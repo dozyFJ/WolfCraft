@@ -165,6 +165,12 @@ impl MeshInput {
 }
 
 fn face_visible(b: Block, n: Block) -> bool {
+    // Water against water (sources, flows, falls) and lava against lava: no inner faces.
+    if let (Some(a), Some(c)) = (b.fluid(), n.fluid()) {
+        if a.lava == c.lava && c.height() >= a.height() {
+            return false;
+        }
+    }
     match b.info().render {
         RenderKind::Opaque => !n.is_opaque(),
         RenderKind::Cutout => !(n.is_opaque() || n == b),
@@ -175,18 +181,36 @@ fn face_visible(b: Block, n: Block) -> bool {
 
 const NORMALS: [[i32; 3]; 6] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 
-/// Skylight 0..15 for the air cell `q` (padded coordinates): a straight ray up the column.
-fn sky_at(inp: &MeshInput, q: [i32; 3]) -> u8 {
+/// Skylight 0..15 along one column above `q`: open sky gives 15, a roof `k` blocks up gives
+/// a dim value, leaves only take some light away.
+fn sky_ray(inp: &MeshInput, x: i32, y0: i32, z: i32) -> f32 {
+    let open = if inp.sky_open { 15.0 } else { 3.0 };
+    let mut light = open;
     for k in 1..=14 {
-        let y = q[1] + k;
+        let y = y0 + k;
         if y > CHUNK_SIZE {
-            return if inp.sky_open { 15 } else { 3 };
+            return light;
         }
-        if inp.get(q[0], y, q[2]).blocks_light() {
-            return (2 + k).min(13) as u8;
+        let b = inp.get(x, y, z);
+        if b.is_opaque() {
+            return ((2 + k) as f32).min(13.0).min(light);
+        }
+        if b.blocks_light() {
+            light -= 2.0; // leaves and other cut-out blocks: dappled shade
         }
     }
-    if inp.sky_open { 15 } else { 3 }
+    light.max(3.0)
+}
+
+/// Soft skylight 0..15 for the air cell `q`: the straight ray up averaged with the four
+/// neighbouring columns, so shadows under roofs and trees have soft edges.
+fn sky_at(inp: &MeshInput, q: [i32; 3]) -> u8 {
+    let c = |v: i32| v.clamp(-1, CHUNK_SIZE);
+    let mut sum = sky_ray(inp, q[0], q[1], q[2]) * 2.0;
+    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        sum += sky_ray(inp, c(q[0] + dx), q[1], c(q[2] + dz));
+    }
+    (sum / 6.0).round().clamp(0.0, 15.0) as u8
 }
 
 /// Block light (0..15) of every padded cell: flood fill from the light sources through
@@ -275,10 +299,64 @@ pub fn mesh_chunk(inp: &MeshInput) -> MeshData {
         mesh_direction(inp, f, &mut out, &bl);
     }
     mesh_shapes(inp, &mut out, &bl);
+    mesh_fluids(inp, &mut out, &bl);
     out.detail_start = out.opaque_idx.len() as u32;
     mesh_cross(inp, &mut out, &bl);
     out.vis = visibility(inp);
     out
+}
+
+/// Flowing water and lava lower than a full block: a box up to the liquid surface, without
+/// faces against the same liquid or opaque blocks. Water goes to the translucent pass.
+fn mesh_fluids(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32) {
+    for y in 0..CHUNK_SIZE {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let b = inp.get(x, y, z);
+                let Some(fl) = b.fluid() else { continue };
+                let h = fl.height();
+                if h >= 1.0 {
+                    continue;
+                }
+                let info = b.info();
+                let tile = info.tiles[0] as u32;
+                let sky = if info.emissive { 1.0 } else { sky_at(inp, [x, y, z]) as f32 / 15.0 };
+                let lit = bl([x, y, z]) << 20;
+                let (verts, idx) = if fl.lava { (&mut out.opaque, &mut out.opaque_idx) } else { (&mut out.water, &mut out.water_idx) };
+                let lo = [0.0f32, 0.0, 0.0];
+                let hi = [1.0f32, h, 1.0];
+                for f in 0..6usize {
+                    let a = f / 2;
+                    let positive = f % 2 == 0;
+                    let n = NORMALS[f];
+                    let nb = inp.get(x + n[0], y + n[1], z + n[2]);
+                    let top = a == 1 && positive;
+                    if nb.is_opaque() && !top {
+                        continue;
+                    }
+                    if let Some(o) = nb.fluid() {
+                        if o.lava == fl.lava && (top || a != 1 && o.height() >= h || a == 1 && !positive) {
+                            continue;
+                        }
+                    }
+                    let (ua, va) = ((a + 1) % 3, (a + 2) % 3);
+                    let shade = if a == 1 { if positive { 1.0 } else { 0.6 } } else { 0.85 };
+                    let base = verts.len() as u32;
+                    for (cu, cv) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)] {
+                        let mut g = [0.0f32; 3];
+                        g[a] = if positive { hi[a] } else { lo[a] };
+                        g[ua] = if cu == 1 { hi[ua] } else { lo[ua] };
+                        g[va] = if cv == 1 { hi[va] } else { lo[va] };
+                        let pos = inp.to_local(x as f32 + g[0], y as f32 + g[1], z as f32 + g[2]);
+                        let (tu, tv) = if a == 1 { (g[ua], g[va]) } else if ua == 1 { (g[va], -g[ua]) } else { (g[ua], -g[va]) };
+                        verts.push(Vertex { pos, uv: [tu, tv], flags: tile | ((info.emissive as u32) << 16) | ((f as u32) << 17) | lit, light: [shade, sky] });
+                    }
+                    idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                    idx.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+                }
+            }
+        }
+    }
 }
 
 /// Slabs, panes, fences, doors: one box per block, textured with the matching part of the tile.
@@ -354,6 +432,9 @@ fn mesh_direction(inp: &MeshInput, f: usize, out: &mut MeshData, bl: &dyn Fn([i3
                 let info = b.info();
                 if !matches!(info.render, RenderKind::Opaque | RenderKind::Cutout | RenderKind::Translucent) {
                     continue;
+                }
+                if b.fluid().is_some_and(|f| f.height() < 1.0) {
+                    continue; // lower flowing liquid: see mesh_fluids
                 }
                 let q = [p[0] + n[0], p[1] + n[1], p[2] + n[2]];
                 let nb = inp.getv(q);

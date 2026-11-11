@@ -293,6 +293,55 @@ blocks! {
     175 IskritLampOn => emissive(info("Искритовая лампа (вкл.)", Opaque, 0.6, Hand, all(t::ISKRIT_LAMP_ON))),
     176 Button => not_solid(info("Кнопка", Shape, 0.5, Hand, all(t::BUTTON))),
     177 ButtonOn => not_solid(info("Кнопка (нажата)", Shape, 0.5, Hand, all(t::BUTTON))),
+    // Flowing fluids (see `fluids.rs`): level 1..7 for water, 1..3 for lava, and falling columns.
+    178 WaterFlow1 => not_solid(info("Вода (течёт)", Translucent, -1.0, Hand, all(t::WATER))),
+    179 WaterFlow2 => not_solid(info("Вода (течёт)", Translucent, -1.0, Hand, all(t::WATER))),
+    180 WaterFlow3 => not_solid(info("Вода (течёт)", Translucent, -1.0, Hand, all(t::WATER))),
+    181 WaterFlow4 => not_solid(info("Вода (течёт)", Translucent, -1.0, Hand, all(t::WATER))),
+    182 WaterFlow5 => not_solid(info("Вода (течёт)", Translucent, -1.0, Hand, all(t::WATER))),
+    183 WaterFlow6 => not_solid(info("Вода (течёт)", Translucent, -1.0, Hand, all(t::WATER))),
+    184 WaterFlow7 => not_solid(info("Вода (течёт)", Translucent, -1.0, Hand, all(t::WATER))),
+    185 WaterFall => not_solid(info("Вода (падает)", Translucent, -1.0, Hand, all(t::WATER))),
+    186 LavaFlow1 => emissive(not_solid(info("Лава (течёт)", Shape, -1.0, Hand, all(t::LAVA)))),
+    187 LavaFlow2 => emissive(not_solid(info("Лава (течёт)", Shape, -1.0, Hand, all(t::LAVA)))),
+    188 LavaFlow3 => emissive(not_solid(info("Лава (течёт)", Shape, -1.0, Hand, all(t::LAVA)))),
+    189 LavaFall => emissive(not_solid(info("Лава (падает)", Opaque, -1.0, Hand, all(t::LAVA)))),
+}
+
+/// Liquid state of a block: lava or water, flow level (1 = thinnest, `max_level` = beside a
+/// source), source block, falling column.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Fluid {
+    pub lava: bool,
+    pub level: u8,
+    pub source: bool,
+    pub falling: bool,
+}
+
+impl Fluid {
+    pub fn max_level(lava: bool) -> u8 {
+        if lava { 3 } else { 7 }
+    }
+    /// Height of the liquid surface inside the cell (0..1).
+    pub fn height(self) -> f32 {
+        if self.source || self.falling {
+            return 1.0;
+        }
+        let max = Self::max_level(self.lava) as f32;
+        (self.level as f32 / max) * 0.78 + 0.1
+    }
+    /// The block for this state.
+    pub fn block(self) -> Block {
+        use Block::*;
+        match (self.lava, self.source, self.falling) {
+            (false, true, _) => Water,
+            (true, true, _) => Lava,
+            (false, _, true) => WaterFall,
+            (true, _, true) => LavaFall,
+            (false, ..) => [WaterFlow1, WaterFlow2, WaterFlow3, WaterFlow4, WaterFlow5, WaterFlow6, WaterFlow7][(self.level.clamp(1, 7) - 1) as usize],
+            (true, ..) => [LavaFlow1, LavaFlow2, LavaFlow3][(self.level.clamp(1, 3) - 1) as usize],
+        }
+    }
 }
 
 impl Block {
@@ -398,6 +447,8 @@ impl Block {
     pub fn base_item(self) -> Block {
         use Block::*;
         match self {
+            WaterFlow1 | WaterFlow2 | WaterFlow3 | WaterFlow4 | WaterFlow5 | WaterFlow6 | WaterFlow7 | WaterFall => Water,
+            LavaFlow1 | LavaFlow2 | LavaFlow3 | LavaFall => Lava,
             DoorOpen => Door,
             BirchDoorOpen => BirchDoor,
             SpruceDoorOpen => SpruceDoor,
@@ -448,7 +499,8 @@ impl Block {
     pub fn light_emission(self) -> u8 {
         use Block::*;
         match self {
-            Lava | Glowstone | Lamp | Lantern | ElectricLampOn | IskritLampOn | InnerCore => 15,
+            Lava | LavaFall | Glowstone | Lamp | Lantern | ElectricLampOn | IskritLampOn | InnerCore => 15,
+            LavaFlow1 | LavaFlow2 | LavaFlow3 => 13,
             Torch => 14,
             NetherPortal => 11,
             IskritTorch => 7,
@@ -473,11 +525,33 @@ impl Block {
     }
     #[inline]
     pub fn is_replaceable(self) -> bool {
-        matches!(self, Block::Air | Block::Water | Block::TallGrass | Block::DeadBush | Block::Lava) || self.info().render == RenderKind::Cross
+        matches!(self, Block::Air | Block::TallGrass | Block::DeadBush) || self.is_fluid() || self.info().render == RenderKind::Cross
     }
     #[inline]
     pub fn is_fluid(self) -> bool {
-        matches!(self, Block::Water | Block::Lava)
+        self.fluid().is_some()
+    }
+    #[inline]
+    pub fn is_water(self) -> bool {
+        self.fluid().is_some_and(|f| !f.lava)
+    }
+    #[inline]
+    pub fn is_lava(self) -> bool {
+        self.fluid().is_some_and(|f| f.lava)
+    }
+    /// Liquid state, `None` for everything that is not water or lava.
+    pub fn fluid(self) -> Option<Fluid> {
+        use Block::*;
+        let f = |lava: bool, level: u8, source: bool, falling: bool| Some(Fluid { lava, level, source, falling });
+        match self {
+            Water => f(false, 8, true, false),
+            Lava => f(true, 4, true, false),
+            WaterFall => f(false, 7, false, true),
+            LavaFall => f(true, 3, false, true),
+            WaterFlow1 | WaterFlow2 | WaterFlow3 | WaterFlow4 | WaterFlow5 | WaterFlow6 | WaterFlow7 => f(false, self as u8 - WaterFlow1 as u8 + 1, false, false),
+            LavaFlow1 | LavaFlow2 | LavaFlow3 => f(true, self as u8 - LavaFlow1 as u8 + 1, false, false),
+            _ => None,
+        }
     }
     #[inline]
     pub fn is_breakable(self) -> bool {

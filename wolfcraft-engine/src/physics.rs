@@ -72,9 +72,9 @@ pub fn step(world: &impl Voxels, body: &mut Body, input: &MoveInput, dt: f64) ->
     let feet = world.block_at_world(body.pos + up * 0.2);
     let mid = world.block_at_world(body.pos + up * 0.9);
     let head = world.block_at_world(body.pos + up * EYE_HEIGHT);
-    body.in_water = feet == Block::Water || mid == Block::Water;
-    body.head_in_water = head == Block::Water;
-    body.in_lava = feet == Block::Lava || mid == Block::Lava;
+    body.in_water = feet.is_water() || mid.is_water();
+    body.head_in_water = head.is_water();
+    body.in_lava = feet.is_lava() || mid.is_lava();
 
     // Split velocity into tangential and radial parts.
     let mut v_up = body.vel.dot(up);

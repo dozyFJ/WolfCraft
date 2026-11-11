@@ -1680,12 +1680,12 @@ impl App {
                     self.hand_lift_vel += acc * dt.min(0.05);
                     self.hand_lift = (self.hand_lift + self.hand_lift_vel * dt.min(0.05)).clamp(-0.09, 0.09);
                 }
-                self.hand_place = (self.hand_place - dt * 5.0).max(0.0);
+                self.hand_place = (self.hand_place - dt * 6.5).max(0.0);
                 if s.player.inventory.selected != self.last_hotbar {
                     self.last_hotbar = s.player.inventory.selected;
                     self.hand_switch = 1.0;
                 }
-                self.hand_switch = (self.hand_switch - dt * 4.5).max(0.0);
+                self.hand_switch = (self.hand_switch - dt * 6.0).max(0.0);
                 let block_target = if s.player.blocking { 1.0 } else { 0.0 };
                 self.hand_block += (block_target - self.hand_block) * (1.0 - (-16.0 * dt).exp());
                 if first_person {
@@ -2284,7 +2284,7 @@ fn build_minimap_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range
                 }
             }
             if let Some((b, k)) = found {
-                let base = if b == Block::Water { [52, 96, 200] } else { colors.get(b as usize).copied().unwrap_or([128, 128, 128]) };
+                let base = if b.is_water() { [52, 96, 200] } else { colors.get(b as usize).copied().unwrap_or([128, 128, 128]) };
                 let shade = (1.0 + (k - pk) as f32 * 0.035).clamp(0.55, 1.35);
                 let ch = |v: u8| ((v as f32 * shade).clamp(0.0, 255.0)) as u8;
                 px[zy * N + xx] = egui::Color32::from_rgb(ch(base[0]), ch(base[1]), ch(base[2]));
@@ -2389,7 +2389,7 @@ fn build_world_map_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Ran
                 }
             }
             let colour = if let Some((b, k)) = found {
-                let base = if b == Block::Water { [52, 96, 200] } else { colors.get(b as usize).copied().unwrap_or([128, 128, 128]) };
+                let base = if b.is_water() { [52, 96, 200] } else { colors.get(b as usize).copied().unwrap_or([128, 128, 128]) };
                 let shade = (1.0 + (k - pk) as f32 * 0.03).clamp(0.55, 1.35);
                 let ch = |v: u8| ((v as f32 * shade).clamp(0.0, 255.0)) as u8;
                 let c = egui::Color32::from_rgb(ch(base[0]), ch(base[1]), ch(base[2]));

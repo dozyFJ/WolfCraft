@@ -468,10 +468,10 @@ pub fn strike_moment(tool: bool) -> f32 {
 /// Swings per second: a fist is quick, tools are heavier.
 pub fn swing_speed(tool: Option<(u8, u8)>) -> f32 {
     match tool.map(|t| t.0) {
-        None => 2.6,
-        Some(3) => 2.2, // sword
-        Some(2) => 1.9, // shovel
-        Some(_) => 1.6, // pickaxe, axe
+        None => 3.3,
+        Some(3) => 2.8, // sword
+        Some(2) => 2.4, // shovel
+        Some(_) => 2.0, // pickaxe, axe
     }
 }
 

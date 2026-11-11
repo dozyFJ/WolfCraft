@@ -127,6 +127,8 @@ pub struct GameSession {
     pub studio: bool,
     /// Pressed buttons and the seconds until they spring back.
     buttons: Vec<(wolfcraft_engine::cubesphere::Cell, f32)>,
+    /// Flowing water and lava around edits.
+    fluids: wolfcraft_engine::fluids::Fluids,
     /// Block changes made by the game itself (a button springing back) for the server.
     pub net_out: Vec<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)>,
 }
@@ -176,6 +178,7 @@ impl GameSession {
             studio: false,
             buttons: Vec::new(),
             net_out: Vec::new(),
+            fluids: Default::default(),
         };
         s.load_containers();
         s.load_block_commands();
@@ -239,6 +242,7 @@ impl GameSession {
             // Only the edit itself comes over the network: charge the iskrit dust, light the
             // lamps and release pressed buttons here as well.
             for (c, b) in applied {
+                self.fluids.changed(&self.chunks, c);
                 wolfcraft_engine::power::update_around(&mut self.chunks, c);
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
                 if b == wolfcraft_engine::block::Block::ButtonOn && !self.buttons.iter().any(|(p, _)| *p == c) {
@@ -445,6 +449,7 @@ impl GameSession {
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
             if let InteractionEvent::Placed { pos, .. } | InteractionEvent::Broken { pos, .. } = e {
+                self.fluids.changed(&self.chunks, *pos);
                 wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, *pos);
             }
@@ -452,6 +457,14 @@ impl GameSession {
                 self.buttons.retain(|(p, _)| p != pos);
                 self.buttons.push((*pos, 1.0));
             }
+        }
+        // Water and lava flow; the current carries the player along.
+        if self.fluids.busy() {
+            self.fluids.update(&mut self.chunks, dt);
+        }
+        if !self.player.body.flying {
+            let push = wolfcraft_engine::fluids::Fluids::current_at(&self.chunks, self.player.body.pos + self.player.up() * 0.3);
+            self.player.body.vel += push * dt as f64;
         }
         // Pressed buttons spring back after a second.
         let mut released = Vec::new();
@@ -759,7 +772,7 @@ impl GameSession {
     }
 
     pub fn eye_in_water(&self) -> bool {
-        self.chunks.block_at_world(self.player.eye_pos()) == wolfcraft_engine::block::Block::Water
+        self.chunks.block_at_world(self.player.eye_pos()).is_water()
     }
 }
 

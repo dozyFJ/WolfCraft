@@ -209,7 +209,8 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
     }
     let roll = to01(hash3(seed ^ 0xD20, pos.x, pos.y, pos.z));
     match block {
-        Block::Air | Block::Water | Block::Lava | Block::Bedrock | Block::Magma | Block::InnerCore => vec![],
+        Block::Air | Block::Bedrock | Block::Magma | Block::InnerCore => vec![],
+        b if b.is_fluid() => vec![],
         Block::Stone => vec![ItemStack::of_block(Block::Cobblestone, 1)],
         Block::Grass | Block::SnowyGrass | Block::DryGrass | Block::SwampGrass => vec![ItemStack::of_block(Block::Dirt, 1)],
         Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => {

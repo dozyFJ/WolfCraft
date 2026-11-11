@@ -3,6 +3,7 @@
 pub mod biome;
 pub mod block;
 pub mod chunk;
+pub mod fluids;
 pub mod chunk_manager;
 pub mod config;
 pub mod cubesphere;
