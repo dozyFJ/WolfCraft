@@ -228,6 +228,17 @@ pub fn setting_row(ui: &mut Ui, label: &str, hint: Option<&str>, add: impl FnOnc
     });
 }
 
+/// Label (and hint) on top, control below — for narrow columns on phones.
+pub fn stacked_row(ui: &mut Ui, label: &str, hint: Option<&str>, add: impl FnOnce(&mut Ui)) {
+    let p = palette(ui.ctx());
+    ui.label(egui::RichText::new(label).font(FontId::proportional(15.0)).color(p.text));
+    if let Some(h) = hint {
+        ui.label(egui::RichText::new(h).font(FontId::proportional(12.5)).color(p.text_muted));
+    }
+    ui.add_space(4.0);
+    ui.horizontal(add);
+}
+
 /// Horizontal progress pill with a centred label.
 pub fn progress_bar(ui: &mut Ui, fraction: f32, label: &str, width: f32) {
     let p = palette(ui.ctx());

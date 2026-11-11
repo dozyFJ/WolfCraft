@@ -575,103 +575,100 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
             }
         });
     });
-    // Centre the two columns (form + planet preview) on wide screens.
-    let side = ((ctx.screen_rect().width() / ctx.zoom_factor() - 1140.0) / 2.0).max(24.0);
-    egui::CentralPanel::default().frame(body_frame(&p).inner_margin(Margin::symmetric(side, 18.0))).show(ctx, |ui| {
-        ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width((ui.available_width() - 360.0).clamp(420.0, 760.0));
-                tab_bar(ui, "cw-tabs", &["Основное", "Планета"], &mut st.tab);
+    // Left sidebar: sections stacked vertically (like the world list).
+    egui::SidePanel::left("cw-side")
+        .resizable(false)
+        .exact_width(210.0)
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 10.0;
+            for (i, ic, label) in [(0usize, icon::EDIT, "Основное"), (1, icon::GLOBE, "Планета")] {
+                let kind = if st.tab == i { ButtonKind::Primary } else { ButtonKind::Secondary };
+                if pill_button(ui, icons, Some(ic), label, kind, ui.available_width(), true).clicked() {
+                    st.tab = i;
+                }
+            }
+        });
+    // Planet preview right next to the sidebar; sized to fit the screen height.
+    let avail_h = ctx.available_rect().height();
+    let globe = (avail_h - 120.0).clamp(160.0, 300.0);
+    egui::SidePanel::left("cw-preview")
+        .resizable(false)
+        .exact_width(globe + 28.0)
+        .frame(Frame::none().fill(p.bg).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::same(14.0)))
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().id_salt("cw-preview-scroll").auto_shrink([false, false]).show(ui, |ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(globe), Sense::hover());
+                ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(6, 9, 18));
+                if let Some(tex) = preview {
+                    ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                } else {
+                    ui.painter().text(r.center(), Align2::CENTER_CENTER, "Генерация…", FontId::proportional(15.0), p.text_muted);
+                }
+                ui.painter().rect_stroke(r, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
                 ui.add_space(8.0);
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    if st.tab == 0 {
-                    card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        section_label(ui, "Основное");
-                        ui.add_space(6.0);
-                        setting_row(ui, "Название мира", None, |ui| {
-                            text_input(ui, icons, &mut st.name, "Новый мир", 280.0, Some(icon::EDIT));
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Seed", Some("Пусто — случайный. Можно ввести число или любой текст"), |ui| {
-                            if icon_button(ui, icons, icon::REFRESH, 34.0, ButtonKind::Secondary).on_hover_text("Случайный seed").clicked() {
-                                let t = (ui.ctx().input(|i| i.time) * 1.0e6) as u64;
-                                st.seed_text = (wolfcraft_engine::planet::splitmix(random_seed ^ t) % 1_000_000_000).to_string();
-                                st.preview_dirty = true;
-                            }
-                            if text_input(ui, icons, &mut st.seed_text, "Случайный", 220.0, Some(icon::GLOBE)).changed() {
-                                st.preview_dirty = true;
-                            }
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Режим", None, |ui| {
-                            segmented(ui, "cw-mode", &[(GameMode::Survival, "Выживание"), (GameMode::Creative, "Творческий")], &mut st.mode);
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Сложность", None, |ui| {
-                            let opts: Vec<(Difficulty, &str)> = Difficulty::ALL.iter().map(|d| (*d, d.label())).collect();
-                            segmented(ui, "cw-diff", &opts, &mut st.difficulty);
-                        });
-                    });
-                    } else {
-                    card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        section_label(ui, "Планета");
-                        ui.add_space(6.0);
-                        setting_row(ui, "Размер планеты", Some(&format!("Окружность ≈ {} блоков", st.size.circumference())), |ui| {
-                            let opts: Vec<(PlanetSize, &str)> = PlanetSize::ALL.iter().map(|d| (*d, d.label())).collect();
-                            if segmented(ui, "cw-size", &opts, &mut st.size) {
-                                st.preview_dirty = true;
-                            }
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Тип мира", None, |ui| {
-                            let opts: Vec<(WorldType, &str)> = WorldType::ALL.iter().map(|d| (*d, d.label())).collect();
-                            if segmented(ui, "cw-type", &opts, &mut st.world_type) {
-                                st.preview_dirty = true;
-                            }
-                        });
-                        ui.add_space(8.0);
-                        let uses = st.world_type == WorldType::Standard;
-                        setting_row(ui, "Количество материков", Some(if uses { "Центры материков выбираются по seed" } else { "Не используется для этого типа мира" }), |ui| {
-                            ui.add_enabled_ui(uses, |ui| {
-                                let opts: Vec<(ContinentCount, &str)> = ContinentCount::ALL.iter().map(|d| (*d, d.label())).collect();
-                                if segmented(ui, "cw-cont", &opts, &mut st.continents) {
-                                    st.preview_dirty = true;
-                                }
-                            });
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Генерация структур", Some("Деревни, руины, храмы, крепости, шахты, подземелья"), |ui| {
-                            toggle_switch(ui, &mut st.structures);
-                        });
-                    });
+                ui.label(egui::RichText::new(format!("Seed: {}", st.effective_seed() as i64)).size(13.0).color(p.text_muted));
+                let mins = st.size.circumference() as f32 / 4.3 / 60.0;
+                ui.label(egui::RichText::new(format!("Радиус {} блоков · обход ≈ {:.0} мин", st.size.radius(), mins)).size(13.0).color(p.text_muted));
+            });
+        });
+    // Settings of the chosen section on the right.
+    egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
+        egui::ScrollArea::both().id_salt("cw-form").auto_shrink([false, false]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            if st.tab == 0 {
+                stacked_row(ui, "Название мира", None, |ui| {
+                    text_input(ui, icons, &mut st.name, "Новый мир", 300.0, Some(icon::EDIT));
+                });
+                ui.add_space(10.0);
+                stacked_row(ui, "Seed", Some("Пусто — случайный. Можно ввести число или текст"), |ui| {
+                    if text_input(ui, icons, &mut st.seed_text, "Случайный", 250.0, Some(icon::GLOBE)).changed() {
+                        st.preview_dirty = true;
+                    }
+                    if square_button(ui, icons, icon::REFRESH, false).clicked() {
+                        let t = (ui.ctx().input(|i| i.time) * 1.0e6) as u64;
+                        st.seed_text = (wolfcraft_engine::planet::splitmix(random_seed ^ t) % 1_000_000_000).to_string();
+                        st.preview_dirty = true;
                     }
                 });
-            });
-            ui.add_space(18.0);
-            // Preview column.
-            ui.vertical(|ui| {
-                ui.set_width(330.0);
-                card(ui, |ui| {
-                    ui.set_width(300.0);
-                    section_label(ui, "Предпросмотр планеты");
-                    ui.add_space(6.0);
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(300.0, 300.0), Sense::hover());
-                    ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(6, 9, 18));
-                    if let Some(tex) = preview {
-                        ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-                    } else {
-                        ui.painter().text(r.center(), Align2::CENTER_CENTER, "Генерация…", FontId::proportional(15.0), p.text_muted);
-                    }
-                    ui.painter().rect_stroke(r, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new(format!("Seed: {}", st.effective_seed() as i64)).size(13.0).color(p.text_muted));
-                    let mins = st.size.circumference() as f32 / 4.3 / 60.0;
-                    ui.label(egui::RichText::new(format!("Радиус {} блоков · обход пешком ≈ {:.0} мин", st.size.radius(), mins)).size(13.0).color(p.text_muted));
-                    ui.label(egui::RichText::new("Планета создаётся по мере исследования: сейчас генерируется только область вокруг точки появления.").size(12.5).color(p.text_muted));
+                ui.add_space(10.0);
+                stacked_row(ui, "Режим", None, |ui| {
+                    segmented(ui, "cw-mode", &[(GameMode::Survival, "Выживание"), (GameMode::Creative, "Творческий")], &mut st.mode);
                 });
-            });
+                ui.add_space(10.0);
+                stacked_row(ui, "Сложность", None, |ui| {
+                    let opts: Vec<(Difficulty, &str)> = Difficulty::ALL.iter().map(|d| (*d, d.label())).collect();
+                    segmented(ui, "cw-diff", &opts, &mut st.difficulty);
+                });
+            } else {
+                stacked_row(ui, "Размер планеты", Some(&format!("Окружность ≈ {} блоков", st.size.circumference())), |ui| {
+                    let opts: Vec<(PlanetSize, &str)> = PlanetSize::ALL.iter().map(|d| (*d, d.label())).collect();
+                    if segmented(ui, "cw-size", &opts, &mut st.size) {
+                        st.preview_dirty = true;
+                    }
+                });
+                ui.add_space(10.0);
+                stacked_row(ui, "Тип мира", None, |ui| {
+                    let opts: Vec<(WorldType, &str)> = WorldType::ALL.iter().map(|d| (*d, d.label())).collect();
+                    if segmented(ui, "cw-type", &opts, &mut st.world_type) {
+                        st.preview_dirty = true;
+                    }
+                });
+                ui.add_space(10.0);
+                let uses = st.world_type == WorldType::Standard;
+                stacked_row(ui, "Количество материков", Some(if uses { "Центры материков выбираются по seed" } else { "Не используется для этого типа мира" }), |ui| {
+                    ui.add_enabled_ui(uses, |ui| {
+                        let opts: Vec<(ContinentCount, &str)> = ContinentCount::ALL.iter().map(|d| (*d, d.label())).collect();
+                        if segmented(ui, "cw-cont", &opts, &mut st.continents) {
+                            st.preview_dirty = true;
+                        }
+                    });
+                });
+                ui.add_space(10.0);
+                stacked_row(ui, "Генерация структур", Some("Деревни, руины, храмы, крепости, шахты"), |ui| {
+                    toggle_switch(ui, &mut st.structures);
+                });
+            }
         });
     });
     action
