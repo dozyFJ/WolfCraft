@@ -188,6 +188,8 @@ pub struct App {
     hand_prev_fwd: Option<glam::Vec3>,
     hand_prev_vup: f32,
     hand_prev_ground: bool,
+    /// Camera turn still to apply (smooth camera).
+    look_pending: (f64, f64),
     /// Shield raise blend (0 down … 1 blocking).
     hand_block: f32,
     /// Block-placing arm motion, 1 -> 0.
@@ -304,6 +306,7 @@ impl App {
             hand_prev_fwd: None,
             hand_prev_vup: 0.0,
             hand_prev_ground: true,
+            look_pending: (0.0, 0.0),
             hand_block: 0.0,
             hand_place: 0.0,
             hand_switch: 0.0,
@@ -851,6 +854,28 @@ impl App {
         }
     }
 
+    /// Smooth camera: touch moves arrive unevenly (two in one frame, none in the next), so
+    /// the turn is spread over a few frames instead of jumping. Nothing is lost: the rest of
+    /// the turn is applied in the next frames.
+    fn smooth_look(&mut self, raw: (f64, f64)) -> (f64, f64) {
+        let s = self.settings.camera_smooth.clamp(0.0, 1.0) as f64;
+        self.look_pending.0 += raw.0;
+        self.look_pending.1 += raw.1;
+        if s < 0.02 {
+            return std::mem::take(&mut self.look_pending);
+        }
+        // Rate 40/s (barely smoothed) down to 9/s (soft glide).
+        let rate = 40.0 + (9.0 - 40.0) * s;
+        let k = 1.0 - (-rate * (self.time.delta() as f64).clamp(0.0, 0.1)).exp();
+        let out = (self.look_pending.0 * k, self.look_pending.1 * k);
+        self.look_pending.0 -= out.0;
+        self.look_pending.1 -= out.1;
+        if self.look_pending.0.abs() < 1e-5 && self.look_pending.1.abs() < 1e-5 {
+            self.look_pending = (0.0, 0.0);
+        }
+        out
+    }
+
     fn take_input_frame(&mut self) -> InputFrame {
         let k = &self.input.keys;
         let axis = |pos: KeyCode, neg: KeyCode| (k.contains(&pos) as i32 - k.contains(&neg) as i32) as f32;
@@ -867,7 +892,7 @@ impl App {
             jump_pressed: std::mem::take(&mut self.input.jump_press),
             sprint: k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight) || self.touch.sprint,
             sneak: k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || self.touch.sneak,
-            look: ((self.input.mouse_dx + tl.0 as f64 * 1.4) * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy + tl.1 as f64 * 1.4) * sens),
+            look: self.smooth_look(((self.input.mouse_dx + tl.0 as f64 * 1.4) * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy + tl.1 as f64 * 1.4) * sens)),
             break_held: self.input.left || (self.touch.breaking && !bow),
             use_pressed: std::mem::take(&mut self.input.right_press),
             use_held: self.input.right || self.touch.place_held || (bow && self.touch.breaking),

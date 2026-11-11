@@ -15,22 +15,27 @@ pub struct Chunk {
     pub modified: bool,
     /// The chunk centre lies above the terrain: a cheap sky-exposure hint for the mesher.
     pub sky_open: bool,
+    /// Light-emitting blocks (index, light level), kept up to date by `set`, so lighting
+    /// neighbouring chunks does not need to scan this one.
+    emitters: Vec<(u16, u8)>,
 }
 
 impl Chunk {
     pub fn empty() -> Self {
-        Self { blocks: None, modified: false, sky_open: true }
+        Self { blocks: None, modified: false, sky_open: true, emitters: Vec::new() }
     }
 
     pub fn filled(b: Block) -> Self {
         if b == Block::Air {
             return Self::empty();
         }
-        Self { blocks: Some(Box::new([b as u8; CHUNK_VOL])), modified: false, sky_open: false }
+        let emitters = if b.light_emission() > 0 { (0..CHUNK_VOL as u16).map(|i| (i, b.light_emission())).collect() } else { Vec::new() };
+        Self { blocks: Some(Box::new([b as u8; CHUNK_VOL])), modified: false, sky_open: false, emitters }
     }
 
     pub fn from_raw(data: Box<[u8; CHUNK_VOL]>) -> Self {
-        let mut c = Self { blocks: Some(data), modified: false, sky_open: false };
+        let emitters = data.iter().enumerate().filter_map(|(i, &b)| Some((i as u16, Block::from_u8(b).light_emission())).filter(|e| e.1 > 0)).collect();
+        let mut c = Self { blocks: Some(data), modified: false, sky_open: false, emitters };
         c.shrink_if_empty();
         c
     }
@@ -50,6 +55,13 @@ impl Chunk {
 
     #[inline]
     pub fn set_index(&mut self, i: usize, b: Block) {
+        let level = b.light_emission();
+        if level > 0 || !self.emitters.is_empty() {
+            self.emitters.retain(|e| e.0 as usize != i);
+            if level > 0 {
+                self.emitters.push((i as u16, level));
+            }
+        }
         match &mut self.blocks {
             Some(d) => d[i] = b as u8,
             None => {
@@ -65,6 +77,11 @@ impl Chunk {
     #[inline]
     pub fn set(&mut self, li: i32, lj: i32, lk: i32, b: Block) {
         self.set_index(local_idx(li, lj, lk), b);
+    }
+
+    /// Light sources in this chunk: (index, level).
+    pub fn emitters(&self) -> &[(u16, u8)] {
+        &self.emitters
     }
 
     pub fn is_empty(&self) -> bool {

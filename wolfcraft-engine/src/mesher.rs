@@ -21,7 +21,7 @@ pub struct Vertex {
     /// Position relative to the chunk's reference corner.
     pub pos: [f32; 3],
     pub uv: [f32; 2],
-    /// bits 0..16 tile, bit 16 emissive, bits 17..20 face id (0..5)
+    /// bits 0..16 tile, bit 16 emissive, bits 17..20 face id (0..5), bits 20..24 block light
     pub flags: u32,
     /// x = ambient occlusion factor (0..1), y = skylight (0..1)
     pub light: [f32; 2],
@@ -126,11 +126,14 @@ pub struct MeshInput {
     pub grid: Grid,
     pub blocks: Box<[u8; PADDED_VOL]>,
     pub sky_open: bool,
+    /// Light sources that can reach this chunk: padded coordinates (may lie outside the
+    /// padded box, in neighbouring chunks) and light level.
+    pub emitters: Vec<([i32; 3], u8)>,
 }
 
 impl MeshInput {
     pub fn new(key: ChunkKey, grid: Grid, sky_open: bool) -> Self {
-        Self { key, grid, blocks: Box::new([0; PADDED_VOL]), sky_open }
+        Self { key, grid, blocks: Box::new([0; PADDED_VOL]), sky_open, emitters: Vec::new() }
     }
     /// Index for padded coordinates `(x, y, z)` = `(j, k, i)` relative to the chunk, each in -1..=16.
     #[inline]
@@ -186,20 +189,100 @@ fn sky_at(inp: &MeshInput, q: [i32; 3]) -> u8 {
     if inp.sky_open { 15 } else { 3 }
 }
 
+/// Block light (0..15) of every padded cell: flood fill from the light sources through
+/// non-opaque blocks, one level less per step, like Minecraft. Sources outside the padded box
+/// shine in through its border as if the way there were open.
+pub fn block_light(inp: &MeshInput) -> Vec<u8> {
+    let mut light = vec![0u8; PADDED_VOL];
+    if inp.emitters.is_empty() {
+        return light;
+    }
+    let r = -1..=CHUNK_SIZE;
+    let mut seed = |light: &mut Vec<u8>, x: i32, y: i32, z: i32, l: u8| {
+        let i = MeshInput::idx(x, y, z);
+        if l > light[i] {
+            light[i] = l;
+        }
+    };
+    for &([ex, ey, ez], level) in &inp.emitters {
+        if r.contains(&ex) && r.contains(&ey) && r.contains(&ez) {
+            seed(&mut light, ex, ey, ez, level);
+            continue;
+        }
+        // Outside: light the nearest border cells with what is left after the distance.
+        let (cx, cy, cz) = (ex.clamp(-1, CHUNK_SIZE), ey.clamp(-1, CHUNK_SIZE), ez.clamp(-1, CHUNK_SIZE));
+        let gap = (ex - cx).abs() + (ey - cy).abs() + (ez - cz).abs();
+        let left = level as i32 - gap;
+        if left <= 0 {
+            continue;
+        }
+        // Every border cell within reach gets level minus its full distance.
+        let reach = left - 1;
+        for y in (cy - reach).max(-1)..=(cy + reach).min(CHUNK_SIZE) {
+            for z in (cz - reach).max(-1)..=(cz + reach).min(CHUNK_SIZE) {
+                for x in (cx - reach).max(-1)..=(cx + reach).min(CHUNK_SIZE) {
+                    let border = x == -1 || y == -1 || z == -1 || x == CHUNK_SIZE || y == CHUNK_SIZE || z == CHUNK_SIZE;
+                    if !border {
+                        continue;
+                    }
+                    let l = level as i32 - ((ex - x).abs() + (ey - y).abs() + (ez - z).abs());
+                    if l > 0 && !inp.get(x, y, z).is_opaque() {
+                        seed(&mut light, x, y, z, l as u8);
+                    }
+                }
+            }
+        }
+    }
+    // Spread level by level (brightest first), so every cell keeps its best value.
+    let mut buckets: Vec<Vec<(i32, i32, i32)>> = vec![Vec::new(); 16];
+    for y in -1..=CHUNK_SIZE {
+        for z in -1..=CHUNK_SIZE {
+            for x in -1..=CHUNK_SIZE {
+                let l = light[MeshInput::idx(x, y, z)];
+                if l > 1 {
+                    buckets[l as usize].push((x, y, z));
+                }
+            }
+        }
+    }
+    for level in (2..16usize).rev() {
+        let cells = std::mem::take(&mut buckets[level]);
+        for (x, y, z) in cells {
+            if light[MeshInput::idx(x, y, z)] as usize != level {
+                continue;
+            }
+            for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
+                let (nx, ny, nz) = (x + dx, y + dy, z + dz);
+                if !r.contains(&nx) || !r.contains(&ny) || !r.contains(&nz) || inp.get(nx, ny, nz).is_opaque() {
+                    continue;
+                }
+                let i = MeshInput::idx(nx, ny, nz);
+                if (light[i] as usize) < level - 1 {
+                    light[i] = (level - 1) as u8;
+                    buckets[level - 1].push((nx, ny, nz));
+                }
+            }
+        }
+    }
+    light
+}
+
 pub fn mesh_chunk(inp: &MeshInput) -> MeshData {
     let mut out = MeshData::default();
+    let light = block_light(inp);
+    let bl = |p: [i32; 3]| light[MeshInput::idx(p[0], p[1], p[2])] as u32;
     for f in 0..6 {
-        mesh_direction(inp, f, &mut out);
+        mesh_direction(inp, f, &mut out, &bl);
     }
-    mesh_shapes(inp, &mut out);
+    mesh_shapes(inp, &mut out, &bl);
     out.detail_start = out.opaque_idx.len() as u32;
-    mesh_cross(inp, &mut out);
+    mesh_cross(inp, &mut out, &bl);
     out.vis = visibility(inp);
     out
 }
 
 /// Slabs, panes, fences, doors: one box per block, textured with the matching part of the tile.
-fn mesh_shapes(inp: &MeshInput, out: &mut MeshData) {
+fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32) {
     for y in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
@@ -211,6 +294,7 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData) {
                 let info = b.info();
                 for s in boxes {
                 let sky = if info.emissive { 1.0 } else { sky_at(inp, [x, y, z]).max(sky_at(inp, [x, y + 1, z])) as f32 / 15.0 };
+                let lit = bl([x, y, z]).max(bl([x, y + 1, z])) << 20;
                 // Padded axes are (x, y, z) = (j, k, i); the shape is given as (i, j, k).
                 let lo = [s[1], s[2], s[0]];
                 let hi = [s[4], s[5], s[3]];
@@ -237,7 +321,7 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData) {
                         } else {
                             (g[ua], -g[va])
                         };
-                        verts.push(Vertex { pos, uv: [tu, tv], flags: tile | ((info.emissive as u32) << 16) | ((f as u32) << 17), light: [shade, sky] });
+                        verts.push(Vertex { pos, uv: [tu, tv], flags: tile | ((info.emissive as u32) << 16) | ((f as u32) << 17) | lit, light: [shade, sky] });
                     }
                     // Both windings: the box is small and may be seen from any side.
                     idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -249,7 +333,7 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData) {
     }
 }
 
-fn mesh_direction(inp: &MeshInput, f: usize, out: &mut MeshData) {
+fn mesh_direction(inp: &MeshInput, f: usize, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32) {
     let a = f / 2;
     let sign: i32 = if f % 2 == 0 { 1 } else { -1 };
     let ua = (a + 1) % 3;
@@ -301,7 +385,8 @@ fn mesh_direction(inp: &MeshInput, f: usize, out: &mut MeshData) {
                 let emit = info.emissive as u64;
                 let sky = if info.emissive { 15 } else { sky_at(inp, q) as u64 };
                 let trans = (info.render == RenderKind::Translucent) as u64;
-                let key = (1u64 << 63) | (tile as u64) | (ao[0] << 16) | (ao[1] << 18) | (ao[2] << 20) | (ao[3] << 22) | (sky << 24) | (emit << 28) | (trans << 29);
+                let lit = bl(q) as u64;
+                let key = (1u64 << 63) | (tile as u64) | (ao[0] << 16) | (ao[1] << 18) | (ao[2] << 20) | (ao[3] << 22) | (sky << 24) | (emit << 28) | (trans << 29) | (lit << 30);
                 mask[(i + j * 16) as usize] = key;
                 any = true;
             }
@@ -340,6 +425,7 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
     let sky = ((key >> 24) & 15) as f32 / 15.0;
     let emit = ((key >> 28) & 1) as u32;
     let trans = (key >> 29) & 1 == 1;
+    let lit = ((key >> 30) & 15) as u32;
 
     let plane = (s + if sign > 0 { 1 } else { 0 }) as f32;
     let corners = [(i0, j0), (i0 + w, j0), (i0 + w, j0 + h), (i0, j0 + h)];
@@ -360,7 +446,7 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
             (*cu as f32, -(*cv as f32))
         };
         let aof = [0.45, 0.65, 0.82, 1.0][ao[ci] as usize];
-        verts.push(Vertex { pos, uv: [tu, tv], flags: tile | (emit << 16) | ((f as u32) << 17), light: [aof, sky] });
+        verts.push(Vertex { pos, uv: [tu, tv], flags: tile | (emit << 16) | ((f as u32) << 17) | (lit << 20), light: [aof, sky] });
     }
     let flip = ao[0] + ao[2] < ao[1] + ao[3];
     let tri: [u32; 6] = match (sign > 0, flip) {
@@ -373,7 +459,7 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
 }
 
 /// Crossed-quad plants (grass, flowers, ...), standing along the radial axis.
-fn mesh_cross(inp: &MeshInput, out: &mut MeshData) {
+fn mesh_cross(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32) {
     for y in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
@@ -382,7 +468,7 @@ fn mesh_cross(inp: &MeshInput, out: &mut MeshData) {
                     continue;
                 }
                 let sky = sky_at(inp, [x, y, z]) as f32 / 15.0;
-                let tile = b.info().tiles[0] as u32;
+                let tile = b.info().tiles[0] as u32 | (bl([x, y, z]) << 20);
                 let verts = &mut out.opaque;
                 let idx = &mut out.opaque_idx;
                 // Two diagonal planes through the block centre; each emitted double-sided.
@@ -470,6 +556,32 @@ mod tests {
         let covered = mesh_chunk(&input_with(&[(5, 5, 5, Block::Stone), (5, 8, 5, Block::Stone)]));
         // The covered stone's top face is shaded; the roof block itself is lit.
         assert!(top_sky(&covered) < top_sky(&open), "{} vs {}", top_sky(&covered), top_sky(&open));
+    }
+
+    #[test]
+    fn torch_light_spreads_fades_and_stops_at_walls() {
+        let mut inp = input_with(&[(8, 8, 8, Block::Torch)]);
+        // A stone wall at x = 11 (full height and depth).
+        for y in -1..=16 {
+            for z in -1..=16 {
+                inp.set(11, y, z, Block::Stone);
+            }
+        }
+        inp.emitters.push(([8, 8, 8], 14));
+        let l = block_light(&inp);
+        let at = |x, y, z| l[MeshInput::idx(x, y, z)];
+        assert_eq!(at(8, 8, 8), 14);
+        assert_eq!(at(9, 8, 8), 13);
+        assert_eq!(at(8, 8, 2), 8, "one level less per block");
+        assert_eq!(at(12, 8, 8), 0, "no light through the wall");
+        // A source in the next chunk shines in over the border.
+        let mut far = input_with(&[]);
+        far.emitters.push(([-4, 5, 5], 14));
+        let l = block_light(&far);
+        assert_eq!(l[MeshInput::idx(0, 5, 5)], 10);
+        // Lit faces carry the light level in the vertex flags.
+        let m = mesh_chunk(&inp);
+        assert!(m.opaque.iter().any(|v| (v.flags >> 20) & 15 >= 10), "faces near the torch are lit");
     }
 
     #[test]

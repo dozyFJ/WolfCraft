@@ -81,14 +81,20 @@ fn shade(in: VsOut, color: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     }
     // Directional light comes from the sun, ambient from the sky; at night only dim moonlight.
     let diffuse = max(dot(n, sun), 0.0);
-    let sky_light = mix(0.075, 0.52 + 0.48 * diffuse, day) * in.light.y;
-    var light = max(sky_light, 0.04) * in.light.x * face_k;
-    var rgb = color.rgb * light;
+    let sky_light = mix(0.09, 0.52 + 0.48 * diffuse, day) * in.light.y;
     // Cool tint at night, warm at sunrise/sunset.
     let night_tint = vec3<f32>(0.78, 0.88, 1.18);
     let warm = vec3<f32>(1.08, 0.95, 0.85);
     let twilight = 1.0 - abs(day * 2.0 - 1.0);
-    rgb = rgb * mix(night_tint, vec3<f32>(1.0), day) * mix(vec3<f32>(1.0), warm, twilight * 0.5);
+    let sky_rgb = vec3<f32>(max(sky_light, 0.04)) * mix(night_tint, vec3<f32>(1.0), day) * mix(vec3<f32>(1.0), warm, twilight * 0.5);
+    // Block light (torches, lava, lamps): level 0..15 from the mesher, warm and with a
+    // Minecraft-like falloff (bright near the source, a soft glow at the edge).
+    let blk = f32((in.flags >> 20u) & 15u) / 15.0;
+    let torch = blk * blk * (0.35 + 0.75 * blk);
+    let torch_rgb = vec3<f32>(1.0, 0.80, 0.55) * torch;
+    // Light adds up, but never brighter than full daylight.
+    let lit = min(sky_rgb + torch_rgb * (1.0 - 0.6 * day * in.light.y), vec3<f32>(1.15));
+    var rgb = color.rgb * lit * in.light.x * face_k;
     if (emit == 1u) {
         rgb = color.rgb * (0.85 + 0.15 * in.light.x);
     }

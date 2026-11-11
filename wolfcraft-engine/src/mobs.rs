@@ -288,6 +288,18 @@ impl MobManager {
             let speed = m.kind.speed() * if m.kind.hostile() && day { 0.8 } else { 1.0 };
             let before = m.body.pos;
             step(world, &mut m.body, &MoveInput { wish, speed, jump: false, up: false, down: false }, dt);
+            // The body is a thin column, but heads and the ghoul's outstretched arms reach
+            // further forward: step back from a wall or tree trunk so they do not sink into it.
+            // Only above step height, so one-block ledges are still climbed.
+            // (Short animals have their heads below step height, so this is for tall mobs.)
+            let reach = m.kind.reach();
+            for _ in 0..if m.kind.size() > 1.4 { 4 } else { 0 } {
+                let front = |h: f64| world.block_at_world(m.body.pos + m.heading * reach + up * h).is_solid();
+                if !(front(1.25) || front(m.kind.size() * 0.85)) {
+                    break;
+                }
+                m.body.pos -= m.heading * 0.06;
+            }
             // Stuck against a wall: hop.
             let moved = (m.body.pos - before).length() / dt.max(1e-6);
             if wish.length_squared() > 0.0 && m.body.on_ground && moved < speed * 0.25 {
@@ -397,6 +409,15 @@ impl MobKind {
     }
 
     /// Approximate body height in blocks.
+    /// How far the model reaches forward from the body centre (head, arms).
+    pub fn reach(self) -> f64 {
+        match self {
+            MobKind::Ghoul => 0.62,
+            MobKind::Crawler => 0.55,
+            MobKind::Boar | MobKind::Sheep => 0.62,
+        }
+    }
+
     pub fn size(self) -> f64 {
         match self {
             MobKind::Ghoul => 1.8,

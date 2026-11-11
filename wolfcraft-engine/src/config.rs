@@ -330,6 +330,8 @@ pub struct Settings {
     /// 0 = unlimited.
     pub max_fps: u32,
     pub mouse_sensitivity: f32,
+    /// Camera smoothing 0..1: 0 turns exactly with the finger, 1 glides softly.
+    pub camera_smooth: f32,
     /// Mouse up looks down.
     pub invert_y: bool,
     pub ui_scale: f32,
@@ -367,6 +369,7 @@ impl Default for Settings {
             vsync: true,
             max_fps: 0,
             mouse_sensitivity: 1.0,
+            camera_smooth: 0.5,
             invert_y: false,
             ui_scale: 1.0,
             theme: ThemeMode::Dark,

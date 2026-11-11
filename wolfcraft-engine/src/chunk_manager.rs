@@ -112,10 +112,28 @@ impl ChunkManager {
         if chunk.get(li, lj, lk) == b {
             return true;
         }
+        let old = chunk.get(li, lj, lk);
         chunk.set(li, lj, lk, b);
         chunk.modified = true;
-        // Every chunk that has this cell in its padding needs a new mesh.
         let g = self.planet.grid;
+        // Light: a new or removed light source, or a block that now lets light through or
+        // stops it near a source, changes the light up to 15 blocks away.
+        let light_changed = old.light_emission() > 0 || b.light_emission() > 0 || (old.is_opaque() != b.is_opaque() && self.light_nearby(c));
+        if light_changed {
+            for dk in [-15, 0, 15] {
+                for dj in [-15, 0, 15] {
+                    for di in [-15, 0, 15] {
+                        if let Some(n) = g.offset(c, di, dj, dk) {
+                            let nk = ChunkKey::of(n);
+                            if self.chunks.contains_key(&nk) && !self.urgent.contains(&nk) {
+                                self.urgent.push(nk);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Every chunk that has this cell in its padding needs a new mesh.
         for dk in -1..=1 {
             for dj in -1..=1 {
                 for di in -1..=1 {
@@ -129,6 +147,20 @@ impl ChunkManager {
             }
         }
         true
+    }
+
+    /// True when a light source within 15 blocks may shine on `c`.
+    fn light_nearby(&self, c: Cell) -> bool {
+        let key = ChunkKey::of(c);
+        let mut keys = vec![key];
+        keys.extend(self.neighbor_keys(key));
+        keys.iter().filter_map(|k| self.chunks.get(k).map(|ch| (k, ch))).any(|(k, ch)| {
+            let o = k.origin();
+            ch.emitters().iter().any(|&(idx, level)| {
+                let (li, lj, lk) = crate::cubesphere::idx_to_local(idx as usize);
+                k.f != c.f || (o.x + li - c.i).abs() + (o.y + lj - c.j).abs() + (o.z + lk - c.k).abs() <= level as i32
+            })
+        })
     }
 
     /// The (up to 26) chunks that surround `key` and are needed to mesh it.
@@ -191,7 +223,31 @@ impl ChunkManager {
                 }
             }
         }
+        inp.emitters = self.emitters_near(key);
         Some(inp)
+    }
+
+    /// Light sources in `key` and the chunks around it (same cube face) that can reach it, in
+    /// the padded coordinates of `key`.
+    fn emitters_near(&self, key: ChunkKey) -> Vec<([i32; 3], u8)> {
+        let o = key.origin();
+        let mut out = Vec::new();
+        let mut keys = vec![key];
+        keys.extend(self.neighbor_keys(key).into_iter().filter(|n| n.f == key.f));
+        for nk in keys {
+            let Some(ch) = self.chunks.get(&nk) else { continue };
+            let no = nk.origin();
+            for &(idx, level) in ch.emitters() {
+                let (li, lj, lk) = crate::cubesphere::idx_to_local(idx as usize);
+                // Padded coordinates are (x, y, z) = (j, k, i).
+                let p = [no.y + lj - o.y, no.z + lk - o.z, no.x + li - o.x];
+                let gap: i32 = p.iter().map(|&v| (-1 - v).max(v - CHUNK_SIZE).max(0)).sum();
+                if gap < level as i32 {
+                    out.push((p, level));
+                }
+            }
+        }
+        out
     }
 
     fn mesh_ready_check(&mut self, key: ChunkKey, center: ChunkKey, view: i32) {

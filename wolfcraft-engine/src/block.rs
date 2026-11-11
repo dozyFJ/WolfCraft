@@ -443,6 +443,20 @@ impl Block {
     pub fn is_solid(self) -> bool {
         self.info().solid
     }
+    /// Block light it gives off (0..15), like Minecraft: a torch lights 13 blocks around it.
+    #[inline]
+    pub fn light_emission(self) -> u8 {
+        use Block::*;
+        match self {
+            Lava | Glowstone | Lamp | Lantern | ElectricLampOn | IskritLampOn | InnerCore => 15,
+            Torch => 14,
+            NetherPortal => 11,
+            IskritTorch => 7,
+            Magma => 4,
+            _ => 0,
+        }
+    }
+
     /// Fully hides neighbouring faces.
     #[inline]
     pub fn is_opaque(self) -> bool {
