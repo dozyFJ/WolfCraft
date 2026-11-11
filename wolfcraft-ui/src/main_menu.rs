@@ -1139,19 +1139,57 @@ pub fn pause_menu(ctx: &egui::Context, icons: &GuiIcons, info: &PauseInfo) -> Me
 }
 
 /// Death screen.
+/// Death screen in a cinematic style: the world fades to dark, a big title slides in,
+/// then respawn / menu buttons; respawns by itself after a few seconds.
 pub fn death_screen(ctx: &egui::Context, icons: &GuiIcons) -> MenuAction {
     let mut action = MenuAction::None;
-    modal(ctx, "death", "Вы погибли", 340.0, |ui| {
-        ui.spacing_mut().item_spacing.y = 10.0;
-        ui.vertical_centered(|ui| {
-            if pill_button(ui, icons, Some(icon::REFRESH), "Возродиться", ButtonKind::Primary, 300.0, true).clicked() {
-                action = MenuAction::Resume;
-            }
-            if pill_button(ui, icons, Some(icon::FOLDER), "Выйти в меню", ButtonKind::Secondary, 300.0, true).clicked() {
-                action = MenuAction::SaveAndQuit;
-            }
-        });
+    let now = ctx.input(|i| i.time);
+    // Start time: reset when the screen was not shown for a moment (a new death).
+    let (t0_id, last_id) = (egui::Id::new("death-t0"), egui::Id::new("death-last"));
+    let last: f64 = ctx.data(|d| d.get_temp(last_id)).unwrap_or(-10.0);
+    let mut t0: f64 = ctx.data(|d| d.get_temp(t0_id)).unwrap_or(now);
+    if now - last > 0.5 {
+        t0 = now;
+    }
+    ctx.data_mut(|d| {
+        d.insert_temp(t0_id, t0);
+        d.insert_temp(last_id, now);
     });
+    let t = (now - t0) as f32;
+    ctx.request_repaint();
+    let screen = ctx.screen_rect();
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("death-fx")));
+    let fade = (t / 1.2).clamp(0.0, 1.0);
+    painter.rect_filled(screen, 0.0, Color32::from_rgba_unmultiplied(20, 8, 8, (170.0 * fade) as u8));
+    // Letterbox bars slide in.
+    let bar = screen.height() * 0.12 * fade;
+    painter.rect_filled(Rect::from_min_size(screen.min, Vec2::new(screen.width(), bar)), 0.0, Color32::BLACK);
+    painter.rect_filled(Rect::from_min_max(Pos2::new(screen.left(), screen.bottom() - bar), screen.max), 0.0, Color32::BLACK);
+    // Title: grows from large to normal and fades in.
+    let ta = ((t - 0.4) / 0.8).clamp(0.0, 1.0);
+    let size = 64.0 + (1.0 - ta) * 30.0;
+    let c = screen.center() - Vec2::new(0.0, 40.0);
+    painter.text(c + Vec2::splat(4.0), Align2::CENTER_CENTER, "ВЫ ПОГИБЛИ", bold_font(size), Color32::from_black_alpha((220.0 * ta) as u8));
+    painter.text(c, Align2::CENTER_CENTER, "ВЫ ПОГИБЛИ", bold_font(size), Color32::from_rgba_unmultiplied(200, 30, 35, (255.0 * ta) as u8));
+    const AUTO: f32 = 6.0;
+    let left = (AUTO - t).ceil().max(0.0);
+    if t > 1.4 {
+        painter.text(c + Vec2::new(0.0, 52.0), Align2::CENTER_CENTER, format!("Возрождение через {left:.0}…"), FontId::proportional(16.0), Color32::from_gray(210));
+        egui::Area::new(egui::Id::new("death-buttons")).order(egui::Order::Foreground).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 110.0)).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if pill_button(ui, icons, Some(icon::REFRESH), "Возродиться", ButtonKind::Primary, 200.0, true).clicked() {
+                    action = MenuAction::Resume;
+                }
+                ui.add_space(12.0);
+                if pill_button(ui, icons, Some(icon::FOLDER), "В меню", ButtonKind::Secondary, 160.0, true).clicked() {
+                    action = MenuAction::SaveAndQuit;
+                }
+            });
+        });
+    }
+    if t >= AUTO && action == MenuAction::None {
+        action = MenuAction::Resume;
+    }
     action
 }
 

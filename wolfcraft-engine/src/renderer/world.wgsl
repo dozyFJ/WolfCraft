@@ -71,10 +71,18 @@ fn shade(in: VsOut, color: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     let sun = normalize(g.sun.xyz);
     let day = smoothstep(-0.12, 0.28, dot(up, sun));
     let _axis = face_normal(face);
+    // Classic voxel face shading: top brightest, sides darker, bottom darkest -> cubes read as 3D.
+    var face_k = 1.0;
+    switch face {
+        case 2u: { face_k = 1.0; }
+        case 3u: { face_k = 0.55; }
+        case 0u, 1u: { face_k = 0.82; }
+        default: { face_k = 0.68; }
+    }
     // Directional light comes from the sun, ambient from the sky; at night only dim moonlight.
     let diffuse = max(dot(n, sun), 0.0);
     let sky_light = mix(0.075, 0.52 + 0.48 * diffuse, day) * in.light.y;
-    var light = max(sky_light, 0.04) * in.light.x;
+    var light = max(sky_light, 0.04) * in.light.x * face_k;
     var rgb = color.rgb * light;
     // Cool tint at night, warm at sunrise/sunset.
     let night_tint = vec3<f32>(0.78, 0.88, 1.18);

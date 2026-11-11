@@ -334,7 +334,7 @@ impl App {
         let mut world = WorldRenderer::new(&gpu.device, &gpu.queue, gpu.config.format, &atlases, gpu.config.width, gpu.config.height);
         if cfg!(target_os = "android") {
             // The phone GPU is fill-rate bound: draw the world smaller and stretch it.
-            world.set_render_scale(0.7);
+            world.set_render_scale(1.0);
         }
         Ok(Gfx { window, gpu, gui, atlases, world })
     }

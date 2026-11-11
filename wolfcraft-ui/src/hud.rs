@@ -115,8 +115,29 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     let screen = ctx.screen_rect();
 
     // Damage flash.
+    // Damage: a red glow along the screen edges (no full-screen tint).
     if s.hurt > 0.0 {
-        painter.rect_filled(screen, 0.0, Color32::from_rgba_unmultiplied(220, 20, 30, (s.hurt / 0.35 * 70.0) as u8));
+        let a = (s.hurt / 0.35).clamp(0.0, 1.0);
+        let edge = Color32::from_rgba_unmultiplied(230, 20, 30, (190.0 * a) as u8);
+        let clear = Color32::from_rgba_unmultiplied(230, 20, 30, 0);
+        let w = (screen.width().min(screen.height()) * 0.16).max(40.0);
+        let mut mesh = egui::Mesh::default();
+        let mut strip = |o0: Pos2, o1: Pos2, i0: Pos2, i1: Pos2| {
+            let b = mesh.vertices.len() as u32;
+            mesh.colored_vertex(o0, edge);
+            mesh.colored_vertex(o1, edge);
+            mesh.colored_vertex(i1, clear);
+            mesh.colored_vertex(i0, clear);
+            mesh.add_triangle(b, b + 1, b + 2);
+            mesh.add_triangle(b, b + 2, b + 3);
+        };
+        let r = screen;
+        let ri = r.shrink(w);
+        strip(r.left_top(), r.right_top(), ri.left_top(), ri.right_top());
+        strip(r.right_top(), r.right_bottom(), ri.right_top(), ri.right_bottom());
+        strip(r.right_bottom(), r.left_bottom(), ri.right_bottom(), ri.left_bottom());
+        strip(r.left_bottom(), r.left_top(), ri.left_bottom(), ri.left_top());
+        painter.add(egui::Shape::mesh(mesh));
     }
 
     // ---- Top bar: coordinates · FPS · time (not on phones) ----
