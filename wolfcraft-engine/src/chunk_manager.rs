@@ -353,7 +353,9 @@ impl ChunkManager {
     fn replan(&mut self, center: ChunkKey, view: i32) {
         self.last_center = Some(center);
         self.last_view = view;
-        let gen_r = (view + 1) as f64;
+        // +2: meshing a chunk at the edge of the view needs its diagonal neighbours (up to √3
+        // chunks away, a bit more where cells are larger, e.g. on a cube planet).
+        let gen_r = (view + 2) as f64;
 
         // Unload far chunks (hysteresis of 2 chunks).
         let keep = (view + 3) as f64;
@@ -392,13 +394,6 @@ impl ChunkManager {
     pub fn progress(&self, center: ChunkKey, radius: i32) -> (usize, usize) {
         let list = self.chunks_within(center, radius as f64);
         let done = list.iter().filter(|(_, k)| self.mesh_state.get(k).map(|s| s.built > 0 && !s.pending).unwrap_or(false)).count();
-        if std::env::var("WC_DEBUG_PROGRESS").is_ok() {
-            for (d, k) in &list {
-                if !self.mesh_state.get(k).map(|s| s.built > 0 && !s.pending).unwrap_or(false) {
-                    eprintln!("not ready {k:?} d={d:.2} loaded={} state={:?}", self.chunks.contains_key(k), self.mesh_state.get(k).map(|s| (s.built, s.pending)));
-                }
-            }
-        }
         (done, list.len())
     }
 

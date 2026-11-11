@@ -511,7 +511,7 @@ impl Default for CreateWorldState {
             mode: GameMode::Survival,
             size: PlanetSize::Medium,
             world_type: WorldType::Standard,
-            shape: PlanetShape::Sphere,
+            shape: PlanetShape::Cube,
             continents: ContinentCount::Auto,
             structures: true,
             difficulty: Difficulty::Normal,

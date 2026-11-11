@@ -183,4 +183,20 @@ mod tests {
         let b = render_globe(&cfg(7, WorldType::Islands), 64);
         assert_eq!(a.pixels, b.pixels);
     }
+
+    #[test]
+    fn cube_preview_has_planet_and_space() {
+        let mut c = cfg(3, WorldType::Standard);
+        c.shape = wolfcraft_engine::config::PlanetShape::Cube;
+        let t = std::time::Instant::now();
+        let img = render_globe(&c, 256);
+        eprintln!("cube preview 256: {:?}", t.elapsed());
+        if let Ok(path) = std::env::var("WC_SAVE_PREVIEW") {
+            let raw: Vec<u8> = img.pixels.iter().flat_map(|p| [p.r(), p.g(), p.b(), 255]).collect();
+            image::save_buffer(path, &raw, 256, 256, image::ExtendedColorType::Rgba8).unwrap();
+        }
+        let planet = img.pixels.iter().filter(|p| p.b() > 60 || p.g() > 60).count();
+        assert!(planet > 256 * 256 * 3 / 10, "planet covers the middle: {planet}");
+        assert!(img.pixels[0].r() < 40, "corner is space");
+    }
 }

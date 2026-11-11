@@ -720,7 +720,9 @@ mod tests {
         let f0 = s.planet.grid.world_to_cell(s.player.body.pos).f;
         let walk = InputFrame { forward: 1.0, ..Default::default() };
         let mut crossed = false;
-        for step in 0..60 * 20 {
+        let mut last = s.player.body.pos;
+        let mut stuck = 0;
+        for step in 0..60 * 120 {
             let up = s.player.up();
             s.player.heading = (DVec3::Y - up * DVec3::Y.dot(up)).normalize_or_zero();
             s.update(&walk, 1.0 / 60.0, 4, step % 30 == 0);
@@ -734,6 +736,23 @@ mod tests {
             }
             if crossed && s.player.up().y > 0.95 {
                 break;
+            }
+            if step % 60 == 59 {
+                let moved = (s.player.body.pos - last).length();
+                stuck = if moved < 1.0 { stuck + 1 } else { 0 };
+                if stuck >= 1 {
+                    // Trees grow on the flat world: chop whatever blocks the way.
+                    let g = s.planet.grid;
+                    let (feet, up, h) = (s.player.body.pos, s.player.up(), s.player.heading);
+                    for a in 1..5 {
+                        for dy in 0..3 {
+                            let c = g.world_to_cell(feet + h * (a as f64 * 0.5) + up * (dy as f64 + 0.5));
+                            s.chunks.set_block(c, Block::Air);
+                        }
+                    }
+                }
+                assert!(stuck < 3, "stuck at {:?} (up {:?})", s.player.body.pos, s.player.up());
+                last = s.player.body.pos;
             }
         }
         assert!(crossed, "never reached the next face");
