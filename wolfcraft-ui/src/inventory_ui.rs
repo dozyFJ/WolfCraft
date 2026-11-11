@@ -17,12 +17,9 @@ const GAP: f32 = 5.0;
 const GRID: usize = 100;
 const OFFHAND: usize = 99;
 
-const TABS: [&str; 8] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты"];
-/// Creative navbar: item categories plus the backpack as the last tab.
-const CREATIVE_TABS: [&str; 9] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Рюкзак"];
-const BACKPACK_TAB: usize = 8;
-/// Width of the creative category column.
-const SIDE_W: f32 = 170.0;
+/// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
+const CREATIVE_TABS: [&str; 10] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Техника", "Растения", "Предметы", "Инструменты", "Рюкзак"];
+const BACKPACK_TAB: usize = 9;
 
 
 #[derive(Default)]
@@ -34,6 +31,8 @@ pub struct InventoryUiState {
     drag_slot: Option<usize>,
     /// Item being dragged from the creative palette.
     drag_item: Option<ItemId>,
+    /// Last known pointer position: on touch screens the pointer is gone in the release frame.
+    last_pos: Option<Pos2>,
     /// Message from the last craft ("Создано: ...").
     pub toast: Option<(String, f32)>,
 }
@@ -69,7 +68,7 @@ fn matches_search(id: ItemId, search: &str) -> bool {
 }
 
 fn in_tab(id: ItemId, tab: usize) -> bool {
-    tab == 0 || tab >= TABS.len() || items::category(id) == TABS[tab]
+    tab == 0 || tab >= BACKPACK_TAB || items::category(id) == CREATIVE_TABS[tab]
 }
 
 fn get(inv: &Inventory, grid: &CraftGrid, slot: usize) -> Option<ItemStack> {
@@ -124,17 +123,27 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     }
 
     let left_w = 9.0 * (CELL + GAP) - GAP;
-    let right_w = if creative { 9.0 * (CELL + GAP) - GAP } else { 3.0 * (CELL + GAP) + 140.0 };
-    let _ = right_w;
-    // Creative: category column on the left, palette (9 columns) on the right.
-    let width = if creative { SIDE_W + 18.0 + left_w + 8.0 } else { left_w + 8.0 };
+    if creative {
+        // Cell size follows the screen height so the hotbar always fits on a phone.
+        let h = ctx.screen_rect().height();
+        let cell = if h < 640.0 { 40.0 } else { CELL };
+        let rows = (((h - 190.0 - cell) / (cell + GAP)).floor() as usize).clamp(2, 6);
+        let grid_w = 9.0 * (cell + GAP) - GAP + 14.0;
+        let width = grid_w + GAP + cell;
+        let dismissed = modal(ctx, "inventory", "", width.min(ctx.screen_rect().width() - 40.0), |ui| {
+            creative_layout(ui, icons, &p, state, inv, cell, rows, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
+        });
+        if dismissed {
+            result.close = true;
+        }
+    } else {
+    let width = left_w + 8.0;
     let dismissed = modal(ctx, "inventory", "", width.min(ctx.screen_rect().width() - 40.0), |ui| {
-        // ---- Header bar: title + close ----
         ui.horizontal(|ui| {
             let (ir, _) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
             icons.paint(ui.painter(), ir, icon::BACKPACK, p.accent);
             ui.add_space(6.0);
-            ui.label(egui::RichText::new(if creative { "Творческий инвентарь" } else { "Инвентарь" }).font(bold_font(20.0)).color(p.text));
+            ui.label(egui::RichText::new("Инвентарь").font(bold_font(20.0)).color(p.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if pill_button(ui, icons, Some(icon::CLOSE), "Закрыть", ButtonKind::Secondary, 0.0, true).clicked() {
                     result.close = true;
@@ -144,73 +153,19 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         ui.add_space(8.0);
         divider(ui);
         ui.add_space(6.0);
-        // ---- Category navbar ----
-        if !creative {
-            state.tab = 0;
-        }
-
-        if !creative {
-            result.crafted = survival_layout(ui, icons, &p, state, inv, near_table, left_w, &mut slot_rects);
-            return;
-        }
-        ui.set_width(width);
-        ui.horizontal_top(|ui| {
-            // ---- Categories, top to bottom ----
-            ui.vertical(|ui| {
-                ui.set_width(SIDE_W);
-                category_column(ui, &p, &mut state.tab);
-            });
-            ui.add_space(18.0);
-            // ---- Palette or backpack, then the hotbar and the bin ----
-            ui.vertical(|ui| {
-                ui.set_width(left_w);
-                if state.tab == BACKPACK_TAB {
-                    section_label(ui, "Рюкзак");
-                    ui.add_space(4.0);
-                    let backpack: Vec<usize> = (HOTBAR..SLOTS).collect();
-                    for row in backpack.chunks(9) {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-                            for &slot in row {
-                                let (rect, _) = ui.allocate_exact_size(Vec2::splat(CELL), Sense::hover());
-                                slot_rects.push((slot, rect));
-                                draw_slot(ui, icons, &p, state, inv, slot, rect);
-                            }
-                        });
-                    }
-                } else {
-                    creative_panel(ui, icons, &p, state, inv);
-                }
-                ui.add_space(10.0);
-                section_label(ui, "Панель быстрого доступа");
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-                    // Stretch the nine slots over the full panel width, like the bin below.
-                    let cell = ((left_w - GAP * (HOTBAR as f32 - 1.0)) / HOTBAR as f32).max(CELL);
-                    for slot in 0..HOTBAR {
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
-                        slot_rects.push((slot, rect));
-                        draw_slot(ui, icons, &p, state, inv, slot, rect);
-                    }
-                });
-                ui.add_space(10.0);
-                let (r, _) = ui.allocate_exact_size(Vec2::new(left_w, 40.0), Sense::hover());
-                let hv = ctx.animate_bool_with_time(Id::new("trash-hv"), state.drag_slot.is_some(), ANIM_TIME);
-                ui.painter().rect_filled(r, Rounding::ZERO, p.danger.gamma_multiply(0.10 + 0.2 * hv));
-                ui.painter().rect_stroke(r, Rounding::ZERO, Stroke::new(2.0_f32, p.danger.gamma_multiply(0.6)));
-                icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x - 120.0, r.center().y), Vec2::splat(20.0)), icon::TRASH, p.danger);
-                ui.painter().text(Pos2::new(r.center().x - 102.0, r.center().y), Align2::LEFT_CENTER, "Перетащите сюда, чтобы удалить", FontId::proportional(13.5), p.danger);
-                trash_rect = Some(r);
-            });
-        });
+        state.tab = 0;
+        result.crafted = survival_layout(ui, icons, &p, state, inv, near_table, left_w, &mut slot_rects);
     });
     if dismissed {
         result.close = true;
     }
+    }
 
     // ---- Drag & drop resolution ----
-    let pointer = ctx.pointer_hover_pos();
+    if let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) {
+        state.last_pos = Some(pos);
+    }
+    let pointer = ctx.pointer_hover_pos().or(state.last_pos);
     if state.drag_slot.is_some() || state.drag_item.is_some() {
         if let Some(pos) = pointer {
             let layer = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, Id::new("drag-ghost")));
@@ -394,61 +349,131 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool) {
     }
 }
 
-/// Vertical list of creative categories (the backpack is the last entry).
-fn category_column(ui: &mut Ui, p: &Palette, tab: &mut usize) {
-    ui.spacing_mut().item_spacing.y = 2.0;
-    for (i, name) in CREATIVE_TABS.iter().enumerate() {
-        if i == BACKPACK_TAB {
-            ui.add_space(8.0);
-        }
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(SIDE_W, 34.0), Sense::click());
-        let sel = *tab == i;
-        let a = ui.ctx().animate_bool_with_time(Id::new(("cat", i)), sel, ANIM_TIME);
-        let hv = ui.ctx().animate_bool_with_time(Id::new(("cat-h", i)), resp.hovered(), ANIM_TIME);
-        let fill = Color32::TRANSPARENT.lerp_to_gamma(p.surface_hover, (hv * 0.8).max(a * 0.9));
-        ui.painter().rect_filled(rect, Rounding::ZERO, fill);
-        // Accent bar on the left of the selected entry.
-        ui.painter().rect_filled(Rect::from_min_size(rect.min + Vec2::new(0.0, 7.0), Vec2::new(3.0 * a, 20.0)), Rounding::ZERO, p.accent);
-        let col = p.text_muted.lerp_to_gamma(p.accent, a).lerp_to_gamma(p.text, hv * (1.0 - a));
-        ui.painter().text(Pos2::new(rect.left() + 14.0, rect.center().y), Align2::LEFT_CENTER, *name, FontId::proportional(14.5), col);
-        if resp.clicked() {
-            *tab = i;
-        }
-        resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-    }
-}
-
-fn creative_panel(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory) {
-    section_label(ui, "Все предметы");
-    ui.add_space(4.0);
-    text_input(ui, icons, &mut state.search, "Поиск предметов…", 320.0, Some(icon::SEARCH));
-    ui.add_space(8.0);
-    let palette_items: Vec<ItemId> = items::creative_palette().into_iter().filter(|id| in_tab(*id, state.tab) && matches_search(*id, &state.search)).collect();
-    let cols = 9;
-    egui::ScrollArea::vertical().max_height(CELL * 5.0 + GAP * 5.0).auto_shrink([false, true]).show(ui, |ui| {
-        for chunk in palette_items.chunks(cols) {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-                for id in chunk {
-                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(CELL), Sense::hover());
-                    let stack = ItemStack::new(*id, 1);
-                    let resp = slot_widget(ui, icons, p, rect, Some(&stack), false, Id::new(("pal", *id)), Sense::click_and_drag());
-                    if resp.drag_started() {
-                        state.drag_item = Some(*id);
+/// Creative inventory laid out like the classic block game: a row of icon tabs on top,
+/// the item grid below, then the hotbar with the bin slot on its right.
+#[allow(clippy::too_many_arguments)]
+fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
+    let palette_all = items::creative_palette();
+    // ---- Tabs ----
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for (i, name) in CREATIVE_TABS.iter().enumerate() {
+            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+            let sel = state.tab == i;
+            let fill = if sel { p.surface_hover } else if resp.hovered() { p.surface_hi.lerp_to_gamma(p.surface_hover, 0.5) } else { p.surface_hi };
+            ui.painter().rect_filled(rect, Rounding::ZERO, fill);
+            ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if sel { p.accent } else { p.outline }));
+            let inner = rect.shrink(cell * 0.18);
+            match i {
+                0 => icons.paint(ui.painter(), inner, icon::STAR, if sel { p.accent } else { p.text }),
+                BACKPACK_TAB => icons.paint(ui.painter(), inner, icon::BACKPACK, if sel { p.accent } else { p.text }),
+                _ => {
+                    if let Some(id) = palette_all.iter().copied().find(|id| items::category(*id) == *name) {
+                        icons.paint_item(ui.painter(), inner, id);
                     }
-                    if resp.clicked() {
-                        let n = if ui.input(|i| i.modifiers.shift) { items::info(*id).max_stack } else { 1 };
-                        inv.add(ItemStack::new(*id, n));
-                    }
-                    resp.on_hover_text(items::info(*id).name);
                 }
+            }
+            if resp.clicked() {
+                state.tab = i;
+            }
+            resp.on_hover_text(*name);
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+            ui.painter().rect_filled(rect, Rounding::ZERO, if resp.hovered() { p.danger.gamma_multiply(0.3) } else { p.surface_hi });
+            ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+            icons.paint(ui.painter(), rect.shrink(cell * 0.25), icon::CLOSE, p.text);
+            if resp.clicked() {
+                result.close = true;
+            }
+        });
+    });
+    ui.add_space(6.0);
+    // ---- Tab title + search ----
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(CREATIVE_TABS[state.tab]).font(bold_font(16.0)).color(p.text));
+        if state.tab != BACKPACK_TAB {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                text_input(ui, icons, &mut state.search, "Поиск…", 220.0, Some(icon::SEARCH));
             });
         }
-        if palette_items.is_empty() {
-            ui.label(egui::RichText::new("Ничего не найдено").color(p.text_muted));
-        }
     });
-    ui.label(egui::RichText::new("Клик — добавить 1, Shift+клик — стак, перетащите на слот").size(12.5).color(p.text_muted));
+    ui.add_space(6.0);
+    // ---- Grid ----
+    let grid_h = rows as f32 * (cell + GAP) - GAP;
+    if state.tab == BACKPACK_TAB {
+        let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
+        let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
+        egui::ScrollArea::vertical().id_salt("backpack-scroll").auto_shrink([false, false]).show(&mut ui2, |ui| {
+            let backpack: Vec<usize> = (HOTBAR..SLOTS).collect();
+            for row in backpack.chunks(9) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::splat(GAP);
+                    for &slot in row {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
+                        slot_rects.push((slot, rect));
+                        draw_slot(ui, icons, p, state, inv, slot, rect);
+                    }
+                });
+                ui.add_space(GAP - ui.spacing().item_spacing.y);
+            }
+        });
+    } else {
+        let list: Vec<ItemId> = palette_all.into_iter().filter(|id| in_tab(*id, state.tab) && matches_search(*id, &state.search)).collect();
+        let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
+        let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
+        egui::ScrollArea::vertical().id_salt(("creative-scroll", state.tab)).auto_shrink([false, false]).show(&mut ui2, |ui| {
+            for chunk in list.chunks(9) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::splat(GAP);
+                    for id in chunk {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
+                        let stack = ItemStack::new(*id, 1);
+                        let resp = slot_widget(ui, icons, p, rect, Some(&stack), false, Id::new(("pal", *id)), Sense::click_and_drag());
+                        if resp.drag_started() {
+                            state.drag_item = Some(*id);
+                        }
+                        if resp.clicked() {
+                            // Tap: a full stack into the selected hotbar slot (Shift: into a free slot).
+                            let full = ItemStack::new(*id, items::info(*id).max_stack);
+                            if ui.input(|i| i.modifiers.shift) {
+                                inv.add(full);
+                            } else {
+                                inv.slots[inv.selected] = Some(full);
+                            }
+                        }
+                        resp.on_hover_text(items::info(*id).name);
+                    }
+                });
+                ui.add_space(GAP - ui.spacing().item_spacing.y);
+            }
+            if list.is_empty() {
+                ui.label(egui::RichText::new("Ничего не найдено").color(p.text_muted));
+            }
+        });
+    }
+    ui.add_space(10.0);
+    // ---- Hotbar + bin ----
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::splat(GAP);
+        for slot in 0..HOTBAR {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
+            slot_rects.push((slot, rect));
+            draw_slot(ui, icons, p, state, inv, slot, rect);
+        }
+        ui.add_space(14.0 - GAP);
+        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+        let hot = resp.hovered() || state.drag_slot.is_some();
+        ui.painter().rect_filled(rect, Rounding::ZERO, p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
+        ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.danger.gamma_multiply(0.7)));
+        icons.paint(ui.painter(), rect.shrink(cell * 0.24), icon::TRASH, p.danger);
+        // Tap: delete the item in the selected hotbar slot. Or drag any slot here.
+        if resp.clicked() {
+            inv.slots[inv.selected] = None;
+        }
+        resp.on_hover_text("Удалить: нажмите — предмет в выбранном слоте, или перетащите сюда");
+        *trash_rect = Some(rect);
+    });
 }
 
 /// Survival crafting: grid → arrow → result. Click the result to craft, Shift+click for all.

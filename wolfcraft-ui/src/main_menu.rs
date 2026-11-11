@@ -953,9 +953,6 @@ pub fn pause_menu(ctx: &egui::Context, icons: &GuiIcons, info: &PauseInfo) -> Me
                     badge(ui, &info.clock, p.secondary);
                     badge(ui, &info.biome, p.text_muted);
                 });
-                ui.add_space(6.0);
-                ui.label(egui::RichText::new(format!("X {:.0}   Y {:.0}   Z {:.0}   ·   Seed {}", info.coords[0], info.coords[1], info.coords[2], info.seed)).size(12.5).color(p.text_muted));
-                ui.label(egui::RichText::new(format!("{} (F5)", info.camera)).size(12.5).color(p.text_muted));
                 ui.add_space(12.0);
                 divider(ui);
                 ui.add_space(12.0);
@@ -973,13 +970,6 @@ pub fn pause_menu(ctx: &egui::Context, icons: &GuiIcons, info: &PauseInfo) -> Me
                     if pill_button(ui, icons, Some(icon::ARROW_LEFT), "Сохранить и выйти в меню", ButtonKind::Secondary, 380.0, true).clicked() {
                         action = MenuAction::SaveAndQuit;
                     }
-                    if pill_button(ui, icons, Some(icon::EXIT), "Выйти из игры", ButtonKind::Danger, 380.0, true).clicked() {
-                        action = MenuAction::Quit;
-                    }
-                });
-                ui.add_space(8.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new("Esc — продолжить   ·   T — чат   ·   E — инвентарь   ·   F3 — отладка").size(12.0).color(p.text_muted));
                 });
             });
     });
@@ -1035,7 +1025,7 @@ mod tests {
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             crate::theme_manager::apply(&ctx, mode);
             frame(&ctx, |c| {
-                main_menu(c, &icons, "0.1.0", "C:\\data", mode == ThemeMode::Dark);
+                main_menu(c, &icons, "0.1.0", "C:\\data", mode == ThemeMode::Dark, None);
             });
             let mut ws = WorldSelectState::default();
             frame(&ctx, |c| {
@@ -1050,7 +1040,7 @@ mod tests {
                 settings_screen(c, &icons, &mut s, "0.1.0");
             });
             let stages = vec!["A".to_string(), "B".to_string()];
-            frame(&ctx, |c| loading_screen(c, &icons, &LoadingView { title: "t", stages: &stages, current: 1, fraction: 0.4, detail: "d" }));
+            frame(&ctx, |c| loading_screen(c, &icons, &LoadingView { title: "t", stages: &stages, current: 1, fraction: 0.4, detail: "d", grid: &[] }));
             frame(&ctx, |c| {
                 pause_menu(c, &icons, &PauseInfo { world_name: "Мир".into(), mode: "Выживание".into(), clock: "12:00".into(), biome: "Лес".into(), seed: 5, coords: [1.0, 2.0, 3.0], camera: "Вид от первого лица".into() });
             });
