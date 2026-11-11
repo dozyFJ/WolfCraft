@@ -39,32 +39,12 @@ pub struct WorldEntry {
 // ---------------------------------------------------------------------------------------------
 // Shared chrome
 
-/// Top bar: logo + name left, version + settings right. Returns true if settings was clicked.
-pub fn top_bar(ctx: &egui::Context, icons: &GuiIcons, title: &str, version: &str, show_settings: bool) -> bool {
-    let p = palette(ctx);
-    let mut settings = false;
-    egui::TopBottomPanel::top("menu-topbar")
-        .exact_height(58.0)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(18.0, 8.0)))
-        .show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
-                icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new("WolfCraft").font(bold_font(21.0)).color(p.text));
-                if !title.is_empty() {
-                    ui.label(egui::RichText::new("›").size(18.0).color(p.text_muted));
-                    ui.label(egui::RichText::new(title).size(16.0).color(p.text_muted));
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if show_settings && icon_button(ui, icons, icon::GEAR, 36.0, ButtonKind::Ghost).on_hover_text("Настройки").clicked() {
-                        settings = true;
-                    }
-                    badge(ui, &format!("v{version}"), p.accent);
-                });
-            });
-        });
-    settings
+/// Former top bar: the header is gone, its title and version are shown in the centre of the
+/// bottom bar instead. Always returns false (settings open from the main menu).
+pub fn top_bar(ctx: &egui::Context, _icons: &GuiIcons, title: &str, version: &str, _show_settings: bool) -> bool {
+    let text = if title.is_empty() { format!("WolfCraft · v{version}") } else { format!("{title} · v{version}") };
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("menu-bar-title"), text));
+    false
 }
 
 fn body_frame(p: &Palette) -> Frame {
@@ -76,7 +56,15 @@ fn bottom_bar<R>(ctx: &egui::Context, add: impl FnOnce(&mut Ui) -> R) -> R {
     egui::TopBottomPanel::bottom("menu-bottombar")
         .exact_height(66.0)
         .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(24.0, 12.0)))
-        .show(ctx, |ui| ui.horizontal_centered(add).inner)
+        .show(ctx, |ui| {
+            let title: Option<String> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("menu-bar-title")));
+            let rect = ui.max_rect();
+            let r = ui.horizontal_centered(add).inner;
+            if let Some(t) = title {
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, t, FontId::proportional(14.0), p.text_muted);
+            }
+            r
+        })
         .inner
 }
 
@@ -174,10 +162,7 @@ fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
 pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>) -> MenuAction {
     let p = palette(ctx);
     let mut action = MenuAction::None;
-    // The header strip is for the PC window only; phones use the whole screen.
-    if !cfg!(target_os = "android") && top_bar(ctx, icons, "", version, true) {
-        action = MenuAction::OpenSettings;
-    }
+    let _ = version;
     egui::CentralPanel::default().frame(Frame::none().fill(p.bg)).show(ctx, |ui| {
         let rect = ui.max_rect();
         planet_backdrop(ui, planet, &p);
@@ -395,62 +380,48 @@ fn square_button(ui: &mut Ui, icons: &GuiIcons, ic: u16, active: bool) -> egui::
 
 /// World-select header: logo and title left; settings, version, sort and search (square icons) right.
 /// The magnifier opens a search field right in the header. Returns true if settings was clicked.
-fn world_select_header(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, version: &str) -> bool {
-    let p = palette(ctx);
+/// World list tools (settings, sort, search) next to "Назад" in the bottom bar.
+fn world_select_tools(ui: &mut Ui, icons: &GuiIcons, st: &mut WorldSelectState) -> (bool, Option<Rect>) {
     let mut settings = false;
     let mut sort_anchor = None;
-    egui::TopBottomPanel::top("menu-topbar")
-        .exact_height(58.0)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(18.0, 8.0)))
-        .show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
-                icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new("WolfCraft").font(bold_font(21.0)).color(p.text));
-                if !st.search_open {
-                    ui.label(egui::RichText::new("›").size(18.0).color(p.text_muted));
-                    ui.label(egui::RichText::new("Выбор мира").size(16.0).color(p.text_muted));
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    if square_button(ui, icons, icon::GEAR, false).clicked() {
-                        settings = true;
-                    }
-                    if st.mode == 0 {
-                        let sort = square_button(ui, icons, icon::SORT, st.sort_open);
-                        if sort.clicked() {
-                            st.sort_open = !st.sort_open;
-                        }
-                        sort_anchor = Some(sort.rect);
-                        if square_button(ui, icons, if st.search_open { icon::CLOSE } else { icon::SEARCH }, st.search_open).clicked() {
-                            st.search_open = !st.search_open;
-                            st.search_focus = st.search_open;
-                            if !st.search_open {
-                                st.search.clear();
-                            }
-                        }
-                        if st.search_open {
-                            let w = (ui.available_width() - 8.0).clamp(140.0, 360.0);
-                            let r = text_input(ui, icons, &mut st.search, "Поиск миров…", w, Some(icon::SEARCH));
-                            if st.search_focus {
-                                st.search_focus = false;
-                                r.request_focus();
-                            }
-                        }
-                    }
-                    if !st.search_open {
-                        badge(ui, &format!("v{version}"), p.accent);
-                    }
-                });
-            });
-        });
-    // Sort menu drops down under its button.
+    ui.spacing_mut().item_spacing.x = 8.0;
+    if square_button(ui, icons, icon::GEAR, false).clicked() {
+        settings = true;
+    }
+    if st.mode == 0 {
+        if square_button(ui, icons, if st.search_open { icon::CLOSE } else { icon::SEARCH }, st.search_open).clicked() {
+            st.search_open = !st.search_open;
+            st.search_focus = st.search_open;
+            if !st.search_open {
+                st.search.clear();
+            }
+        }
+        let sort = square_button(ui, icons, icon::SORT, st.sort_open);
+        if sort.clicked() {
+            st.sort_open = !st.sort_open;
+        }
+        sort_anchor = Some(sort.rect);
+        if st.search_open {
+            let w = (ui.available_width() - 360.0).clamp(120.0, 300.0);
+            let r = text_input(ui, icons, &mut st.search, "Поиск миров…", w, Some(icon::SEARCH));
+            if st.search_focus {
+                st.search_focus = false;
+                r.request_focus();
+            }
+        }
+    }
+    (settings, sort_anchor)
+}
+
+fn world_sort_menu(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, sort_anchor: Option<Rect>) {
+    let p = palette(ctx);
+    // Sort menu opens above its button.
     if st.mode == 0 && st.sort_open {
         if let Some(a) = sort_anchor {
             let area = egui::Area::new(egui::Id::new("world-sort-menu"))
                 .order(egui::Order::Foreground)
-                .fixed_pos(Pos2::new(a.right() - 200.0, a.bottom() + 8.0))
+                .pivot(Align2::LEFT_BOTTOM)
+                .fixed_pos(Pos2::new(a.left(), a.top() - 8.0))
                 .show(ctx, |ui| {
                     Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::same(8.0)).show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 6.0;
@@ -470,18 +441,21 @@ fn world_select_header(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSele
             }
         }
     }
-    settings
 }
 
 pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, worlds: &[WorldEntry], version: &str) -> MenuAction {
     let p = palette(ctx);
     let mut action = MenuAction::None;
-    if world_select_header(ctx, icons, st, version) {
-        action = MenuAction::OpenSettings;
-    }
+    let _ = version;
+    let mut sort_anchor = None;
     bottom_bar(ctx, |ui| {
         if pill_button(ui, icons, Some(icon::ARROW_LEFT), "Назад", ButtonKind::Secondary, 140.0, true).clicked() {
             action = MenuAction::Back;
+        }
+        let (settings, anchor) = world_select_tools(ui, icons, st);
+        sort_anchor = anchor;
+        if settings {
+            action = MenuAction::OpenSettings;
         }
         if st.mode == 0 {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -497,6 +471,7 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
             });
         }
     });
+    world_sort_menu(ctx, icons, st, sort_anchor);
     // Left sidebar: play modes stacked vertically; their content fills the right side.
     egui::SidePanel::left("play-mode-side")
         .resizable(false)
@@ -759,10 +734,10 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
                 }
             }
         });
-    // Planet preview right next to the sidebar; sized to fit the screen height.
+    // Planet preview on the right side; sized to fit the screen height.
     let avail_h = ctx.available_rect().height();
     let globe = (avail_h - 120.0).clamp(160.0, 300.0);
-    egui::SidePanel::left("cw-preview")
+    egui::SidePanel::right("cw-preview")
         .resizable(false)
         .exact_width(globe + 28.0)
         .frame(Frame::none().fill(p.bg).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::same(14.0)))
@@ -931,7 +906,9 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
         if pill_button(ui, icons, Some(icon::ARROW_LEFT), "Назад", ButtonKind::Primary, 160.0, true).clicked() {
             res.back = true;
         }
-        ui.label(egui::RichText::new("Изменения применяются сразу и сохраняются автоматически").size(13.0).color(p.text_muted));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new("Сохраняется автоматически").size(13.0).color(p.text_muted));
+        });
     });
     // Selected section is kept in egui memory, so the screen needs no extra state.
     let tab_id = egui::Id::new("settings-tab");
@@ -1161,8 +1138,7 @@ pub fn loading_screen(ctx: &egui::Context, icons: &GuiIcons, v: &LoadingView) {
                 }
             }
         }
-        // Glass: a soft highlight and the frame.
-        painter.rect_filled(Rect::from_min_size(inner.min + Vec2::new(8.0, 8.0), Vec2::new(6.0, inner.height() - 16.0)), Rounding::ZERO, Color32::from_white_alpha(18));
+        // Frame of the vessel.
         painter.rect_stroke(r.expand(6.0), Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
         painter.rect_stroke(inner, Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
         let _ = v.grid;

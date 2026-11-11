@@ -87,6 +87,9 @@ struct LoadState {
     title: String,
     error: Option<String>,
     started: Instant,
+    /// Last chunk progress and when it last changed: a stalled load enters the world anyway.
+    progress: (usize, usize),
+    progress_at: Instant,
 }
 
 /// Phone folder for the player's resource packs (the app's own shared-storage folder).
@@ -395,7 +398,7 @@ impl App {
     fn start_load(&mut self, cfg: WorldConfig, is_new: bool) {
         let title = format!("«{}»", cfg.name);
         let shared = loader::start(LoadRequest { cfg, worlds_dir: self.worlds_dir.clone(), is_new });
-        self.load = Some(LoadState { shared, title, error: None, started: Instant::now() });
+        self.load = Some(LoadState { shared, title, error: None, started: Instant::now(), progress: (usize::MAX, 0), progress_at: Instant::now() });
         self.session = None;
         self.nav.clear();
         self.screen = Screen::Loading;
@@ -428,7 +431,7 @@ impl App {
         let _ = std::fs::remove_file(dir.join("dimension.txt"));
         let title = format!("«{}»", cfg.name);
         let shared = loader::start(LoadRequest { cfg, worlds_dir: online, is_new: false });
-        self.load = Some(LoadState { shared, title, error: None, started: Instant::now() });
+        self.load = Some(LoadState { shared, title, error: None, started: Instant::now(), progress: (usize::MAX, 0), progress_at: Instant::now() });
         self.session = None;
         self.nav.clear();
         self.screen = Screen::Loading;
@@ -1612,12 +1615,21 @@ impl App {
                 None => l.error = Some("Загрузка мира завершилась без результата".into()),
             }
         }
-        if let Some(s) = &mut self.session {
+        if let (Some(s), Some(l)) = (&mut self.session, &mut self.load) {
             // Stream the starting area; enter the world once the ground around the player is meshed.
             let view = (self.settings.render_distance as i32).clamp(3, 6);
             s.update(&InputFrame::default(), self.time.delta(), view, true);
             let (done, total) = s.chunks.progress(s.player_chunk(), 3);
-            if done >= total && s.ground_ready() {
+            if l.progress != (done, total) {
+                l.progress = (done, total);
+                l.progress_at = Instant::now();
+            }
+            let idle = s.chunks.stats.gen_inflight == 0 && s.chunks.stats.mesh_inflight == 0;
+            let stalled = idle && l.progress_at.elapsed().as_secs_f32() > 4.0;
+            if stalled {
+                log::warn!("loading stalled at {done}/{total} (player {:?}, chunk {:?}); entering anyway", s.player.body.pos, s.player_chunk());
+            }
+            if (done >= total && s.ground_ready()) || stalled {
                 self.load = None;
                 self.screen = Screen::Playing;
                 self.near_table = false;
