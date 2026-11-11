@@ -114,6 +114,8 @@ pub struct App {
     loaded_pack: String,
     pack_status: String,
     pack_dl: Option<Receiver<Result<String, String>>>,
+    /// Text of the last crash (logs/crash.txt), shown once in the main menu.
+    crash_report: Option<String>,
     /// Seconds the splash has been shown.
     splash_t: f32,
     /// Big planet drawn behind the main menu.
@@ -185,6 +187,7 @@ pub struct App {
 impl App {
     pub fn new(args: LaunchArgs) -> Self {
         let data_dir = args.resolved_data_dir();
+        let crash_report = std::fs::read_to_string(data_dir.join("logs").join("crash.txt")).ok();
         let worlds_dir = data_dir.join("worlds");
         let _ = std::fs::create_dir_all(&worlds_dir);
         let mut settings = Settings::load(&data_dir);
@@ -216,6 +219,7 @@ impl App {
             pack_status: String::new(),
             pack_dl: None,
             splash_t: 0.0,
+            crash_report,
             menu_planet: None,
             menu_planet_requested: false,
             create_preview_key: 0,
@@ -1004,6 +1008,7 @@ impl App {
         let mut settings_back = false;
         let mut pack_refresh = false;
         let mut splash_skip = false;
+        let mut crash_close = false;
         // Splash: about 2.8 s, a little longer if the menu planet is not rendered yet.
         if self.screen == Screen::Splash {
             self.splash_t += dt;
@@ -1043,7 +1048,7 @@ impl App {
         }
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
         let frame = {
-            let App { settings, world_select, create, worlds, create_preview, menu_planet, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
+            let App { settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
             let touch_size = gfx.gpu.size();
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
@@ -1052,8 +1057,12 @@ impl App {
                     if main_menu::splash_screen(ctx, &icons, splash_progress, version) {
                         splash_skip = true;
                     }
+                    crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
-                Screen::Main => actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref())),
+                Screen::Main => {
+                    actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref()));
+                    crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
+                }
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
                 Screen::Create => actions.push(main_menu::create_world(ctx, &icons, create, create_preview.as_ref(), version, random_seed)),
                 Screen::Settings => {
@@ -1201,7 +1210,11 @@ impl App {
         self.profile.ui_ms = t_ui.ms();
 
         // ---- apply UI results ----
-        if self.screen == Screen::Splash && (splash_progress >= 1.0 || splash_skip && self.splash_t > 0.6) {
+        if crash_close {
+            self.crash_report = None;
+            let _ = std::fs::remove_file(self.data_dir.join("logs").join("crash.txt"));
+        }
+        if self.screen == Screen::Splash && self.crash_report.is_none() && (splash_progress >= 1.0 || splash_skip && self.splash_t > 0.6) {
             self.screen = Screen::Main;
         }
         if pack_refresh {
@@ -1909,4 +1922,28 @@ fn build_minimap_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range
 /// Phones are small: shrink the interface a little.
 fn ui_mult() -> f32 {
     if cfg!(target_os = "android") { 0.75 } else { 1.0 }
+}
+
+/// Shows the text of the last crash with copy / close buttons. Returns true when closed.
+fn show_crash_report(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::GuiIcons, text: Option<&str>) -> bool {
+    use wolfcraft_ui::ui_components::{ButtonKind, modal, pill_button};
+    let Some(text) = text else { return false };
+    let mut close = false;
+    let dismissed = modal(ctx, "crash-report", "Игра упала в прошлый раз", 560.0, |ui| {
+        ui.label("Сделайте скриншот или скопируйте текст и отправьте разработчику:");
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            ui.label(egui::RichText::new(text).size(11.5));
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if pill_button(ui, icons, None, "Скопировать", ButtonKind::Primary, 0.0, true).clicked() {
+                ctx.copy_text(text.to_string());
+            }
+            if pill_button(ui, icons, None, "Закрыть", ButtonKind::Secondary, 0.0, true).clicked() {
+                close = true;
+            }
+        });
+    });
+    close || dismissed
 }

@@ -56,11 +56,16 @@ pub fn init(log_file: &Path, level: log::LevelFilter) {
     }
     let path = log_file.to_path_buf();
     let prev = std::panic::take_hook();
+    // crash.txt survives the next start (latest.log is truncated), so the game can show it.
+    let crash = log_file.with_file_name("crash.txt");
     std::panic::set_hook(Box::new(move |info| {
-        log::error!("PANIC: {info}");
+        let thread = std::thread::current().name().unwrap_or("?").to_string();
+        let bt = std::backtrace::Backtrace::force_capture();
+        log::error!("PANIC in thread '{thread}': {info}\n{bt}");
         if let Ok(mut f) = OpenOptions::new().append(true).open(&path) {
-            let _ = writeln!(f, "PANIC: {info}");
+            let _ = writeln!(f, "PANIC in thread '{thread}': {info}\n{bt}");
         }
+        let _ = std::fs::write(&crash, format!("Поток '{thread}': {info}\n\n{bt}"));
         prev(info);
     }));
 }

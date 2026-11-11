@@ -51,6 +51,8 @@ impl GpuContext {
         ))
         .map_err(|e| format!("request_device: {e}"))?;
 
+        // A GPU validation error must not kill the game: log it and go on.
+        device.on_uncaptured_error(Box::new(|e| log::error!("wgpu error: {e}")));
         let caps = surface.get_capabilities(&adapter);
         // egui expects a non-sRGB target (it blends in gamma space); the 3D shader converts itself.
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
@@ -98,13 +100,26 @@ impl GpuContext {
         #[cfg(target_os = "android")]
         {
             use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            // Looked up at run time: the function only exists on Android 11+.
+            type SetFrameRate = unsafe extern "C" fn(*mut std::ffi::c_void, f32, i8) -> i32;
             unsafe extern "C" {
-                fn ANativeWindow_setFrameRate(window: *mut std::ffi::c_void, frame_rate: f32, compatibility: i8) -> i32;
+                fn dlopen(name: *const std::ffi::c_char, flags: i32) -> *mut std::ffi::c_void;
+                fn dlsym(handle: *mut std::ffi::c_void, name: *const std::ffi::c_char) -> *mut std::ffi::c_void;
             }
+            let lib = unsafe { dlopen(c"libandroid.so".as_ptr(), 2) };
+            if lib.is_null() {
+                return;
+            }
+            let sym = unsafe { dlsym(lib, c"ANativeWindow_setFrameRate".as_ptr()) };
+            if sym.is_null() {
+                log::info!("refresh rate: not supported on this Android version");
+                return;
+            }
+            let set: SetFrameRate = unsafe { std::mem::transmute(sym) };
             if let Ok(h) = self.window.window_handle() {
                 if let RawWindowHandle::AndroidNdk(a) = h.as_raw() {
                     // compatibility 0 = default: the app renders at this rate.
-                    let r = unsafe { ANativeWindow_setFrameRate(a.a_native_window.as_ptr(), hz as f32, 0) };
+                    let r = unsafe { set(a.a_native_window.as_ptr(), hz as f32, 0) };
                     log::info!("refresh rate {hz} Hz requested (result {r})");
                 }
             }
