@@ -131,6 +131,15 @@ pub mod tiles {
     pub const GLASS_BLUE: u16 = 121;
     pub const GLASS_GREEN: u16 = 122;
     pub const GLASS_YELLOW: u16 = 123;
+    // Iskrit (signal network).
+    pub const ISKRIT_ORE: u16 = 124;
+    pub const ISKRIT_WIRE: u16 = 125;
+    pub const ISKRIT_WIRE_ON: u16 = 126;
+    pub const ISKRIT_BLOCK: u16 = 127;
+    pub const ISKRIT_TORCH: u16 = 128;
+    pub const ISKRIT_LAMP: u16 = 129;
+    pub const ISKRIT_LAMP_ON: u16 = 130;
+    pub const BUTTON: u16 = 131;
 }
 
 const S: u32 = 16;
@@ -1246,6 +1255,89 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(GLASS_BLUE, "glass_blue", stained_glass(Rgb(0.22, 0.36, 0.85)));
     l.add(GLASS_GREEN, "glass_green", stained_glass(Rgb(0.28, 0.70, 0.30)));
     l.add(GLASS_YELLOW, "glass_yellow", stained_glass(Rgb(0.95, 0.82, 0.22)));
+    // ---- Iskrit: a glowing violet-pink crystal dust that carries signals ----
+    let isk = Rgb(0.86, 0.22, 0.62);
+    l.add(ISKRIT_ORE, "iskrit_ore", p(|q| {
+        q.noisy(Rgb(0.50, 0.50, 0.52), 0.12, 190);
+        q.speckle(Rgb(0.42, 0.42, 0.44), 0.25, 191);
+        for y in 0..S {
+            for x in 0..S {
+                if rnd(x / 2, y / 2, 192) < 0.16 && rnd(x, y, 193) < 0.8 {
+                    let hi = rnd(x, y, 194) < 0.3;
+                    q.put(x, y, if hi { Rgb(1.0, 0.55, 0.85) } else { isk }, 1.0);
+                }
+            }
+        }
+    }));
+    let wire = |on: bool| {
+        p(|q| {
+            q.clear();
+            let core = if on { Rgb(1.0, 0.38, 0.80) } else { Rgb(0.42, 0.10, 0.30) };
+            let edge = if on { Rgb(0.80, 0.16, 0.55) } else { Rgb(0.28, 0.06, 0.20) };
+            // Dust trail: a cross of specks, denser in the middle.
+            for y in 0..S {
+                for x in 0..S {
+                    let on_line = (6..10).contains(&x) || (6..10).contains(&y);
+                    let centre = (5..11).contains(&x) && (5..11).contains(&y);
+                    if (on_line || centre) && rnd(x, y, 195) < 0.85 {
+                        let c = if (7..9).contains(&x) || (7..9).contains(&y) { core } else { edge };
+                        q.put(x, y, c, 1.0);
+                    }
+                }
+            }
+            if on {
+                for (x, y) in [(7u32, 7u32), (8, 8), (3, 7), (12, 8), (7, 2), (8, 13)] {
+                    q.put(x, y, Rgb(1.0, 0.85, 0.96), 1.0);
+                }
+            }
+        })
+    };
+    l.add(ISKRIT_WIRE, "iskrit_wire", wire(false));
+    l.add(ISKRIT_WIRE_ON, "iskrit_wire_on", wire(true));
+    l.add(ISKRIT_BLOCK, "iskrit_block", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let t = value_noise(x, y, 4, 196);
+                let c = Rgb(0.62, 0.10, 0.42).lerp(Rgb(1.0, 0.45, 0.82), t);
+                q.put(x, y, if rnd(x, y, 197) < 0.06 { Rgb(1.0, 0.85, 0.95) } else { c }, 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, Rgb(1.0, 0.60, 0.88), Rgb(0.40, 0.05, 0.26));
+    }));
+    l.add(ISKRIT_TORCH, "iskrit_torch", p(|q| {
+        q.clear();
+        for y in 6..16u32 {
+            q.put(7, y, Rgb(0.45, 0.30, 0.16), 1.0);
+            q.put(8, y, Rgb(0.36, 0.24, 0.12), 1.0);
+        }
+        for (x, y, c) in [(7u32, 4u32, isk), (8, 4, isk), (7, 5, Rgb(0.70, 0.12, 0.45)), (8, 5, Rgb(0.70, 0.12, 0.45)), (7, 3, Rgb(1.0, 0.70, 0.92)), (8, 3, Rgb(1.0, 0.55, 0.85)), (6, 4, Rgb(0.60, 0.10, 0.40)), (9, 4, Rgb(0.60, 0.10, 0.40))] {
+            q.put(x, y, c, 1.0);
+        }
+    }));
+    let isk_lamp = |on: bool| {
+        p(|q| {
+            for y in 0..S {
+                for x in 0..S {
+                    let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt() / 8.0;
+                    let c = if on { Rgb(1.0, 0.92, 0.98).lerp(Rgb(1.0, 0.45, 0.80), d.min(1.0)) } else { Rgb(0.42, 0.20, 0.34).lerp(Rgb(0.26, 0.12, 0.22), d.min(1.0)) };
+                    let cell = (x % 5 == 0) || (y % 5 == 0);
+                    q.put(x, y, if cell { if on { Rgb(0.80, 0.30, 0.62) } else { Rgb(0.18, 0.10, 0.16) } } else { c }, 1.0);
+                }
+            }
+            bevel(q, 0, 0, 15, 15, Rgb(0.55, 0.40, 0.30), Rgb(0.30, 0.20, 0.14));
+        })
+    };
+    l.add(ISKRIT_LAMP, "iskrit_lamp", isk_lamp(false));
+    l.add(ISKRIT_LAMP_ON, "iskrit_lamp_on", isk_lamp(true));
+    l.add(BUTTON, "button", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let g = 0.62 - y as f32 * 0.01 + (rnd(x, y, 198) - 0.5) * 0.04;
+                q.put(x, y, Rgb(g, g, g * 1.02), 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, Rgb(0.82, 0.82, 0.84), Rgb(0.36, 0.36, 0.38));
+    }));
     // Pixel-art finish. Natural, noisy materials get clumps instead of per-pixel static, a
     // gentle large-scale variation and a few luminance bands (the hand-painted look); every
     // opaque pixel then gets a touch more contrast and a limited palette.

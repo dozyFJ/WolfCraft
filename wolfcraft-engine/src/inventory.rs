@@ -274,6 +274,12 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerYellow), 1)], (b(Block::YellowWool), 1), false, "Строительство"));
         v.push(r(&[(ids::COAL, 1), (ids::STICK, 2)], (b(Block::Torch), 4), false, "Строительство"));
         v.push(r(&[(b(Block::Torch), 1), (ids::IRON_INGOT, 1)], (b(Block::Lantern), 1), true, "Строительство"));
+        // Iskrit network.
+        v.push(r(&[(b(Block::IskritWire), 9)], (b(Block::IskritBlock), 1), true, "Техника"));
+        v.push(r(&[(b(Block::IskritBlock), 1)], (b(Block::IskritWire), 9), false, "Техника"));
+        v.push(r(&[(b(Block::IskritWire), 1), (ids::STICK, 1)], (b(Block::IskritTorch), 1), false, "Техника"));
+        v.push(r(&[(b(Block::IskritWire), 4), (b(Block::Glowstone), 1)], (b(Block::IskritLamp), 1), true, "Техника"));
+        v.push(r(&[(b(Block::Stone), 1)], (b(Block::Button), 1), false, "Техника"));
         v.push(r(&[(b(Block::Granite), 4)], (b(Block::PolishedGranite), 4), true, "Строительство"));
         v.push(r(&[(b(Block::Marble), 4)], (b(Block::PolishedMarble), 4), true, "Строительство"));
         v.push(r(&[(b(Block::Stone), 1), (ids::COAL, 1)], (b(Block::SmoothStone), 1), true, "Плавка"));

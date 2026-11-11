@@ -148,6 +148,13 @@ impl Interaction {
                 }
                 return events;
             }
+            // Button: pressed for a moment (the session releases it).
+            if h.block == Block::Button && !player.sneaking {
+                if world.set_block(h.cell, Block::ButtonOn) {
+                    events.push(InteractionEvent::Placed { pos: h.cell, block: Block::ButtonOn });
+                }
+                return events;
+            }
             // Door: opens and closes.
             if let (Some(new), false) = (h.block.door_toggle(), player.sneaking) {
                 if world.set_block(h.cell, new) {

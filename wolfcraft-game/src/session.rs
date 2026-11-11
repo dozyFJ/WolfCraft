@@ -125,6 +125,8 @@ pub struct GameSession {
     spawn_checked: bool,
     /// Opened in the studio: creative rules without changing the world's saved mode.
     pub studio: bool,
+    /// Pressed buttons and the seconds until they spring back.
+    buttons: Vec<(wolfcraft_engine::cubesphere::Cell, f32)>,
 }
 
 impl GameSession {
@@ -170,6 +172,7 @@ impl GameSession {
             furnace_t: Default::default(),
             spawn_checked: false,
             studio: false,
+            buttons: Vec::new(),
         };
         s.load_containers();
         s.load_block_commands();
@@ -424,6 +427,27 @@ impl GameSession {
         for e in &events {
             if let InteractionEvent::Placed { pos, .. } | InteractionEvent::Broken { pos, .. } = e {
                 wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
+                wolfcraft_engine::power::update_iskrit(&mut self.chunks, *pos);
+            }
+            if let InteractionEvent::Placed { pos, block: wolfcraft_engine::block::Block::ButtonOn } = e {
+                self.buttons.push((*pos, 1.0));
+            }
+        }
+        // Pressed buttons spring back after a second.
+        let mut released = Vec::new();
+        self.buttons.retain_mut(|(pos, t)| {
+            *t -= dt;
+            if *t <= 0.0 {
+                released.push(*pos);
+                false
+            } else {
+                true
+            }
+        });
+        for pos in released {
+            if self.chunks.get_block(pos) == Some(wolfcraft_engine::block::Block::ButtonOn) {
+                self.chunks.set_block(pos, wolfcraft_engine::block::Block::Button);
+                wolfcraft_engine::power::update_iskrit(&mut self.chunks, pos);
             }
         }
         self.near_table = false;

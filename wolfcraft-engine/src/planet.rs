@@ -612,6 +612,8 @@ impl Planet {
             Block::GoldOre
         } else if roll < 89 && depth_below_sea > 55.0 {
             Block::DiamondOre
+        } else if roll < 99 && depth_below_sea > 16.0 {
+            Block::IskritOre
         } else if roll < 110 && depth_below_sea > 4.0 {
             Block::CopperOre
         } else if roll < 128 && depth_below_sea > 8.0 {

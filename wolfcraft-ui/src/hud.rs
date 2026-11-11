@@ -115,6 +115,45 @@ pub static INV_RECT: std::sync::RwLock<[f32; 4]> = std::sync::RwLock::new([0.0; 
 /// Minimap with its compass frame, in points: tapping it opens the world map.
 pub static MINIMAP_RECT: std::sync::RwLock<[f32; 4]> = std::sync::RwLock::new([0.0; 4]);
 
+/// Rows of the 9×9 heart: `o` outline, `r` red, `w` highlight, `.` empty.
+const HEART: [&str; 9] = [".oo...oo.", "orro.orro", "orwrorrro", "orrrrrrro", "orrrrrrro", ".orrrrro.", "..orrro..", "...oro...", "....o...."];
+
+/// Pseudo-random 0..2 per heart and time step (the low-health shake).
+pub(crate) fn shake_seed(i: usize, step: u64) -> u64 {
+    let mut h = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ step.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    h ^= h >> 29;
+    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    h ^ (h >> 32)
+}
+
+/// One heart of `px`-sized pixels at `origin` (top-left); `fill` 1 = full, 0.5 = half.
+fn pixel_heart(painter: &Painter, origin: Pos2, px: f32, fill: f32, flash: bool) {
+    let outline = if flash { Color32::from_rgb(255, 255, 255) } else { Color32::from_rgb(20, 8, 10) };
+    let empty = Color32::from_rgb(52, 18, 22);
+    let red = Color32::from_rgb(222, 30, 38);
+    let dark = Color32::from_rgb(160, 18, 28);
+    let hi = Color32::from_rgb(255, 170, 170);
+    // Filled columns: a half heart covers the left 4.5 of 9.
+    let filled_cols = if fill >= 0.99 { 9.0 } else if fill > 0.01 { 4.5 } else { 0.0 };
+    for (y, row) in HEART.iter().enumerate() {
+        for (x, ch) in row.chars().enumerate() {
+            let col = match ch {
+                'o' => outline,
+                'r' | 'w' => {
+                    if (x as f32) < filled_cols {
+                        if ch == 'w' { hi } else if y >= 5 || x >= 6 { dark } else { red }
+                    } else {
+                        empty
+                    }
+                }
+                _ => continue,
+            };
+            let r = Rect::from_min_size(Pos2::new(origin.x + x as f32 * px, origin.y + y as f32 * px), Vec2::splat(px));
+            painter.rect_filled(r, Rounding::ZERO, col);
+        }
+    }
+}
+
 pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     let p = palette(ctx);
     let painter = ctx.layer_painter(LayerId::new(Order::Background, egui::Id::new("hud")));
@@ -245,12 +284,14 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         }
         // Health (left) and hunger (right).
         let row_y = xp.top() - 22.0 - if s.xp_level > 0 { 4.0 } else { -6.0 };
+        // Minecraft-style pixel hearts: low health makes them shake, damage flashes the outline.
+        let t = ctx.input(|i| i.time);
+        let flash = s.hurt > 0.0 && ((t * 8.0) as i64) % 2 == 0;
         for i in 0..10 {
-            let r = Rect::from_min_size(Pos2::new(hotbar.left() + 6.0 + i as f32 * 20.0, row_y), Vec2::splat(18.0));
-            icons.paint(&painter, r, icon::HEART, Color32::from_black_alpha(110));
             let fill = ((s.health - i as f32 * 2.0) / 2.0).clamp(0.0, 1.0);
-            let jitter = if s.health <= 4.0 { (ctx.input(|i| i.time) * 14.0 + i as f64).sin() as f32 * 1.2 } else { 0.0 };
-            icons.paint_partial(&painter, r.translate(Vec2::new(0.0, jitter)), icon::HEART, Color32::WHITE, fill);
+            let shake = if s.health <= 4.0 { ((crate::hud::shake_seed(i, (t * 12.0) as u64) % 3) as f32 - 1.0) * 1.5 } else { 0.0 };
+            let origin = Pos2::new(hotbar.left() + 6.0 + i as f32 * 20.0, row_y + shake);
+            pixel_heart(&painter, origin, 2.0, fill, flash);
         }
         for i in 0..10 {
             let r = Rect::from_min_size(Pos2::new(hotbar.right() - 6.0 - (i as f32 + 1.0) * 20.0 + 2.0, row_y), Vec2::splat(18.0));

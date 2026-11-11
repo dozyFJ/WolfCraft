@@ -228,6 +228,7 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         Block::CopperOre => vec![ItemStack::new(ids::RAW_COPPER, 1)],
         Block::TinOre => vec![ItemStack::new(ids::RAW_TIN, 1)],
         Block::SilverOre => vec![ItemStack::new(ids::RAW_SILVER, 1)],
+        Block::IskritOre => vec![ItemStack::of_block(Block::IskritWire, 4 + (roll * 2.0) as u8)],
         Block::ElectricLampOn => vec![ItemStack::of_block(Block::ElectricLamp, 1)],
         Block::SwitchOn => vec![ItemStack::of_block(Block::SwitchOff, 1)],
         b if b.base_item() != b => vec![ItemStack::of_block(b.base_item(), 1)],
@@ -261,6 +262,7 @@ pub fn xp_for(block: Block) -> u32 {
         Block::DiamondOre => 8,
         Block::CopperOre | Block::TinOre => 2,
         Block::SilverOre | Block::CobaltOre => 5,
+        Block::IskritOre => 4,
         _ => 0,
     }
 }
@@ -339,8 +341,10 @@ pub fn category(id: ItemId) -> &'static str {
     }
     let b = Block::from_u8(id as u8);
     match b.info().render {
+        RenderKind::Cross if b == Block::IskritTorch => "Техника",
         RenderKind::Cross if b != Block::Torch => "Растения",
         _ => match b {
+            Block::IskritWire | Block::IskritBlock | Block::IskritLamp | Block::Button => "Техника",
             Block::BirchPlanks | Block::SprucePlanks | Block::AcaciaPlanks => "Дерево",
             b if !b.boxes().is_empty() || matches!(b, Block::RedGlass | Block::BlueGlass | Block::GreenGlass | Block::YellowGlass) => "Строительство",
             Block::Wool | Block::RedWool | Block::BlueWool | Block::YellowWool | Block::Torch | Block::PolishedGranite | Block::PolishedMarble | Block::SmoothStone | Block::SandstoneBricks | Block::Bookshelf | Block::Lantern => "Строительство",
@@ -348,6 +352,8 @@ pub fn category(id: ItemId) -> &'static str {
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Generator | Block::Cable | Block::Battery | Block::ElectricLamp | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
+            Block::IskritWire | Block::IskritBlock | Block::IskritTorch | Block::IskritLamp | Block::Button => "Техника",
+            Block::IskritOre => "Руды",
             Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable => "Строительство",
             _ => "Природа",
         },

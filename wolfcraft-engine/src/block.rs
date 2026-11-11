@@ -283,6 +283,16 @@ blocks! {
     166 SandstoneWall => needs_pick(info("Песчаниковая стена", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
     167 Sign => not_solid(info("Табличка", Shape, 1.0, Axe, all(t::PLANKS))),
     168 SignB => not_solid(info("Табличка (поперёк)", Shape, 1.0, Axe, all(t::PLANKS))),
+    // Iskrit: the signal network (dust wire, sources, lamps).
+    169 IskritOre => ore("Искритовая руда", t::ISKRIT_ORE, 2),
+    170 IskritWire => not_solid(info("Искрит", Shape, 0.0, Hand, all(t::ISKRIT_WIRE))),
+    171 IskritWireOn => emissive(not_solid(info("Искрит (заряжен)", Shape, 0.0, Hand, all(t::ISKRIT_WIRE_ON)))),
+    172 IskritBlock => emissive(needs_pick(info("Блок искрита", Opaque, 5.0, Pickaxe, all(t::ISKRIT_BLOCK)))),
+    173 IskritTorch => emissive(info("Искритовый факел", Cross, 0.0, Hand, all(t::ISKRIT_TORCH))),
+    174 IskritLamp => info("Искритовая лампа", Opaque, 0.6, Hand, all(t::ISKRIT_LAMP)),
+    175 IskritLampOn => emissive(info("Искритовая лампа (вкл.)", Opaque, 0.6, Hand, all(t::ISKRIT_LAMP_ON))),
+    176 Button => not_solid(info("Кнопка", Shape, 0.5, Hand, all(t::BUTTON))),
+    177 ButtonOn => not_solid(info("Кнопка (нажата)", Shape, 0.5, Hand, all(t::BUTTON))),
 }
 
 impl Block {
@@ -317,6 +327,9 @@ impl Block {
         const WALL: [f32; 6] = [0.25, 0.25, 0.0, 0.75, 0.75, 1.0];
         const DOOR: [f32; 6] = [0.0, 0.0, 0.0, 0.19, 1.0, 1.0];
         const DOOR_OPEN: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 0.19, 1.0];
+        const WIRE: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.0625];
+        const BUTTON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.14];
+        const BUTTON_ON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.06];
         // Stairs: the high half is toward +i, -i, +j or -j.
         const ST0: [[f32; 6]; 2] = [SLAB, [0.5, 0.0, 0.5, 1.0, 1.0, 1.0]];
         const ST1: [[f32; 6]; 2] = [SLAB, [0.0, 0.0, 0.5, 0.5, 1.0, 1.0]];
@@ -341,6 +354,9 @@ impl Block {
             CobbleStairs3 | PlankStairs3 | StoneBrickStairs3 | SandstoneStairs3 => &ST3,
             Sign => &SIGN_A,
             SignB => &SIGN_B,
+            IskritWire | IskritWireOn => std::slice::from_ref(&WIRE),
+            Button => std::slice::from_ref(&BUTTON),
+            ButtonOn => std::slice::from_ref(&BUTTON_ON),
             _ => &[],
         }
     }
@@ -399,6 +415,9 @@ impl Block {
             StoneSlabVerticalB => StoneSlabVerticalA,
             PlankSlabVerticalB => PlankSlabVerticalA,
             BrickSlabVerticalB => BrickSlabVerticalA,
+            IskritWireOn => IskritWire,
+            IskritLampOn => IskritLamp,
+            ButtonOn => Button,
             b => b,
         }
     }
