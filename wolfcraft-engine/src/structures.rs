@@ -144,8 +144,8 @@ struct Materials {
 fn materials(b: Biome, ruined: bool) -> Materials {
     let mut m = match b {
         Biome::Desert | Biome::Badlands => Materials { wall: Block::Sandstone, corner: Block::StoneBricks, floor: Block::Sandstone, roof: Block::Sandstone, path: Block::Sandstone, top: Block::Sand, filler: Block::Sand },
-        Biome::Taiga | Biome::Tundra | Biome::SnowyPlains => Materials { wall: Block::OakPlanks, corner: Block::SpruceLog, floor: Block::OakPlanks, roof: Block::StoneBricks, path: Block::Gravel, top: Block::Grass, filler: Block::Dirt },
-        Biome::Savanna => Materials { wall: Block::OakPlanks, corner: Block::AcaciaLog, floor: Block::Cobblestone, roof: Block::OakPlanks, path: Block::Gravel, top: Block::DryGrass, filler: Block::Dirt },
+        Biome::Taiga | Biome::Tundra | Biome::SnowyPlains => Materials { wall: Block::SprucePlanks, corner: Block::SpruceLog, floor: Block::OakPlanks, roof: Block::StoneBricks, path: Block::Gravel, top: Block::Grass, filler: Block::Dirt },
+        Biome::Savanna => Materials { wall: Block::AcaciaPlanks, corner: Block::AcaciaLog, floor: Block::Cobblestone, roof: Block::OakPlanks, path: Block::Gravel, top: Block::DryGrass, filler: Block::Dirt },
         _ => Materials { wall: Block::OakPlanks, corner: Block::OakLog, floor: Block::Cobblestone, roof: Block::OakPlanks, path: Block::Gravel, top: Block::Grass, filler: Block::Dirt },
     };
     if ruined {
@@ -180,6 +180,17 @@ fn house(b: &mut Builder, m: &Materials, u0: i32, v0: i32, su: i32, sv: i32, doo
     };
     b.bx(du, du, 1, 2, dv, dv, Block::Air, Mode::Set);
     if !ruined {
+        // A real door, flat along the wall it sits in (spruce in the north).
+        let spruce = m.corner == Block::SpruceLog;
+        let door = match (door_side < 2, spruce) {
+            (true, false) => Block::DoorOpen,
+            (true, true) => Block::SpruceDoorOpen,
+            (false, false) => Block::Door,
+            (false, true) => Block::SpruceDoor,
+        };
+        b.bx(du, du, 1, 2, dv, dv, door, Mode::Set);
+    }
+    if !ruined {
         b.bx(u0 - 1, u1 + 1, 4, 4, v0 - 1, v1 + 1, b_roof(m), Mode::Set);
         b.bx(u0, u1, 5, 5, v0, v1, b_roof(m), Mode::Set);
         if su > 4 && sv > 4 {
@@ -188,7 +199,13 @@ fn house(b: &mut Builder, m: &Materials, u0: i32, v0: i32, su: i32, sv: i32, doo
     }
     // Interior.
     b.set(u0 + 1, 1, v0 + 1, if kind % 2 == 0 { Block::CraftingTable } else { Block::Chest });
-    b.set(u1 - 1, 3, v1 - 1, Block::Lamp);
+    b.set(u1 - 1, 3, v1 - 1, Block::Lantern);
+    if kind % 3 == 1 {
+        b.bx(u1 - 1, u1 - 1, 1, 2, v0 + 1, v0 + 1, Block::Bookshelf, Mode::Set);
+    }
+    if su > 4 && sv > 4 {
+        b.set(u0 + 1, 1, v1 - 1, Block::Torch);
+    }
     if ruined {
         // Knock random holes into walls and the floor.
         for h in 1..=3 {
