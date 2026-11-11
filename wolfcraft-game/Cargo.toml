@@ -30,7 +30,7 @@ android_logger = "0.14"
 oboe = { version = "0.6", features = ["shared-stdcxx"] }
 
 [package.metadata.android]
-package = "com.wolfcraft.game"
+package = "com.wolfcraft.mobile"
 apk_name = "WolfCraft"
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android", "i686-linux-android"]
 
