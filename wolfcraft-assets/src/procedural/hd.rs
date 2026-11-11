@@ -354,6 +354,7 @@ pub fn block(name: &str, size: u32) -> Option<Image> {
         "silver_ore" => solid(s, |x, y| ore(x, y, rgb(235, 238, 250), 26)),
         "cobalt_ore" => solid(s, |x, y| ore(x, y, rgb(60, 100, 230), 27)),
         "iskrit_ore" => solid(s, |x, y| ore(x, y, rgb(240, 60, 170), 28)),
+        "uranium_ore" => solid(s, |x, y| ore(x, y, rgb(120, 245, 80), 29)),
         "planks" => solid(s, |x, y| planks(x, y, rgb(166, 124, 76), 30)),
         "birch_planks" => solid(s, |x, y| planks(x, y, rgb(214, 192, 140), 31)),
         "spruce_planks" => solid(s, |x, y| planks(x, y, rgb(118, 84, 52), 32)),

@@ -127,6 +127,8 @@ pub struct GameSession {
     pub studio: bool,
     /// Pressed buttons and the seconds until they spring back.
     buttons: Vec<(wolfcraft_engine::cubesphere::Cell, f32)>,
+    /// Radiation dose from uranium (seconds of exposure); every 3 s of it costs half a heart.
+    radiation: f32,
     /// Flowing water and lava around edits.
     fluids: wolfcraft_engine::fluids::Fluids,
     /// Block changes made by the game itself (a button springing back) for the server.
@@ -179,6 +181,7 @@ impl GameSession {
             buttons: Vec::new(),
             net_out: Vec::new(),
             fluids: Default::default(),
+            radiation: 0.0,
         };
         s.load_containers();
         s.load_block_commands();
@@ -456,6 +459,37 @@ impl GameSession {
             if let InteractionEvent::Placed { pos, block: wolfcraft_engine::block::Block::ButtonOn } = e {
                 self.buttons.retain(|(p, _)| p != pos);
                 self.buttons.push((*pos, 1.0));
+            }
+        }
+        // Radiation: uranium carried or within two blocks hurts slowly. A full set of armour
+        // keeps it out.
+        if !self.player.survival.dead && !self.player.is_creative() {
+            use wolfcraft_engine::items::ids;
+            let inv = &self.player.inventory;
+            let carried = inv.slots.iter().flatten().any(|s| matches!(s.id, ids::RAW_URANIUM | ids::URANIUM_INGOT) || s.id == wolfcraft_engine::block::Block::UraniumBlock as u16);
+            let feet = self.chunks.grid().world_to_cell(self.player.body.pos);
+            let mut near = false;
+            'scan: for dk in -1..=2 {
+                for dj in -2..=2 {
+                    for di in -2..=2 {
+                        if let Some(c) = self.chunks.grid().offset(feet, di, dj, dk) {
+                            if self.chunks.get_block(c).is_some_and(|b| b.is_radioactive()) {
+                                near = true;
+                                break 'scan;
+                            }
+                        }
+                    }
+                }
+            }
+            let shielded = self.player.inventory.armor.iter().all(|a| a.is_some());
+            if (carried || near) && !shielded {
+                self.radiation += dt;
+                if self.radiation >= 3.0 {
+                    self.radiation = 0.0;
+                    self.player.damage(1.0, self.cfg.difficulty);
+                }
+            } else {
+                self.radiation = (self.radiation - dt).max(0.0);
             }
         }
         // Water and lava flow; the current carries the player along.

@@ -336,6 +336,9 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::GOLD_INGOT, 9)], (b(Block::GoldBlock), 1), true, "Строительство"));
         // Metals. Bronze = copper + tin alloy.
         v.push(r(&[(ids::RAW_COPPER, 1), (ids::COAL, 1)], (ids::COPPER_INGOT, 1), true, "Плавка"));
+        v.push(r(&[(ids::RAW_URANIUM, 1), (ids::COAL, 1)], (ids::URANIUM_INGOT, 1), true, "Плавка"));
+        v.push(r(&[(ids::URANIUM_INGOT, 9)], (b(Block::UraniumBlock), 1), true, "Руды"));
+        v.push(r(&[(b(Block::UraniumBlock), 1)], (ids::URANIUM_INGOT, 9), false, "Руды"));
         v.push(r(&[(ids::RAW_TIN, 1), (ids::COAL, 1)], (ids::TIN_INGOT, 1), true, "Плавка"));
         v.push(r(&[(ids::RAW_SILVER, 1), (ids::COAL, 1)], (ids::SILVER_INGOT, 1), true, "Плавка"));
         v.push(r(&[(ids::COPPER_INGOT, 3), (ids::TIN_INGOT, 1)], (ids::BRONZE_INGOT, 4), true, "Плавка"));

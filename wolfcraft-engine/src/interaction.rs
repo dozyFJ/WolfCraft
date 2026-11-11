@@ -102,6 +102,15 @@ impl Interaction {
             self.target = None;
             if self.break_block(world, player, hit.cell, hit.block, seed) {
                 events.push(InteractionEvent::Broken { pos: hit.cell, block: hit.block });
+                // A door is two blocks: the other half goes too (one door drops).
+                if let Some((other, ob)) = door_partner(world, hit.cell, hit.block) {
+                    if world.set_block(other, Block::Air) {
+                        if hit.block.is_door_top() && !player.is_creative() {
+                            player.inventory.add(ItemStack::of_block(ob.base_item(), 1));
+                        }
+                        events.push(InteractionEvent::Broken { pos: other, block: ob });
+                    }
+                }
             }
         }
         events
@@ -155,10 +164,18 @@ impl Interaction {
                 }
                 return events;
             }
-            // Door: opens and closes.
+            // Door: opens and closes, both halves together.
             if let (Some(new), false) = (h.block.door_toggle(), player.sneaking) {
+                let partner = door_partner(world, h.cell, h.block);
                 if world.set_block(h.cell, new) {
                     events.push(InteractionEvent::Placed { pos: h.cell, block: new });
+                }
+                if let Some((other, ob)) = partner {
+                    if let Some(on) = ob.door_toggle() {
+                        if world.set_block(other, on) {
+                            events.push(InteractionEvent::Placed { pos: other, block: on });
+                        }
+                    }
                 }
                 return events;
             }
@@ -198,7 +215,19 @@ impl Interaction {
         if block.is_solid() && body_overlaps_cell(world.grid(), player.body.pos, target) {
             return events;
         }
+        // A door needs a free block above for its upper half.
+        let door_above = block.door_top().map(|top| (world.grid().neighbor(target, 2, 1), top));
+        if let Some((above, _)) = door_above {
+            if !above.is_some_and(|a| world.cell_block(a).is_replaceable()) {
+                return events;
+            }
+        }
         if world.set_block(target, block) {
+            if let Some((Some(above), top)) = door_above {
+                if world.set_block(above, top) {
+                    events.push(InteractionEvent::Placed { pos: above, block: top });
+                }
+            }
             if !player.is_creative() {
                 player.inventory.consume_selected();
             }
@@ -374,6 +403,30 @@ mod tests {
     }
 
     #[test]
+    fn doors_are_two_blocks_that_open_and_break_together() {
+        let (mut w, mut p) = setup();
+        let mut it = Interaction::default();
+        p.body.pos = wp(5.5, 51.0, 5.5);
+        p.inventory.add(ItemStack::of_block(Block::Door, 1));
+        let h = hit(&w, c(0, 50, 0), UP);
+        let ev = it.use_item(&mut w, &mut p, Some(h));
+        assert_eq!(ev.len(), 2, "lower and upper half placed: {ev:?}");
+        let (lo, hi) = (w.block(c(0, 51, 0)), w.block(c(0, 52, 0)));
+        assert!(lo.door_toggle().is_some() && !lo.is_door_top(), "lower half {lo:?}");
+        assert_eq!(lo.door_top(), Some(hi), "upper half matches");
+        // Open from the upper half: both halves turn.
+        let top = hit(&w, c(0, 52, 0), UP);
+        it.use_item(&mut w, &mut p, Some(top));
+        assert_eq!(w.block(c(0, 51, 0)), lo.door_toggle().unwrap());
+        assert_eq!(w.block(c(0, 52, 0)), hi.door_toggle().unwrap());
+        // No room above: no door.
+        w.blocks.insert(c(3, 52, 0), Block::Stone);
+        p.inventory.add(ItemStack::of_block(Block::Door, 1));
+        let h3 = hit(&w, c(3, 50, 0), UP);
+        assert!(it.use_item(&mut w, &mut p, Some(h3)).is_empty());
+    }
+
+    #[test]
     fn eating_restores_hunger_only_when_hungry() {
         let (mut w, mut p) = setup();
         let mut it = Interaction::default();
@@ -404,6 +457,14 @@ mod tests {
     }
 }
 
+/// The other half of a two-block door at `c` (its cell and block), if it is there.
+pub fn door_partner(world: &impl WorldEdit, c: Cell, b: Block) -> Option<(Cell, Block)> {
+    b.door_toggle()?;
+    let other = world.grid().neighbor(c, 2, if b.is_door_top() { -1 } else { 1 })?;
+    let ob = world.cell_block(other);
+    (ob.door_toggle().is_some() && ob.is_door_top() != b.is_door_top()).then_some((other, ob))
+}
+
 /// Electric furnace recipes: input item -> output item.
 pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
     use items::ids;
@@ -413,6 +474,7 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
         ids::RAW_COPPER => ids::COPPER_INGOT,
         ids::RAW_TIN => ids::TIN_INGOT,
         ids::RAW_SILVER => ids::SILVER_INGOT,
+        ids::RAW_URANIUM => ids::URANIUM_INGOT,
         ids::RAW_MEAT => ids::COOKED_MEAT,
         x if x == Block::Cobblestone as items::ItemId => Block::Stone as items::ItemId,
         x if x == Block::Sand as items::ItemId => Block::Glass as items::ItemId,

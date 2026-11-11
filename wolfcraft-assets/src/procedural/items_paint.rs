@@ -35,7 +35,9 @@ pub mod items {
     pub const STRING: u16 = 55;
     pub const FLINT: u16 = 56;
     pub const LEATHER: u16 = 57;
-    pub const COUNT: u16 = 58;
+    pub const RAW_URANIUM: u16 = 58;
+    pub const URANIUM_INGOT: u16 = 59;
+    pub const COUNT: u16 = 60;
 }
 
 // Every tool runs from the handle at the bottom-right (the hand model grips it at about pixel
@@ -288,6 +290,8 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(LEATHER, "leather", p(|q| {
         q.shape(Rgb(0.58, 0.36, 0.20), &|u, v| ((u - 0.5) / 0.38).powi(2) + ((v - 0.5) / 0.32).powi(2) < 1.0 && !(v < 0.25 && (u - 0.5).abs() < 0.12));
     }));
+    l.add(RAW_URANIUM, "raw_uranium", blob(Rgb(0.42, 0.88, 0.30), 5.0, 163));
+    l.add(URANIUM_INGOT, "uranium_ingot", ingot(Rgb(0.40, 0.90, 0.28)));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

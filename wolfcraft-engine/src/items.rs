@@ -44,7 +44,9 @@ pub mod ids {
     pub const STRING: ItemId = 311;
     pub const FLINT: ItemId = 312;
     pub const LEATHER: ItemId = 313;
-    pub const LAST: ItemId = 313;
+    pub const RAW_URANIUM: ItemId = 314;
+    pub const URANIUM_INGOT: ItemId = 315;
+    pub const LAST: ItemId = 315;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -148,6 +150,8 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::STRING => plain("Нить", sp::STRING),
         ids::FLINT => plain("Кремень", sp::FLINT),
         ids::LEATHER => plain("Кожа", sp::LEATHER),
+        ids::RAW_URANIUM => plain("Сырой уран", sp::RAW_URANIUM),
+        ids::URANIUM_INGOT => plain("Урановый слиток", sp::URANIUM_INGOT),
         t if (ids::TOOLS_BASE..=ids::TOOLS_LAST).contains(&t) => {
             let n = (t - ids::TOOLS_BASE) as usize;
             let (mat, kind) = (n / 4, n % 4);
@@ -230,6 +234,8 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         Block::TinOre => vec![ItemStack::new(ids::RAW_TIN, 1)],
         Block::SilverOre => vec![ItemStack::new(ids::RAW_SILVER, 1)],
         Block::IskritOre => vec![ItemStack::of_block(Block::IskritWire, 4 + (roll * 2.0) as u8)],
+        Block::UraniumOre => vec![ItemStack::new(ids::RAW_URANIUM, 1)],
+        b if b.is_door_top() => vec![],
         Block::ElectricLampOn => vec![ItemStack::of_block(Block::ElectricLamp, 1)],
         Block::SwitchOn => vec![ItemStack::of_block(Block::SwitchOff, 1)],
         b if b.base_item() != b => vec![ItemStack::of_block(b.base_item(), 1)],
@@ -250,6 +256,8 @@ pub fn mob_drops(kind: crate::mobs::MobKind, salt: u64) -> Vec<ItemStack> {
     match kind {
         MobKind::Boar => vec![ItemStack::new(ids::RAW_MEAT, 1 + (roll * 2.0) as u8), ItemStack::new(ids::LEATHER, 1)],
         MobKind::Sheep => vec![ItemStack::new(ids::RAW_MEAT, 1), ItemStack::of_block(Block::Wool, 1)],
+        // Ghouls live on radiation: now and then one carries a lump of uranium.
+        MobKind::Ghoul if roll < 0.12 => vec![ItemStack::new(ids::ROTTEN_FLESH, 1), ItemStack::new(ids::RAW_URANIUM, 1)],
         MobKind::Ghoul => vec![ItemStack::new(ids::ROTTEN_FLESH, 1 + (roll * 2.0) as u8), ItemStack::new(ids::COAL, 1)],
         MobKind::Crawler => vec![ItemStack::new(ids::STRING, 1 + (roll * 2.0) as u8)],
     }
@@ -360,7 +368,7 @@ pub fn category(id: ItemId) -> &'static str {
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Generator | Block::Cable | Block::Battery | Block::ElectricLamp | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
             Block::IskritWire | Block::IskritBlock | Block::IskritTorch | Block::IskritLamp | Block::Button => "Техника",
-            Block::IskritOre => "Руды",
+            Block::IskritOre | Block::UraniumOre | Block::UraniumBlock => "Руды",
             Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable => "Строительство",
             _ => "Природа",
         },

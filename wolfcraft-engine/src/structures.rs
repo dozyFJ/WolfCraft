@@ -188,7 +188,9 @@ fn house(b: &mut Builder, m: &Materials, u0: i32, v0: i32, su: i32, sv: i32, doo
             (false, false) => Block::Door,
             (false, true) => Block::SpruceDoor,
         };
-        b.bx(du, du, 1, 2, dv, dv, door, Mode::Set);
+        // Two-block door: lower half with the handle, upper half with the window.
+        b.bx(du, du, 1, 1, dv, dv, door, Mode::Set);
+        b.bx(du, du, 2, 2, dv, dv, door.door_top().unwrap_or(door), Mode::Set);
     }
     if !ruined {
         b.bx(u0 - 1, u1 + 1, 4, 4, v0 - 1, v1 + 1, b_roof(m), Mode::Set);

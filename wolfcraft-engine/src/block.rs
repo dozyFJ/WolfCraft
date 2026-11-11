@@ -306,6 +306,18 @@ blocks! {
     187 LavaFlow2 => emissive(not_solid(info("Лава (течёт)", Shape, -1.0, Hand, all(t::LAVA)))),
     188 LavaFlow3 => emissive(not_solid(info("Лава (течёт)", Shape, -1.0, Hand, all(t::LAVA)))),
     189 LavaFall => emissive(not_solid(info("Лава (падает)", Opaque, -1.0, Hand, all(t::LAVA)))),
+    // Upper halves of the two-block doors (window), same states as the lower halves.
+    190 DoorTop => info("Дверь", Shape, 2.0, Axe, all(t::DOOR_OAK_TOP)),
+    191 DoorTopOpen => info("Дверь (открыта)", Shape, 2.0, Axe, all(t::DOOR_OAK_TOP)),
+    192 BirchDoorTop => info("Берёзовая дверь", Shape, 2.0, Axe, all(t::DOOR_BIRCH_TOP)),
+    193 BirchDoorTopOpen => info("Берёзовая дверь (открыта)", Shape, 2.0, Axe, all(t::DOOR_BIRCH_TOP)),
+    194 SpruceDoorTop => info("Еловая дверь", Shape, 2.0, Axe, all(t::DOOR_SPRUCE_TOP)),
+    195 SpruceDoorTopOpen => info("Еловая дверь (открыта)", Shape, 2.0, Axe, all(t::DOOR_SPRUCE_TOP)),
+    196 IronDoorTop => needs_pick(info("Железная дверь", Shape, 8.0, Pickaxe, all(t::DOOR_IRON_TOP))),
+    197 IronDoorTopOpen => needs_pick(info("Железная дверь (открыта)", Shape, 8.0, Pickaxe, all(t::DOOR_IRON_TOP))),
+    // Uranium: a glowing, radioactive ore deep underground.
+    198 UraniumOre => emissive(ore("Урановая руда", t::URANIUM_ORE, 2)),
+    199 UraniumBlock => emissive(needs_pick(info("Блок урана", Opaque, 12.0, Pickaxe, all(t::URANIUM_BLOCK)))),
 }
 
 /// Liquid state of a block: lava or water, flow level (1 = thinnest, `max_level` = beside a
@@ -395,8 +407,8 @@ impl Block {
             GlassPaneB | RedPaneB | BluePaneB | GreenPaneB | YellowPaneB => std::slice::from_ref(&PANE_B),
             Fence | BirchFence | SpruceFence => std::slice::from_ref(&FENCE),
             StoneWall | StoneBrickWall | SandstoneWall => std::slice::from_ref(&WALL),
-            Door | BirchDoor | SpruceDoor | IronDoor => std::slice::from_ref(&DOOR),
-            DoorOpen | BirchDoorOpen | SpruceDoorOpen | IronDoorOpen => std::slice::from_ref(&DOOR_OPEN),
+            Door | BirchDoor | SpruceDoor | IronDoor | DoorTop | BirchDoorTop | SpruceDoorTop | IronDoorTop => std::slice::from_ref(&DOOR),
+            DoorOpen | BirchDoorOpen | SpruceDoorOpen | IronDoorOpen | DoorTopOpen | BirchDoorTopOpen | SpruceDoorTopOpen | IronDoorTopOpen => std::slice::from_ref(&DOOR_OPEN),
             CobbleStairs | PlankStairs | StoneBrickStairs | SandstoneStairs => &ST0,
             CobbleStairs1 | PlankStairs1 | StoneBrickStairs1 | SandstoneStairs1 => &ST1,
             CobbleStairs2 | PlankStairs2 | StoneBrickStairs2 | SandstoneStairs2 => &ST2,
@@ -449,10 +461,10 @@ impl Block {
         match self {
             WaterFlow1 | WaterFlow2 | WaterFlow3 | WaterFlow4 | WaterFlow5 | WaterFlow6 | WaterFlow7 | WaterFall => Water,
             LavaFlow1 | LavaFlow2 | LavaFlow3 | LavaFall => Lava,
-            DoorOpen => Door,
-            BirchDoorOpen => BirchDoor,
-            SpruceDoorOpen => SpruceDoor,
-            IronDoorOpen => IronDoor,
+            DoorOpen | DoorTop | DoorTopOpen => Door,
+            BirchDoorOpen | BirchDoorTop | BirchDoorTopOpen => BirchDoor,
+            SpruceDoorOpen | SpruceDoorTop | SpruceDoorTopOpen => SpruceDoor,
+            IronDoorOpen | IronDoorTop | IronDoorTopOpen => IronDoor,
             CobbleStairs1 | CobbleStairs2 | CobbleStairs3 => CobbleStairs,
             PlankStairs1 | PlankStairs2 | PlankStairs3 => PlankStairs,
             StoneBrickStairs1 | StoneBrickStairs2 | StoneBrickStairs3 => StoneBrickStairs,
@@ -485,8 +497,43 @@ impl Block {
             SpruceDoorOpen => SpruceDoor,
             IronDoor => IronDoorOpen,
             IronDoorOpen => IronDoor,
+            DoorTop => DoorTopOpen,
+            DoorTopOpen => DoorTop,
+            BirchDoorTop => BirchDoorTopOpen,
+            BirchDoorTopOpen => BirchDoorTop,
+            SpruceDoorTop => SpruceDoorTopOpen,
+            SpruceDoorTopOpen => SpruceDoorTop,
+            IronDoorTop => IronDoorTopOpen,
+            IronDoorTopOpen => IronDoorTop,
             _ => return None,
         })
+    }
+
+    /// Upper half that goes above this lower door half (same open state).
+    pub fn door_top(self) -> Option<Block> {
+        use Block::*;
+        Some(match self {
+            Door => DoorTop,
+            DoorOpen => DoorTopOpen,
+            BirchDoor => BirchDoorTop,
+            BirchDoorOpen => BirchDoorTopOpen,
+            SpruceDoor => SpruceDoorTop,
+            SpruceDoorOpen => SpruceDoorTopOpen,
+            IronDoor => IronDoorTop,
+            IronDoorOpen => IronDoorTopOpen,
+            _ => return None,
+        })
+    }
+
+    /// True for the upper half of a door.
+    pub fn is_door_top(self) -> bool {
+        use Block::*;
+        matches!(self, DoorTop | DoorTopOpen | BirchDoorTop | BirchDoorTopOpen | SpruceDoorTop | SpruceDoorTopOpen | IronDoorTop | IronDoorTopOpen)
+    }
+
+    /// Radioactive (uranium ore and blocks).
+    pub fn is_radioactive(self) -> bool {
+        matches!(self, Block::UraniumOre | Block::UraniumBlock)
     }
 
     /// Collides with the player.
@@ -502,6 +549,8 @@ impl Block {
             Lava | LavaFall | Glowstone | Lamp | Lantern | ElectricLampOn | IskritLampOn | InnerCore => 15,
             LavaFlow1 | LavaFlow2 | LavaFlow3 => 13,
             Torch => 14,
+            UraniumBlock => 10,
+            UraniumOre => 6,
             NetherPortal => 11,
             IskritTorch => 7,
             Magma => 4,
