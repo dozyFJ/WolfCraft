@@ -986,51 +986,70 @@ pub fn loading_screen(ctx: &egui::Context, icons: &GuiIcons, v: &LoadingView) {
         painter.rect_filled(rect, Rounding::ZERO, Color32::from_black_alpha(200));
         ui.ctx().request_repaint();
 
-        // Chunk map (an empty one until the terrain starts streaming in).
-        let empty;
-        let grid: &[u8] = if v.grid.is_empty() {
-            empty = vec![0u8; 15 * 15];
-            &empty
-        } else {
-            v.grid
-        };
-        let side = (grid.len() as f32).sqrt().round().max(1.0) as usize;
-        let map = (rect.height() * 0.55).clamp(150.0, 330.0);
-        let cell = (map / side as f32).floor().max(4.0);
-        let size = cell * side as f32;
-        let top = rect.center().y - size / 2.0 + 10.0;
-        let r = Rect::from_min_size(Pos2::new(rect.center().x - size / 2.0, top), Vec2::splat(size));
-
-        // Percentage above the map.
+        // A square vessel that fills with liquid: the level is the progress, the colour
+        // follows the current stage, the surface waves and bubbles rise.
+        let size = (rect.height() * 0.5).clamp(140.0, 300.0);
+        let r = Rect::from_center_size(Pos2::new(rect.center().x, rect.center().y + 6.0), Vec2::splat(size));
+        let t = ui.input(|i| i.time) as f32;
         let pct = format!("{:.0}%", v.fraction * 100.0);
-        painter.text(Pos2::new(r.center().x + 2.0, r.top() - 22.0 + 2.0), Align2::CENTER_BOTTOM, &pct, bold_font(30.0), Color32::from_black_alpha(180));
-        painter.text(Pos2::new(r.center().x, r.top() - 22.0), Align2::CENTER_BOTTOM, &pct, bold_font(30.0), Color32::from_rgb(236, 232, 210));
-
-        // Frame with a hard drop shadow.
+        painter.text(Pos2::new(r.center().x + 2.0, r.top() - 20.0 + 2.0), Align2::CENTER_BOTTOM, &pct, bold_font(30.0), Color32::from_black_alpha(180));
+        painter.text(Pos2::new(r.center().x, r.top() - 20.0), Align2::CENTER_BOTTOM, &pct, bold_font(30.0), Color32::from_rgb(236, 232, 210));
         painter.rect_filled(r.expand(6.0).translate(Vec2::splat(6.0)), Rounding::ZERO, Color32::from_black_alpha(160));
         painter.rect_filled(r.expand(6.0), Rounding::ZERO, Color32::from_rgb(20, 22, 28));
-        painter.rect_stroke(r.expand(6.0), Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-        let t = ui.input(|i| i.time) as f32;
-        let mid = side / 2;
-        for (i, st) in grid.iter().enumerate() {
-            let (cx, cy) = (i % side, i / side);
-            let q = Rect::from_min_size(r.min + Vec2::new(cx as f32 * cell, cy as f32 * cell), Vec2::splat(cell - if cell >= 8.0 { 1.0 } else { 0.0 }));
-            // Ring distance from the player: queued rings pulse softly while they wait.
-            let ring = cx.abs_diff(mid).max(cy.abs_diff(mid)) as f32;
-            let color = match st {
-                2 => Color32::from_rgb(92, 200, 110),
-                1 => Color32::from_rgb(214, 204, 160),
-                _ => {
-                    let pulse = 0.5 + 0.5 * (t * 3.0 - ring * 0.6).sin();
-                    Color32::from_rgb(40, 44, 54).lerp_to_gamma(Color32::from_rgb(58, 64, 78), pulse * 0.6)
+        let inner = r;
+        painter.rect_filled(inner, Rounding::ZERO, Color32::from_rgb(12, 14, 19));
+        // Stage colours: seed, continents, climate, spawn, structures, chunks.
+        const COLS: [[u8; 3]; 7] = [[90, 110, 220], [40, 140, 230], [38, 198, 218], [60, 200, 140], [150, 210, 70], [240, 190, 60], [92, 200, 110]];
+        let stage_f = if v.stages.is_empty() { 0.0 } else { v.current as f32 + 0.5 };
+        let i0 = (stage_f.floor() as usize).min(COLS.len() - 1);
+        let i1 = (i0 + 1).min(COLS.len() - 1);
+        let k = (stage_f - stage_f.floor()).clamp(0.0, 1.0) * 0.6;
+        let mixc = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * k) as u8;
+        let col = Color32::from_rgb(mixc(COLS[i0][0], COLS[i1][0]), mixc(COLS[i0][1], COLS[i1][1]), mixc(COLS[i0][2], COLS[i1][2]));
+        let level = inner.bottom() - inner.height() * v.fraction.clamp(0.0, 1.0);
+        if v.fraction > 0.001 {
+            let painter_c = painter.with_clip_rect(inner);
+            let wave = |x: f32, ph: f32, amp: f32| level + (x * 0.045 + t * 2.4 + ph).sin() * amp + (x * 0.11 - t * 1.7 + ph).sin() * amp * 0.4;
+            let n = 48;
+            // Back wave (darker), then the front liquid body.
+            for (ph, amp, shade) in [(1.7f32, 5.0f32, 0.65f32), (0.0, 4.0, 1.0)] {
+                let mut pts = Vec::with_capacity(n + 3);
+                for i in 0..=n {
+                    let x = inner.left() + inner.width() * i as f32 / n as f32;
+                    pts.push(Pos2::new(x, wave(x - inner.left(), ph, amp)));
                 }
-            };
-            painter.rect_filled(q, Rounding::ZERO, color);
+                let c = Color32::from_rgb((col.r() as f32 * shade) as u8, (col.g() as f32 * shade) as u8, (col.b() as f32 * shade) as u8);
+                // One triangle mesh under the wave (no anti-aliased seams between strips).
+                let mut mesh = egui::Mesh::default();
+                for (i, pt) in pts.iter().enumerate() {
+                    mesh.colored_vertex(*pt, c);
+                    mesh.colored_vertex(Pos2::new(pt.x, inner.bottom()), c);
+                    if i > 0 {
+                        let b = (i as u32 - 1) * 2;
+                        mesh.add_triangle(b, b + 1, b + 2);
+                        mesh.add_triangle(b + 1, b + 3, b + 2);
+                    }
+                }
+                painter_c.add(egui::Shape::mesh(mesh));
+                if shade == 1.0 {
+                    painter_c.add(egui::Shape::line(pts, Stroke::new(2.0_f32, Color32::from_white_alpha(110))));
+                }
+            }
+            // Bubbles rising through the liquid.
+            for b in 0..10u32 {
+                let speed = 18.0 + (b * 7 % 11) as f32 * 3.0;
+                let bx = inner.left() + inner.width() * (((b * 37) % 97) as f32 / 97.0);
+                let y = inner.bottom() - ((t * speed + b as f32 * 31.0) % (inner.bottom() - level + 10.0).max(1.0));
+                if y > level + 4.0 {
+                    painter_c.circle_stroke(Pos2::new(bx + (t * 3.0 + b as f32).sin() * 3.0, y), 2.0 + (b % 3) as f32, Stroke::new(1.5_f32, Color32::from_white_alpha(90)));
+                }
+            }
         }
-        // Player chunk.
-        let me = Rect::from_min_size(r.min + Vec2::new(mid as f32 * cell, mid as f32 * cell), Vec2::splat(cell));
-        painter.rect_stroke(me.expand(1.0), Rounding::ZERO, Stroke::new(2.0_f32, p.accent));
-
+        // Glass: a soft highlight and the frame.
+        painter.rect_filled(Rect::from_min_size(inner.min + Vec2::new(8.0, 8.0), Vec2::new(6.0, inner.height() - 16.0)), Rounding::ZERO, Color32::from_white_alpha(18));
+        painter.rect_stroke(r.expand(6.0), Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+        painter.rect_stroke(inner, Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
+        let _ = v.grid;
         // Below: world name and the current step with a spinner.
         let y = r.bottom() + 22.0;
         let step = v.stages.get(v.current).map(|s| s.as_str()).unwrap_or("Готово");
