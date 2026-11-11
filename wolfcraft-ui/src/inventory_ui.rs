@@ -126,10 +126,12 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     if creative {
         // Cell size follows the screen height so the hotbar always fits on a phone.
         let h = ctx.screen_rect().height();
-        let cell = if h < 640.0 { 40.0 } else { CELL };
-        let rows = (((h - 190.0 - cell) / (cell + GAP)).floor() as usize).clamp(2, 6);
-        let grid_w = 9.0 * (cell + GAP) - GAP + 14.0;
-        let width = grid_w + GAP + cell;
+        let cell = if h < 640.0 { 38.0 } else { CELL };
+        // Keep the bottom row clear of the phone's gesture bar.
+        let rows = (((h - 215.0 - cell) / (cell + GAP)).floor() as usize).clamp(2, 6);
+        // Hotbar (9) + gap + bin; the tab row (10 tabs + close) is laid out to the same width.
+        let width = 10.0 * cell + 8.0 * GAP + 14.0;
+        let grid_w = width;
         let dismissed = modal(ctx, "inventory", "", width.min(ctx.screen_rect().width() - 40.0), |ui| {
             creative_layout(ui, icons, &p, state, inv, cell, rows, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
@@ -355,15 +357,16 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool) {
 fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let palette_all = items::creative_palette();
     // ---- Tabs ----
+    let tab = ((grid_w - 10.0 * 4.0) / 11.0).floor();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         for (i, name) in CREATIVE_TABS.iter().enumerate() {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
             let sel = state.tab == i;
             let fill = if sel { p.surface_hover } else if resp.hovered() { p.surface_hi.lerp_to_gamma(p.surface_hover, 0.5) } else { p.surface_hi };
             ui.painter().rect_filled(rect, Rounding::ZERO, fill);
             ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if sel { p.accent } else { p.outline }));
-            let inner = rect.shrink(cell * 0.18);
+            let inner = rect.shrink(tab * 0.18);
             match i {
                 0 => icons.paint(ui.painter(), inner, icon::STAR, if sel { p.accent } else { p.text }),
                 BACKPACK_TAB => icons.paint(ui.painter(), inner, icon::BACKPACK, if sel { p.accent } else { p.text }),
@@ -379,10 +382,10 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
             resp.on_hover_text(*name);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
             ui.painter().rect_filled(rect, Rounding::ZERO, if resp.hovered() { p.danger.gamma_multiply(0.3) } else { p.surface_hi });
             ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-            icons.paint(ui.painter(), rect.shrink(cell * 0.25), icon::CLOSE, p.text);
+            icons.paint(ui.painter(), rect.shrink(tab * 0.25), icon::CLOSE, p.text);
             if resp.clicked() {
                 result.close = true;
             }
@@ -423,7 +426,7 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
         egui::ScrollArea::vertical().id_salt(("creative-scroll", state.tab)).auto_shrink([false, false]).show(&mut ui2, |ui| {
-            for chunk in list.chunks(9) {
+            for chunk in list.chunks(10) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::splat(GAP);
                     for id in chunk {

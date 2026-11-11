@@ -154,19 +154,20 @@ fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
         let h = i.wrapping_mul(2654435761).rotate_left(7) ^ 0x9e37_79b9;
         let x = (h % 10_000) as f32 / 10_000.0;
         let y = ((h / 10_000) % 10_000) as f32 / 10_000.0;
-        let tw = 0.55 + 0.45 * (t * (0.6 + (h % 7) as f32 * 0.2) + i as f32).sin();
+        // Static stars: no twinkling, nothing in the menu moves (no shimmer on phones).
+        let tw = 0.55 + 0.45 * ((h % 7) as f32 / 6.0);
         let r = if h % 11 == 0 { 1.6 } else { 1.0 };
         painter.circle_filled(Pos2::new(rect.left() + x * rect.width(), rect.top() + y * rect.height()), r, Color32::from_white_alpha((150.0 * tw) as u8));
     }
     if let Some(tex) = planet {
         // Slow drift up and down so the screen feels alive.
         let d = rect.width().max(rect.height() * 1.6);
-        let c = Pos2::new(rect.center().x, rect.bottom() + d * 0.18 + (t * 0.25).sin() * 6.0);
+        let c = Pos2::new(rect.center().x.round(), (rect.bottom() + d * 0.18).round());
         painter.image(tex.id(), Rect::from_center_size(c, Vec2::splat(d)), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
     }
     // Soft shade so the menu stays readable.
     painter.rect_filled(rect, Rounding::ZERO, p.bg.gamma_multiply(if p.dark { 0.25 } else { 0.15 }));
-    ui.ctx().request_repaint();
+    let _ = t;
 }
 
 pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>) -> MenuAction {

@@ -245,54 +245,114 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3) -> Vec<ModelVe
         let z = Vec3::ZERO;
         match m.kind {
             MobKind::Ghoul => {
-                let skin = tint([0.42, 0.52, 0.38]);
-                let rag = tint([0.30, 0.27, 0.34]);
-                let eye = [0.95, 0.15, 0.10];
+                // Hunched, ragged walker with glowing eyes.
+                let skin = tint([0.47, 0.60, 0.42]);
+                let skin_d = tint([0.36, 0.47, 0.32]);
+                let shirt = tint([0.32, 0.36, 0.52]);
+                let rag = tint([0.24, 0.22, 0.30]);
+                let glow = [1.0, 0.85, 0.25];
                 for (side, a) in [(-1.0f32, swing), (1.0, -swing)] {
-                    let x0 = if side < 0.0 { -0.25 } else { 0.0 };
-                    add_box(&mut v, &f, Vec3::new(x0, 0.0, -0.125), Vec3::new(x0 + 0.25, 0.7, 0.125), Vec3::new(x0 + 0.125, 0.7, 0.0), a, rag);
+                    let x0 = if side < 0.0 { -0.24 } else { 0.01 };
+                    add_box(&mut v, &f, Vec3::new(x0, 0.0, -0.12), Vec3::new(x0 + 0.23, 0.72, 0.12), Vec3::new(x0 + 0.115, 0.72, 0.0), a, rag);
+                    add_box(&mut v, &f, Vec3::new(x0 - 0.01, 0.0, -0.13), Vec3::new(x0 + 0.24, 0.14, 0.16), Vec3::new(x0 + 0.115, 0.72, 0.0), a, skin_d);
                 }
-                add_box(&mut v, &f, Vec3::new(-0.25, 0.7, -0.15), Vec3::new(0.25, 1.35, 0.15), z, 0.0, rag);
-                // Arms reach forward.
-                for x0 in [-0.5f32, 0.25] {
-                    add_box(&mut v, &f, Vec3::new(x0, 0.7, -0.125), Vec3::new(x0 + 0.25, 1.3, 0.125), Vec3::new(x0 + 0.125, 1.3, 0.0), 1.35 + swing * 0.2, skin);
+                // Torso leans forward a little.
+                let lean = 0.18;
+                add_box(&mut v, &f, Vec3::new(-0.26, 0.72, -0.14), Vec3::new(0.26, 1.36, 0.14), Vec3::new(0.0, 0.72, 0.0), lean, shirt);
+                add_box(&mut v, &f, Vec3::new(-0.27, 0.72, -0.15), Vec3::new(0.27, 0.86, 0.15), Vec3::new(0.0, 0.72, 0.0), lean, rag);
+                for x0 in [-0.5f32, 0.26] {
+                    add_box(&mut v, &f, Vec3::new(x0, 0.72, -0.11), Vec3::new(x0 + 0.24, 1.32, 0.11), Vec3::new(x0 + 0.12, 1.3, 0.0), 1.3 + swing * 0.25, skin);
+                    add_box(&mut v, &f, Vec3::new(x0 - 0.01, 1.1, -0.12), Vec3::new(x0 + 0.25, 1.33, 0.12), Vec3::new(x0 + 0.12, 1.3, 0.0), 1.3 + swing * 0.25, shirt);
                 }
-                add_box(&mut v, &f, Vec3::new(-0.25, 1.35, -0.25), Vec3::new(0.25, 1.85, 0.25), z, 0.0, skin);
-                for ex in [-0.15f32, 0.07] {
-                    add_box(&mut v, &f, Vec3::new(ex, 1.55, 0.25), Vec3::new(ex + 0.08, 1.63, 0.262), z, 0.0, eye);
+                let hp = Vec3::new(0.0, 1.36, 0.08);
+                let ha = lean + 0.1 + (m.anim * 0.5).sin() * 0.06;
+                add_box(&mut v, &f, Vec3::new(-0.24, 1.36, -0.16), Vec3::new(0.24, 1.84, 0.32), hp, ha, skin);
+                add_box(&mut v, &f, Vec3::new(-0.25, 1.74, -0.17), Vec3::new(0.25, 1.86, 0.33), hp, ha, skin_d);
+                for ex in [-0.16f32, 0.06] {
+                    add_box(&mut v, &f, Vec3::new(ex, 1.58, 0.32), Vec3::new(ex + 0.1, 1.66, 0.335), hp, ha, glow);
                 }
+                add_box(&mut v, &f, Vec3::new(-0.1, 1.44, 0.32), Vec3::new(0.1, 1.49, 0.335), hp, ha, [0.15, 0.05, 0.05]);
             }
             MobKind::Crawler => {
-                let body = tint([0.22, 0.14, 0.30]);
-                let leg = tint([0.15, 0.10, 0.20]);
-                let eye = [0.95, 0.20, 0.15];
-                add_box(&mut v, &f, Vec3::new(-0.3, 0.3, -0.5), Vec3::new(0.3, 0.7, 0.4), z, 0.0, body);
-                add_box(&mut v, &f, Vec3::new(-0.22, 0.32, 0.4), Vec3::new(0.22, 0.68, 0.75), z, 0.0, body);
-                for (i, zz) in [-0.35f32, -0.05, 0.25].iter().enumerate() {
-                    let a = if i % 2 == 0 { swing } else { -swing };
-                    add_box(&mut v, &f, Vec3::new(-0.5, 0.0, *zz), Vec3::new(-0.3, 0.5, *zz + 0.1), Vec3::new(-0.4, 0.5, *zz), a, leg);
-                    add_box(&mut v, &f, Vec3::new(0.3, 0.0, *zz), Vec3::new(0.5, 0.5, *zz + 0.1), Vec3::new(0.4, 0.5, *zz), -a, leg);
+                // Eight-legged crawler: round abdomen, head with a cluster of eyes.
+                let body = tint([0.26, 0.17, 0.34]);
+                let back = tint([0.38, 0.22, 0.46]);
+                let leg = tint([0.17, 0.11, 0.22]);
+                let eye = [1.0, 0.25, 0.20];
+                add_box(&mut v, &f, Vec3::new(-0.32, 0.28, -0.62), Vec3::new(0.32, 0.78, 0.0), z, 0.0, body);
+                add_box(&mut v, &f, Vec3::new(-0.2, 0.78, -0.5), Vec3::new(0.2, 0.82, -0.12), z, 0.0, back);
+                add_box(&mut v, &f, Vec3::new(-0.2, 0.3, 0.0), Vec3::new(0.2, 0.6, 0.22), z, 0.0, body);
+                add_box(&mut v, &f, Vec3::new(-0.22, 0.32, 0.22), Vec3::new(0.22, 0.66, 0.56), z, 0.0, body);
+                for (i, zz) in [-0.1f32, 0.02, 0.14, 0.26].iter().enumerate() {
+                    let a = if i % 2 == 0 { swing } else { -swing } * 0.8;
+                    let spread = 0.18 + i as f32 * 0.06;
+                    add_box(&mut v, &f, Vec3::new(-0.62, 0.0, *zz - spread * 0.3), Vec3::new(-0.2, 0.08, *zz - spread * 0.3 + 0.07), Vec3::new(-0.2, 0.45, *zz), a, leg);
+                    add_box(&mut v, &f, Vec3::new(-0.6, 0.0, *zz - spread * 0.3), Vec3::new(-0.52, 0.45, *zz - spread * 0.3 + 0.07), Vec3::new(-0.2, 0.45, *zz), a, leg);
+                    add_box(&mut v, &f, Vec3::new(0.2, 0.0, *zz - spread * 0.3), Vec3::new(0.62, 0.08, *zz - spread * 0.3 + 0.07), Vec3::new(0.2, 0.45, *zz), -a, leg);
+                    add_box(&mut v, &f, Vec3::new(0.52, 0.0, *zz - spread * 0.3), Vec3::new(0.6, 0.45, *zz - spread * 0.3 + 0.07), Vec3::new(0.2, 0.45, *zz), -a, leg);
                 }
-                for ex in [-0.14f32, 0.06] {
-                    add_box(&mut v, &f, Vec3::new(ex, 0.5, 0.75), Vec3::new(ex + 0.08, 0.58, 0.762), z, 0.0, eye);
+                for (ex, ey, sz) in [(-0.15f32, 0.5f32, 0.08f32), (0.07, 0.5, 0.08), (-0.08, 0.58, 0.05), (0.03, 0.58, 0.05), (-0.17, 0.4, 0.04), (0.13, 0.4, 0.04)] {
+                    add_box(&mut v, &f, Vec3::new(ex, ey, 0.56), Vec3::new(ex + sz, ey + sz, 0.572), z, 0.0, eye);
                 }
             }
             MobKind::Boar | MobKind::Sheep => {
                 let sheep = m.kind == MobKind::Sheep;
-                let body = tint(if sheep { [0.92, 0.91, 0.86] } else { [0.62, 0.42, 0.36] });
-                let head = tint(if sheep { [0.25, 0.22, 0.22] } else { [0.70, 0.50, 0.44] });
-                let leg = tint(if sheep { [0.30, 0.27, 0.26] } else { [0.45, 0.30, 0.26] });
-                let h = if sheep { 0.35 } else { 0.30 };
-                add_box(&mut v, &f, Vec3::new(-0.3, h, -0.5), Vec3::new(0.3, h + 0.6, 0.45), z, 0.0, body);
-                for (x0, z0, a) in [(-0.28f32, -0.45f32, swing), (0.08, -0.45, -swing), (-0.28, 0.25, -swing), (0.08, 0.25, swing)] {
-                    add_box(&mut v, &f, Vec3::new(x0, 0.0, z0), Vec3::new(x0 + 0.2, h + 0.05, z0 + 0.2), Vec3::new(x0 + 0.1, h, z0 + 0.1), a, leg);
-                }
-                add_box(&mut v, &f, Vec3::new(-0.2, h + 0.3, 0.45), Vec3::new(0.2, h + 0.7, 0.8), z, 0.0, head);
-                if !sheep {
-                    add_box(&mut v, &f, Vec3::new(-0.1, h + 0.32, 0.8), Vec3::new(0.1, h + 0.48, 0.9), z, 0.0, tint([0.85, 0.62, 0.56]));
-                }
-                for ex in [-0.14f32, 0.06] {
-                    add_box(&mut v, &f, Vec3::new(ex, h + 0.5, 0.8), Vec3::new(ex + 0.08, h + 0.58, 0.812), z, 0.0, [0.05, 0.05, 0.08]);
+                let bob = (m.anim * 2.0).sin().abs() * 0.03 * m.amount;
+                if sheep {
+                    // Fluffy sheep: big wool body, wool cap, cream face.
+                    let wool = tint([0.96, 0.95, 0.90]);
+                    let wool_d = tint([0.86, 0.85, 0.80]);
+                    let face = tint([0.93, 0.82, 0.72]);
+                    let leg = tint([0.32, 0.28, 0.27]);
+                    let h = 0.36;
+                    for (x0, z0, a) in [(-0.27f32, -0.42f32, swing), (0.09, -0.42, -swing), (-0.27, 0.22, -swing), (0.09, 0.22, swing)] {
+                        add_box(&mut v, &f, Vec3::new(x0, 0.0, z0), Vec3::new(x0 + 0.18, h + 0.06, z0 + 0.18), Vec3::new(x0 + 0.09, h, z0 + 0.09), a, leg);
+                    }
+                    add_box(&mut v, &f, Vec3::new(-0.36, h + bob, -0.55), Vec3::new(0.36, h + 0.62 + bob, 0.48), z, 0.0, wool);
+                    add_box(&mut v, &f, Vec3::new(-0.3, h + 0.62 + bob, -0.45), Vec3::new(0.3, h + 0.7 + bob, 0.38), z, 0.0, wool_d);
+                    add_box(&mut v, &f, Vec3::new(-0.08, h + 0.4 + bob, -0.62), Vec3::new(0.08, h + 0.56 + bob, -0.55), z, 0.0, wool_d);
+                    let hz = 0.48;
+                    let hy = h + 0.36 + bob;
+                    add_box(&mut v, &f, Vec3::new(-0.18, hy, hz), Vec3::new(0.18, hy + 0.36, hz + 0.32), z, 0.0, face);
+                    add_box(&mut v, &f, Vec3::new(-0.2, hy + 0.28, hz - 0.02), Vec3::new(0.2, hy + 0.42, hz + 0.24), z, 0.0, wool);
+                    for ex in [-0.3f32, 0.18] {
+                        add_box(&mut v, &f, Vec3::new(ex, hy + 0.2, hz + 0.08), Vec3::new(ex + 0.12, hy + 0.27, hz + 0.18), z, 0.0, face);
+                    }
+                    for ex in [-0.13f32, 0.05] {
+                        add_box(&mut v, &f, Vec3::new(ex, hy + 0.17, hz + 0.32), Vec3::new(ex + 0.08, hy + 0.25, hz + 0.332), z, 0.0, [0.08, 0.07, 0.09]);
+                        add_box(&mut v, &f, Vec3::new(ex + 0.05, hy + 0.22, hz + 0.333), Vec3::new(ex + 0.075, hy + 0.245, hz + 0.336), z, 0.0, [1.0, 1.0, 1.0]);
+                    }
+                    add_box(&mut v, &f, Vec3::new(-0.05, hy + 0.06, hz + 0.32), Vec3::new(0.05, hy + 0.11, hz + 0.333), z, 0.0, [0.92, 0.55, 0.60]);
+                } else {
+                    // Boar: dark bristly back, pink snout, tusks.
+                    let hide = tint([0.55, 0.36, 0.26]);
+                    let dark = tint([0.36, 0.23, 0.17]);
+                    let snout = tint([0.88, 0.62, 0.56]);
+                    let leg = tint([0.38, 0.25, 0.19]);
+                    let h = 0.3;
+                    for (x0, z0, a) in [(-0.28f32, -0.42f32, swing), (0.08, -0.42, -swing), (-0.28, 0.22, -swing), (0.08, 0.22, swing)] {
+                        add_box(&mut v, &f, Vec3::new(x0, 0.0, z0), Vec3::new(x0 + 0.2, h + 0.05, z0 + 0.2), Vec3::new(x0 + 0.1, h, z0 + 0.1), a, leg);
+                    }
+                    add_box(&mut v, &f, Vec3::new(-0.32, h + bob, -0.52), Vec3::new(0.32, h + 0.56 + bob, 0.46), z, 0.0, hide);
+                    add_box(&mut v, &f, Vec3::new(-0.1, h + 0.56 + bob, -0.48), Vec3::new(0.1, h + 0.64 + bob, 0.44), z, 0.0, dark);
+                    add_box(&mut v, &f, Vec3::new(-0.03, h + 0.3 + bob, -0.6), Vec3::new(0.03, h + 0.46 + bob, -0.52), z, 0.0, dark);
+                    let hz = 0.46;
+                    let hy = h + 0.2 + bob;
+                    add_box(&mut v, &f, Vec3::new(-0.22, hy, hz), Vec3::new(0.22, hy + 0.38, hz + 0.3), z, 0.0, hide);
+                    add_box(&mut v, &f, Vec3::new(-0.12, hy + 0.04, hz + 0.3), Vec3::new(0.12, hy + 0.2, hz + 0.4), z, 0.0, snout);
+                    for nx in [-0.07f32, 0.03] {
+                        add_box(&mut v, &f, Vec3::new(nx, hy + 0.09, hz + 0.4), Vec3::new(nx + 0.04, hy + 0.14, hz + 0.405), z, 0.0, [0.35, 0.18, 0.16]);
+                    }
+                    for tx in [-0.17f32, 0.13] {
+                        add_box(&mut v, &f, Vec3::new(tx, hy + 0.02, hz + 0.28), Vec3::new(tx + 0.04, hy + 0.14, hz + 0.33), z, 0.0, [0.96, 0.94, 0.86]);
+                    }
+                    for ex in [-0.24f32, 0.14] {
+                        add_box(&mut v, &f, Vec3::new(ex, hy + 0.34, hz + 0.04), Vec3::new(ex + 0.1, hy + 0.46, hz + 0.12), z, 0.0, dark);
+                    }
+                    for ex in [-0.15f32, 0.07] {
+                        add_box(&mut v, &f, Vec3::new(ex, hy + 0.24, hz + 0.3), Vec3::new(ex + 0.08, hy + 0.31, hz + 0.312), z, 0.0, [0.06, 0.05, 0.05]);
+                        add_box(&mut v, &f, Vec3::new(ex + 0.05, hy + 0.28, hz + 0.313), Vec3::new(ex + 0.075, hy + 0.305, hz + 0.316), z, 0.0, [1.0, 1.0, 1.0]);
+                    }
                 }
             }
         }

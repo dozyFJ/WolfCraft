@@ -97,6 +97,23 @@ pub fn apply_user_pack(pack: &Path, kind: AtlasKind, sprites: &mut [(String, Ima
     }
 }
 
+/// The built-in look: richer, brighter colours (saturation +22 %, a little more light and
+/// contrast) over the procedural art.
+pub fn vibrant(img: &mut Image) {
+    for px in img.pixels.chunks_exact_mut(4) {
+        if px[3] == 0 {
+            continue;
+        }
+        let (r, g, b) = (px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0);
+        let l = 0.299 * r + 0.587 * g + 0.114 * b;
+        let sat = |c: f32| l + (c - l) * 1.22;
+        let tone = |c: f32| (((sat(c) - 0.5) * 1.06 + 0.5) * 1.07).clamp(0.0, 1.0);
+        px[0] = (tone(r) * 255.0) as u8;
+        px[1] = (tone(g) * 255.0) as u8;
+        px[2] = (tone(b) * 255.0) as u8;
+    }
+}
+
 /// Smooth HD version of a pixel-art sprite: Scale2x applied `factor` times over, then a soft
 /// deterministic grain so large surfaces do not look flat.
 pub fn upscale(img: &Image, factor: u32) -> Image {

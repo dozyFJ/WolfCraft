@@ -196,9 +196,12 @@ impl AtlasManager {
         for kind in AtlasKind::ALL {
             let mut sprites = procedural::sprites(kind);
             // Block, item and particle art gets the HD treatment; GUI icons and skins stay as they are.
-            if scale > 1 && matches!(kind, AtlasKind::Blocks | AtlasKind::Items | AtlasKind::Particles) {
+            if matches!(kind, AtlasKind::Blocks | AtlasKind::Items | AtlasKind::Particles) {
                 for (_, img) in sprites.iter_mut() {
-                    *img = crate::packs::upscale(img, scale);
+                    crate::packs::vibrant(img);
+                    if scale > 1 {
+                        *img = crate::packs::upscale(img, scale);
+                    }
                 }
             }
             if let Some(pack) = user_pack {
@@ -251,7 +254,8 @@ impl AtlasManager {
         if size != 16 * scale {
             return false; // overridden by a pack with another size: keep it static
         }
-        let img = procedural::water_frame(frame);
+        let mut img = procedural::water_frame(frame);
+        crate::packs::vibrant(&mut img);
         let img = if scale > 1 { crate::packs::upscale(&img, scale) } else { img };
         blocks.update_sprite(id, img).is_ok()
     }

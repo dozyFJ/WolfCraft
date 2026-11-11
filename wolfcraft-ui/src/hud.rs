@@ -164,7 +164,9 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     let hb_w = slots_w;
     let total_w = slots_w + if s.compact { inv_gap + slot_sz } else { 0.0 };
     let left = screen.center().x - total_w / 2.0;
-    let hotbar = Rect::from_min_size(Pos2::new(left, screen.bottom() - 14.0 - slot_sz), Vec2::new(slots_w, slot_sz));
+    // Phones: keep clear of the system gesture bar at the bottom edge.
+    let bottom_gap = if s.compact { 30.0 } else { 14.0 };
+    let hotbar = Rect::from_min_size(Pos2::new(left, screen.bottom() - bottom_gap - slot_sz), Vec2::new(slots_w, slot_sz));
     if let Ok(mut h) = HOTBAR_RECT.write() {
         *h = [hotbar.min.x, hotbar.min.y, hotbar.max.x, hotbar.max.y];
     }

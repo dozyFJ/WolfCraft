@@ -93,12 +93,164 @@ impl ChatState {
     }
 }
 
-fn kind_color(k: ChatKind, p: &crate::theme_manager::Palette) -> Color32 {
+fn kind_color(k: ChatKind, _p: &crate::theme_manager::Palette) -> Color32 {
     match k {
-        ChatKind::Player => p.text,
-        ChatKind::System => p.accent,
-        ChatKind::Error => p.danger,
+        ChatKind::Player => Color32::from_rgb(230, 232, 228),
+        ChatKind::System => Color32::from_rgb(110, 230, 140),
+        ChatKind::Error => Color32::from_rgb(255, 110, 100),
     }
+}
+
+/// Quick commands shown as terminal keys: (label, command).
+const QUICK: [(&str, &str); 10] = [
+    ("day", "/time set день"),
+    ("night", "/time set ночь"),
+    ("creative", "/gamemode творческий"),
+    ("survival", "/gamemode выживание"),
+    ("heal", "/heal"),
+    ("feed", "/feed"),
+    ("fly", "/fly"),
+    ("spawn", "/spawn"),
+    ("pos", "/pos"),
+    ("help", "/help"),
+];
+
+/// One terminal key (Termux "extra keys" style). Returns true when tapped.
+fn term_key(ui: &mut egui::Ui, label: &str, w: f32, accent: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 34.0), egui::Sense::click());
+    let down = resp.is_pointer_button_down_on();
+    let fill = if down { Color32::from_rgb(60, 66, 62) } else { Color32::from_rgb(28, 31, 30) };
+    ui.painter().rect_filled(rect, 4.0, fill);
+    let col = if accent { Color32::from_rgb(110, 230, 140) } else { Color32::from_rgb(225, 228, 224) };
+    match label {
+        "UP" | "DOWN" => {
+            let c = rect.center();
+            let s = if label == "UP" { -1.0 } else { 1.0 };
+            ui.painter().add(egui::Shape::convex_polygon(vec![c + Vec2::new(0.0, 6.0 * s), c + Vec2::new(-7.0, -5.0 * s), c + Vec2::new(7.0, -5.0 * s)], col, Stroke::NONE));
+        }
+        _ => {
+            ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, FontId::monospace(13.0), col);
+        }
+    }
+    resp.clicked()
+}
+
+/// Open chat as a terminal: log and prompt in a dark monospace window at the top-left,
+/// a row of extra keys and a row of quick commands under it (clear of the phone keyboard).
+fn terminal(ctx: &Context, st: &mut ChatState, screen: Rect) -> Option<String> {
+    let mut submitted = None;
+    let w = (screen.width() * 0.58).clamp(320.0, 680.0);
+    let h = (screen.height() * 0.46).clamp(150.0, 360.0);
+    let green = Color32::from_rgb(110, 230, 140);
+    let mut close = false;
+    egui::Area::new(Id::new("chat-terminal")).order(Order::Foreground).fixed_pos(Pos2::new(screen.left() + 12.0, screen.top() + 10.0)).show(ctx, |ui| {
+        Frame::none().fill(Color32::from_rgba_unmultiplied(6, 9, 8, 238)).rounding(Rounding::same(8.0)).stroke(Stroke::new(1.5_f32, Color32::from_rgb(40, 46, 43))).inner_margin(Margin::same(10.0)).show(ui, |ui| {
+            ui.set_width(w);
+            // Title bar with the three dots.
+            ui.horizontal(|ui| {
+                for c in [Color32::from_rgb(255, 95, 86), Color32::from_rgb(255, 189, 46), Color32::from_rgb(39, 201, 63)] {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::hover());
+                    ui.painter().circle_filled(r.center(), 5.0, c);
+                }
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new("wolfcraft — терминал").font(FontId::monospace(12.0)).color(Color32::from_gray(150)));
+            });
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical().max_height(h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
+                for l in st.lines.iter().rev().take(80).collect::<Vec<_>>().into_iter().rev() {
+                    ui.label(egui::RichText::new(&l.text).font(FontId::monospace(13.0)).color(kind_color(l.kind, &crate::theme_manager::palette(ctx))));
+                }
+                if st.lines.is_empty() {
+                    ui.label(egui::RichText::new("Введите /help — список команд").font(FontId::monospace(13.0)).color(Color32::from_gray(140)));
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("wolfcraft:~$").font(FontId::monospace(14.0)).color(green));
+                let id = Id::new("chat-input-edit");
+                let resp = ui.add(egui::TextEdit::singleline(&mut st.input).id(id).frame(false).desired_width(f32::INFINITY).font(FontId::monospace(14.0)).text_color(Color32::WHITE).cursor_at_end(true));
+                if st.just_opened {
+                    // Drop the character of the key that opened the chat (T) but keep the "/" prefill.
+                    st.input = st.prefill.clone();
+                    st.just_opened = false;
+                    resp.request_focus();
+                    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+                        let end = egui::text::CCursor::new(st.input.chars().count());
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+                        state.store(ctx, id);
+                    }
+                } else if !resp.has_focus() && !resp.lost_focus() {
+                    resp.request_focus();
+                }
+                if resp.has_focus() {
+                    if ctx.input(|i| i.key_pressed(Key::ArrowUp)) {
+                        st.browse_history(-1);
+                    }
+                    if ctx.input(|i| i.key_pressed(Key::ArrowDown)) {
+                        st.browse_history(1);
+                    }
+                }
+                if resp.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) {
+                    let line = st.input.trim().to_string();
+                    if !line.is_empty() {
+                        st.remember(&line);
+                        submitted = Some(line);
+                    }
+                    close = true;
+                }
+            });
+        });
+        ui.add_space(6.0);
+        // Extra keys, like Termux.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let kw = (w + 20.0 - 4.0 * 5.0) / 6.0;
+            if term_key(ui, "ESC", kw, false) {
+                close = true;
+            }
+            if term_key(ui, "/", kw, false) && !st.input.starts_with('/') {
+                st.input.insert(0, '/');
+            }
+            if term_key(ui, "TAB", kw, false) {
+                // Complete a command from the quick list.
+                let q = st.input.trim_start_matches('/').to_lowercase();
+                if let Some((_, cmd)) = QUICK.iter().find(|(l, c)| !q.is_empty() && (l.starts_with(&q) || c.trim_start_matches('/').starts_with(&q))) {
+                    st.input = cmd.to_string();
+                }
+            }
+            if term_key(ui, "UP", kw, false) {
+                st.browse_history(-1);
+            }
+            if term_key(ui, "DOWN", kw, false) {
+                st.browse_history(1);
+            }
+            if term_key(ui, "ENTER", kw, true) {
+                let line = st.input.trim().to_string();
+                if !line.is_empty() {
+                    st.remember(&line);
+                    submitted = Some(line);
+                }
+                close = true;
+            }
+        });
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(w + 20.0);
+            ui.spacing_mut().item_spacing = Vec2::splat(4.0);
+            for (label, cmd) in QUICK {
+                let kw = 9.0 * label.len() as f32 + 22.0;
+                if term_key(ui, label, kw, true) {
+                    st.remember(cmd);
+                    submitted = Some(cmd.to_string());
+                    close = true;
+                }
+            }
+        });
+    });
+    if close {
+        st.close();
+    }
+    submitted
 }
 
 /// Draws the chat. Returns a submitted line (message or `/command`) when Enter was pressed.
@@ -111,7 +263,7 @@ pub fn draw(ctx: &Context, _icons: &GuiIcons, st: &mut ChatState, now: f64) -> O
     let bottom = screen.bottom() - 16.0 - input_h;
     let n = st.visible_lines(now);
     let mut y = bottom;
-    let font = FontId::proportional(15.0);
+    let font = FontId::monospace(14.0);
 
     // Newest at the bottom.
     let take = if st.open { 16 } else { 8 };
@@ -123,12 +275,11 @@ pub fn draw(ctx: &Context, _icons: &GuiIcons, st: &mut ChatState, now: f64) -> O
         let galley = painter.layout(l.text.clone(), font.clone(), kind_color(l.kind, &p).gamma_multiply(alpha), width - 24.0);
         blocks.push((galley, alpha));
     }
-    if st.open && !blocks.is_empty() || !blocks.is_empty() {
+    if !st.open && !blocks.is_empty() {
         let total: f32 = blocks.iter().map(|(g, _)| g.size().y + 3.0).sum::<f32>() + 14.0;
         let max_alpha = blocks.iter().map(|(_, a)| *a).fold(0.0, f32::max);
         let rect = Rect::from_min_size(Pos2::new(14.0, bottom - total), Vec2::new(width, total));
-        painter.rect_filled(rect, Rounding::ZERO, p.surface.gamma_multiply(0.72 * max_alpha));
-        painter.rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.outline.gamma_multiply(max_alpha)));
+        painter.rect_filled(rect, 6.0, Color32::from_rgba_unmultiplied(6, 9, 8, (200.0 * max_alpha) as u8));
         for (g, _) in blocks {
             y -= g.size().y + 3.0;
             let h = g.size().y;
@@ -139,82 +290,7 @@ pub fn draw(ctx: &Context, _icons: &GuiIcons, st: &mut ChatState, now: f64) -> O
 
     let mut submitted = None;
     if st.open {
-        egui::Area::new(Id::new("chat-input-area")).order(Order::Foreground).anchor(Align2::LEFT_BOTTOM, Vec2::new(14.0, -14.0)).show(ctx, |ui| {
-            let focus_t = ctx.animate_bool_with_time(Id::new("chat-focus"), true, ANIM_TIME);
-            Frame::none()
-                .fill(p.surface)
-                .rounding(Rounding::ZERO)
-                .stroke(Stroke::new(1.5_f32, p.outline.lerp_to_gamma(p.accent, focus_t)))
-                .inner_margin(Margin::symmetric(16.0, 9.0))
-                .show(ui, |ui| {
-                    ui.set_width(width - 34.0);
-                    let id = Id::new("chat-input-edit");
-                    let resp = ui.add(egui::TextEdit::singleline(&mut st.input).id(id).hint_text("Сообщение или /команда…  (/help — список команд)").frame(false).desired_width(f32::INFINITY).font(FontId::proportional(16.0)).text_color(p.text));
-                    if st.just_opened {
-                        // Drop the character of the key that opened the chat (T) but keep the "/" prefill.
-                        st.input = st.prefill.clone();
-                        st.just_opened = false;
-                        resp.request_focus();
-                        if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
-                            let end = egui::text::CCursor::new(st.input.chars().count());
-                            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
-                            state.store(ctx, id);
-                        }
-                    } else if !resp.has_focus() && !resp.lost_focus() {
-                        resp.request_focus();
-                    }
-                    if resp.has_focus() {
-                        if ctx.input(|i| i.key_pressed(Key::ArrowUp)) {
-                            st.browse_history(-1);
-                        }
-                        if ctx.input(|i| i.key_pressed(Key::ArrowDown)) {
-                            st.browse_history(1);
-                        }
-                    }
-                    if resp.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) {
-                        let line = st.input.trim().to_string();
-                        if !line.is_empty() {
-                            st.remember(&line);
-                            submitted = Some(line);
-                        }
-                        st.close();
-                    }
-                });
-        });
-    }
-    if st.open {
-        // Quick commands: one tap runs them (handy on a phone without a keyboard).
-        const QUICK: [(&str, &str); 10] = [
-            ("День", "/time set день"),
-            ("Ночь", "/time set ночь"),
-            ("Творческий", "/gamemode творческий"),
-            ("Выживание", "/gamemode выживание"),
-            ("Лечение", "/heal"),
-            ("Еда", "/feed"),
-            ("Полёт", "/fly"),
-            ("Спавн", "/spawn"),
-            ("Позиция", "/pos"),
-            ("Помощь", "/help"),
-        ];
-        let mut close = false;
-        egui::Area::new(Id::new("chat-quick-area")).order(Order::Foreground).anchor(Align2::LEFT_BOTTOM, Vec2::new(14.0, -70.0)).show(ctx, |ui| {
-            ui.set_max_width(width);
-            ui.horizontal_wrapped(|ui| {
-                for (label, cmd) in QUICK {
-                    if ui.add(egui::Button::new(egui::RichText::new(label).size(15.0).color(p.text)).fill(p.surface).stroke(Stroke::new(1.5_f32, p.outline)).rounding(Rounding::ZERO).min_size(Vec2::new(0.0, 30.0))).clicked() {
-                        st.remember(cmd);
-                        submitted = Some(cmd.to_string());
-                        close = true;
-                    }
-                }
-                if ui.add(egui::Button::new(egui::RichText::new("Закрыть").size(15.0).color(p.danger)).fill(p.surface).stroke(Stroke::new(1.5_f32, p.danger)).rounding(Rounding::ZERO).min_size(Vec2::new(0.0, 30.0))).clicked() {
-                    close = true;
-                }
-            });
-        });
-        if close {
-            st.close();
-        }
+        submitted = terminal(ctx, st, screen);
     }
     submitted
 }
