@@ -188,15 +188,28 @@ fn sphere_obb(c: DVec3, r: f64, o: &Obb) -> Option<(DVec3, f64, Option<(usize, i
 
 /// Collision box of `block` in `cell`: the whole cell, or the smaller box of a shaped block.
 pub fn block_obb(grid: &Grid, cell: Cell, block: Block) -> Obb {
-    let mut o = grid.cell_obb(cell);
-    if let Some(s) = block.shape() {
-        for a in 0..3 {
-            let (lo, hi) = (s[a] as f64, s[a + 3] as f64);
-            o.center += o.axes[a] * (((lo + hi) * 0.5 - 0.5) * 2.0 * o.half[a]);
-            o.half[a] *= hi - lo;
-        }
+    let o = grid.cell_obb(cell);
+    match block.shape() {
+        Some(s) => sub_obb(&o, &s),
+        None => o,
+    }
+}
+
+fn sub_obb(cell: &Obb, s: &[f32; 6]) -> Obb {
+    let mut o = cell.clone();
+    for a in 0..3 {
+        let (lo, hi) = (s[a] as f64, s[a + 3] as f64);
+        o.center += o.axes[a] * (((lo + hi) * 0.5 - 0.5) * 2.0 * o.half[a]);
+        o.half[a] *= hi - lo;
     }
     o
+}
+
+/// All collision boxes of `block` in `cell` (stairs have two).
+pub fn block_obbs(grid: &Grid, cell: Cell, block: Block) -> Vec<Obb> {
+    let o = grid.cell_obb(cell);
+    let boxes = block.boxes();
+    if boxes.is_empty() { vec![o] } else { boxes.iter().map(|s| sub_obb(&o, s)).collect() }
 }
 
 /// True if a body with its feet at `feet` intersects any solid block.
@@ -211,7 +224,7 @@ fn overlaps(world: &impl Voxels, feet: DVec3) -> bool {
                 for di in -1..=1 {
                     let Some(cell) = g.offset(base, di, dj, dk) else { continue };
                     let b = world.cell_block(cell);
-                    if b.is_solid() && sphere_obb(c, BODY_RADIUS - 0.01, &block_obb(g, cell, b)).is_some() {
+                    if b.is_solid() && block_obbs(g, cell, b).iter().any(|o| sphere_obb(c, BODY_RADIUS - 0.01, o).is_some()) {
                         return true;
                     }
                 }
@@ -242,8 +255,9 @@ fn resolve(world: &impl Voxels, body: &mut Body, hdir: DVec3) -> (bool, f64, boo
                         if !block.is_solid() {
                             continue;
                         }
+                        for obb in block_obbs(g, cell, block) {
                         let c = body.pos + up * h;
-                        let Some((normal, push, face)) = sphere_obb(c, BODY_RADIUS, &block_obb(g, cell, block)) else { continue };
+                        let Some((normal, push, face)) = sphere_obb(c, BODY_RADIUS, &obb) else { continue };
                         // A contact with a face that is covered by another solid block is internal
                         // (only between full cubes: a slab or a pane does not cover its neighbour).
                         if let Some((axis, sign)) = face.filter(|_| block.shape().is_none()) {
@@ -265,6 +279,7 @@ fn resolve(world: &impl Voxels, body: &mut Body, hdir: DVec3) -> (bool, f64, boo
                             wall = true;
                         }
                         moved = true;
+                        }
                     }
                 }
             }

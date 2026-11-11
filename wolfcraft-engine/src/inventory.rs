@@ -260,6 +260,45 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::Sandstone), 4)], (b(Block::SandstoneBricks), 4), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::LEATHER, 1)], (b(Block::Bookshelf), 1), true, "Строительство"));
         v.push(r(&[(ids::LEATHER, 5)], (ids::ARMOR_BASE + 1, 1), true, "Броня"));
+        // Slabs, stairs, vertical slabs, doors, stained glass and panes, fences, walls, signs.
+        for (mat, slab) in [(Block::Cobblestone, Block::CobbleSlab), (Block::StoneBricks, Block::StoneBrickSlab), (Block::Sandstone, Block::SandstoneSlab), (Block::Bricks, Block::BrickSlab), (Block::BirchPlanks, Block::BirchSlab), (Block::SprucePlanks, Block::SpruceSlab)] {
+            v.push(r(&[(b(mat), 3)], (b(slab), 6), true, "Строительство"));
+        }
+        v.push(r(&[(b(Block::PlankSlab), 1)], (b(Block::PlankSlabVerticalA), 1), false, "Строительство"));
+        v.push(r(&[(b(Block::BrickSlab), 1)], (b(Block::BrickSlabVerticalA), 1), false, "Строительство"));
+        for (mat, stairs) in [(Block::Cobblestone, Block::CobbleStairs), (Block::OakPlanks, Block::PlankStairs), (Block::StoneBricks, Block::StoneBrickStairs), (Block::Sandstone, Block::SandstoneStairs)] {
+            v.push(r(&[(b(mat), 6)], (b(stairs), 4), true, "Строительство"));
+        }
+        v.push(r(&[(b(Block::BirchPlanks), 3)], (b(Block::BirchDoor), 2), true, "Строительство"));
+        v.push(r(&[(b(Block::SprucePlanks), 3)], (b(Block::SpruceDoor), 2), true, "Строительство"));
+        v.push(r(&[(ids::IRON_INGOT, 3)], (b(Block::IronDoor), 1), true, "Строительство"));
+        for (dye, glass, pane) in [(Block::FlowerRed, Block::RedGlass, Block::RedPaneA), (Block::FlowerBlue, Block::BlueGlass, Block::BluePaneA), (Block::Fern, Block::GreenGlass, Block::GreenPaneA), (Block::FlowerYellow, Block::YellowGlass, Block::YellowPaneA)] {
+            v.push(r(&[(b(Block::Glass), 4), (b(dye), 1)], (b(glass), 4), false, "Строительство"));
+            v.push(r(&[(b(glass), 3)], (b(pane), 8), true, "Строительство"));
+        }
+        v.push(r(&[(b(Block::BirchPlanks), 2), (ids::STICK, 2)], (b(Block::BirchFence), 3), true, "Строительство"));
+        v.push(r(&[(b(Block::SprucePlanks), 2), (ids::STICK, 2)], (b(Block::SpruceFence), 3), true, "Строительство"));
+        v.push(r(&[(b(Block::StoneBricks), 3)], (b(Block::StoneBrickWall), 6), true, "Строительство"));
+        v.push(r(&[(b(Block::Sandstone), 3)], (b(Block::SandstoneWall), 6), true, "Строительство"));
+        v.push(r(&[(b(Block::OakPlanks), 6), (ids::STICK, 1)], (b(Block::Sign), 3), true, "Строительство"));
+        // Same material, different shapes: slabs are a row of three, doors a column of three,
+        // walls two rows (shaped, so they never clash).
+        for rec in v.iter_mut() {
+            if rec.ingredients.len() != 1 || rec.output.0 >= crate::items::ITEM_BASE {
+                continue;
+            }
+            let out = Block::from_u8(rec.output.0 as u8);
+            let mat = rec.ingredients[0].0;
+            let rows = match out {
+                Block::StoneSlab | Block::PlankSlab | Block::CobbleSlab | Block::StoneBrickSlab | Block::SandstoneSlab | Block::BrickSlab | Block::BirchSlab | Block::SpruceSlab => ["MMM", "...", "..."],
+                Block::Door | Block::BirchDoor | Block::SpruceDoor | Block::IronDoor => ["M..", "M..", "M.."],
+                Block::StoneWall | Block::StoneBrickWall | Block::SandstoneWall => ["MMM", "MMM", "..."],
+                _ => continue,
+            };
+            let n = rows.iter().map(|r| r.matches('M').count()).sum::<usize>() as u8;
+            rec.ingredients = vec![(mat, n)];
+            rec.shape = Some(pattern(rows, mat));
+        }
         v.push(r(&[(b(Block::OakPlanks), 2)], (ids::STICK, 4), false, "Дерево"));
         v.push(r(&[(b(Block::OakPlanks), 4)], (b(Block::CraftingTable), 1), false, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 8)], (b(Block::Chest), 1), true, "Строительство"));

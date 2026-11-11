@@ -228,6 +228,61 @@ blocks! {
     116 RedWool => info("Красная шерсть", Opaque, 1.2, Hand, all(t::WOOL_RED)),
     117 BlueWool => info("Синяя шерсть", Opaque, 1.2, Hand, all(t::WOOL_BLUE)),
     118 YellowWool => info("Жёлтая шерсть", Opaque, 1.2, Hand, all(t::WOOL_YELLOW)),
+    // Slabs
+    119 CobbleSlab => needs_pick(info("Булыжная плита", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    120 StoneBrickSlab => needs_pick(info("Плита из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    121 SandstoneSlab => needs_pick(info("Песчаниковая плита", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    122 BrickSlab => needs_pick(info("Кирпичная плита", Shape, 5.0, Pickaxe, all(t::BRICKS))),
+    123 BirchSlab => info("Берёзовая плита", Shape, 2.0, Axe, all(t::BIRCH_PLANKS)),
+    124 SpruceSlab => info("Еловая плита", Shape, 2.0, Axe, all(t::SPRUCE_PLANKS)),
+    125 PlankSlabVerticalA => info("Вертикальная дощатая плита", Shape, 2.0, Axe, all(t::PLANKS)),
+    126 PlankSlabVerticalB => info("Вертикальная дощатая плита (поперёк)", Shape, 2.0, Axe, all(t::PLANKS)),
+    127 BrickSlabVerticalA => needs_pick(info("Вертикальная кирпичная плита", Shape, 5.0, Pickaxe, all(t::BRICKS))),
+    128 BrickSlabVerticalB => needs_pick(info("Вертикальная кирпичная плита (поперёк)", Shape, 5.0, Pickaxe, all(t::BRICKS))),
+    // Stairs: four directions each (the base item is the first one)
+    129 CobbleStairs => needs_pick(info("Булыжные ступени", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    130 CobbleStairs1 => needs_pick(info("Булыжные ступени", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    131 CobbleStairs2 => needs_pick(info("Булыжные ступени", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    132 CobbleStairs3 => needs_pick(info("Булыжные ступени", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    133 PlankStairs => info("Деревянные ступени", Shape, 2.0, Axe, all(t::PLANKS)),
+    134 PlankStairs1 => info("Деревянные ступени", Shape, 2.0, Axe, all(t::PLANKS)),
+    135 PlankStairs2 => info("Деревянные ступени", Shape, 2.0, Axe, all(t::PLANKS)),
+    136 PlankStairs3 => info("Деревянные ступени", Shape, 2.0, Axe, all(t::PLANKS)),
+    137 StoneBrickStairs => needs_pick(info("Ступени из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    138 StoneBrickStairs1 => needs_pick(info("Ступени из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    139 StoneBrickStairs2 => needs_pick(info("Ступени из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    140 StoneBrickStairs3 => needs_pick(info("Ступени из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    141 SandstoneStairs => needs_pick(info("Песчаниковые ступени", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    142 SandstoneStairs1 => needs_pick(info("Песчаниковые ступени", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    143 SandstoneStairs2 => needs_pick(info("Песчаниковые ступени", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    144 SandstoneStairs3 => needs_pick(info("Песчаниковые ступени", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    // Doors
+    145 BirchDoor => info("Берёзовая дверь", Shape, 2.0, Axe, all(t::BIRCH_PLANKS)),
+    146 BirchDoorOpen => info("Берёзовая дверь (открыта)", Shape, 2.0, Axe, all(t::BIRCH_PLANKS)),
+    147 SpruceDoor => info("Еловая дверь", Shape, 2.0, Axe, all(t::SPRUCE_PLANKS)),
+    148 SpruceDoorOpen => info("Еловая дверь (открыта)", Shape, 2.0, Axe, all(t::SPRUCE_PLANKS)),
+    149 IronDoor => needs_pick(info("Железная дверь", Shape, 8.0, Pickaxe, all(t::IRON_BLOCK))),
+    150 IronDoorOpen => needs_pick(info("Железная дверь (открыта)", Shape, 8.0, Pickaxe, all(t::IRON_BLOCK))),
+    // Stained glass and panes
+    151 RedGlass => info("Красное стекло", Cutout, 0.45, Hand, all(t::GLASS_RED)),
+    152 BlueGlass => info("Синее стекло", Cutout, 0.45, Hand, all(t::GLASS_BLUE)),
+    153 GreenGlass => info("Зелёное стекло", Cutout, 0.45, Hand, all(t::GLASS_GREEN)),
+    154 YellowGlass => info("Жёлтое стекло", Cutout, 0.45, Hand, all(t::GLASS_YELLOW)),
+    155 RedPaneA => info("Красная стеклянная панель", Shape, 0.4, Hand, all(t::GLASS_RED)),
+    156 RedPaneB => info("Красная стеклянная панель (поперёк)", Shape, 0.4, Hand, all(t::GLASS_RED)),
+    157 BluePaneA => info("Синяя стеклянная панель", Shape, 0.4, Hand, all(t::GLASS_BLUE)),
+    158 BluePaneB => info("Синяя стеклянная панель (поперёк)", Shape, 0.4, Hand, all(t::GLASS_BLUE)),
+    159 GreenPaneA => info("Зелёная стеклянная панель", Shape, 0.4, Hand, all(t::GLASS_GREEN)),
+    160 GreenPaneB => info("Зелёная стеклянная панель (поперёк)", Shape, 0.4, Hand, all(t::GLASS_GREEN)),
+    161 YellowPaneA => info("Жёлтая стеклянная панель", Shape, 0.4, Hand, all(t::GLASS_YELLOW)),
+    162 YellowPaneB => info("Жёлтая стеклянная панель (поперёк)", Shape, 0.4, Hand, all(t::GLASS_YELLOW)),
+    // Fences, walls, signs
+    163 BirchFence => info("Берёзовый забор", Shape, 2.0, Axe, all(t::BIRCH_PLANKS)),
+    164 SpruceFence => info("Еловый забор", Shape, 2.0, Axe, all(t::SPRUCE_PLANKS)),
+    165 StoneBrickWall => needs_pick(info("Стена из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    166 SandstoneWall => needs_pick(info("Песчаниковая стена", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    167 Sign => not_solid(info("Табличка", Shape, 1.0, Axe, all(t::PLANKS))),
+    168 SignB => not_solid(info("Табличка (поперёк)", Shape, 1.0, Axe, all(t::PLANKS))),
 }
 
 impl Block {
@@ -244,18 +299,122 @@ impl Block {
         self == Block::Air
     }
     /// Box of a `Shape` block inside its cell: `[i0, j0, k0, i1, j1, k1]` in 0..1
-    /// (i and j run along the ground, k is up). `None` for full cubes.
+    /// (i and j run along the ground, k is up). `None` for full cubes. For blocks made of
+    /// several boxes (stairs, signs) this is the first one; see [`Block::boxes`].
     pub fn shape(self) -> Option<[f32; 6]> {
+        self.boxes().first().copied()
+    }
+
+    /// All boxes of a `Shape` block (empty for full cubes).
+    pub fn boxes(self) -> &'static [[f32; 6]] {
+        use Block::*;
+        const SLAB: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.5];
+        const VERT_A: [f32; 6] = [0.0, 0.0, 0.0, 0.5, 1.0, 1.0];
+        const VERT_B: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 0.5, 1.0];
+        const PANE_A: [f32; 6] = [0.44, 0.0, 0.0, 0.56, 1.0, 1.0];
+        const PANE_B: [f32; 6] = [0.0, 0.44, 0.0, 1.0, 0.56, 1.0];
+        const FENCE: [f32; 6] = [0.375, 0.375, 0.0, 0.625, 0.625, 1.0];
+        const WALL: [f32; 6] = [0.25, 0.25, 0.0, 0.75, 0.75, 1.0];
+        const DOOR: [f32; 6] = [0.0, 0.0, 0.0, 0.19, 1.0, 1.0];
+        const DOOR_OPEN: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 0.19, 1.0];
+        // Stairs: the high half is toward +i, -i, +j or -j.
+        const ST0: [[f32; 6]; 2] = [SLAB, [0.5, 0.0, 0.5, 1.0, 1.0, 1.0]];
+        const ST1: [[f32; 6]; 2] = [SLAB, [0.0, 0.0, 0.5, 0.5, 1.0, 1.0]];
+        const ST2: [[f32; 6]; 2] = [SLAB, [0.0, 0.5, 0.5, 1.0, 1.0, 1.0]];
+        const ST3: [[f32; 6]; 2] = [SLAB, [0.0, 0.0, 0.5, 1.0, 0.5, 1.0]];
+        // Sign: post and board.
+        const SIGN_A: [[f32; 6]; 2] = [[0.46, 0.46, 0.0, 0.54, 0.54, 0.55], [0.05, 0.44, 0.5, 0.95, 0.56, 0.95]];
+        const SIGN_B: [[f32; 6]; 2] = [[0.46, 0.46, 0.0, 0.54, 0.54, 0.55], [0.44, 0.05, 0.5, 0.56, 0.95, 0.95]];
+        match self {
+            StoneSlab | PlankSlab | CobbleSlab | StoneBrickSlab | SandstoneSlab | BrickSlab | BirchSlab | SpruceSlab => std::slice::from_ref(&SLAB),
+            StoneSlabVerticalA | PlankSlabVerticalA | BrickSlabVerticalA => std::slice::from_ref(&VERT_A),
+            StoneSlabVerticalB | PlankSlabVerticalB | BrickSlabVerticalB => std::slice::from_ref(&VERT_B),
+            GlassPaneA | RedPaneA | BluePaneA | GreenPaneA | YellowPaneA => std::slice::from_ref(&PANE_A),
+            GlassPaneB | RedPaneB | BluePaneB | GreenPaneB | YellowPaneB => std::slice::from_ref(&PANE_B),
+            Fence | BirchFence | SpruceFence => std::slice::from_ref(&FENCE),
+            StoneWall | StoneBrickWall | SandstoneWall => std::slice::from_ref(&WALL),
+            Door | BirchDoor | SpruceDoor | IronDoor => std::slice::from_ref(&DOOR),
+            DoorOpen | BirchDoorOpen | SpruceDoorOpen | IronDoorOpen => std::slice::from_ref(&DOOR_OPEN),
+            CobbleStairs | PlankStairs | StoneBrickStairs | SandstoneStairs => &ST0,
+            CobbleStairs1 | PlankStairs1 | StoneBrickStairs1 | SandstoneStairs1 => &ST1,
+            CobbleStairs2 | PlankStairs2 | StoneBrickStairs2 | SandstoneStairs2 => &ST2,
+            CobbleStairs3 | PlankStairs3 | StoneBrickStairs3 | SandstoneStairs3 => &ST3,
+            Sign => &SIGN_A,
+            SignB => &SIGN_B,
+            _ => &[],
+        }
+    }
+
+    /// Block placed for this item, turned to face `dir_i`/`dir_j` (how much the player looks
+    /// along the cell's i and j axes): stairs rise away from the player, panes, doors,
+    /// vertical slabs and signs stand across the view.
+    pub fn oriented(self, dir_i: f64, dir_j: f64) -> Block {
+        use Block::*;
+        let along_i = dir_i.abs() >= dir_j.abs();
+        let stairs = |base: Block| -> Block {
+            let k = if along_i { if dir_i > 0.0 { 0 } else { 1 } } else if dir_j > 0.0 { 2 } else { 3 };
+            Block::from_u8(base as u8 + k)
+        };
+        let ab = |a: Block, b: Block| if along_i { a } else { b };
+        match self {
+            CobbleStairs => stairs(CobbleStairs),
+            PlankStairs => stairs(PlankStairs),
+            StoneBrickStairs => stairs(StoneBrickStairs),
+            SandstoneStairs => stairs(SandstoneStairs),
+            GlassPaneA => ab(GlassPaneA, GlassPaneB),
+            RedPaneA => ab(RedPaneA, RedPaneB),
+            BluePaneA => ab(BluePaneA, BluePaneB),
+            GreenPaneA => ab(GreenPaneA, GreenPaneB),
+            YellowPaneA => ab(YellowPaneA, YellowPaneB),
+            Door => ab(Door, DoorOpen),
+            BirchDoor => ab(BirchDoor, BirchDoorOpen),
+            SpruceDoor => ab(SpruceDoor, SpruceDoorOpen),
+            IronDoor => ab(IronDoor, IronDoorOpen),
+            Sign => ab(SignB, Sign),
+            StoneSlabVerticalA => ab(StoneSlabVerticalA, StoneSlabVerticalB),
+            PlankSlabVerticalA => ab(PlankSlabVerticalA, PlankSlabVerticalB),
+            BrickSlabVerticalA => ab(BrickSlabVerticalA, BrickSlabVerticalB),
+            b => b,
+        }
+    }
+
+    /// The item a placed variant comes from (open doors, turned stairs and panes, ...).
+    pub fn base_item(self) -> Block {
+        use Block::*;
+        match self {
+            DoorOpen => Door,
+            BirchDoorOpen => BirchDoor,
+            SpruceDoorOpen => SpruceDoor,
+            IronDoorOpen => IronDoor,
+            CobbleStairs1 | CobbleStairs2 | CobbleStairs3 => CobbleStairs,
+            PlankStairs1 | PlankStairs2 | PlankStairs3 => PlankStairs,
+            StoneBrickStairs1 | StoneBrickStairs2 | StoneBrickStairs3 => StoneBrickStairs,
+            SandstoneStairs1 | SandstoneStairs2 | SandstoneStairs3 => SandstoneStairs,
+            GlassPaneB => GlassPaneA,
+            RedPaneB => RedPaneA,
+            BluePaneB => BluePaneA,
+            GreenPaneB => GreenPaneA,
+            YellowPaneB => YellowPaneA,
+            SignB => Sign,
+            StoneSlabVerticalB => StoneSlabVerticalA,
+            PlankSlabVerticalB => PlankSlabVerticalA,
+            BrickSlabVerticalB => BrickSlabVerticalA,
+            b => b,
+        }
+    }
+
+    /// Door states: (closed, open) pairs toggle on use.
+    pub fn door_toggle(self) -> Option<Block> {
+        use Block::*;
         Some(match self {
-            Block::StoneSlab | Block::PlankSlab => [0.0, 0.0, 0.0, 1.0, 1.0, 0.5],
-            Block::StoneSlabVerticalA => [0.0, 0.0, 0.0, 0.5, 1.0, 1.0],
-            Block::StoneSlabVerticalB => [0.0, 0.0, 0.0, 1.0, 0.5, 1.0],
-            Block::GlassPaneA => [0.44, 0.0, 0.0, 0.56, 1.0, 1.0],
-            Block::GlassPaneB => [0.0, 0.44, 0.0, 1.0, 0.56, 1.0],
-            Block::Fence => [0.375, 0.375, 0.0, 0.625, 0.625, 1.0],
-            Block::StoneWall => [0.25, 0.25, 0.0, 0.75, 0.75, 1.0],
-            Block::Door => [0.0, 0.0, 0.0, 0.19, 1.0, 1.0],
-            Block::DoorOpen => [0.0, 0.0, 0.0, 1.0, 0.19, 1.0],
+            Door => DoorOpen,
+            DoorOpen => Door,
+            BirchDoor => BirchDoorOpen,
+            BirchDoorOpen => BirchDoor,
+            SpruceDoor => SpruceDoorOpen,
+            SpruceDoorOpen => SpruceDoor,
+            IronDoor => IronDoorOpen,
+            IronDoorOpen => IronDoor,
             _ => return None,
         })
     }

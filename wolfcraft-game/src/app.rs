@@ -763,6 +763,8 @@ impl App {
         let sens = 0.0022 * self.settings.mouse_sensitivity as f64;
         self.touch.tick();
         let tl = self.touch.take_look();
+        // With a bow in hand a long press on the screen draws it instead of breaking blocks.
+        let bow = self.session.as_ref().is_some_and(|s| s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::BOW));
         let k = &self.input.keys;
         let f = InputFrame {
             forward: (axis(KeyCode::KeyW, KeyCode::KeyS) + self.touch.move_vec.1).clamp(-1.0, 1.0),
@@ -772,9 +774,9 @@ impl App {
             sprint: k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight) || self.touch.sprint,
             sneak: k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || self.touch.sneak,
             look: ((self.input.mouse_dx + tl.0 as f64 * 1.4) * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy + tl.1 as f64 * 1.4) * sens),
-            break_held: self.input.left || self.touch.breaking,
+            break_held: self.input.left || (self.touch.breaking && !bow),
             use_pressed: std::mem::take(&mut self.input.right_press),
-            use_held: self.input.right || self.touch.place_held,
+            use_held: self.input.right || self.touch.place_held || (bow && self.touch.breaking),
             swap_hands: std::mem::take(&mut self.input.swap_press),
             pick_pressed: std::mem::take(&mut self.input.middle_press),
             hotbar_delta: std::mem::take(&mut self.input.scroll) as i32,
@@ -992,6 +994,12 @@ impl App {
                                 self.screen = Screen::Inventory;
                             }
                             InteractionEvent::Placed { pos, block } => {
+                                // A new sign asks for its text right away.
+                                if matches!(block, wolfcraft_engine::block::Block::Sign | wolfcraft_engine::block::Block::SignB) {
+                                    self.container = Some((pos, wolfcraft_engine::block::Block::Sign));
+                                    self.inv_ui = InventoryUiState::default();
+                                    self.screen = Screen::Inventory;
+                                }
                                 if let Some(net) = &mut self.net {
                                     net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u8, hell: s.hell });
                                 }
@@ -1195,6 +1203,7 @@ impl App {
                             hint: if screen == Screen::Playing { hint } else { None },
                             mining: s.interaction.mining_fraction(),
                             bow_charge: s.bow_charge,
+                            sign_text: s.hit.filter(|h| matches!(h.block, wolfcraft_engine::block::Block::Sign | wolfcraft_engine::block::Block::SignB)).and_then(|h| s.block_commands.get(&h.cell)).filter(|t| !t.trim().is_empty()).cloned(),
                             item_name: s.item_name.clone(),
                             show_fps: settings.show_fps,
                             debug: debug_info.as_ref(),
@@ -1238,7 +1247,24 @@ impl App {
                         }
                         Screen::Inventory => {
                             if let Some(s) = session {
-                                if let Some((pos, wolfcraft_engine::block::Block::CommandBlock)) = *container {
+                                if let Some((pos, wolfcraft_engine::block::Block::Sign | wolfcraft_engine::block::Block::SignB)) = *container {
+                                    // Sign text, kept with the command-block texts of the world.
+                                    let mut text = s.block_commands.get(&pos).cloned().unwrap_or_default();
+                                    let mut done = false;
+                                    let dismissed = wolfcraft_ui::ui_components::modal(ctx, "sign", "Табличка", 460.0, |ui| {
+                                        ui.label("Надпись (видна, когда смотришь на табличку):");
+                                        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(f32::INFINITY).char_limit(80));
+                                        if !r.has_focus() && !r.lost_focus() {
+                                            r.request_focus();
+                                        }
+                                        ui.add_space(8.0);
+                                        if wolfcraft_ui::ui_components::pill_button(ui, &icons, Some(wolfcraft_assets::gui::CHECK), "Готово", wolfcraft_ui::ui_components::ButtonKind::Primary, 140.0, true).clicked() || r.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                            done = true;
+                                        }
+                                    });
+                                    s.block_commands.insert(pos, text);
+                                    close_inventory |= dismissed || done;
+                                } else if let Some((pos, wolfcraft_engine::block::Block::CommandBlock)) = *container {
                                     let mut cmd = s.block_commands.get(&pos).cloned().unwrap_or_default();
                                     let mut run = false;
                                     let dismissed = wolfcraft_ui::ui_components::modal(ctx, "cmdblock", "Командный блок", 480.0, |ui| {

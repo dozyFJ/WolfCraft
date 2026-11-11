@@ -127,6 +127,10 @@ pub mod tiles {
     pub const WOOL_RED: u16 = 117;
     pub const WOOL_BLUE: u16 = 118;
     pub const WOOL_YELLOW: u16 = 119;
+    pub const GLASS_RED: u16 = 120;
+    pub const GLASS_BLUE: u16 = 121;
+    pub const GLASS_GREEN: u16 = 122;
+    pub const GLASS_YELLOW: u16 = 123;
 }
 
 const S: u32 = 16;
@@ -298,6 +302,23 @@ fn polished(base: Rgb, seed: u32) -> Image {
                 let edge = x == 0 || y == 0 || x == 15 || y == 15;
                 let c = if edge { base.scale(0.82) } else { base.add((rnd(x, y, seed) - 0.5) * 0.05 + if x + y < 8 { 0.03 } else { 0.0 }) };
                 q.put(x, y, c, 1.0);
+            }
+        }
+    })
+}
+
+fn stained_glass(c: Rgb) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let edge = x == 0 || y == 0 || x == 15 || y == 15;
+                if edge {
+                    q.put(x, y, c.scale(0.7), 1.0);
+                } else if (x + y) % 9 == 0 && x > 2 && x < 10 {
+                    q.put(x, y, c.add(0.25), 0.9);
+                } else {
+                    q.put(x, y, c, 0.45);
+                }
             }
         }
     })
@@ -1000,6 +1021,10 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(WOOL_RED, "wool_red", wool(Rgb(0.74, 0.20, 0.20), 186));
     l.add(WOOL_BLUE, "wool_blue", wool(Rgb(0.22, 0.34, 0.70), 187));
     l.add(WOOL_YELLOW, "wool_yellow", wool(Rgb(0.92, 0.80, 0.25), 188));
+    l.add(GLASS_RED, "glass_red", stained_glass(Rgb(0.80, 0.20, 0.18)));
+    l.add(GLASS_BLUE, "glass_blue", stained_glass(Rgb(0.22, 0.36, 0.85)));
+    l.add(GLASS_GREEN, "glass_green", stained_glass(Rgb(0.28, 0.70, 0.30)));
+    l.add(GLASS_YELLOW, "glass_yellow", stained_glass(Rgb(0.95, 0.82, 0.22)));
     // Pixel-art finish for every opaque pixel: a touch more contrast and a limited palette
     // (14 levels per channel) so textures look hand-painted instead of smooth noise.
     for (_, img) in l.0.iter_mut() {

@@ -230,7 +230,7 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         Block::SilverOre => vec![ItemStack::new(ids::RAW_SILVER, 1)],
         Block::ElectricLampOn => vec![ItemStack::of_block(Block::ElectricLamp, 1)],
         Block::SwitchOn => vec![ItemStack::of_block(Block::SwitchOff, 1)],
-        Block::DoorOpen => vec![ItemStack::of_block(Block::Door, 1)],
+        b if b.base_item() != b => vec![ItemStack::of_block(b.base_item(), 1)],
         Block::Glass | Block::Ice | Block::PackedIce | Block::TallGrass | Block::Seagrass | Block::Kelp => vec![],
         Block::Snow => vec![ItemStack::of_block(Block::Snow, 1)],
         Block::Gravel if roll < 0.12 => vec![ItemStack::new(ids::FLINT, 1)],
@@ -302,7 +302,7 @@ pub fn break_time(held: Option<ItemInfo>, block: Block, creative: bool) -> Optio
 pub fn creative_palette() -> Vec<ItemId> {
     let mut v: Vec<ItemId> = Block::ALL
         .iter()
-        .filter(|b| !matches!(b, Block::Air | Block::Water | Block::Magma | Block::InnerCore | Block::Bedrock | Block::ElectricLampOn | Block::SwitchOn | Block::DoorOpen))
+        .filter(|b| !matches!(b, Block::Air | Block::Water | Block::Magma | Block::InnerCore | Block::Bedrock | Block::ElectricLampOn | Block::SwitchOn | Block::GlassPaneB | Block::StoneSlabVerticalB | Block::PlankSlabVerticalB | Block::BrickSlabVerticalB) && b.base_item() == **b)
         .map(|b| *b as ItemId)
         .collect();
     v.extend(ITEM_BASE..=ids::LAST);
@@ -336,6 +336,7 @@ pub fn category(id: ItemId) -> &'static str {
         RenderKind::Cross if b != Block::Torch => "Растения",
         _ => match b {
             Block::BirchPlanks | Block::SprucePlanks | Block::AcaciaPlanks => "Дерево",
+            b if !b.boxes().is_empty() || matches!(b, Block::RedGlass | Block::BlueGlass | Block::GreenGlass | Block::YellowGlass) => "Строительство",
             Block::Wool | Block::RedWool | Block::BlueWool | Block::YellowWool | Block::Torch | Block::PolishedGranite | Block::PolishedMarble | Block::SmoothStone | Block::SandstoneBricks | Block::Bookshelf | Block::Lantern => "Строительство",
             Block::Pumpkin | Block::Melon => "Растения",
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",

@@ -68,6 +68,8 @@ pub struct HudState<'a> {
     pub mining: f32,
     /// Bow draw 0..1 (a bar under the crosshair while drawing).
     pub bow_charge: f32,
+    /// Text of the sign under the crosshair.
+    pub sign_text: Option<String>,
     pub item_name: Option<(String, f32)>,
     pub show_fps: bool,
     pub debug: Option<&'a DebugInfo>,
@@ -183,6 +185,13 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         let full = s.bow_charge >= 1.0;
         let col = if full { Color32::from_rgb(250, 200, 60) } else { Color32::from_white_alpha(230) };
         painter.rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width() * s.bow_charge.clamp(0.0, 1.0), r.height())), Rounding::ZERO, col);
+    }
+    if let Some(t) = &s.sign_text {
+        let g = painter.layout(t.clone(), FontId::proportional(16.0), Color32::from_rgb(40, 28, 16), 360.0);
+        let r = Rect::from_center_size(c - Vec2::new(0.0, 46.0), g.size() + Vec2::new(24.0, 14.0));
+        painter.rect_filled(r, Rounding::same(4.0), Color32::from_rgb(214, 180, 128));
+        painter.rect_stroke(r, Rounding::same(4.0), Stroke::new(2.0_f32, Color32::from_rgb(120, 84, 46)));
+        painter.galley(r.min + Vec2::new(12.0, 7.0), g, Color32::from_rgb(40, 28, 16));
     }
     // No hint pill under the crosshair: the view stays clean.
     let _ = &s.hint;
@@ -432,6 +441,7 @@ mod tests {
                     hint: Some("ЛКМ — сломать".into()),
                     mining: 0.5,
                     bow_charge: 0.5,
+                    sign_text: Some("Привет".into()),
                     item_name: Some(("Лампа".into(), 1.0)),
                     show_fps: true,
                     debug: Some(&dbg),

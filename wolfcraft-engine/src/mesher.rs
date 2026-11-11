@@ -126,8 +126,12 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData) {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let b = inp.get(x, y, z);
-                let Some(s) = b.shape() else { continue };
+                let boxes = b.boxes();
+                if boxes.is_empty() {
+                    continue;
+                }
                 let info = b.info();
+                for s in boxes {
                 let sky = if info.emissive { 1.0 } else { sky_at(inp, [x, y, z]).max(sky_at(inp, [x, y + 1, z])) as f32 / 15.0 };
                 // Padded axes are (x, y, z) = (j, k, i); the shape is given as (i, j, k).
                 let lo = [s[1], s[2], s[0]];
@@ -160,6 +164,7 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData) {
                     // Both windings: the box is small and may be seen from any side.
                     idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                     idx.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+                }
                 }
             }
         }

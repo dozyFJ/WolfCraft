@@ -149,15 +149,14 @@ impl Interaction {
                 return events;
             }
             // Door: opens and closes.
-            if matches!(h.block, Block::Door | Block::DoorOpen) && !player.sneaking {
-                let new = if h.block == Block::Door { Block::DoorOpen } else { Block::Door };
+            if let (Some(new), false) = (h.block.door_toggle(), player.sneaking) {
                 if world.set_block(h.cell, new) {
                     events.push(InteractionEvent::Placed { pos: h.cell, block: new });
                 }
                 return events;
             }
             // Chest and electric furnace open their own window (sneak to place blocks instead).
-            if matches!(h.block, Block::Chest | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal) && !player.sneaking {
+            if matches!(h.block, Block::Chest | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) && !player.sneaking {
                 events.push(InteractionEvent::OpenContainer { pos: h.cell, block: h.block });
                 return events;
             }
@@ -174,6 +173,14 @@ impl Interaction {
         }
         let (Some(block), Some(h)) = (info.place, hit) else { return events };
         let Some(target) = h.front_cell(world.grid()) else { return events };
+        // Turn stairs, panes, doors and signs to the player's view.
+        let block = {
+            let g = world.grid();
+            let p0 = g.point(target.f, target.i as f64, target.j as f64, target.k as f64);
+            let ei = (g.point(target.f, target.i as f64 + 1.0, target.j as f64, target.k as f64) - p0).normalize_or_zero();
+            let ej = (g.point(target.f, target.i as f64, target.j as f64 + 1.0, target.k as f64) - p0).normalize_or_zero();
+            block.oriented(player.heading.dot(ei), player.heading.dot(ej))
+        };
         if !world.cell_block(target).is_replaceable() {
             return events;
         }
