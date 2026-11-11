@@ -298,6 +298,12 @@ pub fn break_time(held: Option<ItemInfo>, block: Block, creative: bool) -> Optio
     Some(t)
 }
 
+/// Added in the latest update (marked "NEW" and listed first in the creative inventory):
+/// blocks from the biome/building set on, the bow and its materials.
+pub fn is_new(id: ItemId) -> bool {
+    (98..ITEM_BASE).contains(&id) || (ids::BOW..=ids::LAST).contains(&id)
+}
+
 /// All blocks that make sense in the creative palette.
 pub fn creative_palette() -> Vec<ItemId> {
     let mut v: Vec<ItemId> = Block::ALL

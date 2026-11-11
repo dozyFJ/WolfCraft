@@ -443,7 +443,9 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
         });
         return;
     } else {
-        let list: Vec<ItemId> = palette_all.into_iter().filter(|id| in_tab(*id, state.tab) && matches_search(*id, &state.search)).collect();
+        let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| in_tab(*id, state.tab) && matches_search(*id, &state.search)).collect();
+        // Newest blocks and items first, so they are easy to find.
+        list.sort_by_key(|id| !items::is_new(*id));
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
         // Swipe scrolls the list (a slot only reacts to a tap, so the finger drag goes to the
@@ -469,6 +471,11 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                             } else {
                                 inv.slots[inv.selected] = Some(full);
                             }
+                        }
+                        if items::is_new(*id) {
+                            let tag = Rect::from_min_size(rect.left_top() + Vec2::new(2.0, 2.0), Vec2::new(22.0, 10.0));
+                            ui.painter().rect_filled(tag, Rounding::same(2.0), p.success);
+                            ui.painter().text(tag.center(), egui::Align2::CENTER_CENTER, "NEW", egui::FontId::proportional(7.5), egui::Color32::BLACK);
                         }
                         resp.on_hover_text(items::info(*id).name);
                     }

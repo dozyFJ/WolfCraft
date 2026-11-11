@@ -77,7 +77,14 @@ impl GuiIcons {
         if item < ITEM_BASE {
             let bi = Block::from_u8(item as u8).info();
             if !matches!(bi.render, RenderKind::Cross | RenderKind::Invisible) {
-                self.paint_cube(painter, rect, bi.tiles[2], bi.tiles[4], bi.tiles[0]);
+                let block = Block::from_u8(item as u8);
+                let boxes = block.boxes();
+                if boxes.is_empty() {
+                    self.paint_cube(painter, rect, bi.tiles[2], bi.tiles[4], bi.tiles[0]);
+                } else {
+                    // Stairs, slabs, doors, panes, fences: their real shape.
+                    self.paint_boxes(painter, rect, boxes, bi.tiles[2], bi.tiles[4], bi.tiles[0]);
+                }
                 return;
             }
         }
@@ -129,6 +136,39 @@ impl GuiIcons {
         painter.add(egui::Shape::line_segment([so, e], thin));
         painter.add(egui::Shape::line_segment([so, so + d], thin));
         painter.add(egui::Shape::line_segment([n, e], egui::Stroke::new(thin.width, Color32::from_white_alpha(120))));
+    }
+
+    /// Isometric view of a shaped block made of boxes `[i0, j0, k0, i1, j1, k1]` (k is up), in
+    /// the same projection as [`Self::paint_cube`]; boxes are drawn back to front.
+    pub fn paint_boxes(&self, painter: &egui::Painter, rect: Rect, boxes: &[[f32; 6]], top: u16, left: u16, right: u16) {
+        let s = rect.width().min(rect.height());
+        let c = rect.center();
+        let (w, v) = (s * 0.44, s * 0.48);
+        let h = w * 0.55;
+        let y0 = c.y - (2.0 * h + v) / 2.0;
+        let pt = |i: f32, j: f32, k: f32| egui::pos2(c.x + (i - j) * w, y0 + (i + j) * h + (1.0 - k) * v);
+        let mut order: Vec<&[f32; 6]> = boxes.iter().collect();
+        order.sort_by(|a, b| (a[0] + a[1] + a[3] + a[4] - a[2] * 0.01).partial_cmp(&(b[0] + b[1] + b[3] + b[4] - b[2] * 0.01)).unwrap_or(std::cmp::Ordering::Equal));
+        let ink = egui::Stroke::new((s / 32.0).max(1.0), Color32::from_rgb(24, 20, 28));
+        for b in order {
+            let [i0, j0, k0, i1, j1, k1] = *b;
+            let mut mesh = egui::Mesh::with_texture(self.blocks.id());
+            let mut quad = |p: [egui::Pos2; 4], tile: u16, u: (f32, f32), vv: (f32, f32), col: Color32| {
+                let Some(uv) = self.block_uv.get(tile as usize) else { return };
+                let at = |a: f32, b: f32| egui::pos2(uv.min.x + uv.width() * a, uv.min.y + uv.height() * b);
+                let i = mesh.vertices.len() as u32;
+                for (pos, t) in p.into_iter().zip([at(u.0, vv.0), at(u.1, vv.0), at(u.1, vv.1), at(u.0, vv.1)]) {
+                    mesh.vertices.push(epaint::Vertex { pos, uv: t, color: col });
+                }
+                mesh.add_triangle(i, i + 1, i + 2);
+                mesh.add_triangle(i, i + 2, i + 3);
+            };
+            quad([pt(i0, j0, k1), pt(i1, j0, k1), pt(i1, j1, k1), pt(i0, j1, k1)], top, (i0, i1), (j0, j1), Color32::WHITE);
+            quad([pt(i0, j1, k1), pt(i1, j1, k1), pt(i1, j1, k0), pt(i0, j1, k0)], left, (i0, i1), (1.0 - k1, 1.0 - k0), Color32::from_gray(190));
+            quad([pt(i1, j1, k1), pt(i1, j0, k1), pt(i1, j0, k0), pt(i1, j1, k0)], right, (1.0 - j1, 1.0 - j0), (1.0 - k1, 1.0 - k0), Color32::from_gray(125));
+            painter.add(egui::Shape::mesh(mesh));
+            painter.add(egui::Shape::closed_line(vec![pt(i0, j0, k1), pt(i1, j0, k1), pt(i1, j0, k0), pt(i1, j1, k0), pt(i0, j1, k0), pt(i0, j1, k1)], ink));
+        }
     }
 
     /// Draws a sprite from the blocks atlas by id (used for textured block previews).

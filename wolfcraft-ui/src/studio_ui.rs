@@ -113,7 +113,8 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, project
             ui.add(egui::TextEdit::singleline(&mut st.search).hint_text("Поиск…").desired_width(f32::INFINITY));
             ui.add_space(4.0);
             let q = st.search.trim().to_lowercase();
-            let list: Vec<u16> = items::creative_palette().into_iter().filter(|id| q.is_empty() || items::info(*id).name.to_lowercase().contains(&q)).collect();
+            let mut list: Vec<u16> = items::creative_palette().into_iter().filter(|id| q.is_empty() || items::info(*id).name.to_lowercase().contains(&q)).collect();
+            list.sort_by_key(|id| !items::is_new(*id));
             let cell = 46.0;
             let cols = ((ui.available_width() + 4.0) / (cell + 4.0)).floor().max(1.0) as usize;
             egui::ScrollArea::vertical().id_salt("studio-assets-scroll").auto_shrink([false, false]).drag_to_scroll(true).show(ui, |ui| {
