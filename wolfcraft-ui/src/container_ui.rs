@@ -3,7 +3,7 @@
 
 use crate::gui_renderer::GuiIcons;
 use crate::theme_manager::{bold_font, palette};
-use crate::ui_components::{ButtonKind, icon_button, modal, progress_bar};
+use crate::ui_components::{ButtonKind, icon_button, progress_bar};
 use egui::{Align2, Color32, FontId, Rect, Rounding, Sense, Stroke, Ui, Vec2};
 use wolfcraft_assets::gui as icon;
 use wolfcraft_engine::inventory::Inventory;
@@ -74,7 +74,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, slots: 
     let mut close = false;
     let cols = view.columns.max(1);
     let width = cols.max(9) as f32 * (CELL + GAP) - GAP;
-    let dismissed = modal(ctx, "container", "", width + 4.0, |ui| {
+    let dismissed = crate::ui_components::game_window(ctx, "container", width + 4.0, |ui| {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(view.title).font(bold_font(20.0)).color(p.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

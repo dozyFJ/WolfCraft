@@ -429,14 +429,50 @@ pub fn strike_curve(t: f32) -> f32 {
     }
 }
 
-fn swing_amount(pose: &HandsPose) -> f32 {
-    pose.guard.clamp(0.0, 1.0) * strike_curve(pose.punch_cycle.rem_euclid(1.0))
-}
-
 const TOOL_MATERIALS: [[f32; 3]; 4] = [[0.62, 0.45, 0.25], [0.55, 0.55, 0.55], [0.85, 0.85, 0.88], [0.35, 0.90, 0.85]];
 const HANDLE: [f32; 3] = [0.45, 0.32, 0.18];
 const PLANK: [f32; 3] = [0.62, 0.45, 0.25];
 const IRON: [f32; 3] = [0.62, 0.64, 0.68];
+
+/// One keyframe of a held-tool animation: time in the cycle (0..1), hand offset (camera-local
+/// x right, y up, z forward) and forearm tilt.
+#[derive(Clone, Copy)]
+struct AnimKey {
+    t: f32,
+    x: f32,
+    y: f32,
+    z: f32,
+    tilt: f32,
+}
+
+const fn key(t: f32, x: f32, y: f32, z: f32, tilt: f32) -> AnimKey {
+    AnimKey { t, x, y, z, tilt }
+}
+
+/// Animation atlas of the tools: one strike per cycle, first and last key equal so strikes
+/// repeat smoothly while mining. Order: pickaxe, axe, shovel, sword.
+const TOOL_ANIMS: [&[AnimKey]; 4] = [
+    // Pickaxe: raised over the shoulder, short wind-up, hard downward blow into the ore, a
+    // little rebound on impact.
+    &[key(0.00, 0.00, 0.10, 0.00, -0.85), key(0.28, -0.01, 0.15, -0.03, -1.05), key(0.50, -0.05, -0.07, 0.11, 0.90), key(0.58, -0.05, -0.05, 0.10, 0.78), key(0.66, -0.05, -0.07, 0.10, 0.84), key(1.00, 0.00, 0.10, 0.00, -0.85)],
+    // Axe: chop on a diagonal from the upper right to the lower left.
+    &[key(0.00, 0.10, 0.08, 0.00, -0.60), key(0.28, 0.15, 0.13, -0.03, -0.85), key(0.50, -0.15, -0.07, 0.07, 0.72), key(0.64, -0.15, -0.08, 0.06, 0.66), key(1.00, 0.10, 0.08, 0.00, -0.60)],
+    // Shovel: pull back, then a digging thrust forward and down, and scoop up.
+    &[key(0.00, 0.00, -0.02, -0.05, 0.25), key(0.30, 0.01, 0.01, -0.10, 0.10), key(0.50, -0.03, -0.12, 0.19, 0.72), key(0.66, -0.02, -0.08, 0.14, 0.40), key(1.00, 0.00, -0.02, -0.05, 0.25)],
+    // Sword: quick diagonal slash across the view.
+    &[key(0.00, 0.12, 0.06, 0.00, -0.45), key(0.22, 0.17, 0.11, -0.03, -0.62), key(0.42, -0.19, -0.08, 0.08, 0.62), key(0.58, -0.19, -0.09, 0.07, 0.55), key(1.00, 0.12, 0.06, 0.00, -0.45)],
+];
+
+/// Pose of an animation at `t` (0..1): eased blend between the two surrounding keys.
+fn sample_anim(keys: &[AnimKey], t: f32) -> AnimKey {
+    let t = t.clamp(0.0, 1.0);
+    let i = keys.iter().rposition(|k| k.t <= t).unwrap_or(0).min(keys.len() - 2);
+    let (a, b) = (keys[i], keys[i + 1]);
+    let f = ((t - a.t) / (b.t - a.t).max(1e-4)).clamp(0.0, 1.0);
+    let f = f * f * (3.0 - 2.0 * f);
+    let l = |p: f32, q: f32| p + (q - p) * f;
+    key(t, l(a.x, b.x), l(a.y, b.y), l(a.z, b.z), l(a.tilt, b.tilt))
+}
 
 /// Where one arm is this frame: shoulder-side start (camera-local x right, y up, z forward)
 /// and forearm tilt about the local X axis.
@@ -462,20 +498,10 @@ fn arm_place_base(pose: &HandsPose, side: f32, jab: f32) -> (Vec3, f32) {
     // At rest the arms are hidden below the screen; only the right one stays up while holding
     // an item. Holding LMB brings both up into the boxing guard.
     if side > 0.0 && pose.tool.is_some() {
-        // Every tool swings its own way; `sw` runs wind-up (<0) -> hit (1) -> back (0).
-        let sw = swing_amount(pose);
-        let kind = pose.tool.map(|t| t.0).unwrap_or(0);
-        let (dx, dy, dz, tilt) = match kind {
-            // Pickaxe: raised high, then straight down.
-            0 => (-0.05 * sw, 0.10 * g - 0.15 * sw, 0.08 * sw, g * (-0.85 + 1.65 * sw)),
-            // Axe: diagonal chop from the upper right to the lower left.
-            1 => (0.10 * g - 0.24 * sw, 0.08 * g - 0.12 * sw, 0.06 * sw, g * (-0.60 + 1.30 * sw)),
-            // Shovel: a digging thrust forward and down.
-            2 => (-0.03 * sw, -0.02 * g - 0.10 * sw, -0.05 * g + 0.22 * sw, g * (0.25 + 0.45 * sw)),
-            // Sword: a quick sideways sweep.
-            // Sword: Minecraft-style diagonal slash from upper right down to the centre.
-            _ => (0.12 * g - 0.30 * sw, 0.06 * g - 0.14 * sw, 0.08 * sw, g * (-0.45 + 1.05 * sw)),
-        };
+        // Every tool has its own strike in the animation atlas (keyframes over one cycle).
+        let kind = pose.tool.map(|t| t.0).unwrap_or(0) as usize;
+        let k = sample_anim(TOOL_ANIMS[kind.min(TOOL_ANIMS.len() - 1)], pose.punch_cycle.rem_euclid(1.0));
+        let (dx, dy, dz, tilt) = (k.x * g, k.y * g, k.z * g, k.tilt * g);
         return (Vec3::new(0.30 + dx + bob_x, -0.30 + dy - bob_y, 0.42 + dz), 0.2 + tilt);
     }
     if side < 0.0 && (pose.shield || pose.tool.is_some()) {

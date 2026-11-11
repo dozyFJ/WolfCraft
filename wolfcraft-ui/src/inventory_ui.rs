@@ -5,7 +5,7 @@
 use crate::gui_renderer::GuiIcons;
 use crate::hud::draw_stack;
 use crate::theme_manager::{ANIM_TIME, Palette, RADIUS_MD, RADIUS_SM, bold_font, palette};
-use crate::ui_components::{ButtonKind, divider, modal, pill_button, section_label, text_input};
+use crate::ui_components::{ButtonKind, divider, pill_button, section_label, text_input};
 use egui::{Align2, Color32, FontId, Id, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
 use wolfcraft_assets::gui as icon;
 use wolfcraft_engine::inventory::{CraftGrid, HOTBAR, Inventory, SLOTS};
@@ -126,6 +126,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     let mut result = InventoryResult::default();
     let mut slot_rects: Vec<(usize, Rect)> = Vec::new();
     let mut trash_rect: Option<Rect> = None;
+    // The workbench always opens its own 3×3 window, in creative too.
+    let creative = creative && !near_table;
     if !creative {
         let want = if near_table { 3 } else { 2 };
         if state.grid.size != want {
@@ -143,7 +145,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         // Hotbar (9) + gap + bin; the tab row (10 tabs + close) is laid out to the same width.
         let width = 10.0 * cell + 8.0 * GAP + 14.0;
         let grid_w = width;
-        let dismissed = modal(ctx, "inventory", "", width.min(ctx.screen_rect().width() - 40.0), |ui| {
+        let dismissed = crate::ui_components::game_window(ctx, "inventory", width.min(ctx.screen_rect().width() - 40.0), |ui| {
             creative_layout(ui, icons, &p, state, inv, cell, rows, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
         if dismissed {
@@ -151,12 +153,12 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         }
     } else {
     let width = left_w + 8.0;
-    let dismissed = modal(ctx, "inventory", "", width.min(ctx.screen_rect().width() - 40.0), |ui| {
+    let dismissed = crate::ui_components::game_window(ctx, "inventory", width.min(ctx.screen_rect().width() - 40.0), |ui| {
         ui.horizontal(|ui| {
             let (ir, _) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
-            icons.paint(ui.painter(), ir, icon::BACKPACK, p.accent);
+            icons.paint(ui.painter(), ir, if near_table { icon::CUBE } else { icon::BACKPACK }, p.accent);
             ui.add_space(6.0);
-            ui.label(egui::RichText::new("Инвентарь").font(bold_font(20.0)).color(p.text));
+            ui.label(egui::RichText::new(if near_table { "Верстак" } else { "Инвентарь" }).font(bold_font(20.0)).color(p.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if pill_button(ui, icons, Some(icon::CLOSE), "Закрыть", ButtonKind::Secondary, 0.0, true).clicked() {
                     result.close = true;

@@ -293,13 +293,25 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
 
 /// Centered modal dialog over a dimmed screen. Returns true if the user clicked outside / Esc.
 pub fn modal(ctx: &egui::Context, id: &str, title: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+    modal_opts(ctx, id, title, width, true, add)
+}
+
+/// In-game window (inventory, chest, furnace, workbench): no dimming behind it, the world stays
+/// fully visible; a tap outside still closes it.
+pub fn game_window(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+    modal_opts(ctx, id, "", width, false, add)
+}
+
+fn modal_opts(ctx: &egui::Context, id: &str, title: &str, width: f32, scrim: bool, add: impl FnOnce(&mut Ui)) -> bool {
     let p: Palette = palette(ctx);
     let screen = ctx.screen_rect();
     let mut dismissed = false;
     egui::Area::new(Id::new(id).with("scrim")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
         let (rect, resp) = ui.allocate_exact_size(screen.size(), Sense::click());
         let a = ctx.animate_bool_with_time(Id::new(id).with("fade"), true, ANIM_TIME);
-        ui.painter().rect_filled(rect, 0.0, p.scrim.gamma_multiply(a));
+        if scrim {
+            ui.painter().rect_filled(rect, 0.0, p.scrim.gamma_multiply(a));
+        }
         if resp.clicked() {
             dismissed = true;
         }
