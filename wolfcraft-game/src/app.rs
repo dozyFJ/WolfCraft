@@ -85,6 +85,9 @@ struct LoadState {
     started: Instant,
 }
 
+/// Phone folder for the player's resource packs (the app's own shared-storage folder).
+const ANDROID_PACKS_DIR: &str = "/storage/emulated/0/Android/data/com.wolfcraft.mobile/files/resourcepacks";
+
 /// Preview-channel id of the main menu backdrop planet.
 const MENU_PLANET_ID: &str = "__menu_planet";
 
@@ -104,6 +107,11 @@ pub struct App {
     preview_rx: Receiver<(String, egui::ColorImage)>,
     preview_requested: HashSet<String>,
     create_preview: Option<TextureHandle>,
+    /// Resource packs found on disk, the one currently loaded and the download in progress.
+    packs: Vec<wolfcraft_assets::packs::PackInfo>,
+    loaded_pack: String,
+    pack_status: String,
+    pack_dl: Option<Receiver<Result<String, String>>>,
     /// Big planet drawn behind the main menu.
     menu_planet: Option<TextureHandle>,
     menu_planet_requested: bool,
@@ -199,6 +207,10 @@ impl App {
             preview_rx,
             preview_requested: HashSet::new(),
             create_preview: None,
+            packs: Vec::new(),
+            loaded_pack: String::new(),
+            pack_status: String::new(),
+            pack_dl: None,
             menu_planet: None,
             menu_planet_requested: false,
             create_preview_key: 0,
@@ -273,7 +285,8 @@ impl App {
             window.set_fullscreen(Some(Fullscreen::Borderless(None)));
         }
         let gpu = GpuContext::new(window.clone(), self.settings.vsync, false)?;
-        let atlases = AtlasManager::new(Some(&self.data_dir.join("resourcepacks")))?;
+        self.packs = wolfcraft_assets::packs::list(&self.pack_dirs());
+        let atlases = self.load_atlases().or_else(|_| AtlasManager::new(None))?;
         // Export the generated atlases once so artists can see and override them.
         let export_dir = self.data_dir.join("atlases");
         if !export_dir.join("blocks_atlas.png").exists() {
@@ -527,7 +540,94 @@ impl App {
         self.menu_planet_requested = false;
     }
 
+    /// Folders scanned for resource packs. On a phone also the app's folder in shared storage,
+    /// which a file manager or a computer over USB can reach.
+    fn pack_dirs(&self) -> Vec<PathBuf> {
+        let mut v = vec![self.data_dir.join("resourcepacks")];
+        if cfg!(target_os = "android") {
+            v.push(PathBuf::from(ANDROID_PACKS_DIR));
+        }
+        for d in &v {
+            let _ = std::fs::create_dir_all(d);
+        }
+        v
+    }
+
+    /// Builds atlases for the selected pack (falls back to the default if it is gone).
+    fn load_atlases(&mut self) -> Result<AtlasManager, String> {
+        use wolfcraft_assets::packs::{DEFAULT_PACK, base_scale};
+        let id = self.settings.texture_pack.clone();
+        let user = self.packs.iter().find(|p| p.id == id).and_then(|p| p.path.clone());
+        let base = if user.is_some() || base_scale(&id) > 1 || id == DEFAULT_PACK { id.clone() } else { DEFAULT_PACK.to_string() };
+        if user.is_none() && base != id {
+            self.settings.texture_pack = DEFAULT_PACK.into();
+        }
+        let m = AtlasManager::load(&base, user.as_deref(), Some(&self.data_dir.join("resourcepacks")))?;
+        self.loaded_pack = self.settings.texture_pack.clone();
+        Ok(m)
+    }
+
+    /// Switches the resource pack live: new atlases for the world, models and the GUI.
+    fn reload_pack(&mut self, gfx: &mut Gfx) {
+        match self.load_atlases() {
+            Ok(a) => {
+                gfx.atlases = a;
+                gfx.world.reload_atlases(&gfx.gpu.device, &gfx.gpu.queue, &gfx.atlases);
+                gfx.gui.icons = Arc::new(wolfcraft_ui::gui_renderer::GuiIcons::new(&gfx.gui.ctx, &gfx.atlases));
+                self.block_colors.clear();
+                self.pack_status = String::new();
+            }
+            Err(e) => {
+                self.pack_status = format!("Не удалось загрузить пак: {e}");
+                self.loaded_pack = self.settings.texture_pack.clone();
+            }
+        }
+    }
+
+    /// Downloads a .zip pack in the background into the packs folder.
+    fn start_pack_download(&mut self, url: String) {
+        let dir = self.pack_dirs()[0].clone();
+        let (tx, rx) = channel();
+        self.pack_dl = Some(rx);
+        self.pack_status = "Загрузка…".into();
+        std::thread::spawn(move || {
+            let r = (|| -> Result<String, String> {
+                let resp = ureq::get(&url).call().map_err(|e| e.to_string())?;
+                let mut bytes = Vec::new();
+                use std::io::Read;
+                resp.into_reader().take(200 << 20).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+                if !bytes.starts_with(b"PK") {
+                    return Err("по ссылке не .zip файл".into());
+                }
+                let raw = url.split(['?', '#']).next().unwrap_or("").rsplit('/').next().unwrap_or("");
+                let mut name: String = raw.trim_end_matches(".zip").chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+                if name.is_empty() {
+                    name = "pack".into();
+                }
+                let file = format!("{name}.zip");
+                std::fs::write(dir.join(&file), &bytes).map_err(|e| e.to_string())?;
+                Ok(file)
+            })();
+            let _ = tx.send(r);
+        });
+    }
+
+    fn poll_pack_download(&mut self) {
+        let Some(rx) = &self.pack_dl else { return };
+        if let Ok(r) = rx.try_recv() {
+            self.pack_dl = None;
+            self.packs = wolfcraft_assets::packs::list(&self.pack_dirs());
+            self.pack_status = match r {
+                Ok(f) => format!("Пак загружен: {f}. Выберите его в списке."),
+                Err(e) => format!("Ошибка загрузки: {e}"),
+            };
+        }
+    }
+
     fn apply_settings(&mut self, gfx: &mut Gfx) {
+        if self.settings.texture_pack != self.loaded_pack {
+            self.reload_pack(gfx);
+        }
         gfx.gui.set_ui_scale(self.settings.ui_scale * ui_mult());
         theme_manager::apply(&gfx.gui.ctx, self.settings.theme);
         gfx.gpu.set_vsync(self.settings.vsync);
@@ -895,6 +995,8 @@ impl App {
         let mut actions: Vec<MenuAction> = Vec::new();
         let mut settings_changed = false;
         let mut settings_back = false;
+        let mut pack_refresh = false;
+        let mut pack_download: Option<String> = None;
         let mut close_inventory = false;
         let mut submitted: Vec<String> = Vec::new();
         let icons = gfx.gui.icons.clone();
@@ -928,7 +1030,7 @@ impl App {
         }
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
         let frame = {
-            let App { settings, world_select, create, worlds, create_preview, menu_planet, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
+            let App { settings, world_select, create, worlds, create_preview, menu_planet, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
             let touch_size = gfx.gpu.size();
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
@@ -937,9 +1039,14 @@ impl App {
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
                 Screen::Create => actions.push(main_menu::create_world(ctx, &icons, create, create_preview.as_ref(), version, random_seed)),
                 Screen::Settings => {
-                    let r = main_menu::settings_screen(ctx, &icons, settings, version);
+                    let folder = if cfg!(target_os = "android") { ANDROID_PACKS_DIR.to_string() } else { data_dir_str.clone() + "/resourcepacks" };
+                    let r = main_menu::settings_screen(ctx, &icons, settings, version, &main_menu::PacksView { list: packs, status: pack_status, folder: &folder });
                     settings_changed |= r.changed;
                     settings_back |= r.back;
+                    pack_refresh |= r.refresh_packs;
+                    if r.download.is_some() {
+                        pack_download = r.download;
+                    }
                 }
                 Screen::Loading => {
                     let stages: Vec<String> = STAGES.iter().map(|s| s.to_string()).collect();
@@ -1076,6 +1183,14 @@ impl App {
         self.profile.ui_ms = t_ui.ms();
 
         // ---- apply UI results ----
+        if pack_refresh {
+            self.packs = wolfcraft_assets::packs::list(&self.pack_dirs());
+            self.pack_status = format!("Найдено паков: {}", self.packs.iter().filter(|p| p.path.is_some()).count());
+        }
+        if let Some(url) = pack_download {
+            self.start_pack_download(url);
+        }
+        self.poll_pack_download();
         if settings_changed {
             self.apply_settings(gfx);
         }

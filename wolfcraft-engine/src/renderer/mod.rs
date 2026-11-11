@@ -206,32 +206,7 @@ impl WorldRenderer {
         let blocks_atlas = GpuAtlas::new(device, queue, blocks);
         let entities_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Entities));
         let items_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Items));
-        // Models sample skins and item icons from these atlases.
-        {
-            let ent = atlases.get(AtlasKind::Entities);
-            let it = atlases.get(AtlasKind::Items);
-            let rect = |u: wolfcraft_assets::UvRect| [u.min[0], u.min[1], u.max[0], u.max[1]];
-            model::set_textures(model::ModelTextures {
-                player: (ent.len() > wolfcraft_assets::entities::PLAYER as usize).then(|| rect(ent.uv(wolfcraft_assets::entities::PLAYER as usize))),
-                items: it.uvs().iter().map(|u| rect(*u)).collect(),
-                item_pixels: (0..it.len())
-                    .map(|i| {
-                        // RGBA pixels of each 16x16 icon, for 3D (voxel) held items.
-                        let r = it.rect(i);
-                        let img = it.image();
-                        let mut px = Vec::with_capacity(256);
-                        for y in 0..16u32 {
-                            for x in 0..16u32 {
-                                let (sx, sy) = (r.x + x * r.w / 16, r.y + y * r.h / 16);
-                                let o = ((sy * img.width + sx) * 4) as usize;
-                                px.push([img.pixels[o], img.pixels[o + 1], img.pixels[o + 2], img.pixels[o + 3]]);
-                            }
-                        }
-                        px
-                    })
-                    .collect(),
-            });
-        }
+        set_model_textures(atlases);
         let mut tile_rects = [[0.0f32; 4]; MAX_TILES];
         for (i, rect) in tile_rects.iter_mut().enumerate().take(blocks.len().min(MAX_TILES)) {
             let uv = blocks.uv(i);
@@ -569,6 +544,22 @@ impl WorldRenderer {
     }
 
     /// Pushes animated/changed atlas data to the GPU. Cheap when nothing changed.
+    /// Swaps in new atlases (another resource pack). Chunk meshes keep working: they refer to
+    /// tiles by index and the shader looks the UV rectangles up.
+    pub fn reload_atlases(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, atlases: &AtlasManager) {
+        set_model_textures(atlases);
+        let blocks = atlases.get(AtlasKind::Blocks);
+        self.blocks_atlas = GpuAtlas::new(device, queue, blocks);
+        self.entities_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Entities));
+        self.items_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Items));
+        for (i, rect) in self.tile_rects.iter_mut().enumerate().take(blocks.len().min(MAX_TILES)) {
+            let uv = blocks.uv(i);
+            *rect = [uv.min[0], uv.min[1], uv.max[0] - uv.min[0], uv.max[1] - uv.min[1]];
+        }
+        self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view], &self.sampler);
+        self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view], &self.sampler);
+    }
+
     pub fn sync_atlas(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, atlases: &mut AtlasManager) {
         let atlas = atlases.get_mut(AtlasKind::Blocks);
         if self.blocks_atlas.sync(device, queue, atlas) {
@@ -890,6 +881,33 @@ impl WorldRenderer {
         self.stats = stats;
     }
 }
+
+/// Models sample skins and item icons from these atlases.
+fn set_model_textures(atlases: &AtlasManager) {
+            let ent = atlases.get(AtlasKind::Entities);
+            let it = atlases.get(AtlasKind::Items);
+            let rect = |u: wolfcraft_assets::UvRect| [u.min[0], u.min[1], u.max[0], u.max[1]];
+            model::set_textures(model::ModelTextures {
+                player: (ent.len() > wolfcraft_assets::entities::PLAYER as usize).then(|| rect(ent.uv(wolfcraft_assets::entities::PLAYER as usize))),
+                items: it.uvs().iter().map(|u| rect(*u)).collect(),
+                item_pixels: (0..it.len())
+                    .map(|i| {
+                        // RGBA pixels of each 16x16 icon, for 3D (voxel) held items.
+                        let r = it.rect(i);
+                        let img = it.image();
+                        let mut px = Vec::with_capacity(256);
+                        for y in 0..16u32 {
+                            for x in 0..16u32 {
+                                let (sx, sy) = (r.x + x * r.w / 16, r.y + y * r.h / 16);
+                                let o = ((sy * img.width + sx) * 4) as usize;
+                                px.push([img.pixels[o], img.pixels[o + 1], img.pixels[o + 2], img.pixels[o + 3]]);
+                            }
+                        }
+                        px
+                    })
+                    .collect(),
+            });
+        }
 
 /// Six frustum planes (normal.xyz, d) from a view-projection matrix (depth range 0..1).
 pub fn frustum_planes(vp: &Mat4) -> [Vec4; 6] {

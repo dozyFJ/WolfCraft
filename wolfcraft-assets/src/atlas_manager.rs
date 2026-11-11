@@ -177,15 +177,33 @@ impl TextureAtlas {
 pub struct AtlasManager {
     atlases: Vec<TextureAtlas>,
     water_frame: u32,
+    /// Upscale factor of the built-in base (1 = 16×).
+    scale: u32,
 }
 
 impl AtlasManager {
     /// Builds all atlases from procedural sprites, applying PNG overrides from
     /// `override_dir/<category>/<sprite>.png` when present.
     pub fn new(override_dir: Option<&Path>) -> Result<Self, String> {
+        Self::load(crate::packs::DEFAULT_PACK, None, override_dir)
+    }
+
+    /// Builds the atlases for a resource pack: the built-in base of `pack_id` (16× or a smooth
+    /// HD upscale), then the user pack at `user_pack` on top, then loose legacy overrides.
+    pub fn load(pack_id: &str, user_pack: Option<&Path>, override_dir: Option<&Path>) -> Result<Self, String> {
+        let scale = crate::packs::base_scale(pack_id);
         let mut atlases = Vec::new();
         for kind in AtlasKind::ALL {
             let mut sprites = procedural::sprites(kind);
+            // Block, item and particle art gets the HD treatment; GUI icons and skins stay as they are.
+            if scale > 1 && matches!(kind, AtlasKind::Blocks | AtlasKind::Items | AtlasKind::Particles) {
+                for (_, img) in sprites.iter_mut() {
+                    *img = crate::packs::upscale(img, scale);
+                }
+            }
+            if let Some(pack) = user_pack {
+                crate::packs::apply_user_pack(pack, kind, &mut sprites);
+            }
             if let Some(dir) = override_dir {
                 for (name, img) in sprites.iter_mut() {
                     let p = dir.join(kind.folder()).join(format!("{name}.png"));
@@ -202,7 +220,7 @@ impl AtlasManager {
             }
             atlases.push(TextureAtlas::build(kind, sprites)?);
         }
-        Ok(Self { atlases, water_frame: 0 })
+        Ok(Self { atlases, water_frame: 0, scale })
     }
 
     pub fn get(&self, kind: AtlasKind) -> &TextureAtlas {
@@ -226,13 +244,16 @@ impl AtlasManager {
             return false;
         }
         self.water_frame = frame;
+        let scale = self.scale;
         let blocks = self.get_mut(AtlasKind::Blocks);
         let id = procedural::tiles::WATER as usize;
         let size = blocks.sprites[id].1.width;
-        if size != 16 {
+        if size != 16 * scale {
             return false; // overridden by a pack with another size: keep it static
         }
-        blocks.update_sprite(id, procedural::water_frame(frame)).is_ok()
+        let img = procedural::water_frame(frame);
+        let img = if scale > 1 { crate::packs::upscale(&img, scale) } else { img };
+        blocks.update_sprite(id, img).is_ok()
     }
 }
 
@@ -276,5 +297,23 @@ mod tests {
         let m = AtlasManager::new(None).unwrap();
         let gui = m.get(AtlasKind::Gui);
         assert_eq!(gui.id("logo"), Some(procedural::gui::LOGO as usize));
+    }
+}
+
+#[cfg(test)]
+mod pack_tests {
+    use super::*;
+
+    #[test]
+    fn hd_packs_build() {
+        for (id, _, f) in crate::packs::BUILTIN {
+            let t = std::time::Instant::now();
+            let mut m = AtlasManager::load(id, None, None).unwrap();
+            let b = m.get(AtlasKind::Blocks);
+            assert_eq!(b.sprites[crate::procedural::tiles::STONE as usize].1.width, 16 * f);
+            assert!(b.image().width <= 8192, "{id}: atlas {}", b.image().width);
+            eprintln!("{id}: {:?} atlas {}x{}", t.elapsed(), b.image().width, b.image().height);
+            assert!(m.animate(0.5) || m.animate(1.0));
+        }
     }
 }

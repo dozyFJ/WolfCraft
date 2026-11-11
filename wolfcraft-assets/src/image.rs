@@ -59,6 +59,11 @@ impl Image {
         Ok(Image { width: img.width(), height: img.height(), pixels: img.into_raw() })
     }
 
+    pub fn load_png_bytes(bytes: &[u8]) -> Result<Image, String> {
+        let img = ::image::load_from_memory(bytes).map_err(|e| e.to_string())?.to_rgba8();
+        Ok(Image { width: img.width(), height: img.height(), pixels: img.into_raw() })
+    }
+
     pub fn save_png(&self, path: &std::path::Path) -> Result<(), String> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

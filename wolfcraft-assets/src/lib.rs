@@ -9,6 +9,7 @@
 
 pub mod atlas_manager;
 pub mod image;
+pub mod packs;
 pub mod procedural;
 pub mod texture_packer;
 

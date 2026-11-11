@@ -681,13 +681,72 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
 pub struct SettingsResult {
     pub changed: bool,
     pub back: bool,
+    /// Re-scan the resource pack folders.
+    pub refresh_packs: bool,
+    /// Download a resource pack (.zip) from this link.
+    pub download: Option<String>,
+}
+
+/// What the "Текстуры" tab shows.
+pub struct PacksView<'a> {
+    pub list: &'a [wolfcraft_assets::packs::PackInfo],
+    /// Download / scan status line.
+    pub status: &'a str,
+    /// Folder where the player can drop packs.
+    pub folder: &'a str,
 }
 
 const FPS_LIMITS: [u32; 7] = [0, 30, 60, 90, 120, 144, 240];
 
-const SETTINGS_TABS: [(u16, &str); 5] = [(icon::HEART, "Профиль"), (icon::SUN, "Графика"), (icon::HAMMER, "Рука"), (icon::EDIT, "Интерфейс"), (icon::CROSSHAIR, "Управление")];
+const SETTINGS_TABS: [(u16, &str); 6] = [(icon::HEART, "Профиль"), (icon::SUN, "Графика"), (icon::CUBE, "Текстуры"), (icon::HAMMER, "Рука"), (icon::EDIT, "Интерфейс"), (icon::CROSSHAIR, "Управление")];
 
-pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, version: &str) -> SettingsResult {
+/// Resource packs: built-in ones and the player's own, plus import from a link.
+fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs: &PacksView, res: &mut SettingsResult) {
+    for pack in packs.list {
+        let sel = s.texture_pack == pack.id;
+        let resp = row_card(ui, sel, |ui| {
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+                icons.paint(ui.painter(), r, if sel { icon::CHECK } else if pack.path.is_some() { icon::FOLDER } else { icon::CUBE }, if sel { p.accent } else { p.text_muted });
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(&pack.name).font(bold_font(15.0)).color(if sel { p.accent } else { p.text }));
+                    if !pack.description.is_empty() {
+                        ui.label(egui::RichText::new(&pack.description).size(12.5).color(p.text_muted));
+                    }
+                });
+            });
+        });
+        if resp.clicked() && !sel {
+            s.texture_pack = pack.id.clone();
+            res.changed = true;
+        }
+        ui.add_space(6.0);
+    }
+    ui.add_space(8.0);
+    section_label(ui, "Свой пак");
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new("Пак — папка или .zip с картинками blocks/, items/, entities/, gui/, particles/ (имя_спрайта.png, любой размер) и pack.json {\"name\": \"...\"}. Положите его в папку:").size(12.5).color(p.text_muted));
+    ui.label(egui::RichText::new(packs.folder).size(12.5).color(p.text));
+    ui.add_space(6.0);
+    let url_id = egui::Id::new("pack-url");
+    let mut url: String = ui.ctx().data(|d| d.get_temp(url_id)).unwrap_or_default();
+    ui.horizontal(|ui| {
+        text_input(ui, icons, &mut url, "Ссылка на .zip", 300.0, Some(icon::GLOBE));
+        if pill_button(ui, icons, Some(icon::DOWNLOAD), "Загрузить", ButtonKind::Primary, 0.0, !url.trim().is_empty()).clicked() {
+            res.download = Some(url.trim().to_string());
+        }
+        if square_button(ui, icons, icon::REFRESH, false).on_hover_text("Обновить список").clicked() {
+            res.refresh_packs = true;
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(url_id, url));
+    if !packs.status.is_empty() {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(packs.status).size(13.0).color(p.text_muted));
+    }
+}
+
+pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, version: &str, packs: &PacksView) -> SettingsResult {
     let p = palette(ctx);
     let mut res = SettingsResult::default();
     top_bar(ctx, icons, "Настройки", version, false);
@@ -777,6 +836,9 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                     });
                 }
                 2 => {
+                    packs_tab(ui, icons, &p, s, packs, &mut res);
+                }
+                3 => {
                     setting_row(ui, "Поле зрения руки", Some("Отдельно от основной камеры"), |ui| {
                         res.changed |= ui.add(egui::Slider::new(&mut s.vm_fov, 40.0..=100.0).suffix("°").integer()).changed();
                     });
@@ -797,7 +859,7 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                         res.changed |= ui.add(egui::Slider::new(&mut s.hand_anim, 0.4..=1.0)).changed();
                     });
                 }
-                3 => {
+                4 => {
                     setting_row(ui, "Тема", None, |ui| {
                         res.changed |= segmented(ui, "theme", &[(ThemeMode::Dark, "Тёмная"), (ThemeMode::Light, "Светлая")], &mut s.theme);
                     });
@@ -1037,7 +1099,7 @@ mod tests {
             });
             let mut s = Settings::default();
             frame(&ctx, |c| {
-                settings_screen(c, &icons, &mut s, "0.1.0");
+                settings_screen(c, &icons, &mut s, "0.1.0", &PacksView { list: &[], status: "", folder: "" });
             });
             let stages = vec!["A".to_string(), "B".to_string()];
             frame(&ctx, |c| loading_screen(c, &icons, &LoadingView { title: "t", stages: &stages, current: 1, fraction: 0.4, detail: "d", grid: &[] }));

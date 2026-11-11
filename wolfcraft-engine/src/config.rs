@@ -328,6 +328,8 @@ pub struct Settings {
     pub particles: f32,
     /// Strength of the hand swing animation (0.4 = subtle, 1 = full).
     pub hand_anim: f32,
+    /// Active resource pack: `builtin:16|32|64|128` or `user:<folder or zip name>`.
+    pub texture_pack: String,
 }
 
 impl Default for Settings {
@@ -352,6 +354,7 @@ impl Default for Settings {
             volume: 0.6,
             particles: 1.0,
             hand_anim: 1.0,
+            texture_pack: "builtin:16".into(),
         }
     }
 }
