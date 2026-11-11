@@ -898,6 +898,10 @@ impl App {
             cpu_cores: self.cpu.cores(),
             ram_mb: platform::process_memory_bytes() as f32 / 1048576.0,
             gpu_name: gfx.gpu.adapter_info.name.clone(),
+            gpu_errors: {
+                let n = wolfcraft_common::gpu::GPU_ERRORS.load(std::sync::atomic::Ordering::Relaxed);
+                if n == 0 { "Ошибок GPU: 0".into() } else { format!("Ошибок GPU: {n} · {}", wolfcraft_common::gpu::LAST_GPU_ERROR.lock().map(|l| l.clone()).unwrap_or_default()) }
+            },
             backend: format!("{:?}", gfx.gpu.adapter_info.backend),
             pos: [p.body.pos.x, p.body.pos.y, p.body.pos.z],
             block: {

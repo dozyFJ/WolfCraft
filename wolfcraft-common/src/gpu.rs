@@ -3,6 +3,10 @@
 use std::sync::Arc;
 use winit::window::Window;
 
+/// GPU validation errors seen so far and the last message (shown in the F3 overlay).
+pub static GPU_ERRORS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub static LAST_GPU_ERROR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 pub struct GpuContext {
     pub window: Arc<Window>,
     /// `None` while the app is in the background (Android takes the window away).
@@ -52,7 +56,13 @@ impl GpuContext {
         .map_err(|e| format!("request_device: {e}"))?;
 
         // A GPU validation error must not kill the game: log it and go on.
-        device.on_uncaptured_error(Box::new(|e| log::error!("wgpu error: {e}")));
+        device.on_uncaptured_error(Box::new(|e| {
+            log::error!("wgpu error: {e}");
+            GPU_ERRORS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut l) = LAST_GPU_ERROR.lock() {
+                *l = e.to_string().lines().next().unwrap_or("").chars().take(120).collect();
+            }
+        }));
         let caps = surface.get_capabilities(&adapter);
         // egui expects a non-sRGB target (it blends in gamma space); the 3D shader converts itself.
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
@@ -173,6 +183,13 @@ impl GpuContext {
             Ok(t) => {
                 if t.suboptimal {
                     log::warn!("surface suboptimal");
+                }
+                // The real swapchain image size wins (Android can change it under us).
+                let (w, h) = (t.texture.width(), t.texture.height());
+                if (w, h) != (self.config.width, self.config.height) {
+                    log::warn!("swapchain {}x{} != config {}x{}", w, h, self.config.width, self.config.height);
+                    self.config.width = w;
+                    self.config.height = h;
                 }
                 Some(t)
             }

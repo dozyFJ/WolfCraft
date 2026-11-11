@@ -16,6 +16,8 @@ pub struct DebugInfo {
     pub cpu_cores: usize,
     pub ram_mb: f32,
     pub gpu_name: String,
+    /// GPU validation errors so far, with the last message.
+    pub gpu_errors: String,
     pub backend: String,
     pub pos: [f64; 3],
     pub block: [i32; 3],
@@ -352,6 +354,7 @@ fn draw_debug(painter: &Painter, p: &Palette, d: &DebugInfo) {
         String::new(),
         format!("GPU: {}", d.gpu_name),
         format!("API: {}", d.backend),
+        d.gpu_errors.clone(),
         String::new(),
         format!("Кадр, мс: обн. {:.2} · чанки {:.2}", d.update_ms, d.chunks_ms),
         format!("рендер {:.2} · UI {:.2}", d.render_ms, d.ui_ms),
