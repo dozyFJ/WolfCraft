@@ -203,6 +203,7 @@ impl App {
         let worlds_dir = data_dir.join("worlds");
         let _ = std::fs::create_dir_all(&worlds_dir);
         let mut settings = Settings::load(&data_dir);
+        let saved_servers = settings.servers.clone();
         if cfg!(target_os = "android") {
             // Phones: a shorter view keeps the frame rate up.
             settings.render_distance = settings.render_distance.min(5);
@@ -218,7 +219,7 @@ impl App {
             gfx: None,
             screen: Screen::Splash,
             nav: Vec::new(),
-            world_select: WorldSelectState::default(),
+            world_select: WorldSelectState { servers: saved_servers, ..Default::default() },
             create: CreateWorldState::default(),
             worlds: Vec::new(),
             preview_cache: HashMap::new(),
@@ -440,9 +441,13 @@ impl App {
     }
 
     /// Starts a server on this device (its own world under `hosted/`) and joins it.
-    fn host_server(&mut self) {
+    fn host_server(&mut self, world: Option<String>) {
         self.host = None;
-        let dir = self.data_dir.join("hosted").join("world");
+        // A private world: one of the player's own worlds; otherwise the shared network world.
+        let dir = match &world {
+            Some(id) => self.worlds_dir.join(id),
+            None => self.data_dir.join("hosted").join("world"),
+        };
         let cfg = match WorldConfig::load(&dir) {
             Ok(c) => c,
             Err(_) => {
@@ -1310,6 +1315,11 @@ impl App {
             self.near_table = false;
             self.container = None;
         }
+        if self.world_select.servers_changed {
+            self.world_select.servers_changed = false;
+            self.settings.servers = self.world_select.servers.clone();
+            self.settings.save(&self.data_dir);
+        }
         for a in actions {
             self.handle_action(a, gfx);
         }
@@ -1629,7 +1639,7 @@ impl App {
                 self.host = None;
                 self.join_server(&addr);
             }
-            MenuAction::HostServer => self.host_server(),
+            MenuAction::HostServer(world) => self.host_server(world),
             MenuAction::PlayWorld(id) => {
                 self.net = None;
                 if let Some(w) = self.worlds.iter().find(|w| w.cfg.id == id) {

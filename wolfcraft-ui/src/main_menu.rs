@@ -19,8 +19,9 @@ pub enum MenuAction {
     PlayWorld(String),
     /// Connect to a WolfServer at this address.
     JoinServer(String),
-    /// Start a server on this device and join it.
-    HostServer,
+    /// Start a server on this device and join it: with one of the player's worlds
+    /// (private world for friends) or a fresh network world (`None`).
+    HostServer(Option<String>),
     CreateWorld(Box<WorldConfig>),
     DeleteWorld(String),
     RenameWorld(String, String),
@@ -225,6 +226,13 @@ pub struct WorldSelectState {
     pub mode: usize,
     /// Address typed for a network game.
     pub address: String,
+    /// Right sidebar in "Игра по сети": 0 servers, 1 private worlds, 2 by address.
+    pub net_tab: usize,
+    /// Saved servers (name, address); `servers_changed` tells the app to save them.
+    pub servers: Vec<(String, String)>,
+    pub servers_changed: bool,
+    pub new_server_name: String,
+    pub new_server_addr: String,
     /// Why the last connection attempt failed.
     pub net_error: Option<String>,
     pub search: String,
@@ -240,40 +248,119 @@ pub struct WorldSelectState {
     pub confirm_delete: Option<String>,
 }
 
-/// The "play over the network" tab: LAN worlds and a server address.
-fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Palette, st: &mut WorldSelectState) -> Option<MenuAction> {
-    let mut join = None;
-    ui.label(egui::RichText::new("Подключиться к серверу").font(bold_font(18.0)).color(p.text));
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        text_input(ui, icons, &mut st.address, "Адрес, например 192.168.0.10:25570", 420.0, Some(icon::GLOBE));
-        ui.add_space(8.0);
-        let ready = !st.address.trim().is_empty();
-        if pill_button(ui, icons, Some(icon::PLAY), "Подключиться", ButtonKind::Primary, 0.0, ready).clicked() {
-            st.net_error = None;
-            join = Some(MenuAction::JoinServer(st.address.trim().to_string()));
-        }
-    });
+/// "Игра по сети": content of the tab chosen in the right sidebar.
+fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Palette, st: &mut WorldSelectState, worlds: &[WorldEntry]) -> Option<MenuAction> {
+    let mut act = None;
     if let Some(e) = &st.net_error {
-        ui.add_space(8.0);
         ui.label(egui::RichText::new(e).size(14.0).color(p.danger));
+        ui.add_space(8.0);
     }
-    ui.add_space(16.0);
-    row_card(ui, false, |ui| {
-        ui.label(egui::RichText::new("Игра по Wi‑Fi и в интернете").font(bold_font(16.0)).color(p.text));
-        ui.label(egui::RichText::new("Запустите WolfServer на компьютере — он покажет адрес. Введите этот адрес здесь на ПК и на телефоне (в одной сети Wi‑Fi), и вы окажетесь в одном мире: видите друг друга, общие постройки и чат.").size(13.5).color(p.text_muted));
-    });
-    ui.add_space(12.0);
-    row_card(ui, false, |ui| {
-        ui.label(egui::RichText::new("Сервер на этом устройстве").font(bold_font(16.0)).color(p.text));
-        ui.label(egui::RichText::new("Игра сама запустит сервер и войдёт в него. Адрес для друзей появится в чате. Работает и на телефоне: раздайте Wi‑Fi или будьте в одной сети.").size(13.5).color(p.text_muted));
-        ui.add_space(6.0);
-        if pill_button(ui, icons, Some(icon::GLOBE), "Создать сервер", ButtonKind::Secondary, 0.0, true).clicked() {
-            st.net_error = None;
-            join = Some(MenuAction::HostServer);
+    match st.net_tab {
+        0 => {
+            ui.label(egui::RichText::new("Мои серверы").font(bold_font(18.0)).color(p.text));
+            ui.add_space(6.0);
+            let mut remove = None;
+            egui::ScrollArea::vertical().id_salt("servers").max_height(ui.available_height() - 70.0).show(ui, |ui| {
+                if st.servers.is_empty() {
+                    ui.label(egui::RichText::new("Список пуст. Добавьте сервер ниже: имя и адрес (например 192.168.0.10:25570).").size(13.5).color(p.text_muted));
+                }
+                for (i, (name, addr)) in st.servers.iter().enumerate() {
+                    row_card(ui, false, |ui| {
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+                            icons.paint(ui.painter(), r, icon::GLOBE, p.accent);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(name).font(bold_font(16.0)).color(p.text));
+                                ui.label(egui::RichText::new(addr).size(12.5).color(p.text_muted));
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if icon_button(ui, icons, icon::TRASH, 34.0, ButtonKind::Danger).clicked() {
+                                    remove = Some(i);
+                                }
+                                if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 0.0, true).clicked() {
+                                    act = Some(MenuAction::JoinServer(addr.clone()));
+                                }
+                            });
+                        });
+                    });
+                    ui.add_space(6.0);
+                }
+            });
+            if let Some(i) = remove {
+                st.servers.remove(i);
+                st.servers_changed = true;
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                text_input(ui, icons, &mut st.new_server_name, "Имя", 150.0, Some(icon::EDIT));
+                text_input(ui, icons, &mut st.new_server_addr, "Адрес:порт", 220.0, Some(icon::GLOBE));
+                let ok = !st.new_server_addr.trim().is_empty();
+                if pill_button(ui, icons, Some(icon::PLUS), "Добавить", ButtonKind::Secondary, 0.0, ok).clicked() {
+                    let name = if st.new_server_name.trim().is_empty() { st.new_server_addr.trim().to_string() } else { st.new_server_name.trim().to_string() };
+                    st.servers.push((name, st.new_server_addr.trim().to_string()));
+                    st.new_server_name.clear();
+                    st.new_server_addr.clear();
+                    st.servers_changed = true;
+                }
+            });
         }
-    });
-    join
+        1 => {
+            ui.label(egui::RichText::new("Приватные миры").font(bold_font(18.0)).color(p.text));
+            ui.label(egui::RichText::new("Откройте свой мир для друзей: телефон станет сервером, адрес появится в чате. Друзья подключаются из «Мои серверы» или «По адресу» (одна сеть Wi-Fi).").size(13.0).color(p.text_muted));
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical().id_salt("private-worlds").max_height(ui.available_height() - 60.0).show(ui, |ui| {
+                for w in worlds {
+                    row_card(ui, false, |ui| {
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
+                            ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(8, 12, 22));
+                            if let Some(tex) = &w.preview {
+                                ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                            }
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(16.0)).color(p.text));
+                                ui.label(egui::RichText::new(format!("{} · {}", if w.cfg.mode == GameMode::Creative { "Творческий" } else { "Выживание" }, w.cfg.size.label())).size(12.5).color(p.text_muted));
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if pill_button(ui, icons, Some(icon::GLOBE), "Открыть для друзей", ButtonKind::Primary, 0.0, true).clicked() {
+                                    st.net_error = None;
+                                    act = Some(MenuAction::HostServer(Some(w.cfg.id.clone())));
+                                }
+                            });
+                        });
+                    });
+                    ui.add_space(6.0);
+                }
+                if worlds.is_empty() {
+                    ui.label(egui::RichText::new("У вас пока нет миров.").color(p.text_muted));
+                }
+            });
+            ui.add_space(6.0);
+            if pill_button(ui, icons, Some(icon::PLUS), "Новый сетевой мир", ButtonKind::Secondary, 0.0, true).clicked() {
+                st.net_error = None;
+                act = Some(MenuAction::HostServer(None));
+            }
+        }
+        _ => {
+            ui.label(egui::RichText::new("Подключиться по адресу").font(bold_font(18.0)).color(p.text));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                text_input(ui, icons, &mut st.address, "Адрес, например 192.168.0.10:25570", 360.0, Some(icon::GLOBE));
+                ui.add_space(8.0);
+                let ready = !st.address.trim().is_empty();
+                if pill_button(ui, icons, Some(icon::PLAY), "Подключиться", ButtonKind::Primary, 0.0, ready).clicked() {
+                    st.net_error = None;
+                    act = Some(MenuAction::JoinServer(st.address.trim().to_string()));
+                }
+            });
+            ui.add_space(14.0);
+            row_card(ui, false, |ui| {
+                ui.label(egui::RichText::new("Как играть вместе").font(bold_font(16.0)).color(p.text));
+                ui.label(egui::RichText::new("Один игрок открывает мир (Приватные миры) — в чате появится адрес. Остальные в той же сети Wi-Fi вводят этот адрес здесь. Вы окажетесь в одном мире: видите друг друга, общие постройки и чат.").size(13.5).color(p.text_muted));
+            });
+        }
+    }
+    act
 }
 
 pub fn sorted_filtered<'a>(worlds: &'a [WorldEntry], search: &str, sort: usize) -> Vec<&'a WorldEntry> {
@@ -424,9 +511,25 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
                 }
             }
         });
+    if st.mode == 1 {
+        // Right sidebar: network sections, mirroring the left one.
+        egui::SidePanel::right("net-side")
+            .resizable(false)
+            .exact_width(220.0)
+            .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 10.0;
+                for (i, ic, label) in [(0usize, icon::GLOBE, "Серверы"), (1, icon::STAR, "Приватные миры"), (2, icon::EDIT, "По адресу")] {
+                    let kind = if st.net_tab == i { ButtonKind::Primary } else { ButtonKind::Secondary };
+                    if pill_button(ui, icons, Some(ic), label, kind, ui.available_width(), true).clicked() {
+                        st.net_tab = i;
+                    }
+                }
+            });
+    }
     egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
         if st.mode == 1 {
-            if let Some(a) = online_tab(ui, icons, &p, st) {
+            if let Some(a) = online_tab(ui, icons, &p, st, worlds) {
                 action = a;
             }
             return;

@@ -355,6 +355,8 @@ pub struct Settings {
     pub texture_pack: String,
     /// Screen refresh rate asked from the phone (60, 90 or 120 Hz).
     pub refresh_rate: u32,
+    /// Saved multiplayer servers: (name, address).
+    pub servers: Vec<(String, String)>,
 }
 
 impl Default for Settings {
@@ -381,6 +383,7 @@ impl Default for Settings {
             hand_anim: 1.0,
             texture_pack: "builtin:16".into(),
             refresh_rate: 120,
+            servers: Vec::new(),
         }
     }
 }
