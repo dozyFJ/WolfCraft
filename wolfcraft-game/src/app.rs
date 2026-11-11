@@ -1602,7 +1602,10 @@ impl App {
                         sneaking: s.player.sneaking,
                         swimming: s.player.body.in_water && !s.player.body.on_ground && !s.player.body.flying,
                         skin: self.settings.skin,
-                        attack: self.hand_cycle,
+                        // Mining/attacking swings; placing a block is a short push of the arm.
+                        attack: if self.hand_cycle > 0.0 { self.hand_cycle } else if self.hand_place > 0.0 { (1.0 - self.hand_place) * 0.5 } else { 0.0 },
+                        held: held_visual(&s.player.inventory, &self.tile_colors),
+                        armor: worn_armor(&s.player.inventory),
                     };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
@@ -1612,7 +1615,7 @@ impl App {
                     if pos.length_squared() < 1.0 {
                         continue;
                     }
-                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, skin: rp.skin, attack: 0.0 };
+                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, skin: rp.skin, attack: 0.0, held: Default::default(), armor: [None; 4] };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));
@@ -1713,6 +1716,7 @@ impl App {
                         lift: self.hand_lift,
                         sway: self.hand_sway,
                         time: self.time.elapsed(),
+                        sleeve: worn_armor(&s.player.inventory)[1].map(wolfcraft_engine::renderer::model::armor_color),
                     };
                     let hands = build_first_person_hands(&hand_pose);
                     // View model placement: settings, item-switch dip, aspect ratio.
@@ -2570,5 +2574,32 @@ fn world_map_ui(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::GuiIcon
         // Scale hint bottom-left.
         painter.text(Pos2::new(screen.left() + 18.0, screen.bottom() - 18.0), Align2::LEFT_BOTTOM, format!("{} бл/пикс · север сверху", view.bpp), FontId::proportional(12.0), Color32::from_white_alpha(170));
     });
+    out
+}
+
+/// What the character holds, for the third-person model.
+fn held_visual(inv: &wolfcraft_engine::inventory::Inventory, tile_colors: &[[[f32; 3]; 3]]) -> wolfcraft_engine::renderer::model::Held {
+    use wolfcraft_engine::renderer::model::Held;
+    let Some(st) = inv.held() else { return Held::Nothing };
+    if let Some((kind, mat)) = wolfcraft_engine::items::tool_shape(st.id) {
+        return Held::Tool(kind, mat);
+    }
+    let info = st.info();
+    if let Some(b) = info.place {
+        let c = tile_colors.get(b.info().tiles[0] as usize).map(|c| c[1]).unwrap_or([0.6, 0.6, 0.6]);
+        return Held::Block(c);
+    }
+    match info.icon {
+        wolfcraft_engine::items::Icon::Item(i) => Held::Item(i),
+        _ => Held::Nothing,
+    }
+}
+
+/// Worn armour per slot as material index (leather, bronze, iron, diamond).
+fn worn_armor(inv: &wolfcraft_engine::inventory::Inventory) -> [Option<u8>; 4] {
+    let mut out = [None; 4];
+    for (i, slot) in inv.armor.iter().enumerate() {
+        out[i] = slot.map(|s| ((s.id.saturating_sub(wolfcraft_engine::items::ids::ARMOR_BASE)) / 4) as u8);
+    }
     out
 }

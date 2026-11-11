@@ -73,8 +73,57 @@ pub struct PlayerPose {
     pub swimming: bool,
     /// Skin preset (see `SKIN_NAMES`).
     pub skin: u8,
-    /// Swing of the right arm 0..1 (0 = none): it chops forward and down, as in Minecraft.
+    /// Swing of the right arm 0..1 (0 = none); the motion depends on what is held.
     pub attack: f32,
+    /// What the right hand holds (drawn in it, and it picks the swing).
+    pub held: Held,
+    /// Worn armour per slot (helmet, chestplate, leggings, boots): material 0 leather,
+    /// 1 bronze, 2 iron, 3 diamond.
+    pub armor: [Option<u8>; 4],
+}
+
+/// Item in the character's right hand.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Held {
+    #[default]
+    Nothing,
+    /// Tool: (kind 0 pickaxe, 1 axe, 2 shovel, 3 sword; material 0..3).
+    Tool(u8, u8),
+    /// A block, drawn as a small cube of this colour.
+    Block([f32; 3]),
+    /// Another item: its items-atlas sprite.
+    Item(u16),
+}
+
+/// Colour of armour of material `m` (leather, bronze, iron, diamond).
+pub fn armor_color(m: u8) -> [f32; 3] {
+    match m {
+        0 => [0.55, 0.36, 0.20],
+        1 => [0.80, 0.56, 0.26],
+        2 => [0.80, 0.81, 0.84],
+        _ => [0.36, 0.90, 0.86],
+    }
+}
+
+/// Right-arm angle (negative = raised forward) during a swing `a` (0..1) with `held`.
+/// Pickaxe and axe are lifted high and brought down hard, the shovel is thrust low, the sword
+/// sweeps wide, a fist punches forward.
+fn swing_angle(a: f32, held: Held) -> f32 {
+    let a = a.clamp(0.0, 1.0);
+    if a <= 0.0 {
+        return 0.0;
+    }
+    let ss = |x: f32| x * x * (3.0 - 2.0 * x);
+    let pi = std::f32::consts::PI;
+    match held {
+        Held::Tool(0 | 1, _) => {
+            // Wind up over the head, chop down, recover.
+            if a < 0.4 { -2.7 * ss(a / 0.4) } else if a < 0.55 { -2.7 + 2.1 * ss((a - 0.4) / 0.15) } else { -0.6 * (1.0 - ss((a - 0.55) / 0.45)) }
+        }
+        Held::Tool(2, _) => -1.1 * (a * pi).sin() - 0.3 * (a * 2.0 * pi).sin().max(0.0),
+        Held::Tool(_, _) => -2.0 * (a * pi).sin(),
+        _ => -1.5 * (a * pi).sin(),
+    }
 }
 
 /// Names of the built-in skins, in the order of `skin_colors`.
@@ -157,10 +206,12 @@ fn add_box(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: V
                 (1.0, [to(x0, y0 + ph), to(x0, y0), to(x0 + pw, y0), to(x0 + pw, y0 + ph)])
             }
             None => {
-                // Flat colours get box-local pixel coordinates: the shader paints a 1/16-block pattern.
-                let seed = fi as f32 * 3.7 + min.x * 5.1 + min.y * 7.3 + min.z * 2.9;
+                // Flat colours get box-local pixel coordinates: the shader paints a 1/16-block
+                // pattern. Measured from the box's own corner and seeded by its size and colour
+                // only, so the pattern sticks to the box while it moves (no shimmering).
+                let seed = fi as f32 * 3.7 + size.x * 5.1 + size.y * 7.3 + size.z * 2.9 + color[0] * 11.0 + color[1] * 13.0;
                 let uv_of = |(x, y, z): (bool, bool, bool)| -> [f32; 2] {
-                    let p = corners(x, y, z);
+                    let p = corners(x, y, z) - min;
                     let (a, b) = match fi {
                         0 | 1 => (p.z, p.y),
                         2 | 3 => (p.x, p.z),
@@ -212,12 +263,43 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
     for (side, ang) in [(-1.0f32, -swing), (1.0, swing)] {
         // Crawl stroke: the arms circle all the way round, one half a turn behind the other.
         let ang = if swim { pose.phase * 0.8 + if side < 0.0 { 0.0 } else { std::f32::consts::PI } + 2.6 } else { ang };
-        // Attack: the right arm comes up in front and chops down (negative angle = forward).
+        // Attack: the right arm's motion depends on the tool. Holding something keeps the arm a
+        // little forward, as in Minecraft.
         let a = pose.attack.clamp(0.0, 1.0);
-        let ang = if side > 0.0 && a > 0.0 && !swim { ang * (1.0 - (a * std::f32::consts::PI).sin()) - 1.5 * (a * std::f32::consts::PI).sin() } else { ang };
+        let hold = if side > 0.0 && pose.held != Held::Nothing && !swim { -0.3 } else { 0.0 };
+        let ang = if side > 0.0 && a > 0.0 && !swim {
+            let k = (a * std::f32::consts::PI).sin();
+            ang * (1.0 - k) + swing_angle(a, pose.held) + hold * (1.0 - k)
+        } else {
+            ang * if hold != 0.0 { 0.4 } else { 1.0 } + hold
+        };
         let x0 = if side < 0.0 { -0.5 } else { 0.25 };
         add_box(&mut v, &frame, Vec3::new(x0, ty0, -0.125), Vec3::new(x0 + 0.25, shoulder, 0.125), Vec3::new(x0 + 0.125, shoulder, 0.0), ang, sleeve_c);
         add_box(&mut v, &frame, Vec3::new(x0, ty0 - 0.02, -0.12), Vec3::new(x0 + 0.25, ty0 + 0.16, 0.12), Vec3::new(x0 + 0.125, shoulder, 0.0), ang, skin_c);
+        let pivot = Vec3::new(x0 + 0.125, shoulder, 0.0);
+        if let Some(m) = pose.armor[1] {
+            // Chestplate shoulder pads.
+            add_box(&mut v, &frame, Vec3::new(x0 - 0.03, shoulder - 0.28, -0.155), Vec3::new(x0 + 0.28, shoulder + 0.03, 0.155), pivot, ang, armor_color(m));
+        }
+        if side > 0.0 && !swim {
+            add_held(&mut v, &frame, Vec3::new(x0 + 0.125, ty0 + 0.02, 0.0), pivot, ang, pose.held);
+        }
+    }
+    // Armour over the body.
+    if let Some(m) = pose.armor[1] {
+        add_box(&mut v, &frame, Vec3::new(-0.28, ty0 + 0.06, -0.155), Vec3::new(0.28, ty0 + 0.66, 0.155), Vec3::ZERO, 0.0, armor_color(m));
+    }
+    if pose.armor[2].is_some() || pose.armor[3].is_some() {
+        for (side, lang) in [(-1.0f32, swing), (1.0, -swing)] {
+            let x0 = if side < 0.0 { -0.25 } else { 0.0 };
+            let lp = Vec3::new(x0 + 0.125, hip, 0.0);
+            if let Some(m) = pose.armor[2] {
+                add_box(&mut v, &frame, Vec3::new(x0 - 0.02, 0.22, -0.145), Vec3::new(x0 + 0.27, hip + 0.02, 0.145), lp, lang, armor_color(m));
+            }
+            if let Some(m) = pose.armor[3] {
+                add_box(&mut v, &frame, Vec3::new(x0 - 0.03, -0.01, -0.15), Vec3::new(x0 + 0.28, 0.22, 0.175), lp, lang, armor_color(m));
+            }
+        }
     }
     // Head follows the look pitch, pivoting at the neck.
     let neck = ty0 + 0.65;
@@ -227,7 +309,48 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
     for ex in [-0.14f32, 0.06] {
         add_box(&mut v, &frame, Vec3::new(ex, neck + 0.22, 0.25), Vec3::new(ex + 0.08, neck + 0.30, 0.262), Vec3::new(0.0, neck, 0.0), head_ang, EYE);
     }
+    if let Some(m) = pose.armor[0] {
+        // Helmet: cap over the top and the back of the head, the face stays free.
+        let c = armor_color(m);
+        let hp = Vec3::new(0.0, neck, 0.0);
+        add_box(&mut v, &frame, Vec3::new(-0.285, neck + 0.36, -0.285), Vec3::new(0.285, neck + 0.56, 0.285), hp, head_ang, c);
+        add_box(&mut v, &frame, Vec3::new(-0.285, neck + 0.08, -0.285), Vec3::new(0.285, neck + 0.36, -0.12), hp, head_ang, c);
+        for sx in [-0.285f32, 0.215] {
+            add_box(&mut v, &frame, Vec3::new(sx, neck + 0.12, -0.285), Vec3::new(sx + 0.07, neck + 0.36, 0.2), hp, head_ang, c);
+        }
+    }
     v
+}
+
+/// Draws the held item at the hand `hand` (before the arm rotation `angle` about `pivot`).
+/// Tools and items are 3D pixel icons pointing forward and up, blocks a small cube.
+fn add_held(v: &mut Vec<ModelVertex>, frame: &Frame, hand: Vec3, pivot: Vec3, angle: f32, held: Held) {
+    let sprite = match held {
+        Held::Nothing => return,
+        Held::Block(c) => {
+            let h = 0.13;
+            let c0 = hand + Vec3::new(0.0, -0.05, 0.12);
+            add_box(v, frame, c0 - Vec3::splat(h), c0 + Vec3::splat(h), pivot, angle, c);
+            return;
+        }
+        Held::Tool(kind, mat) => wolfcraft_assets::items::TOOLS_BASE as usize + mat as usize * 4 + kind as usize,
+        Held::Item(i) => i as usize,
+    };
+    let Some(px) = textures().and_then(|t| t.item_pixels.get(sprite).cloned()).filter(|p| p.len() == 256) else {
+        if let Held::Tool(kind, mat) = held {
+            // No icon pixels (tests): the simple box tool, pointing forward.
+            add_tool(v, frame, hand + Vec3::new(0.0, 0.0, 0.05), pivot, angle + 1.4, kind, mat);
+        }
+        return;
+    };
+    // Icon plane: image right = backwards, image up = up. Our tool icons run from the handle
+    // (bottom-right) to the head (top-left), so the head points forward and up from the fist.
+    let (u, w) = (Vec3::NEG_Z, Vec3::Y);
+    let n = u.cross(w);
+    let s = if matches!(held, Held::Tool(..)) { 0.62 } else { 0.42 };
+    let grip = if matches!(held, Held::Tool(..)) { (12.5, 12.5) } else { (8.0, 12.0) };
+    let o = hand - u * (grip.0 / 16.0 * s) - w * ((16.0 - grip.1) / 16.0 * s) - n * 0.02;
+    add_voxel_icon(v, frame, &px, o, u, w, n, s, pivot, angle);
 }
 
 /// Builds all creatures relative to `camera` (original blocky designs, flat colours).
@@ -435,12 +558,14 @@ pub struct HandsPose {
     pub sway: [f32; 2],
     /// Seconds since start, for idle breathing.
     pub time: f32,
+    /// Colour of the worn chestplate: the sleeve takes it.
+    pub sleeve: Option<[f32; 3]>,
 }
 
 impl HandsPose {
     /// Resting pose looking along `forward` (handy for tests and previews).
     pub fn rest(forward: Vec3, up: Vec3) -> Self {
-        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0 }
+        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None }
     }
 }
 
@@ -747,6 +872,7 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool, cross
 pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
     let frame = camera_frame(pose);
     let (skin_c, _, _, sleeve_c, _) = skin_colors(pose.skin);
+    let sleeve_c = pose.sleeve.unwrap_or(sleeve_c);
 
     let mut v = Vec::with_capacity(4 * 36);
     for side in [1.0f32, -1.0] {
@@ -1059,7 +1185,7 @@ mod tests {
 
     fn pose(up: DVec3) -> PlayerPose {
         let heading = if up.y.abs() > 0.9 { DVec3::X } else { DVec3::Y.cross(up).normalize() };
-        PlayerPose { feet: up * 1000.0, heading, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, skin: 0, attack: 0.0 }
+        PlayerPose { feet: up * 1000.0, heading, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, skin: 0, attack: 0.0, held: Held::Nothing, armor: [None; 4] }
     }
 
     #[test]
@@ -1091,6 +1217,29 @@ mod tests {
         let xs: Vec<f32> = still.iter().map(|v| v.pos[0]).collect();
         let (lo, hi) = xs.iter().fold((f32::MAX, f32::MIN), |(l, h), x| (l.min(*x), h.max(*x)));
         assert!(((lo + hi) / 2.0 - (p.feet.x - cam.x) as f32).abs() < 0.05);
+    }
+
+    #[test]
+    fn armour_and_tools_show_on_the_character() {
+        let mut p = pose(DVec3::Y);
+        let cam = p.feet - DVec3::Y * 3.0;
+        let bare = build_player_model(&p, cam).len();
+        p.armor = [Some(2), Some(2), Some(2), Some(2)];
+        let dressed = build_player_model(&p, cam);
+        assert!(dressed.len() > bare + 8 * 36, "armour adds boxes");
+        let iron = armor_color(2);
+        assert!(dressed.iter().any(|v| v.color == iron));
+        p.held = Held::Tool(0, 2);
+        let rest = build_player_model(&p, cam);
+        assert!(rest.len() > dressed.len(), "the pickaxe is drawn");
+        p.armor = [None; 4];
+        let rest = build_player_model(&p, cam);
+        p.attack = 0.4;
+        let raised = build_player_model(&p, cam);
+        // The arm (sleeve) goes up over the head for the wind-up.
+        let top = |v: &[ModelVertex]| v.iter().filter(|x| x.color == SLEEVE).map(|x| x.pos[1]).fold(f32::MIN, f32::max);
+        assert!(top(&raised) > top(&rest) + 0.3, "the arm is lifted over the head ({} vs {})", top(&raised), top(&rest));
+        assert!(swing_angle(0.5, Held::Tool(3, 0)) < -1.5 && swing_angle(0.5, Held::Nothing) < -1.0);
     }
 
     #[test]
