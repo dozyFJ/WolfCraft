@@ -332,6 +332,8 @@ pub struct Settings {
     pub mouse_sensitivity: f32,
     /// Camera smoothing 0..1: 0 turns exactly with the finger, 1 glides softly.
     pub camera_smooth: f32,
+    /// Phones: pick blocks with the finger instead of the crosshair (off: crosshair).
+    pub tap_aim: bool,
     /// Shader preset on top of the texture pack: 0 off, 1 light, 2 ultra.
     pub shaders: u8,
     /// Mouse up looks down.
@@ -372,6 +374,7 @@ impl Default for Settings {
             max_fps: 0,
             mouse_sensitivity: 1.0,
             camera_smooth: 0.5,
+            tap_aim: false,
             shaders: 1,
             invert_y: false,
             ui_scale: 1.0,

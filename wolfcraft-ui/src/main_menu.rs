@@ -1074,6 +1074,10 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                         res.changed |= ui.add(egui::Slider::new(&mut s.mouse_sensitivity, 0.2..=3.0).fixed_decimals(2)).changed();
                     });
                     ui.add_space(8.0);
+                    setting_row(ui, "Выбор касанием", Some("Ломать и ставить там, где палец, без прицела"), |ui| {
+                        res.changed |= toggle_switch(ui, &mut s.tap_aim).changed();
+                    });
+                    ui.add_space(8.0);
                     setting_row(ui, "Плавность камеры", Some("0 — поворот точно за пальцем, 1 — мягко"), |ui| {
                         res.changed |= ui.add(egui::Slider::new(&mut s.camera_smooth, 0.0..=1.0).fixed_decimals(2)).changed();
                     });

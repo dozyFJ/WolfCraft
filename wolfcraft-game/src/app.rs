@@ -917,8 +917,8 @@ impl App {
             pick_pressed: std::mem::take(&mut self.input.middle_press),
             hotbar_delta: std::mem::take(&mut self.input.scroll) as i32,
             hotbar_set: self.input.hotbar_set.take(),
-            aim: self.touch_aim(),
-            touch: self.touch.seen,
+            aim: if self.settings.tap_aim { self.touch_aim() } else { None },
+            touch: self.touch.seen && self.settings.tap_aim,
         };
         self.touch.tap_point = None;
         self.input.mouse_dx = 0.0;
@@ -1389,6 +1389,7 @@ impl App {
                             compass: Some(compass_bearing(p.heading, p.up()) as f32),
                             minimap: if studio.is_some() { None } else { minimap_tex },
                             compact: cfg!(target_os = "android"),
+                            crosshair: !(touch.seen && settings.tap_aim),
                         };
                         if screen != Screen::Map {
                             hud::draw(ctx, &icons, &hud);
