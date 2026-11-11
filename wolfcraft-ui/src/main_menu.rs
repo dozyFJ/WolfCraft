@@ -544,47 +544,59 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
                 ui.label(egui::RichText::new(if worlds.is_empty() { "Создайте первую планету — нажмите «Создать мир»" } else { "Измените запрос поиска" }).color(p.text_muted));
             });
         }
+        // Grid of world cards: big planet on top, name and tags, play / rename / delete.
+        let avail = ui.available_width();
+        let card_w = 200.0f32;
+        let gap = 12.0;
+        let cols = ((avail + gap) / (card_w + gap)).floor().max(1.0) as usize;
+        let card_w = (avail - gap * (cols as f32 - 1.0)) / cols as f32 - 1.0;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for w in list {
-                let selected = st.selected.as_deref() == Some(w.cfg.id.as_str());
-                let resp = row_card(ui, selected, |ui| {
-                    ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(Vec2::splat(76.0), Sense::hover());
-                        ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(8, 12, 22));
-                        if let Some(tex) = &w.preview {
-                            ui.painter().image(tex.id(), r.shrink(2.0), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-                        }
-                        ui.painter().rect_stroke(r, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-                        ui.add_space(6.0);
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(18.0)).color(p.text));
-                            ui.horizontal(|ui| {
-                                badge(ui, if w.cfg.mode == GameMode::Creative { "Творческий" } else { "Выживание" }, if w.cfg.mode == GameMode::Creative { p.secondary } else { p.accent });
-                                badge(ui, w.cfg.size.label(), p.text_muted);
-                                badge(ui, w.cfg.world_type.label(), p.text_muted);
+            for row in list.chunks(cols) {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for w in row {
+                        let selected = st.selected.as_deref() == Some(w.cfg.id.as_str());
+                        ui.allocate_ui(Vec2::new(card_w, 10.0), |ui| {
+                            ui.set_width(card_w);
+                            let resp = row_card(ui, selected, |ui| {
+                                ui.set_width(card_w - 26.0);
+                                ui.vertical_centered(|ui| {
+                                    let sz = (card_w - 60.0).min(120.0);
+                                    let (r, _) = ui.allocate_exact_size(Vec2::splat(sz), Sense::hover());
+                                    if let Some(tex) = &w.preview {
+                                        ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                                    } else {
+                                        ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(8, 12, 22));
+                                    }
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(17.0)).color(p.text));
+                                    ui.label(egui::RichText::new(format!("{} · {}", if w.cfg.mode == GameMode::Creative { "Творческий" } else { "Выживание" }, w.cfg.size.label())).size(12.5).color(if w.cfg.mode == GameMode::Creative { p.secondary } else { p.accent }));
+                                    ui.label(egui::RichText::new(format_timestamp(w.cfg.last_played)).size(11.5).color(p.text_muted));
+                                    ui.add_space(6.0);
+                                    ui.horizontal(|ui| {
+                                        let bw = card_w - 26.0 - 2.0 * 34.0 - 2.0 * ui.spacing().item_spacing.x;
+                                        if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, bw, true).clicked() {
+                                            action = MenuAction::PlayWorld(w.cfg.id.clone());
+                                        }
+                                        if icon_button(ui, icons, icon::EDIT, 34.0, ButtonKind::Ghost).clicked() {
+                                            st.rename = Some((w.cfg.id.clone(), w.cfg.name.clone()));
+                                        }
+                                        if icon_button(ui, icons, icon::TRASH, 34.0, ButtonKind::Danger).clicked() {
+                                            st.confirm_delete = Some(w.cfg.id.clone());
+                                        }
+                                    });
+                                });
                             });
-                            ui.label(egui::RichText::new(format!("Сохранён: {}   ·   Seed: {}", format_timestamp(w.cfg.last_played), w.cfg.seed as i64)).size(12.5).color(p.text_muted));
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if icon_button(ui, icons, icon::TRASH, 34.0, ButtonKind::Danger).on_hover_text("Удалить").clicked() {
-                                st.confirm_delete = Some(w.cfg.id.clone());
+                            if resp.clicked() {
+                                st.selected = Some(w.cfg.id.clone());
                             }
-                            if icon_button(ui, icons, icon::EDIT, 34.0, ButtonKind::Ghost).on_hover_text("Переименовать").clicked() {
-                                st.rename = Some((w.cfg.id.clone(), w.cfg.name.clone()));
-                            }
-                            if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 0.0, true).clicked() {
+                            if resp.double_clicked() {
                                 action = MenuAction::PlayWorld(w.cfg.id.clone());
                             }
                         });
-                    });
+                    }
                 });
-                if resp.clicked() {
-                    st.selected = Some(w.cfg.id.clone());
-                }
-                if resp.double_clicked() {
-                    action = MenuAction::PlayWorld(w.cfg.id.clone());
-                }
-                ui.add_space(8.0);
+                ui.add_space(gap);
             }
         });
     });

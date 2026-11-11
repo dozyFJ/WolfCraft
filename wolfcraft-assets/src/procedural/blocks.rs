@@ -148,12 +148,11 @@ fn leaves(base: Rgb, seed: u32) -> Image {
     p(|q| {
         for y in 0..S {
             for x in 0..S {
-                if rnd(x, y, seed) < 0.18 {
-                    q.put(x, y, Rgb(0.0, 0.0, 0.0), 0.0);
-                } else {
-                    let n = (rnd(x, y, seed + 1) - 0.5) * 0.2;
-                    q.put(x, y, base.add(n), 1.0);
-                }
+                // Gaps are a darker shade, not holes: holes let the bright sky shine through
+                // as white dots.
+                let n = (rnd(x, y, seed + 1) - 0.5) * 0.12;
+                let c = if rnd(x, y, seed) < 0.15 { base.scale(0.72) } else { base.add(n) };
+                q.put(x, y, c, 1.0);
             }
         }
     })
@@ -246,18 +245,19 @@ pub fn water_frame(frame: u32) -> Image {
 pub(crate) fn build() -> Vec<(String, Image)> {
     use tiles::*;
     let mut l = SpriteList::new();
-    let grass = Rgb(0.36, 0.62, 0.24);
-    let dirt = Rgb(0.47, 0.33, 0.22);
+    // Calm palette: fresh green grass, warm brown earth, soft variation (little noise).
+    let grass = Rgb(0.41, 0.66, 0.28);
+    let dirt = Rgb(0.52, 0.37, 0.24);
     let stone = Rgb(0.50, 0.50, 0.52);
 
     l.add(GRASS_TOP, "grass_top", p(|q| {
-        q.noisy(grass, 0.18, 1);
-        q.speckle(Rgb(0.30, 0.54, 0.20), 0.3, 2);
+        q.noisy(grass, 0.08, 1);
+        q.speckle(Rgb(0.37, 0.61, 0.25), 0.18, 2);
     }));
     l.add(GRASS_SIDE, "grass_side", side_with_top(dirt, grass, 9));
     l.add(DIRT, "dirt", p(|q| {
-        q.noisy(dirt, 0.14, 3);
-        q.speckle(Rgb(0.38, 0.26, 0.17), 0.25, 4);
+        q.noisy(dirt, 0.09, 3);
+        q.speckle(Rgb(0.46, 0.32, 0.21), 0.2, 4);
     }));
     l.add(STONE, "stone", p(|q| {
         q.noisy(stone, 0.12, 5);
@@ -284,7 +284,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
-    l.add(LOG_SIDE, "oak_log_side", log_side(Rgb(0.40, 0.30, 0.18), 14, false));
+    l.add(LOG_SIDE, "oak_log_side", log_side(Rgb(0.52, 0.38, 0.23), 14, false));
     l.add(LOG_TOP, "log_top", p(|q| {
         for y in 0..S {
             for x in 0..S {
@@ -309,7 +309,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
-    l.add(LEAVES, "oak_leaves", leaves(Rgb(0.22, 0.50, 0.16), 17));
+    l.add(LEAVES, "oak_leaves", leaves(Rgb(0.32, 0.58, 0.22), 17));
     l.add(WATER, "water", water_frame(0));
     l.add(GLASS, "glass", p(|q| {
         for i in 0..S {
@@ -425,7 +425,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
     }));
     l.add(SPRUCE_LOG_SIDE, "spruce_log_side", log_side(Rgb(0.28, 0.20, 0.12), 34, false));
-    l.add(SPRUCE_LEAVES, "spruce_leaves", leaves(Rgb(0.16, 0.36, 0.22), 37));
+    l.add(SPRUCE_LEAVES, "spruce_leaves", leaves(Rgb(0.22, 0.44, 0.26), 37));
     l.add(DEAD_BUSH, "dead_bush", p(|q| {
         let c = Rgb(0.50, 0.36, 0.20);
         for y in 6..S {
@@ -491,8 +491,8 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }));
     l.add(BIRCH_LOG_SIDE, "birch_log_side", log_side(Rgb(0.88, 0.87, 0.82), 90, true));
     l.add(BIRCH_LEAVES, "birch_leaves", leaves(Rgb(0.42, 0.60, 0.26), 91));
-    l.add(ACACIA_LOG_SIDE, "acacia_log_side", log_side(Rgb(0.45, 0.40, 0.35), 92, false));
-    l.add(ACACIA_LEAVES, "acacia_leaves", leaves(Rgb(0.45, 0.55, 0.18), 93));
+    l.add(ACACIA_LOG_SIDE, "acacia_log_side", log_side(Rgb(0.55, 0.43, 0.32), 92, false));
+    l.add(ACACIA_LEAVES, "acacia_leaves", leaves(Rgb(0.42, 0.60, 0.24), 93));
     l.add(MUSHROOM_RED, "mushroom_red", mushroom(Rgb(0.80, 0.15, 0.12), true));
     l.add(MUSHROOM_BROWN, "mushroom_brown", mushroom(Rgb(0.55, 0.40, 0.28), false));
     l.add(SEAGRASS, "seagrass", p(|q| {
@@ -535,10 +535,10 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
-    let dry = Rgb(0.62, 0.62, 0.30);
+    let dry = Rgb(0.55, 0.62, 0.32);
     l.add(DRY_GRASS_TOP, "dry_grass_top", p(|q| {
-        q.noisy(dry, 0.14, 98);
-        q.speckle(Rgb(0.55, 0.52, 0.26), 0.3, 99);
+        q.noisy(dry, 0.08, 98);
+        q.speckle(Rgb(0.51, 0.58, 0.30), 0.18, 99);
     }));
     l.add(DRY_GRASS_SIDE, "dry_grass_side", side_with_top(dirt, dry, 100));
     l.add(MOSSY_STONE_BRICKS, "mossy_stone_bricks", bricks_pattern(sb, sm, 2, 1, 101, 0.3, false));
