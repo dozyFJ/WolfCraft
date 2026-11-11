@@ -427,6 +427,22 @@ impl Player {
 /// Real seconds per full in-game day.
 pub const DAY_LENGTH: f64 = 1200.0;
 
+/// Game days per season (a year is four seasons: spring, summer, autumn, winter).
+pub const SEASON_DAYS: f64 = 6.0;
+pub const SEASON_NAMES: [&str; 4] = ["Весна", "Лето", "Осень", "Зима"];
+
+/// Season as a continuous value 0..4: 0 spring, 1 summer, 2 autumn, 3 winter (2.5 is mid
+/// autumn). The world starts in spring.
+pub fn season(world_time: f64) -> f32 {
+    ((world_time / (DAY_LENGTH * SEASON_DAYS)).rem_euclid(4.0)) as f32
+}
+
+/// Name of the season at `world_time` and the day within it (1-based).
+pub fn season_label(world_time: f64) -> (&'static str, u32) {
+    let s = season(world_time);
+    (SEASON_NAMES[s.floor() as usize % 4], (s.fract() as f64 * SEASON_DAYS).floor() as u32 + 1)
+}
+
 /// 0..1 → fraction of the day (0 = midnight? no: 0.25 = sunrise, 0.5 = noon, 0.75 = sunset).
 pub fn day_fraction(world_time: f64) -> f64 {
     (world_time / DAY_LENGTH).rem_euclid(1.0)

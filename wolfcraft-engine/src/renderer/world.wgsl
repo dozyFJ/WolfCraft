@@ -4,6 +4,7 @@ struct Globals {
     cam: vec4<f32>,      // xyz: camera position in world space (f32, planet-sized)
     fog: vec4<f32>,      // rgb: fog colour, a: density (1 / fog distance)
     misc: vec4<f32>,     // x: time, y: underwater (0/1), z: crack, w: shader preset (0 off, 1 light, 2 ultra)
+    env: vec4<f32>,      // x: season 0..4 (spring, summer, autumn, winter), y: snow cover, z: humidity
     tiles: array<vec4<f32>, 256>, // xy: uv min, zw: uv size of every block sprite
 };
 
@@ -79,7 +80,51 @@ fn geom_normal(rel: vec3<f32>) -> vec3<f32> {
     return n;
 }
 
-fn shade(in: VsOut, color: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
+// Seasons: leaves (bit 24), plants (bit 25) and grass tops (bit 26) change colour through the
+// year: fresh green in spring, autumn reds, oranges and yellows (per tree block), bare grey-green
+// and snow on top in winter. Smooth between seasons.
+fn season_tint(c: vec3<f32>, in: VsOut, n: vec3<f32>) -> vec3<f32> {
+    let leaves = (in.flags >> 24u) & 1u;
+    let plant = (in.flags >> 25u) & 1u;
+    let turf = (in.flags >> 26u) & 1u;
+    if (leaves + plant + turf == 0u) {
+        return c;
+    }
+    let s = g.env.x;
+    let spring = smoothstep(0.0, 0.3, s) * (1.0 - smoothstep(0.8, 1.2, s));
+    let autumn = smoothstep(1.75, 2.25, s) * (1.0 - smoothstep(2.8, 3.15, s));
+    let winter = smoothstep(2.8, 3.15, s) * (1.0 - smoothstep(3.8, 4.0, s)) + (1.0 - smoothstep(0.0, 0.3, s));
+    let lum = dot(c, vec3<f32>(0.299, 0.587, 0.114));
+    var o = c;
+    // Spring: fresher, lighter green.
+    o = mix(o, o * vec3<f32>(0.95, 1.10, 0.90), spring);
+    // Autumn: every leaf block picks orange, red or yellow; grass turns straw-coloured.
+    let cell = floor(in.world + vec3<f32>(0.001));
+    let h = fract(sin(dot(cell, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+    var fall = vec3<f32>(0.95, 0.80, 0.25);
+    if (h < 0.4) {
+        fall = vec3<f32>(0.95, 0.52, 0.14);
+    } else if (h < 0.6) {
+        fall = vec3<f32>(0.78, 0.22, 0.12);
+    }
+    let strength = select(0.55, 0.9, leaves == 1u);
+    let grass_fall = vec3<f32>(0.78, 0.66, 0.32);
+    let target_fall = select(grass_fall, fall, leaves == 1u) * lum * 2.1;
+    o = mix(o, target_fall, autumn * strength);
+    // Winter: dull grey-green, then snow settles on what faces the sky.
+    o = mix(o, vec3<f32>(lum) * vec3<f32>(0.85, 0.95, 0.85), winter * 0.45);
+    let up = normalize(in.world);
+    var settle = 1.0;
+    if (leaves == 1u) {
+        settle = smoothstep(0.2, 0.7, dot(n, up));
+    }
+    let snow = winter * g.env.y * settle * select(0.9, 0.5, plant == 1u);
+    o = mix(o, vec3<f32>(0.90, 0.94, 1.0) * (0.85 + 0.25 * lum), snow);
+    return o;
+}
+
+fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
+    let color = vec4<f32>(season_tint(color0.rgb, in, n), color0.a);
     let emit = (in.flags >> 16u) & 1u;
     let face = (in.flags >> 17u) & 7u;
     let up = normalize(in.world);

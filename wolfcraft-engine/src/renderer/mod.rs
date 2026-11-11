@@ -22,6 +22,9 @@ struct Globals {
     cam: [f32; 4],
     fog: [f32; 4],
     misc: [f32; 4],
+    /// x: season 0..4 (spring, summer, autumn, winter), y: snow cover 0..1, z: biome
+    /// humidity 0..1, w: unused.
+    env: [f32; 4],
     tiles: [[f32; 4]; MAX_TILES],
 }
 
@@ -171,6 +174,13 @@ pub struct RenderStats {
 }
 
 pub struct FrameParams {
+    /// Season 0..4 (spring, summer, autumn, winter), snow cover 0..1 and the biome's humidity:
+    /// leaves and grass take the season's colours, winter puts snow on them.
+    pub season: f32,
+    pub snow: f32,
+    pub humidity: f32,
+    /// Fog thickness of the biome (1 = normal, more = mistier).
+    pub fog_density: f32,
     /// Shader preset: 0 off, 1 light (swaying leaves and grass, water waves, colour
     /// grading), 2 ultra (also texture relief lit by the sun).
     pub shaders: u8,
@@ -762,8 +772,9 @@ impl WorldRenderer {
             sun: [p.sun_dir.x, p.sun_dir.y, p.sun_dir.z, 0.0],
             cam: [p.eye.x as f32, p.eye.y as f32, p.eye.z as f32, 0.0],
             // Fog is mixed in linear space inside the shader; the caller passes display colours.
-            fog: [fog_color[0].powf(2.2), fog_color[1].powf(2.2), fog_color[2].powf(2.2), 1.0 / (p.view_distance_blocks * 1.15).max(16.0)],
+            fog: [fog_color[0].powf(2.2), fog_color[1].powf(2.2), fog_color[2].powf(2.2), p.fog_density.max(0.5) / (p.view_distance_blocks * 1.15).max(16.0)],
             misc: [p.time, p.underwater as u32 as f32, p.crack, p.shaders as f32],
+            env: [p.season, p.snow, p.humidity, 0.0],
             tiles: self.tile_rects,
         };
         if p.underwater {
@@ -1088,7 +1099,7 @@ mod tests {
 
     #[test]
     fn globals_layout_matches_wgsl() {
-        assert_eq!(std::mem::size_of::<Globals>(), 64 + 16 * 4 + 16 * MAX_TILES);
+        assert_eq!(std::mem::size_of::<Globals>(), 64 + 16 * 5 + 16 * MAX_TILES);
         assert_eq!(std::mem::size_of::<Vertex>(), 32);
     }
 

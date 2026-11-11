@@ -1367,7 +1367,7 @@ impl App {
                         let hud = HudState {
                             coords: [p.body.pos.x, p.body.pos.y, p.body.pos.z],
                             fps: time.fps(),
-                            clock: s.clock(),
+                            clock: format!("{} · {}", s.clock(), s.season_label()),
                             biome: s.planet.column(p.up()).biome.label().to_string(),
                             inventory: &p.inventory,
                             health: p.survival.health,
@@ -1592,8 +1592,13 @@ impl App {
                 // Smooth FOV kick: wider while sprinting or flying fast, a touch narrower underwater.
                 let fx_target = if s.bow_charge > 0.0 { -14.0 * s.bow_charge } else if s.player.sprinting { 9.0 } else if s.player.body.flying { 4.0 } else if underwater { -4.0 } else { 0.0 };
                 self.fov_fx += (fx_target - self.fov_fx) * (1.0 - (-dt as f32 * 7.0).exp());
+                let (season, snow, humidity) = s.environment();
                 let params = FrameParams {
                     shaders: self.settings.shaders,
+                    season,
+                    snow,
+                    humidity,
+                    fog_density: s.biome_fog().2,
                     eye: cam.eye,
                     forward: cam.forward.as_vec3(),
                     up: cam.up.as_vec3(),
@@ -1785,7 +1790,10 @@ impl App {
                     gfx.world.set_hands(&gfx.gpu.device, &gfx.gpu.queue, &[]);
                     gfx.world.set_held(&gfx.gpu.queue, &[]);
                 }
-                gfx.world.render(&gfx.gpu.device, &gfx.gpu.queue, &mut encoder, &view_tex, &params, sky, sky);
+                // The biome tints the fog (green mist over swamps, warm haze in deserts).
+                let (tint, amount, _) = s.biome_fog();
+                let fog_c = [0, 1, 2].map(|i| sky[i] + (sky[i] * tint[i] * 1.1 - sky[i]) * amount);
+                gfx.world.render(&gfx.gpu.device, &gfx.gpu.queue, &mut encoder, &view_tex, &params, sky, fog_c);
             }
         } else {
             let p = theme_manager::palette(&gfx.gui.ctx);

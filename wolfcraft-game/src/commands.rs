@@ -26,6 +26,7 @@ pub const HELP: &[&str] = &[
     "/give <предмет> [кол-во]   ·   /clear — очистить инвентарь",
     "/heal  /feed  /kill  /fly   ·   /difficulty <мирная|лёгкая|нормальная|сложная>",
     "/pos  /biome  /seed  /save  /say <текст>",
+    "/season [весна|лето|осень|зима] — узнать или сменить время года",
     "/ад — перейти в Ад,  /мир — вернуться (или через адский портал: 4 обсидиана + светокамень)",
 ];
 
@@ -230,6 +231,24 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
             let p = s.player.body.pos;
             let up = s.player.up();
             vec![sys(format!("XYZ {:.1} {:.1} {:.1} · широта {:.2}° долгота {:.2}° · высота {:.1}", p.x, p.y, p.z, up.y.asin().to_degrees(), up.z.atan2(up.x).to_degrees(), s.planet.grid.radial(p) - s.planet.radius))]
+        }
+        "season" | "сезон" => {
+            use wolfcraft_engine::player::{DAY_LENGTH, SEASON_DAYS};
+            let year = DAY_LENGTH * SEASON_DAYS * 4.0;
+            let idx = match args.first().map(|a| a.to_lowercase()) {
+                None => return vec![sys(format!("Сейчас: {}", s.season_label()))],
+                Some(a) if a.starts_with("вес") || a == "spring" => 0.0,
+                Some(a) if a.starts_with("лет") || a == "summer" => 1.0,
+                Some(a) if a.starts_with("осе") || a == "autumn" => 2.0,
+                Some(a) if a.starts_with("зим") || a == "winter" => 3.0,
+                Some(_) => return vec![err("Сезоны: весна, лето, осень, зима")],
+            };
+            // Keep the time of day, move to the middle of the chosen season of this year.
+            let t = s.player.world_time;
+            let year_start = (t / year).floor() * year;
+            let day = t.rem_euclid(DAY_LENGTH);
+            s.player.world_time = year_start + (idx + 0.5) * DAY_LENGTH * SEASON_DAYS - (idx + 0.5) * DAY_LENGTH * SEASON_DAYS % DAY_LENGTH + day;
+            vec![sys(format!("Время года: {}", s.season_label()))]
         }
         "biome" => {
             let col = s.planet.column(s.player.up());

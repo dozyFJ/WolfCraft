@@ -140,6 +140,8 @@ pub struct GameSession {
     fx_was_in_water: bool,
     fx_prev_vup: f64,
     fx_was_ground: bool,
+    /// Biome around the player (biome, temperature, humidity), refreshed twice a second.
+    env_col: Option<(wolfcraft_engine::biome::Biome, f32, f32)>,
     /// Direction of the current targeting ray (view centre, or under the finger on phones).
     aim_dir: Option<DVec3>,
     /// Blows that landed on creatures this frame (the app plays the swing and the sound).
@@ -208,6 +210,7 @@ impl GameSession {
             fx_was_in_water: false,
             fx_prev_vup: 0.0,
             fx_was_ground: true,
+            env_col: None,
         };
         s.load_containers();
         s.load_block_commands();
@@ -797,6 +800,10 @@ impl GameSession {
         use wolfcraft_engine::block::Block;
         use wolfcraft_engine::mobs::FxKind;
         let k = self.fx_amount.clamp(0.0, 2.0);
+        if self.env_col.is_none() || self.fx_scan <= dt {
+            let col = self.planet.column(self.player.up());
+            self.env_col = Some((col.biome, col.temp, col.humid));
+        }
         if k <= 0.0 || self.player.survival.dead {
             return;
         }
@@ -878,18 +885,28 @@ impl GameSession {
                 continue;
             }
             let below = g.neighbor(c, 2, -1).and_then(|n| self.chunks.get_block(n)).unwrap_or(Block::Stone);
-            if below != Block::Air || self.mobs.rand() > 0.12 {
+            // Autumn: leaves fall much more often, in autumn colours; winter: hardly any.
+            let (season, _, _) = self.environment();
+            let autumn = (2.0..3.0).contains(&season);
+            let rate = if autumn { 0.45 } else if season >= 3.0 { 0.02 } else { 0.12 };
+            if below != Block::Air || self.mobs.rand() > rate {
                 continue;
             }
-            let col = match b {
-                Block::BirchLeaves => [0.55, 0.72, 0.25],
-                Block::SpruceLeaves => [0.20, 0.42, 0.24],
-                Block::AcaciaLeaves => [0.62, 0.70, 0.22],
-                _ => if self.mobs.rand() < 0.2 { [0.85, 0.62, 0.18] } else { [0.32, 0.62, 0.20] },
+            let col = if autumn && b != Block::SpruceLeaves {
+                [[0.95, 0.55, 0.15], [0.80, 0.24, 0.12], [0.95, 0.80, 0.25]][(self.mobs.rand() * 3.0) as usize % 3]
+            } else {
+                match b {
+                    Block::BirchLeaves => [0.55, 0.72, 0.25],
+                    Block::SpruceLeaves => [0.20, 0.42, 0.24],
+                    Block::AcaciaLeaves => [0.62, 0.70, 0.22],
+                    _ => if self.mobs.rand() < 0.2 { [0.85, 0.62, 0.18] } else { [0.32, 0.62, 0.20] },
+                }
             };
             let p = g.cell_center(c) - wolfcraft_engine::physics::up_at(g.cell_center(c)) * 0.55;
             self.mobs.fx(p, DVec3::ZERO, col, 0.06, 2.9, FxKind::Leaf);
         }
+        // The biome's own nature around the player.
+        self.biome_ambience(dt, k, pos, up, t1, t2);
         // Splash on entering water, dust on landing and while sprinting.
         let vup = self.player.body.vel.dot(up);
         let in_water = self.player.body.in_water;
@@ -968,6 +985,99 @@ impl GameSession {
             }
         }
         true
+    }
+
+    /// Season (0..4: spring, summer, autumn, winter), snow cover 0..1 here, humidity 0..1.
+    /// Snow lies only where it is cold enough: never in deserts, always on glaciers.
+    pub fn environment(&self) -> (f32, f32, f32) {
+        let season = wolfcraft_engine::player::season(self.player.world_time);
+        let (biome, temp, humid) = self.env_col.unwrap_or((wolfcraft_engine::biome::Biome::Plains, 0.5, 0.5));
+        use wolfcraft_engine::biome::Biome as B;
+        let winter = if season >= 3.0 { ((season - 3.0) * 4.0).min(1.0).min((4.0 - season) * 4.0) } else { 0.0 };
+        let cold = ((0.8 - temp) * 2.0).clamp(0.0, 1.0);
+        let snow = match biome {
+            B::Desert | B::Badlands | B::Volcano | B::Jungle | B::Savanna => 0.0,
+            B::Tundra | B::SnowyPlains | B::SnowyPeaks | B::FrozenOcean => 1.0,
+            _ => winter * cold,
+        };
+        (season, snow, humid)
+    }
+
+    /// Name of the season and the day in it, for the HUD clock.
+    pub fn season_label(&self) -> String {
+        let (name, day) = wolfcraft_engine::player::season_label(self.player.world_time);
+        format!("{name}, день {day}")
+    }
+
+    /// Fog colour tint and how much thicker the fog is in this biome (swamps are misty).
+    pub fn biome_fog(&self) -> ([f32; 3], f32, f32) {
+        use wolfcraft_engine::biome::Biome as B;
+        match self.env_col.map(|e| e.0) {
+            Some(B::Swamp) => ([0.45, 0.55, 0.40], 0.35, 1.8),
+            Some(B::Jungle) => ([0.55, 0.70, 0.55], 0.20, 1.3),
+            Some(B::Desert | B::Badlands) => ([0.90, 0.78, 0.55], 0.30, 1.0),
+            Some(B::Volcano) => ([0.45, 0.38, 0.36], 0.45, 1.6),
+            Some(B::Tundra | B::SnowyPlains | B::SnowyPeaks) => ([0.85, 0.90, 0.98], 0.30, 1.2),
+            _ => ([1.0, 1.0, 1.0], 0.0, 1.0),
+        }
+    }
+
+    /// Ambient particles of the biome and season: fireflies over swamps and jungles at
+    /// night, blowing sand in deserts, snowfall where it is cold in winter, pollen in spring
+    /// and summer meadows and forests, ash and embers over volcanoes.
+    fn biome_ambience(&mut self, dt: f32, k: f32, pos: DVec3, up: DVec3, t1: DVec3, t2: DVec3) {
+        use wolfcraft_engine::biome::Biome as B;
+        use wolfcraft_engine::mobs::FxKind;
+        let Some((biome, _, _)) = self.env_col else { return };
+        let (season, snow, _) = self.environment();
+        let day = local_sun(self.player.world_time, up).dot(up) > 0.05;
+        let rate = (k * dt) as f64;
+        let around = |m: &mut wolfcraft_engine::mobs::MobManager, r: f64, h0: f64, h1: f64| {
+            let a = m.rand() * std::f64::consts::TAU;
+            let d = m.rand().sqrt() * r;
+            pos + (t1 * a.cos() + t2 * a.sin()) * d + up * (h0 + m.rand() * (h1 - h0))
+        };
+        // Snowfall (cold biomes, or any cold place in winter).
+        if snow > 0.05 && !matches!(biome, B::Desert | B::Badlands | B::Volcano) && (season >= 3.0 || matches!(biome, B::Tundra | B::SnowyPlains | B::SnowyPeaks)) {
+            for _ in 0..((rate * 40.0 * snow as f64) as usize + (self.mobs.rand() < (rate * 40.0 * snow as f64).fract()) as usize) {
+                let p = around(&mut self.mobs, 12.0, 6.0, 12.0);
+                self.mobs.fx(p, -up * 1.2, [0.96, 0.97, 1.0], 0.045, 2.9, FxKind::Leaf);
+            }
+        }
+        match biome {
+            B::Swamp | B::Jungle if !day => {
+                if self.mobs.rand() < rate * 6.0 {
+                    let p = around(&mut self.mobs, 9.0, 0.5, 3.0);
+                    let v = (t1 * (self.mobs.rand() - 0.5) + t2 * (self.mobs.rand() - 0.5)) * 0.6 - up * 0.3;
+                    self.mobs.fx_glow(p, v, [0.85, 1.0, 0.35], 0.04, 2.6, FxKind::Rise);
+                }
+            }
+            B::Desert | B::Badlands if day => {
+                if self.mobs.rand() < rate * 14.0 {
+                    let p = around(&mut self.mobs, 10.0, 0.1, 2.0);
+                    let col = if biome == B::Badlands { [0.80, 0.45, 0.25] } else { [0.88, 0.80, 0.58] };
+                    self.mobs.fx(p, t1 * 3.0 + up * 0.2, col, 0.035, 1.8, FxKind::Rise);
+                }
+            }
+            B::Volcano => {
+                if self.mobs.rand() < rate * 12.0 {
+                    let p = around(&mut self.mobs, 12.0, 5.0, 10.0);
+                    self.mobs.fx(p, -up * 0.8, [0.35, 0.33, 0.32], 0.05, 2.9, FxKind::Leaf);
+                }
+                if self.mobs.rand() < rate * 3.0 {
+                    let p = around(&mut self.mobs, 8.0, 0.0, 2.0);
+                    self.mobs.fx_glow(p, up * 1.2, [1.0, 0.5, 0.12], 0.035, 1.5, FxKind::Rise);
+                }
+            }
+            B::Plains | B::Forest | B::BirchForest | B::Savanna if day && season < 2.0 => {
+                if self.mobs.rand() < rate * 5.0 {
+                    let p = around(&mut self.mobs, 8.0, 0.3, 3.0);
+                    let v = (t1 * (self.mobs.rand() - 0.5) + t2 * (self.mobs.rand() - 0.5)) * 0.5;
+                    self.mobs.fx(p, v, [1.0, 0.96, 0.70], 0.025, 2.5, FxKind::Rise);
+                }
+            }
+            _ => {}
+        }
     }
 
     pub fn cycle_camera(&mut self) {
