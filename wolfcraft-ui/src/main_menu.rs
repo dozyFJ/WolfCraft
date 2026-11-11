@@ -92,7 +92,33 @@ fn decor(ui: &Ui, icons: &GuiIcons, p: &Palette) {
 // ---------------------------------------------------------------------------------------------
 // Main menu
 
-pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool) -> MenuAction {
+/// Space backdrop with a big planet rising from the bottom edge (the planet of the last played world).
+fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
+    let rect = ui.max_rect();
+    let painter = ui.painter();
+    painter.rect_filled(rect, Rounding::ZERO, Color32::from_rgb(2, 7, 13));
+    // Twinkling stars at fixed pseudo-random spots.
+    let t = ui.input(|i| i.time) as f32;
+    for i in 0..140u32 {
+        let h = i.wrapping_mul(2654435761).rotate_left(7) ^ 0x9e37_79b9;
+        let x = (h % 10_000) as f32 / 10_000.0;
+        let y = ((h / 10_000) % 10_000) as f32 / 10_000.0;
+        let tw = 0.55 + 0.45 * (t * (0.6 + (h % 7) as f32 * 0.2) + i as f32).sin();
+        let r = if h % 11 == 0 { 1.6 } else { 1.0 };
+        painter.circle_filled(Pos2::new(rect.left() + x * rect.width(), rect.top() + y * rect.height()), r, Color32::from_white_alpha((150.0 * tw) as u8));
+    }
+    if let Some(tex) = planet {
+        // Slow drift up and down so the screen feels alive.
+        let d = rect.width().max(rect.height() * 1.6);
+        let c = Pos2::new(rect.center().x, rect.bottom() + d * 0.18 + (t * 0.25).sin() * 6.0);
+        painter.image(tex.id(), Rect::from_center_size(c, Vec2::splat(d)), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+    }
+    // Soft shade so the menu stays readable.
+    painter.rect_filled(rect, Rounding::ZERO, p.bg.gamma_multiply(if p.dark { 0.25 } else { 0.15 }));
+    ui.ctx().request_repaint();
+}
+
+pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>) -> MenuAction {
     let p = palette(ctx);
     let mut action = MenuAction::None;
     // The header strip is for the PC window only; phones use the whole screen.
@@ -101,26 +127,20 @@ pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir:
     }
     egui::CentralPanel::default().frame(Frame::none().fill(p.bg)).show(ctx, |ui| {
         let rect = ui.max_rect();
-        // Rings behind the centred menu column.
-        for (i, r) in [200.0, 280.0, 370.0, 470.0].iter().enumerate() {
-            ui.painter().circle_stroke(rect.center(), *r, Stroke::new(2.0_f32, p.outline.gamma_multiply(0.45 - i as f32 * 0.08)));
-        }
-        let col = Rect::from_center_size(rect.center(), Vec2::new(360.0, rect.height().min(460.0)));
+        planet_backdrop(ui, planet, &p);
+        let col = Rect::from_center_size(rect.center(), Vec2::new(360.0, rect.height().min(400.0)));
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col), |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| ui.vertical_centered(|ui| {
                 ui.add_space(10.0);
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(88.0), Sense::hover());
                 icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new("WolfCraft").font(bold_font(40.0)).color(p.text));
-                ui.label(egui::RichText::new("Исследуйте целую планету из блоков").size(15.0).color(p.text_muted));
+                ui.label(egui::RichText::new("WolfCraft").font(bold_font(40.0)).color(Color32::WHITE));
+                ui.label(egui::RichText::new("Исследуйте целую планету из блоков").size(15.0).color(Color32::from_gray(200)));
                 ui.add_space(26.0);
                 ui.spacing_mut().item_spacing.y = 12.0;
                 if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 320.0, true).clicked() {
                     action = MenuAction::OpenWorldSelect;
-                }
-                if pill_button(ui, icons, Some(icon::PLUS), "Создать мир", ButtonKind::Secondary, 320.0, true).clicked() {
-                    action = MenuAction::OpenCreate;
                 }
                 if pill_button(ui, icons, Some(icon::GEAR), "Настройки", ButtonKind::Secondary, 320.0, true).clicked() {
                     action = MenuAction::OpenSettings;
@@ -233,13 +253,21 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
             });
         }
     });
-    // Centred column like the Minecraft world list: at most 760 px wide.
-    let side = ((ctx.screen_rect().width() / ctx.zoom_factor() - 760.0) / 2.0).max(24.0);
-    egui::CentralPanel::default().frame(body_frame(&p).inner_margin(Margin::symmetric(side, 18.0))).show(ctx, |ui| {
-        ui.vertical_centered(|ui| {
-            segmented(ui, "play-mode", &[(0usize, "Одиночная игра"), (1, "Игра по сети")], &mut st.mode);
+    // Left sidebar: play modes stacked vertically; their content fills the right side.
+    egui::SidePanel::left("play-mode-side")
+        .resizable(false)
+        .exact_width(230.0)
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 10.0;
+            for (i, ic, label) in [(0usize, icon::CUBE, "Одиночная игра"), (1, icon::GLOBE, "Игра по сети")] {
+                let kind = if st.mode == i { ButtonKind::Primary } else { ButtonKind::Secondary };
+                if pill_button(ui, icons, Some(ic), label, kind, ui.available_width(), true).clicked() {
+                    st.mode = i;
+                }
+            }
         });
-        ui.add_space(12.0);
+    egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
         if st.mode == 1 {
             if let Some(a) = online_tab(ui, icons, &p, st) {
                 action = a;

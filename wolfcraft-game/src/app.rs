@@ -85,6 +85,9 @@ struct LoadState {
     started: Instant,
 }
 
+/// Preview-channel id of the main menu backdrop planet.
+const MENU_PLANET_ID: &str = "__menu_planet";
+
 pub struct App {
     args: LaunchArgs,
     data_dir: PathBuf,
@@ -101,6 +104,9 @@ pub struct App {
     preview_rx: Receiver<(String, egui::ColorImage)>,
     preview_requested: HashSet<String>,
     create_preview: Option<TextureHandle>,
+    /// Big planet drawn behind the main menu.
+    menu_planet: Option<TextureHandle>,
+    menu_planet_requested: bool,
     create_preview_key: u64,
     create_preview_inflight: Option<u64>,
     create_tx: Sender<(u64, egui::ColorImage)>,
@@ -193,6 +199,8 @@ impl App {
             preview_rx,
             preview_requested: HashSet::new(),
             create_preview: None,
+            menu_planet: None,
+            menu_planet_requested: false,
             create_preview_key: 0,
             create_preview_inflight: None,
             create_tx,
@@ -515,6 +523,8 @@ impl App {
         }
         self.nav.clear();
         self.screen = Screen::Main;
+        // Show the planet of the world we just left.
+        self.menu_planet_requested = false;
     }
 
     fn apply_settings(&mut self, gfx: &mut Gfx) {
@@ -658,7 +668,21 @@ impl App {
     }
 
     fn poll_previews(&mut self, ctx: &egui::Context) {
+        // Main menu backdrop: the planet of the last played world (or a fixed one).
+        if self.screen == Screen::Main && !self.menu_planet_requested {
+            self.menu_planet_requested = true;
+            let cfg = list_worlds(&self.worlds_dir).into_iter().max_by_key(|c| c.last_played).unwrap_or_else(|| WorldConfig::new("menu", 20_240_611));
+            let tx = self.preview_tx.clone();
+            rayon::spawn(move || {
+                let img = preview::render_globe(&cfg, 512);
+                let _ = tx.send((MENU_PLANET_ID.to_string(), img));
+            });
+        }
         while let Ok((id, img)) = self.preview_rx.try_recv() {
+            if id == MENU_PLANET_ID {
+                self.menu_planet = Some(ctx.load_texture("menu-planet", img, egui::TextureOptions::LINEAR));
+                continue;
+            }
             let tex = ctx.load_texture(format!("preview-{id}"), img, egui::TextureOptions::LINEAR);
             self.preview_cache.insert(id.clone(), tex.clone());
             for w in &mut self.worlds {
@@ -904,12 +928,12 @@ impl App {
         }
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
         let frame = {
-            let App { settings, world_select, create, worlds, create_preview, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
+            let App { settings, world_select, create, worlds, create_preview, menu_planet, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
             let touch_size = gfx.gpu.size();
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
             gfx.gui.run(&gfx.window, |ctx| match screen {
-                Screen::Main => actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark)),
+                Screen::Main => actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref())),
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
                 Screen::Create => actions.push(main_menu::create_world(ctx, &icons, create, create_preview.as_ref(), version, random_seed)),
                 Screen::Settings => {
