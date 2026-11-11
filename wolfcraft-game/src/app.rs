@@ -1626,13 +1626,24 @@ impl App {
                 // swinging, and a started swing always plays to the end.
                 let first_person = s.camera_mode == crate::session::CameraMode::First && !s.player.survival.dead;
                 let tool = s.player.inventory.held().and_then(|st| wolfcraft_engine::items::tool_shape(st.id));
-                let want = self.screen == Screen::Playing && self.input.left && !s.player.survival.dead;
+                // Mouse button or a held finger (touch) keeps swinging; every blow that lands on a
+                // creature starts a swing too (a tap on a mob).
+                let bow = s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::BOW);
+                let hits = std::mem::take(&mut s.mob_hits);
+                if hits > 0 {
+                    self.audio.play(crate::audio::Sfx::Hit, 1.0);
+                }
+                let want = self.screen == Screen::Playing && (self.input.left || (self.touch.breaking && !bow) || hits > 0) && !s.player.survival.dead;
                 let c0 = self.hand_cycle;
                 if self.hand_cycle > 0.0 {
                     self.hand_cycle += dt * swing_speed(tool);
                     if self.hand_cycle >= 1.0 {
                         self.hand_cycle = if want { (self.hand_cycle - 1.0).max(1e-4) } else { 0.0 };
                     }
+                } else if hits > 0 {
+                    // The blow already landed: start the swing near its strike so the hand
+                    // and the hit happen together.
+                    self.hand_cycle = 0.18;
                 } else if want {
                     self.hand_cycle = 1e-4;
                 }

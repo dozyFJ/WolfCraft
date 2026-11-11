@@ -136,6 +136,8 @@ pub struct GameSession {
     fx_was_in_water: bool,
     fx_prev_vup: f64,
     fx_was_ground: bool,
+    /// Blows that landed on creatures this frame (the app plays the swing and the sound).
+    pub mob_hits: u32,
     /// Radiation dose from uranium (seconds of exposure); every 3 s of it costs half a heart.
     radiation: f32,
     /// Flowing water and lava around edits.
@@ -191,6 +193,7 @@ impl GameSession {
             net_out: Vec::new(),
             fluids: Default::default(),
             radiation: 0.0,
+            mob_hits: 0,
             fx_amount: 1.0,
             fx_lights: Vec::new(),
             fx_scan: 0.0,
@@ -394,7 +397,8 @@ impl GameSession {
         if !self.player.survival.dead {
             let hit = self.hit;
             events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held, dt, self.cfg.seed));
-            if input.use_pressed {
+            // A tap on a creature in the crosshair hits it (touch screens: a short tap is "use").
+            if input.use_pressed && !self.try_attack(0.25) {
                 events.extend(self.interaction.use_item(&mut self.chunks, &mut self.player, hit));
             }
             if input.pick_pressed {
@@ -419,23 +423,8 @@ impl GameSession {
                 self.death_burst_done = false;
             }
             self.attack_cd = (self.attack_cd - dt).max(0.0);
-            if input.break_held && self.attack_cd <= 0.0 {
-                let eye = self.player.eye_pos();
-                let look = self.player.look_dir();
-                let reach = Interaction::reach(&self.player) - 1.5;
-                if let Some((i, t)) = self.mobs.raycast(eye, look, reach) {
-                    // A block in front of the creature protects it.
-                    if self.hit.is_none_or(|h| h.dist > t) {
-                        let dmg = self.player.inventory.held().map(|s| s.info().attack).unwrap_or(1.0).max(1.0);
-                        if let Some(kind) = self.mobs.hurt(i, dmg, self.player.body.pos) {
-                            for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64) {
-                                self.player.inventory.add(drop);
-                            }
-                            self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
-                        }
-                        self.attack_cd = 0.45;
-                    }
-                }
+            if input.break_held {
+                self.try_attack(0.45);
             }
         }
         // Arrows: flight, hits, pickup.
@@ -931,6 +920,45 @@ impl GameSession {
         self.fx_was_in_water = in_water;
         self.fx_was_ground = ground;
         self.fx_prev_vup = vup;
+    }
+
+    /// Hits the creature in the crosshair if there is one within reach and nothing solid in
+    /// front of it. Returns true when a creature was targeted (even during the cooldown, so a
+    /// tap on a mob never places a block on it).
+    fn try_attack(&mut self, cooldown: f32) -> bool {
+        if self.player.survival.dead || !self.ground_ready() {
+            return false;
+        }
+        let eye = self.player.eye_pos();
+        let look = self.player.look_dir();
+        let reach = Interaction::reach(&self.player) - 1.5;
+        let Some((i, t)) = self.mobs.raycast(eye, look, reach) else { return false };
+        // A block in front of the creature protects it.
+        if self.hit.is_some_and(|h| h.dist <= t) {
+            return false;
+        }
+        if self.attack_cd > 0.0 {
+            return true;
+        }
+        let dmg = self.player.inventory.held().map(|s| s.info().attack).unwrap_or(1.0).max(1.0);
+        let at = self.mobs.mobs.get(i).map(|m| m.centre()).unwrap_or(eye + look * t);
+        // Hit feedback: a burst of red and white sparks, more for strong weapons.
+        let n = ((4.0 + dmg * 1.5) * self.fx_amount) as usize;
+        self.mobs.chips(at - look * 0.3, &[[0.95, 0.15, 0.12], [1.0, 1.0, 1.0], [0.75, 0.05, 0.05]], n, 2.2 + dmg as f64 * 0.15);
+        if let Some(kind) = self.mobs.hurt(i, dmg, self.player.body.pos) {
+            for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64) {
+                self.player.inventory.add(drop);
+            }
+            self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
+        }
+        self.attack_cd = cooldown;
+        self.mob_hits += 1;
+        if let Some(st) = self.player.inventory.held() {
+            if st.info().durability > 0 {
+                self.player.inventory.wear_selected();
+            }
+        }
+        true
     }
 
     pub fn cycle_camera(&mut self) {
