@@ -606,15 +606,19 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         // 3D item: every opaque icon pixel is a little box. The icon's handle (bottom-left)
         // sits in the fist; its right edge points left and a bit away, so the tip leans
         // towards the crosshair.
-        // Minecraft-like grip: the icon diagonal (handle -> head) points up, forward and
-        // towards the crosshair, the flat side half-turned to the camera.
-        let a = 0.62f32;
-        let u = Vec3::new(-a.cos(), 0.0, a.sin());
-        let w0 = Vec3::new(0.0, 0.88, 0.48).normalize();
-        let w = (w0 - u * u.dot(w0)).normalize();
+        // Minecraft grip. Our tool icons run from the handle (bottom-right pixel) to the head
+        // (top-left). `d` is that diagonal in the view: up, forward and a bit right; the flat
+        // side looks back towards the camera at about 45°.
+        let d = Vec3::new(0.60, 0.80, 0.30).normalize();
+        let to_cam = Vec3::new(-1.0, 0.05, -0.75).normalize();
+        let to_cam = (to_cam - d * d.dot(to_cam)).normalize();
+        let e = d.cross(to_cam);
+        let u = (e - d).normalize();
+        let w = (e + d).normalize();
         let n = u.cross(w).normalize();
-        let s = 0.46;
-        let o = f + Vec3::new(0.06, -0.08, -0.06);
+        let s = 0.52;
+        // The grip pixel (12.5, 12.5 from the top-left) sits in the fist.
+        let o = f + Vec3::new(-0.12, -0.04, 0.06) - u * (s * 0.78) - w * (s * 0.22);
         add_voxel_icon(v, frame, &px, o, u, w, n, s, pivot, angle);
         return;
     }

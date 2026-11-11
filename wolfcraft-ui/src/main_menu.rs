@@ -151,11 +151,24 @@ fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
     if let Some(tex) = planet {
         // Slow drift up and down so the screen feels alive.
         let d = rect.width().max(rect.height() * 1.6);
-        let c = Pos2::new(rect.center().x.round(), (rect.bottom() + d * 0.18).round());
+        // Low on the screen: only the top of the planet shows, under the buttons.
+        let c = Pos2::new(rect.center().x.round(), (rect.bottom() + d * 0.30).round());
         painter.image(tex.id(), Rect::from_center_size(c, Vec2::splat(d)), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
     }
-    // Soft shade so the menu stays readable.
+    // Soft shade so the menu stays readable, darker from the top down to the middle where the
+    // logo and title sit.
     painter.rect_filled(rect, Rounding::ZERO, p.bg.gamma_multiply(if p.dark { 0.25 } else { 0.15 }));
+    let mut m = egui::Mesh::default();
+    let dark = Color32::from_black_alpha(200);
+    let clear = Color32::from_black_alpha(0);
+    let mid = rect.top() + rect.height() * 0.62;
+    m.colored_vertex(rect.left_top(), dark);
+    m.colored_vertex(rect.right_top(), dark);
+    m.colored_vertex(Pos2::new(rect.right(), mid), clear);
+    m.colored_vertex(Pos2::new(rect.left(), mid), clear);
+    m.add_triangle(0, 1, 2);
+    m.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::mesh(m));
     let _ = t;
 }
 
@@ -174,7 +187,7 @@ pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir:
                 icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new("WolfCraft").font(bold_font(40.0)).color(Color32::WHITE));
-                ui.label(egui::RichText::new("Исследуйте целую планету из блоков").size(15.0).color(Color32::from_gray(200)));
+                ui.label(egui::RichText::new("Исследуйте целую планету из блоков").size(15.0).color(Color32::from_gray(225)));
                 ui.add_space(26.0);
                 ui.spacing_mut().item_spacing.y = 12.0;
                 if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 320.0, true).clicked() {

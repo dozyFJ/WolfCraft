@@ -444,17 +444,21 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
         let list: Vec<ItemId> = palette_all.into_iter().filter(|id| in_tab(*id, state.tab) && matches_search(*id, &state.search)).collect();
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
-        egui::ScrollArea::vertical().id_salt(("creative-scroll", state.tab)).auto_shrink([false, false]).show(&mut ui2, |ui| {
+        // Swipe scrolls the list (a slot only reacts to a tap, so the finger drag goes to the
+        // scroll area); the bar stays visible so it is clear there is more below.
+        egui::ScrollArea::vertical()
+            .id_salt(("creative-scroll", state.tab))
+            .auto_shrink([false, false])
+            .drag_to_scroll(true)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+            .show(&mut ui2, |ui| {
             for chunk in list.chunks(10) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::splat(GAP);
                     for id in chunk {
                         let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
                         let stack = ItemStack::new(*id, 1);
-                        let resp = slot_widget(ui, icons, p, rect, Some(&stack), false, Id::new(("pal", *id)), Sense::click_and_drag());
-                        if resp.drag_started() {
-                            state.drag_item = Some(*id);
-                        }
+                        let resp = slot_widget(ui, icons, p, rect, Some(&stack), false, Id::new(("pal", *id)), Sense::click());
                         if resp.clicked() {
                             // Tap: a full stack into the selected hotbar slot (Shift: into a free slot).
                             let full = ItemStack::new(*id, items::info(*id).max_stack);
