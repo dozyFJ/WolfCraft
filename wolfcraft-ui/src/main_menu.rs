@@ -902,71 +902,83 @@ pub struct LoadingView<'a> {
     pub grid: &'a [u8],
 }
 
+/// World loading, styled after the classic "loading terrain" screen: a dark tiled earth
+/// backdrop, the percentage on top, a big chunk map in the middle and the current step below.
 pub fn loading_screen(ctx: &egui::Context, icons: &GuiIcons, v: &LoadingView) {
     let p = palette(ctx);
-    egui::CentralPanel::default().frame(Frame::none().fill(p.bg)).show(ctx, |ui| {
-        decor(ui, icons, &p);
+    egui::CentralPanel::default().frame(Frame::none().fill(Color32::from_rgb(14, 12, 10))).show(ctx, |ui| {
         let rect = ui.max_rect();
-        let col = Rect::from_center_size(rect.center(), Vec2::new(480.0, if v.grid.is_empty() { 520.0 } else { 700.0 }));
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col), |ui| {
-            card(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(Vec2::splat(46.0), Sense::hover());
-                    icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(v.title).font(bold_font(20.0)).color(p.text));
-                        ui.label(egui::RichText::new(v.detail).size(13.0).color(p.text_muted));
-                    });
-                });
-                ui.add_space(14.0);
-                for (i, s) in v.stages.iter().enumerate() {
-                    let done = i < v.current;
-                    let active = i == v.current;
-                    ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-                        if done {
-                            icons.paint(ui.painter(), r, icon::CHECK, p.success);
-                        } else if active {
-                            let t = ui.input(|i| i.time) as f32;
-                            ui.ctx().request_repaint();
-                            let c = r.center();
-                            ui.painter().circle_stroke(c, 7.0, Stroke::new(2.0_f32, p.outline));
-                            let a = t * 6.0;
-                            ui.painter().circle_filled(c + Vec2::new(a.cos(), a.sin()) * 7.0, 2.8, p.accent);
-                        } else {
-                            ui.painter().circle_filled(r.center(), 3.0, p.outline);
-                        }
-                        ui.label(egui::RichText::new(s).size(14.5).color(if done { p.text_muted } else if active { p.text } else { p.text_muted.gamma_multiply(0.7) }));
-                    });
+        let painter = ui.painter().clone();
+        // Backdrop: dirt blocks, darkened.
+        let tile = 64.0;
+        let (nx, ny) = ((rect.width() / tile).ceil() as i32, (rect.height() / tile).ceil() as i32);
+        for y in 0..ny {
+            for x in 0..nx {
+                let r = Rect::from_min_size(rect.min + Vec2::new(x as f32 * tile, y as f32 * tile), Vec2::splat(tile));
+                icons.paint_block_tile(&painter, r, wolfcraft_assets::tiles::DIRT);
+            }
+        }
+        painter.rect_filled(rect, Rounding::ZERO, Color32::from_black_alpha(200));
+        ui.ctx().request_repaint();
+
+        // Chunk map (an empty one until the terrain starts streaming in).
+        let empty;
+        let grid: &[u8] = if v.grid.is_empty() {
+            empty = vec![0u8; 15 * 15];
+            &empty
+        } else {
+            v.grid
+        };
+        let side = (grid.len() as f32).sqrt().round().max(1.0) as usize;
+        let map = (rect.height() * 0.55).clamp(150.0, 330.0);
+        let cell = (map / side as f32).floor().max(4.0);
+        let size = cell * side as f32;
+        let top = rect.center().y - size / 2.0 + 10.0;
+        let r = Rect::from_min_size(Pos2::new(rect.center().x - size / 2.0, top), Vec2::splat(size));
+
+        // Percentage above the map.
+        let pct = format!("{:.0}%", v.fraction * 100.0);
+        painter.text(Pos2::new(r.center().x + 2.0, r.top() - 22.0 + 2.0), Align2::CENTER_BOTTOM, &pct, bold_font(30.0), Color32::from_black_alpha(180));
+        painter.text(Pos2::new(r.center().x, r.top() - 22.0), Align2::CENTER_BOTTOM, &pct, bold_font(30.0), Color32::from_rgb(236, 232, 210));
+
+        // Frame with a hard drop shadow.
+        painter.rect_filled(r.expand(6.0).translate(Vec2::splat(6.0)), Rounding::ZERO, Color32::from_black_alpha(160));
+        painter.rect_filled(r.expand(6.0), Rounding::ZERO, Color32::from_rgb(20, 22, 28));
+        painter.rect_stroke(r.expand(6.0), Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+        let t = ui.input(|i| i.time) as f32;
+        let mid = side / 2;
+        for (i, st) in grid.iter().enumerate() {
+            let (cx, cy) = (i % side, i / side);
+            let q = Rect::from_min_size(r.min + Vec2::new(cx as f32 * cell, cy as f32 * cell), Vec2::splat(cell - if cell >= 8.0 { 1.0 } else { 0.0 }));
+            // Ring distance from the player: queued rings pulse softly while they wait.
+            let ring = cx.abs_diff(mid).max(cy.abs_diff(mid)) as f32;
+            let color = match st {
+                2 => Color32::from_rgb(92, 200, 110),
+                1 => Color32::from_rgb(214, 204, 160),
+                _ => {
+                    let pulse = 0.5 + 0.5 * (t * 3.0 - ring * 0.6).sin();
+                    Color32::from_rgb(40, 44, 54).lerp_to_gamma(Color32::from_rgb(58, 64, 78), pulse * 0.6)
                 }
-                ui.add_space(14.0);
-                progress_bar(ui, v.fraction, &format!("{:.0}%", v.fraction * 100.0), ui.available_width());
-                // Chunk map: squares fill in as the terrain around the player appears.
-                let side = (v.grid.len() as f32).sqrt().round() as usize;
-                if side > 0 && side * side == v.grid.len() {
-                    ui.add_space(14.0);
-                    let cell = (150.0 / side as f32).floor().max(4.0);
-                    let size = cell * side as f32;
-                    ui.vertical_centered(|ui| {
-                        let (r, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-                        let painter = ui.painter();
-                        painter.rect_filled(r.expand(4.0), Rounding::ZERO, p.bg);
-                        painter.rect_stroke(r.expand(4.0), Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-                        for (i, s) in v.grid.iter().enumerate() {
-                            let (cx, cy) = ((i % side) as f32, (i / side) as f32);
-                            let q = Rect::from_min_size(r.min + Vec2::new(cx * cell, cy * cell), Vec2::splat(cell - 1.0));
-                            let color = match s {
-                                2 => p.success,
-                                1 => p.accent.gamma_multiply(0.55),
-                                _ => p.outline.gamma_multiply(0.5),
-                            };
-                            painter.rect_filled(q, Rounding::ZERO, color);
-                        }
-                    });
-                }
-            });
-        });
+            };
+            painter.rect_filled(q, Rounding::ZERO, color);
+        }
+        // Player chunk.
+        let me = Rect::from_min_size(r.min + Vec2::new(mid as f32 * cell, mid as f32 * cell), Vec2::splat(cell));
+        painter.rect_stroke(me.expand(1.0), Rounding::ZERO, Stroke::new(2.0_f32, p.accent));
+
+        // Below: world name and the current step with a spinner.
+        let y = r.bottom() + 22.0;
+        let step = v.stages.get(v.current).map(|s| s.as_str()).unwrap_or("Готово");
+        painter.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, v.title, bold_font(16.0), Color32::from_rgb(236, 232, 210));
+        let line = if v.detail.is_empty() { step.to_string() } else { format!("{step} · {}", v.detail) };
+        let g = painter.layout_no_wrap(line, FontId::proportional(13.5), Color32::from_gray(170));
+        let w = g.size().x + 22.0;
+        let x0 = r.center().x - w / 2.0;
+        let c = Pos2::new(x0 + 7.0, y + 30.0);
+        painter.circle_stroke(c, 6.0, Stroke::new(2.0_f32, Color32::from_gray(80)));
+        painter.circle_filled(c + Vec2::new((t * 6.0).cos(), (t * 6.0).sin()) * 6.0, 2.5, p.accent);
+        painter.galley(Pos2::new(x0 + 22.0, y + 30.0 - g.size().y / 2.0), g, Color32::from_gray(170));
+        let _ = icon::LOGO;
     });
 }
 

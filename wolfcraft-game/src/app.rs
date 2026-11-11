@@ -1066,7 +1066,7 @@ impl App {
                             }
                         } else {
                             let (cur, frac, detail) = loading_view(l, session.as_ref());
-                            let grid = session.as_ref().map(|s| s.chunks.progress_grid(s.player_chunk(), 5)).unwrap_or_default();
+                            let grid = session.as_ref().map(|s| s.chunks.progress_grid(s.player_chunk(), 7)).unwrap_or_default();
                             main_menu::loading_screen(ctx, &icons, &LoadingView { title: &format!("Мир {}", l.title), stages: &stages, current: cur, fraction: frac, detail: &detail, grid: &grid });
                         }
                     }
