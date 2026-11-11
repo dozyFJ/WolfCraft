@@ -1291,7 +1291,7 @@ mod tests {
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             crate::theme_manager::apply(&ctx, mode);
             frame(&ctx, |c| {
-                main_menu(c, &icons, "0.1.0", "C:\\data", mode == ThemeMode::Dark, None);
+                main_menu(c, &icons, "0.1.0", "C:\\data", mode == ThemeMode::Dark, None, 0);
             });
             let mut ws = WorldSelectState::default();
             frame(&ctx, |c| {
