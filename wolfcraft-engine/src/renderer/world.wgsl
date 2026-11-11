@@ -96,7 +96,7 @@ fn shade(in: VsOut, color: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     }
     // Directional light comes from the sun, ambient from the sky; at night only dim moonlight.
     let diffuse = max(dot(n, sun), 0.0);
-    let sky_light = mix(0.09, 0.52 + 0.48 * diffuse, day) * in.light.y;
+    let sky_light = mix(0.10, 0.64 + 0.44 * diffuse, day) * in.light.y;
     // Cool tint at night, warm at sunrise/sunset.
     let night_tint = vec3<f32>(0.78, 0.88, 1.18);
     let warm = vec3<f32>(1.08, 0.95, 0.85);
@@ -124,13 +124,16 @@ fn shade(in: VsOut, color: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     return rgb;
 }
 
-// Shaders: gentle colour grading (a little contrast and saturation, warm highlights).
+// Colour grading: the game is bright and colourful (more saturation always), and with
+// shaders on a soft contrast curve and warm highlights on top.
 fn grade(c: vec3<f32>) -> vec3<f32> {
-    if (g.misc.w < 0.5) {
-        return c;
-    }
     let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
-    var o = mix(vec3<f32>(l), c, 1.12);
+    let vivid = max(mix(vec3<f32>(l), c, 1.18), vec3<f32>(0.0));
+    if (g.misc.w < 0.5) {
+        return vivid;
+    }
+    var o = mix(vec3<f32>(l), c, 1.32);
+    o = max(o, vec3<f32>(0.0));
     o = o * o * (3.0 - 2.0 * o) * 0.35 + o * 0.65; // soft S-curve
     return o * vec3<f32>(1.02, 1.0, 0.97);
 }
@@ -330,12 +333,12 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     let sun = normalize(g.sun.xyz);
     let day = smoothstep(-0.12, 0.28, dot(up, sun));
     let diffuse = max(dot(normalize(in.normal), sun), 0.0);
-    let light = max(mix(0.10, 0.50 + 0.50 * diffuse, day), 0.16);
+    let light = max(mix(0.11, 0.62 + 0.45 * diffuse, day), 0.16);
     var rgb = base * light;
     let d = length(in.rel);
     let f = clamp(1.0 - exp(-pow(d * g.fog.a, 2.0)), 0.0, 1.0);
     rgb = mix(rgb, g.fog.rgb, f);
-    return vec4<f32>(to_srgb(rgb), 1.0);
+    return vec4<f32>(to_srgb(grade(rgb)), 1.0);
 }
 
 @fragment

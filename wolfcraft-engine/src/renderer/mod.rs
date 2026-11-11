@@ -1046,8 +1046,9 @@ pub fn aabb_in_frustum(planes: &[Vec4; 6], min: Vec3, max: Vec3) -> bool {
 /// Sky and fog colour for the given daylight (0 night … 1 day) and altitude (0 surface … 1 space).
 pub fn sky_color(day: f32, twilight: f32, altitude: f32) -> [f32; 3] {
     let night = Vec3::new(0.012, 0.018, 0.05);
-    let noon = Vec3::new(0.46, 0.68, 0.98);
-    let dusk = Vec3::new(0.95, 0.52, 0.30);
+    // Bright, saturated blue at noon and a vivid orange-pink dusk.
+    let noon = Vec3::new(0.36, 0.64, 1.0);
+    let dusk = Vec3::new(1.0, 0.50, 0.32);
     let mut c = night.lerp(noon, day.clamp(0.0, 1.0));
     c = c.lerp(dusk, (twilight * 0.55).clamp(0.0, 0.55));
     c *= 1.0 - altitude.clamp(0.0, 1.0) * 0.85;
