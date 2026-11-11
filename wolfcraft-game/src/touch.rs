@@ -32,6 +32,8 @@ enum Role {
 enum Btn {
     Jump,
     Sneak,
+    Sprint,
+    Place,
     Inventory,
     Pause,
     Chat,
@@ -59,6 +61,8 @@ pub struct TouchState {
     /// Joystick deflection, x = strafe right, y = forward (both -1..1).
     pub move_vec: (f32, f32),
     pub sneak: bool,
+    /// Sprint toggle (on-screen button).
+    pub sprint: bool,
     pub jump_held: bool,
     /// Accumulated look drag in pixels since the last frame.
     pub look: (f32, f32),
@@ -93,8 +97,11 @@ fn button_rect(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>) -
         }
     }
     match b {
-        Btn::Jump => (w - 120.0 * u, h - 150.0 * u, 62.0 * u),
-        Btn::Sneak => (w - 120.0 * u, h - 290.0 * u, 44.0 * u),
+        // Right-hand cluster: big jump, then sneak, sprint and place around it.
+        Btn::Jump => (w - 130.0 * u, h - 150.0 * u, 60.0 * u),
+        Btn::Sneak => (w - 265.0 * u, h - 95.0 * u, 40.0 * u),
+        Btn::Sprint => (w - 280.0 * u, h - 215.0 * u, 40.0 * u),
+        Btn::Place => (w - 130.0 * u, h - 300.0 * u, 44.0 * u),
         Btn::Inventory => (w - 70.0 * u, h - 50.0 * u, 34.0 * u),
         Btn::Chat | Btn::Camera | Btn::Tab | Btn::Pause => {
             let i = ISLAND.iter().position(|x| *x == b).unwrap_or(0) as f32;
@@ -120,7 +127,7 @@ fn island_layout(size: (u32, u32)) -> (f32, f32, f32) {
 }
 
 /// Round on-screen buttons (the inventory is a tile next to the hotbar, drawn by the HUD).
-const BUTTONS: [Btn; 6] = [Btn::Jump, Btn::Sneak, Btn::Pause, Btn::Chat, Btn::Camera, Btn::Tab];
+const BUTTONS: [Btn; 8] = [Btn::Jump, Btn::Sneak, Btn::Sprint, Btn::Place, Btn::Pause, Btn::Chat, Btn::Camera, Btn::Tab];
 
 fn hit(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>, p: (f32, f32)) -> bool {
     let (cx, cy, r) = button_rect(b, size, hotbar);
@@ -157,7 +164,19 @@ impl TouchState {
                             self.jump_held = true;
                             out.push(TouchAction::Jump);
                         }
-                        Btn::Sneak => self.sneak = !self.sneak,
+                        Btn::Sneak => {
+                            self.sneak = !self.sneak;
+                            if self.sneak {
+                                self.sprint = false;
+                            }
+                        }
+                        Btn::Sprint => {
+                            self.sprint = !self.sprint;
+                            if self.sprint {
+                                self.sneak = false;
+                            }
+                        }
+                        Btn::Place => out.push(TouchAction::Place),
                         Btn::Inventory => out.push(TouchAction::Inventory),
                         Btn::Pause => out.push(TouchAction::Pause),
                         Btn::Chat => out.push(TouchAction::Chat),
@@ -308,32 +327,46 @@ impl TouchState {
             let (cx, cy, r) = button_rect(b, size, self.hotbar);
             let on = match b {
                 Btn::Sneak => self.sneak,
+                Btn::Sprint => self.sprint,
                 Btn::Jump => self.jump_held,
                 _ => false,
             };
-            let col = if on { Color32::from_rgba_unmultiplied(60, 160, 200, 170) } else { fill };
+            let col = if on { Color32::from_rgba_unmultiplied(38, 198, 218, 170) } else { fill };
             painter.circle(pt(cx, cy), r / ppp, col, line);
-            let white = Color32::from_rgba_unmultiplied(240, 245, 250, 230);
-            if matches!(b, Btn::Jump | Btn::Sneak) {
-                // The pixel font has no arrow glyphs: draw the triangle as a shape.
-                let k = r * 0.42 / ppp;
-                let c = pt(cx, cy);
-                let s = if b == Btn::Jump { -1.0 } else { 1.0 };
-                painter.add(egui::Shape::convex_polygon(vec![c + egui::vec2(0.0, s * k), c + egui::vec2(-k, -s * k * 0.7), c + egui::vec2(k, -s * k * 0.7)], white, Stroke::NONE));
-                continue;
+            let white = Color32::from_rgba_unmultiplied(240, 245, 250, 235);
+            let c = pt(cx, cy);
+            let k = r * 0.42 / ppp;
+            let st = Stroke::new(2.6, white);
+            match b {
+                Btn::Jump | Btn::Sneak => {
+                    // The pixel font has no arrow glyphs: draw the triangle as a shape.
+                    let sgn = if b == Btn::Jump { -1.0 } else { 1.0 };
+                    painter.add(egui::Shape::convex_polygon(vec![c + egui::vec2(0.0, sgn * k), c + egui::vec2(-k, -sgn * k * 0.7), c + egui::vec2(k, -sgn * k * 0.7)], white, Stroke::NONE));
+                }
+                Btn::Sprint => {
+                    // Double chevron: run.
+                    for dx in [-0.45f32, 0.35] {
+                        let o = c + egui::vec2(dx * k, 0.0);
+                        painter.line_segment([o + egui::vec2(-k * 0.35, -k * 0.7), o + egui::vec2(k * 0.35, 0.0)], st);
+                        painter.line_segment([o + egui::vec2(k * 0.35, 0.0), o + egui::vec2(-k * 0.35, k * 0.7)], st);
+                    }
+                }
+                Btn::Place => {
+                    // A block with a plus.
+                    painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(k * 1.6, k * 1.6)), 0.0, st);
+                    painter.line_segment([c - egui::vec2(k * 0.5, 0.0), c + egui::vec2(k * 0.5, 0.0)], st);
+                    painter.line_segment([c - egui::vec2(0.0, k * 0.5), c + egui::vec2(0.0, k * 0.5)], st);
+                }
+                _ => {}
             }
             let label = match b {
-                Btn::Jump => "",
-                Btn::Sneak => "",
-                Btn::Inventory => "E",
-                Btn::Pause => "II",
-                Btn::Chat => "T",
-                Btn::Camera => "V",
-                Btn::Tab => "TAB",
-                Btn::Prev => "◀",
-                Btn::Next => "▶",
+                Btn::Jump => "Прыжок",
+                Btn::Sneak => "Присесть",
+                Btn::Sprint => "Бег",
+                Btn::Place => "Поставить",
+                _ => "",
             };
-            painter.text(pt(cx, cy), Align2::CENTER_CENTER, label, FontId::proportional(r * 0.9 / ppp), Color32::from_rgba_unmultiplied(240, 245, 250, 220));
+            painter.text(pt(cx, cy + r + 4.0 * u), Align2::CENTER_TOP, label, FontId::proportional(11.0), Color32::from_rgba_unmultiplied(240, 245, 250, 200));
         }
     }
 }

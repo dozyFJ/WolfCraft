@@ -751,7 +751,7 @@ impl App {
             strafe: (axis(KeyCode::KeyD, KeyCode::KeyA) + self.touch.move_vec.0).clamp(-1.0, 1.0),
             jump: k.contains(&KeyCode::Space) || self.touch.jump_held,
             jump_pressed: std::mem::take(&mut self.input.jump_press),
-            sprint: k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight),
+            sprint: k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight) || self.touch.sprint,
             sneak: k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || self.touch.sneak,
             look: ((self.input.mouse_dx + tl.0 as f64 * 1.4) * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy + tl.1 as f64 * 1.4) * sens),
             break_held: self.input.left || self.touch.breaking,
