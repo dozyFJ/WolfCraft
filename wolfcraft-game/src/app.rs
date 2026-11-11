@@ -38,6 +38,8 @@ use wolfcraft_ui::{GuiRenderer, theme_manager};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Screen {
+    /// Studio splash with a loading bar and tips, shown once at start.
+    Splash,
     Main,
     WorldSelect,
     Create,
@@ -112,6 +114,8 @@ pub struct App {
     loaded_pack: String,
     pack_status: String,
     pack_dl: Option<Receiver<Result<String, String>>>,
+    /// Seconds the splash has been shown.
+    splash_t: f32,
     /// Big planet drawn behind the main menu.
     menu_planet: Option<TextureHandle>,
     menu_planet_requested: bool,
@@ -197,7 +201,7 @@ impl App {
             worlds_dir,
             settings,
             gfx: None,
-            screen: Screen::Main,
+            screen: Screen::Splash,
             nav: Vec::new(),
             world_select: WorldSelectState::default(),
             create: CreateWorldState::default(),
@@ -211,6 +215,7 @@ impl App {
             loaded_pack: String::new(),
             pack_status: String::new(),
             pack_dl: None,
+            splash_t: 0.0,
             menu_planet: None,
             menu_planet_requested: false,
             create_preview_key: 0,
@@ -625,6 +630,7 @@ impl App {
     }
 
     fn apply_settings(&mut self, gfx: &mut Gfx) {
+        gfx.gpu.set_refresh_rate(self.settings.refresh_rate);
         if self.settings.texture_pack != self.loaded_pack {
             self.reload_pack(gfx);
         }
@@ -769,7 +775,7 @@ impl App {
 
     fn poll_previews(&mut self, ctx: &egui::Context) {
         // Main menu backdrop: the planet of the last played world (or a fixed one).
-        if self.screen == Screen::Main && !self.menu_planet_requested {
+        if matches!(self.screen, Screen::Main | Screen::Splash) && !self.menu_planet_requested {
             self.menu_planet_requested = true;
             let cfg = list_worlds(&self.worlds_dir).into_iter().max_by_key(|c| c.last_played).unwrap_or_else(|| WorldConfig::new("menu", 20_240_611));
             let tx = self.preview_tx.clone();
@@ -997,6 +1003,12 @@ impl App {
         let mut settings_changed = false;
         let mut settings_back = false;
         let mut pack_refresh = false;
+        let mut splash_skip = false;
+        // Splash: about 2.8 s, a little longer if the menu planet is not rendered yet.
+        if self.screen == Screen::Splash {
+            self.splash_t += dt;
+        }
+        let splash_progress = (self.splash_t / 2.8).min(if self.menu_planet.is_some() { 1.0 } else { 0.9 + (self.splash_t / 6.0).min(0.1) });
         let mut pack_download: Option<String> = None;
         let mut close_inventory = false;
         let mut submitted: Vec<String> = Vec::new();
@@ -1036,6 +1048,11 @@ impl App {
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
             gfx.gui.run(&gfx.window, |ctx| match screen {
+                Screen::Splash => {
+                    if main_menu::splash_screen(ctx, &icons, splash_progress, version) {
+                        splash_skip = true;
+                    }
+                }
                 Screen::Main => actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref())),
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
                 Screen::Create => actions.push(main_menu::create_world(ctx, &icons, create, create_preview.as_ref(), version, random_seed)),
@@ -1184,6 +1201,9 @@ impl App {
         self.profile.ui_ms = t_ui.ms();
 
         // ---- apply UI results ----
+        if self.screen == Screen::Splash && (splash_progress >= 1.0 || splash_skip && self.splash_t > 0.6) {
+            self.screen = Screen::Main;
+        }
         if pack_refresh {
             self.packs = wolfcraft_assets::packs::list(&self.pack_dirs());
             self.pack_status = format!("Найдено паков: {}", self.packs.iter().filter(|p| p.path.is_some()).count());
@@ -1633,12 +1653,14 @@ impl ApplicationHandler for App {
         if let Some(gfx) = &mut self.gfx {
             // Back from the background (phone): the old surface is gone, make a new one.
             gfx.gpu.resume();
+            gfx.gpu.set_refresh_rate(self.settings.refresh_rate);
             gfx.window.request_redraw();
             return;
         }
         match self.create_gfx(event_loop) {
             Ok(g) => {
                 log::info!("window and GPU ready");
+                g.gpu.set_refresh_rate(self.settings.refresh_rate);
                 self.gfx = Some(g);
             }
             Err(e) => {
@@ -1769,8 +1791,9 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let Some(gfx) = &self.gfx else { return };
-        // Menus never need more than 60 FPS; in game honour VSync / the FPS limiter.
-        let cap = if !self.screen.in_world() {
+        // Menus run at the screen rate on phones (vsync paces them), 60 FPS elsewhere;
+        // in game honour VSync / the FPS limiter.
+        let cap = if !self.screen.in_world() && !cfg!(target_os = "android") {
             60
         } else if gfx.gpu.vsync() {
             0

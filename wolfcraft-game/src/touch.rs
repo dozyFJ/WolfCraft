@@ -91,13 +91,25 @@ fn button_rect(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>) -
         Btn::Jump => (w - 120.0 * u, h - 150.0 * u, 62.0 * u),
         Btn::Sneak => (w - 120.0 * u, h - 290.0 * u, 44.0 * u),
         Btn::Inventory => (w - 70.0 * u, h - 50.0 * u, 34.0 * u),
-        Btn::Pause => (w * 0.5, 60.0 * u, 34.0 * u),
-        Btn::Chat => (70.0 * u, 70.0 * u, 38.0 * u),
-        Btn::Camera => (250.0 * u, 70.0 * u, 38.0 * u),
-        Btn::Tab => (160.0 * u, 70.0 * u, 38.0 * u),
+        Btn::Chat | Btn::Camera | Btn::Tab | Btn::Pause => {
+            let i = ISLAND.iter().position(|x| *x == b).unwrap_or(0) as f32;
+            let (x0, y, step) = island_layout(size);
+            (x0 + step * (i + 0.5), y, 30.0 * u)
+        }
         Btn::Prev => (w * 0.5 - 130.0 * u, h - 50.0 * u, 34.0 * u),
         Btn::Next => (w * 0.5 + 130.0 * u, h - 50.0 * u, 34.0 * u),
     }
+}
+
+/// Buttons of the top "island", left to right.
+const ISLAND: [Btn; 4] = [Btn::Chat, Btn::Camera, Btn::Tab, Btn::Pause];
+
+/// Island: (left x, centre y, slot width) in physical pixels, centred at the top.
+fn island_layout(size: (u32, u32)) -> (f32, f32, f32) {
+    let u = unit(size);
+    let step = 78.0 * u;
+    let w = step * ISLAND.len() as f32;
+    (size.0 as f32 * 0.5 - w * 0.5, 48.0 * u, step)
 }
 
 const BUTTONS: [Btn; 9] = [Btn::Jump, Btn::Sneak, Btn::Inventory, Btn::Pause, Btn::Chat, Btn::Camera, Btn::Tab, Btn::Prev, Btn::Next];
@@ -234,7 +246,49 @@ impl TouchState {
         };
         painter.circle(pt(bx, by), STICK_R * 0.9 / ppp, fill, line);
         painter.circle(pt(kx, ky), 40.0 * u / ppp, Color32::from_rgba_unmultiplied(230, 240, 250, 150), line);
+        // Top island: one rounded pill holding chat, camera, debug and pause.
+        {
+            let (x0, y, step) = island_layout(size);
+            let hh = 34.0 * u;
+            let rect = egui::Rect::from_min_max(pt(x0 - 8.0 * u, y - hh), pt(x0 + step * ISLAND.len() as f32 + 8.0 * u, y + hh));
+            painter.rect(rect, hh / ppp, Color32::from_rgba_unmultiplied(12, 14, 20, 200), Stroke::new(1.5, Color32::from_rgba_unmultiplied(220, 230, 240, 70)));
+            for i in 1..ISLAND.len() {
+                let x = x0 + step * i as f32;
+                painter.line_segment([pt(x, y - hh * 0.45), pt(x, y + hh * 0.45)], Stroke::new(1.0, Color32::from_rgba_unmultiplied(220, 230, 240, 50)));
+            }
+            let white = Color32::from_rgba_unmultiplied(240, 245, 250, 235);
+            let st = Stroke::new(2.4, white);
+            for b in ISLAND {
+                let (cx, cy, r) = button_rect(b, size, self.hotbar);
+                let c = pt(cx, cy);
+                let k = r * 0.5 / ppp;
+                match b {
+                    Btn::Pause => {
+                        for dx in [-0.45, 0.45] {
+                            painter.rect_filled(egui::Rect::from_center_size(c + egui::vec2(dx * k, 0.0), egui::vec2(k * 0.42, k * 1.6)), 1.0, white);
+                        }
+                    }
+                    Btn::Chat => {
+                        // Speech bubble.
+                        let bubble = egui::Rect::from_center_size(c - egui::vec2(0.0, k * 0.15), egui::vec2(k * 2.0, k * 1.4));
+                        painter.rect_stroke(bubble, k * 0.35, st);
+                        painter.add(egui::Shape::convex_polygon(vec![bubble.left_bottom() + egui::vec2(k * 0.35, 0.0), bubble.left_bottom() + egui::vec2(k * 0.85, 0.0), bubble.left_bottom() + egui::vec2(k * 0.2, k * 0.55)], white, Stroke::NONE));
+                    }
+                    Btn::Camera => {
+                        // Eye: switch between first and third person.
+                        painter.circle_stroke(c, k * 0.95, st);
+                        painter.circle_filled(c, k * 0.38, white);
+                    }
+                    _ => {
+                        painter.text(c, Align2::CENTER_CENTER, "F3", FontId::proportional(k * 1.25), white);
+                    }
+                }
+            }
+        }
         for b in BUTTONS {
+            if ISLAND.contains(&b) {
+                continue;
+            }
             let (cx, cy, r) = button_rect(b, size, self.hotbar);
             let on = match b {
                 Btn::Sneak => self.sneak,

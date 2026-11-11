@@ -353,6 +353,8 @@ pub struct Settings {
     pub hand_anim: f32,
     /// Active resource pack: `builtin:16|32|64|128` or `user:<folder or zip name>`.
     pub texture_pack: String,
+    /// Screen refresh rate asked from the phone (60, 90 or 120 Hz).
+    pub refresh_rate: u32,
 }
 
 impl Default for Settings {
@@ -378,6 +380,7 @@ impl Default for Settings {
             particles: 1.0,
             hand_anim: 1.0,
             texture_pack: "builtin:16".into(),
+            refresh_rate: 120,
         }
     }
 }

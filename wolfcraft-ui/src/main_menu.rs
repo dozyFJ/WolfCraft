@@ -92,6 +92,57 @@ fn decor(ui: &Ui, icons: &GuiIcons, p: &Palette) {
 // ---------------------------------------------------------------------------------------------
 // Main menu
 
+/// Hints shown under the splash loading bar.
+const TIPS: [&str; 9] = [
+    "Планета — это куб: дойдите до ребра и шагните на соседнюю грань",
+    "В творческом режиме дважды нажмите прыжок, чтобы полететь",
+    "Чем выше летите, тем быстрее: в космосе скорость растёт",
+    "Верстак открывает сетку крафта 3×3",
+    "Свои текстуры: Настройки → Текстуры → загрузить пак по ссылке",
+    "Пауза и чат — в островке вверху экрана",
+    "Корзина в творческом инвентаре удаляет предмет из выбранного слота",
+    "Сервер на телефоне: Играть → Игра по сети → Создать сервер",
+    "Ночью появляются монстры — постройте укрытие",
+];
+
+/// Studio splash: logo, name, a loading bar and rotating tips. Returns true when tapped.
+pub fn splash_screen(ctx: &egui::Context, icons: &GuiIcons, progress: f32, version: &str) -> bool {
+    let mut tapped = false;
+    egui::CentralPanel::default().frame(Frame::none().fill(Color32::from_rgb(10, 12, 18))).show(ctx, |ui| {
+        let rect = ui.max_rect();
+        let resp = ui.allocate_rect(rect, Sense::click());
+        tapped = resp.clicked();
+        let painter = ui.painter();
+        let t = ui.input(|i| i.time) as f32;
+        ui.ctx().request_repaint();
+        let fade = (t * 2.0).min(1.0);
+        let c = rect.center() - Vec2::new(0.0, 40.0);
+        // Logo: the cube, with a soft glow pulsing behind it.
+        let glow = 0.5 + 0.5 * (t * 2.2).sin();
+        for (i, r) in [120.0, 95.0, 72.0].iter().enumerate() {
+            painter.circle_filled(c - Vec2::new(0.0, 56.0), *r, Color32::from_rgba_unmultiplied(38, 198, 218, (6.0 + glow * 6.0 + i as f32 * 4.0) as u8));
+        }
+        icons.paint(painter, Rect::from_center_size(c - Vec2::new(0.0, 56.0), Vec2::splat(110.0)), icon::LOGO, Color32::WHITE.gamma_multiply(fade));
+        painter.text(c + Vec2::new(0.0, 36.0), Align2::CENTER_CENTER, "WOLFCRAFT", bold_font(46.0), Color32::from_rgb(240, 240, 232).gamma_multiply(fade));
+        painter.text(c + Vec2::new(0.0, 76.0), Align2::CENTER_CENTER, "S T U D I O S", FontId::proportional(16.0), Color32::from_rgb(38, 198, 218).gamma_multiply(fade));
+        // Loading bar.
+        let w = (rect.width() * 0.45).clamp(240.0, 520.0);
+        let bar = Rect::from_center_size(Pos2::new(rect.center().x, c.y + 130.0), Vec2::new(w, 14.0));
+        painter.rect_filled(bar, Rounding::ZERO, Color32::from_rgb(28, 32, 42));
+        painter.rect_stroke(bar.expand(3.0), Rounding::ZERO, Stroke::new(2.0_f32, Color32::from_rgb(70, 78, 96)));
+        let fill = Rect::from_min_size(bar.min, Vec2::new(bar.width() * progress.clamp(0.0, 1.0), bar.height()));
+        painter.rect_filled(fill, Rounding::ZERO, Color32::from_rgb(38, 198, 218));
+        // Shine running along the filled part.
+        let sx = fill.left() + (t * 180.0) % fill.width().max(1.0);
+        painter.rect_filled(Rect::from_min_max(Pos2::new(sx, bar.top()), Pos2::new((sx + 24.0).min(fill.right()), bar.bottom())), Rounding::ZERO, Color32::from_white_alpha(50));
+        // Tip under the bar, changing every few seconds.
+        let tip = TIPS[((t / 3.5) as usize) % TIPS.len()];
+        painter.text(Pos2::new(rect.center().x, bar.bottom() + 26.0), Align2::CENTER_TOP, format!("Совет: {tip}"), FontId::proportional(14.0), Color32::from_gray(170));
+        painter.text(Pos2::new(rect.right() - 12.0, rect.bottom() - 10.0), Align2::RIGHT_BOTTOM, format!("v{version}"), FontId::proportional(12.0), Color32::from_gray(90));
+    });
+    tapped
+}
+
 /// Space backdrop with a big planet rising from the bottom edge (the planet of the last played world).
 fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
     let rect = ui.max_rect();
@@ -841,6 +892,10 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                         });
                         ui.add_space(8.0);
                     }
+                    setting_row(ui, "Частота экрана", Some("Плавнее на экранах 90/120 Гц, но тратит больше батареи"), |ui| {
+                        res.changed |= segmented(ui, "refresh", &[(60u32, "60 Гц"), (90, "90 Гц"), (120, "120 Гц")], &mut s.refresh_rate);
+                    });
+                    ui.add_space(8.0);
                     setting_row(ui, "Показывать FPS", None, |ui| {
                         res.changed |= toggle_switch(ui, &mut s.show_fps).changed();
                     });

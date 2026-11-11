@@ -92,6 +92,27 @@ impl GpuContext {
         }
     }
 
+    /// Asks the phone to run the screen at `hz` (Android 11+; ignored elsewhere). With vsync on,
+    /// the game then renders at that rate.
+    pub fn set_refresh_rate(&self, hz: u32) {
+        #[cfg(target_os = "android")]
+        {
+            use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            unsafe extern "C" {
+                fn ANativeWindow_setFrameRate(window: *mut std::ffi::c_void, frame_rate: f32, compatibility: i8) -> i32;
+            }
+            if let Ok(h) = self.window.window_handle() {
+                if let RawWindowHandle::AndroidNdk(a) = h.as_raw() {
+                    // compatibility 0 = default: the app renders at this rate.
+                    let r = unsafe { ANativeWindow_setFrameRate(a.a_native_window.as_ptr(), hz as f32, 0) };
+                    log::info!("refresh rate {hz} Hz requested (result {r})");
+                }
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        let _ = hz;
+    }
+
     /// App went to the background: the window's native surface is about to go away.
     pub fn suspend(&mut self) {
         self.surface = None;
