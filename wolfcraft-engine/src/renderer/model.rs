@@ -72,6 +72,8 @@ pub struct PlayerPose {
     pub swimming: bool,
     /// Skin preset (see `SKIN_NAMES`).
     pub skin: u8,
+    /// Swing of the right arm 0..1 (0 = none): it chops forward and down, as in Minecraft.
+    pub attack: f32,
 }
 
 /// Names of the built-in skins, in the order of `skin_colors`.
@@ -209,6 +211,9 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
     for (side, ang) in [(-1.0f32, -swing), (1.0, swing)] {
         // Crawl stroke: the arms circle all the way round, one half a turn behind the other.
         let ang = if swim { pose.phase * 0.8 + if side < 0.0 { 0.0 } else { std::f32::consts::PI } + 2.6 } else { ang };
+        // Attack: the right arm comes up in front and chops down (negative angle = forward).
+        let a = pose.attack.clamp(0.0, 1.0);
+        let ang = if side > 0.0 && a > 0.0 && !swim { ang * (1.0 - (a * std::f32::consts::PI).sin()) - 1.5 * (a * std::f32::consts::PI).sin() } else { ang };
         let x0 = if side < 0.0 { -0.5 } else { 0.25 };
         add_box(&mut v, &frame, Vec3::new(x0, ty0, -0.125), Vec3::new(x0 + 0.25, shoulder, 0.125), Vec3::new(x0 + 0.125, shoulder, 0.0), ang, sleeve_c);
         add_box(&mut v, &frame, Vec3::new(x0, ty0 - 0.02, -0.12), Vec3::new(x0 + 0.25, ty0 + 0.16, 0.12), Vec3::new(x0 + 0.125, shoulder, 0.0), ang, skin_c);
@@ -383,21 +388,25 @@ pub fn build_arrow_models(arrows: &[(DVec3, DVec3)], camera: DVec3) -> Vec<Model
 }
 
 /// First-person arms: camera basis and animation state.
+///
+/// The animation set follows the Bedrock animation packs: the right arm is always in view, one
+/// swing per click that always plays to the end, the hand lags behind camera turns, bobs in a
+/// figure eight while walking, drops and tilts while sprinting, lifts on a jump and dips on
+/// landing.
 #[derive(Clone, Copy, Debug)]
 pub struct HandsPose {
     pub forward: Vec3,
     pub up: Vec3,
-    /// Punch cycle; one full cycle = one right jab + one left jab.
+    /// Swing progress 0..1 of the current strike (0 = resting, no swing).
     pub punch_cycle: f32,
-    /// 0 = arms lowered at rest, 1 = boxing guard (punching while LMB is held).
+    /// Size of the animations, 0..1 (setting "Размах анимации").
     pub guard: f32,
-    /// Walk bob phase (radians) and amount (0..1).
+    /// Walk bob phase (radians, π per step) and amount (0..1).
     pub bob_phase: f32,
     pub bob_amount: f32,
-    /// Something is selected in the hotbar: the right hand stays in view holding it.
+    /// Something is selected in the hotbar: the right hand holds it instead of being empty.
     pub holding: bool,
     /// Tool in the main hand: (kind 0 pickaxe, 1 axe, 2 shovel, 3 sword; material 0..3).
-    /// LMB then swings it instead of boxing.
     pub tool: Option<(u8, u8)>,
     /// Other (non-block, non-tool) item in the main hand: its items-atlas sprite.
     pub icon: Option<u16>,
@@ -409,12 +418,28 @@ pub struct HandsPose {
     pub place: f32,
     /// Skin preset of the arm (see `SKIN_NAMES`).
     pub skin: u8,
+    /// Sprint blend 0..1: arm lower and turned in.
+    pub sprint: f32,
+    /// Sneak blend 0..1: arm a little lower and closer.
+    pub sneak: f32,
+    /// Vertical lag of the hand (camera-local units, + up): trails jumps and dips on landing.
+    pub lift: f32,
+    /// Inertia: how far the hand trails behind a camera turn (x right, y up), roughly −1..1.
+    pub sway: [f32; 2],
+    /// Seconds since start, for idle breathing.
+    pub time: f32,
 }
 
-/// Swing of a held tool/weapon, 0 (raised) → 1 (struck) → 0, while LMB is held.
-/// One strike over `t` 0..1: a short wind-up backwards (to about -0.18), a fast eased hit that
-/// reaches 1 at `t = 0.5`, then a soft recovery back to 0. Continuous at both ends, so strikes
-/// repeat without a jump while the button is held.
+impl HandsPose {
+    /// Resting pose looking along `forward` (handy for tests and previews).
+    pub fn rest(forward: Vec3, up: Vec3) -> Self {
+        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0 }
+    }
+}
+
+/// Swing of a held tool/weapon, 0 (rest) → 1 (struck) → 0 over `t` 0..1: a short wind-up
+/// backwards (to about -0.18), a fast eased hit that reaches 1 at `t = 0.5`, then a soft
+/// recovery back to 0. Continuous at both ends.
 pub fn strike_curve(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     let ss = |x: f32| x * x * (3.0 - 2.0 * x);
@@ -429,38 +454,92 @@ pub fn strike_curve(t: f32) -> f32 {
     }
 }
 
+/// Moment of a swing (0..1) when the blow lands: chips fly and the hit sound plays.
+pub fn strike_moment(tool: bool) -> f32 {
+    if tool { 0.5 } else { 0.35 }
+}
+
+/// Swings per second: a fist is quick, tools are heavier.
+pub fn swing_speed(tool: Option<(u8, u8)>) -> f32 {
+    match tool.map(|t| t.0) {
+        None => 2.6,
+        Some(3) => 2.2, // sword
+        Some(2) => 1.9, // shovel
+        Some(_) => 1.6, // pickaxe, axe
+    }
+}
+
 const TOOL_MATERIALS: [[f32; 3]; 4] = [[0.62, 0.45, 0.25], [0.55, 0.55, 0.55], [0.85, 0.85, 0.88], [0.35, 0.90, 0.85]];
 const HANDLE: [f32; 3] = [0.45, 0.32, 0.18];
 const PLANK: [f32; 3] = [0.62, 0.45, 0.25];
 const IRON: [f32; 3] = [0.62, 0.64, 0.68];
 
-/// One keyframe of a held-tool animation: time in the cycle (0..1), hand offset (camera-local
-/// x right, y up, z forward) and forearm tilt.
-#[derive(Clone, Copy)]
+/// One keyframe of a hand animation: time in the swing (0..1), hand offset from the resting
+/// pose (camera-local x right, y up, z forward), forearm tilt (+ tip down), yaw (+ towards the
+/// view centre) and roll (+ top of the hand towards the centre).
+#[derive(Clone, Copy, Debug)]
 struct AnimKey {
     t: f32,
     x: f32,
     y: f32,
     z: f32,
     tilt: f32,
+    yaw: f32,
+    roll: f32,
 }
 
-const fn key(t: f32, x: f32, y: f32, z: f32, tilt: f32) -> AnimKey {
-    AnimKey { t, x, y, z, tilt }
+#[allow(clippy::too_many_arguments)]
+const fn key(t: f32, x: f32, y: f32, z: f32, tilt: f32, yaw: f32, roll: f32) -> AnimKey {
+    AnimKey { t, x, y, z, tilt, yaw, roll }
 }
 
-/// Animation atlas of the tools: one strike per cycle, first and last key equal so strikes
-/// repeat smoothly while mining. Order: pickaxe, axe, shovel, sword.
+const REST: f32 = 0.0;
+
+/// Empty hand: the Minecraft punch, a quick arc in towards the crosshair and back.
+const FIST_ANIM: &[AnimKey] = &[
+    key(0.00, REST, REST, REST, REST, REST, REST),
+    key(0.12, -0.04, 0.05, 0.06, -0.20, 0.25, 0.10),
+    key(0.35, -0.17, 0.07, 0.18, -0.30, 0.55, 0.25),
+    key(0.55, -0.12, 0.00, 0.10, -0.05, 0.40, 0.15),
+    key(1.00, REST, REST, REST, REST, REST, REST),
+];
+
+/// Tool strikes, every one starts and ends at rest so a swing blends in from the idle pose and
+/// repeats without a jump while mining. Order: pickaxe, axe, shovel, sword.
 const TOOL_ANIMS: [&[AnimKey]; 4] = [
-    // Pickaxe: raised over the shoulder, short wind-up, hard downward blow into the ore, a
-    // little rebound on impact.
-    &[key(0.00, 0.00, 0.10, 0.00, -0.85), key(0.28, -0.01, 0.15, -0.03, -1.05), key(0.50, -0.05, -0.07, 0.11, 0.90), key(0.58, -0.05, -0.05, 0.10, 0.78), key(0.66, -0.05, -0.07, 0.10, 0.84), key(1.00, 0.00, 0.10, 0.00, -0.85)],
+    // Pickaxe: lifted over the shoulder, hard downward blow into the ore, a little rebound.
+    &[
+        key(0.00, REST, REST, REST, REST, REST, REST),
+        key(0.28, 0.00, 0.08, 0.00, -0.70, 0.05, 0.00),
+        key(0.50, -0.07, -0.02, 0.12, 0.42, 0.25, 0.10),
+        key(0.58, -0.07, 0.00, 0.10, 0.30, 0.22, 0.08),
+        key(0.68, -0.07, -0.02, 0.10, 0.36, 0.22, 0.08),
+        key(1.00, REST, REST, REST, REST, REST, REST),
+    ],
     // Axe: chop on a diagonal from the upper right to the lower left.
-    &[key(0.00, 0.10, 0.08, 0.00, -0.60), key(0.28, 0.15, 0.13, -0.03, -0.85), key(0.50, -0.15, -0.07, 0.07, 0.72), key(0.64, -0.15, -0.08, 0.06, 0.66), key(1.00, 0.10, 0.08, 0.00, -0.60)],
-    // Shovel: pull back, then a digging thrust forward and down, and scoop up.
-    &[key(0.00, 0.00, -0.02, -0.05, 0.25), key(0.30, 0.01, 0.01, -0.10, 0.10), key(0.50, -0.03, -0.12, 0.19, 0.72), key(0.66, -0.02, -0.08, 0.14, 0.40), key(1.00, 0.00, -0.02, -0.05, 0.25)],
+    &[
+        key(0.00, REST, REST, REST, REST, REST, REST),
+        key(0.28, 0.06, 0.08, 0.00, -0.65, -0.20, -0.25),
+        key(0.50, -0.14, -0.03, 0.10, 0.40, 0.40, 0.35),
+        key(0.64, -0.14, -0.04, 0.09, 0.34, 0.36, 0.30),
+        key(1.00, REST, REST, REST, REST, REST, REST),
+    ],
+    // Shovel: pull back, a digging thrust forward and down, then scoop up.
+    &[
+        key(0.00, REST, REST, REST, REST, REST, REST),
+        key(0.30, 0.01, 0.03, -0.08, -0.20, 0.00, 0.00),
+        key(0.50, -0.04, -0.05, 0.19, 0.38, 0.15, 0.00),
+        key(0.66, -0.02, -0.04, 0.14, 0.05, 0.08, 0.00),
+        key(1.00, REST, REST, REST, REST, REST, REST),
+    ],
     // Sword: quick diagonal slash across the view.
-    &[key(0.00, 0.12, 0.06, 0.00, -0.45), key(0.22, 0.17, 0.11, -0.03, -0.62), key(0.42, -0.19, -0.08, 0.08, 0.62), key(0.58, -0.19, -0.09, 0.07, 0.55), key(1.00, 0.12, 0.06, 0.00, -0.45)],
+    &[
+        key(0.00, REST, REST, REST, REST, REST, REST),
+        key(0.22, 0.06, 0.07, 0.00, -0.50, -0.30, -0.30),
+        key(0.45, -0.20, -0.03, 0.10, 0.32, 0.75, 0.45),
+        key(0.60, -0.20, -0.04, 0.08, 0.26, 0.70, 0.40),
+        key(1.00, REST, REST, REST, REST, REST, REST),
+    ],
 ];
 
 /// Pose of an animation at `t` (0..1): eased blend between the two surrounding keys.
@@ -471,58 +550,117 @@ fn sample_anim(keys: &[AnimKey], t: f32) -> AnimKey {
     let f = ((t - a.t) / (b.t - a.t).max(1e-4)).clamp(0.0, 1.0);
     let f = f * f * (3.0 - 2.0 * f);
     let l = |p: f32, q: f32| p + (q - p) * f;
-    key(t, l(a.x, b.x), l(a.y, b.y), l(a.z, b.z), l(a.tilt, b.tilt))
+    key(t, l(a.x, b.x), l(a.y, b.y), l(a.z, b.z), l(a.tilt, b.tilt), l(a.yaw, b.yaw), l(a.roll, b.roll))
 }
 
-/// Where one arm is this frame: shoulder-side start (camera-local x right, y up, z forward)
-/// and forearm tilt about the local X axis.
-fn arm_place(pose: &HandsPose, side: f32, jab: f32) -> (Vec3, f32) {
-    let (mut p, mut a) = arm_place_base(pose, side, jab);
-    if side > 0.0 && pose.place > 0.0 {
-        // The right hand pushes forward and down quickly, then eases back with a little recoil.
-        let t = 1.0 - pose.place.clamp(0.0, 1.0);
-        let ss = |x: f32| x * x * (3.0 - 2.0 * x);
-        let k = if t < 0.3 { 1.0 - (1.0 - t / 0.3).powi(3) } else { 1.0 - ss((t - 0.3) / 0.7) };
-        let recoil = (t * std::f32::consts::PI).sin() * (1.0 - t) * 0.03;
-        p += Vec3::new(-0.03 * k, -0.08 * k + recoil, 0.17 * k - recoil);
-        a -= 0.5 * k;
-    }
-    (p, a)
+/// Where one arm is this frame: shoulder-side start of the forearm (camera-local), its tilt
+/// about the local X axis, and the yaw/roll of the whole hand around that point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ArmPlace {
+    pos: Vec3,
+    tilt: f32,
+    yaw: f32,
+    roll: f32,
 }
 
-fn arm_place_base(pose: &HandsPose, side: f32, jab: f32) -> (Vec3, f32) {
-    let g = pose.guard.clamp(0.0, 1.0);
+/// Motion shared by everything in view: walk bob, breathing, turn inertia, jump lag, sprint
+/// and sneak. Returns (offset, tilt, yaw, roll).
+fn body_motion(pose: &HandsPose) -> (Vec3, f32, f32, f32) {
+    let k = pose.guard.clamp(0.0, 1.0);
+    let b = pose.bob_amount.clamp(0.0, 1.0) * (1.0 + 0.6 * pose.sprint.clamp(0.0, 1.0));
+    // Figure eight: one side-to-side sway per two steps, a dip on every step.
+    let ph = pose.bob_phase;
+    let bob = Vec3::new(ph.cos() * 0.016 * b, -ph.sin().abs() * 0.022 * b, 0.0);
+    let bob_roll = ph.cos() * 0.05 * b;
+    let breath = Vec3::new((pose.time * 1.3).cos() * 0.003, (pose.time * 1.9).sin() * 0.005, 0.0) * (1.0 - pose.bob_amount.clamp(0.0, 1.0));
+    let sway = Vec3::new(pose.sway[0].clamp(-1.0, 1.0) * 0.05, pose.sway[1].clamp(-1.0, 1.0) * 0.04, 0.0);
+    let lift = Vec3::new(0.0, pose.lift.clamp(-0.08, 0.08), 0.0);
+    let s = pose.sprint.clamp(0.0, 1.0);
+    let n = pose.sneak.clamp(0.0, 1.0);
+    let sprint = Vec3::new(-0.02 * s, -0.035 * s, -0.02 * s);
+    let sneak = Vec3::new(-0.01 * n, -0.03 * n, 0.0);
+    let off = (bob + sway + lift) * k + breath + sprint + sneak;
+    let tilt = 0.15 * s + pose.sway[1].clamp(-1.0, 1.0) * 0.10 * k;
+    let yaw = 0.20 * s - pose.sway[0].clamp(-1.0, 1.0) * 0.12 * k;
+    let roll = 0.30 * s + bob_roll * k;
+    (off, tilt, yaw, roll)
+}
+
+fn arm_place(pose: &HandsPose, side: f32) -> ArmPlace {
+    let k = pose.guard.clamp(0.0, 1.0);
     let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
-    let bob_y = pose.bob_phase.sin().abs() * 0.025 * pose.bob_amount;
-    let bob_x = pose.bob_phase.cos() * 0.012 * pose.bob_amount;
-    // At rest the arms are hidden below the screen; only the right one stays up while holding
-    // an item. Holding LMB brings both up into the boxing guard.
-    if side > 0.0 && pose.tool.is_some() {
-        // Every tool has its own strike in the animation atlas (keyframes over one cycle).
-        let kind = pose.tool.map(|t| t.0).unwrap_or(0) as usize;
-        let k = sample_anim(TOOL_ANIMS[kind.min(TOOL_ANIMS.len() - 1)], pose.punch_cycle.rem_euclid(1.0));
-        let (dx, dy, dz, tilt) = (k.x * g, k.y * g, k.z * g, k.tilt * g);
-        return (Vec3::new(0.30 + dx + bob_x, -0.30 + dy - bob_y, 0.42 + dz), 0.2 + tilt);
-    }
-    if side < 0.0 && (pose.shield || pose.tool.is_some()) {
-        if pose.shield {
-            // Shield at the side; RMB brings it to the middle of the view.
-            let b = pose.blocking.clamp(0.0, 1.0);
-            // Raised shield stays left of the crosshair so the target remains visible.
-            let x = lerp(-0.34, -0.19, b) + bob_x;
-            let y = lerp(-0.36, -0.25, b) - bob_y;
-            return (Vec3::new(x, y, 0.42), lerp(0.25, -0.05, b));
+    let (off, btilt, byaw, broll) = body_motion(pose);
+    let swing = pose.punch_cycle;
+    let swinging = swing > 0.0 && swing < 1.0;
+    if side > 0.0 {
+        // Resting place of the right hand: low on the right, like in Minecraft.
+        let mut p = Vec3::new(0.30, -0.30, 0.42) + off;
+        let mut a = ArmPlace { pos: p, tilt: 0.2 + btilt, yaw: byaw, roll: broll };
+        if swinging {
+            let keys = match pose.tool {
+                Some((kind, _)) => TOOL_ANIMS[(kind as usize).min(TOOL_ANIMS.len() - 1)],
+                None => FIST_ANIM,
+            };
+            let s = sample_anim(keys, swing);
+            p += Vec3::new(s.x, s.y, s.z) * k;
+            a.tilt += s.tilt * k;
+            a.yaw += s.yaw * k;
+            a.roll += s.roll * k;
         }
-        return (Vec3::new(-0.34, -0.80, 0.40), 0.25);
+        if pose.place > 0.0 {
+            // The right hand pushes forward and down quickly, then eases back with a recoil.
+            let t = 1.0 - pose.place.clamp(0.0, 1.0);
+            let ss = |x: f32| x * x * (3.0 - 2.0 * x);
+            let e = if t < 0.3 { 1.0 - (1.0 - t / 0.3).powi(3) } else { 1.0 - ss((t - 0.3) / 0.7) };
+            let recoil = (t * std::f32::consts::PI).sin() * (1.0 - t) * 0.03;
+            p += Vec3::new(-0.03 * e, -0.08 * e + recoil, 0.17 * e - recoil) * k.max(0.4);
+            a.tilt -= 0.5 * e * k.max(0.4);
+        }
+        a.pos = p;
+        return a;
     }
-    let shown = side > 0.0 && pose.holding;
-    let rest_y = if shown { -0.30 } else { -0.80 };
-    let x = lerp(side * lerp(0.34, 0.17, g), side * 0.07, jab) + bob_x;
-    let y = lerp(lerp(rest_y, -0.20, g), -0.11, jab) - bob_y;
-    let z = 0.40 + 0.24 * jab;
-    // Tilt: forearm points down at rest, slightly up in guard, straight on impact.
-    let angle = lerp(0.25, -0.10, g) * (1.0 - jab);
-    (Vec3::new(x, y, z), angle)
+    // Left arm: below the screen unless it carries a shield.
+    if pose.shield {
+        let b = pose.blocking.clamp(0.0, 1.0);
+        // Raised shield stays left of the crosshair so the target remains visible.
+        let x = lerp(-0.34, -0.19, b);
+        let y = lerp(-0.36, -0.25, b);
+        return ArmPlace { pos: Vec3::new(x, y, 0.42) + off, tilt: lerp(0.25, -0.05, b) + btilt * (1.0 - b), yaw: -byaw * (1.0 - b), roll: -broll * (1.0 - b) };
+    }
+    ArmPlace { pos: Vec3::new(-0.34, -0.80, 0.40), tilt: 0.25, yaw: 0.0, roll: 0.0 }
+}
+
+/// Forearm tilt about the local X axis through `pivot` (+ tips the forearm down).
+fn tilt_point(p: Vec3, pivot: Vec3, angle: f32) -> Vec3 {
+    let (s, c) = angle.sin_cos();
+    let d = p - pivot;
+    pivot + Vec3::new(d.x, d.y * c - d.z * s, d.y * s + d.z * c)
+}
+
+/// Yaw and roll of a whole hand around `pivot`, in camera-local coordinates. `side` mirrors
+/// them for the left hand so "towards the centre" stays the same.
+fn twist_dir(v: Vec3, yaw: f32, roll: f32, side: f32) -> Vec3 {
+    let (ys, yc) = (yaw * side).sin_cos();
+    // Yaw about up: + turns the forward axis to the left (towards the view centre for the right hand).
+    let v = Vec3::new(v.x * yc - v.z * ys, v.y, v.x * ys + v.z * yc);
+    let (rs, rc) = (roll * side).sin_cos();
+    // Roll about forward: + leans the top to the left.
+    Vec3::new(v.x * rc - v.y * rs, v.x * rs + v.y * rc, v.z)
+}
+
+/// Applies an arm's yaw/roll to vertices already in camera-relative world space.
+fn twist_verts(verts: &mut [ModelVertex], frame: &Frame, a: &ArmPlace, side: f32) {
+    if a.yaw.abs() < 1e-5 && a.roll.abs() < 1e-5 {
+        return;
+    }
+    let (r, u, f) = (frame.right.as_vec3(), frame.up.as_vec3(), frame.fwd.as_vec3());
+    let local = |w: Vec3| Vec3::new(w.dot(r), w.dot(u), w.dot(f));
+    let world = |l: Vec3| r * l.x + u * l.y + f * l.z;
+    for v in verts.iter_mut() {
+        let p = local(Vec3::from(v.pos)) - a.pos;
+        v.pos = world(a.pos + twist_dir(p, a.yaw, a.roll, side)).to_array();
+        v.normal = world(twist_dir(local(Vec3::from(v.normal)), a.yaw, a.roll, side)).to_array();
+    }
 }
 
 fn camera_frame(pose: &HandsPose) -> Frame {
@@ -537,10 +675,9 @@ fn camera_frame(pose: &HandsPose) -> Frame {
 /// `tiles`: atlas sprite per face (+X, -X, +Y, -Y, +Z, -Z), as in `BlockInfo::tiles`.
 pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool) -> Vec<crate::mesher::Vertex> {
     let frame = camera_frame(pose);
-    let (p, angle) = arm_place(pose, 1.0, punch_extension(pose)[0]);
+    let a = arm_place(pose, 1.0);
     // Fist centre after the forearm tilt, then a bit above and in front of it.
-    let (s, c) = angle.sin_cos();
-    let fist = p + Vec3::new(0.0, -0.29 * s, 0.29 * c);
+    let fist = tilt_point(a.pos + Vec3::new(0.0, 0.0, 0.29), a.pos, a.tilt);
     let centre = fist + Vec3::new(0.05, 0.06, 0.06);
     let h = 0.15f32;
     let (ys, yc) = 0.72f32.sin_cos(); // turned so two sides show, like a held block
@@ -549,6 +686,7 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool) -> Ve
         let r = Vec3::new(v.x * yc + v.z * ys, v.y, -v.x * ys + v.z * yc);
         Vec3::new(r.x, r.y * pc - r.z * ps, r.y * ps + r.z * pc)
     };
+    let twist = |l: Vec3| a.pos + twist_dir(l - a.pos, a.yaw, a.roll, 1.0);
     let mut out = Vec::with_capacity(72);
     // (face index in tiles, normal, u axis, v axis)
     let faces: [(usize, Vec3, Vec3, Vec3); 6] = [
@@ -561,7 +699,7 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool) -> Ve
     ];
     for (fi, n, ua, va) in faces {
         let corner = |u: f32, v: f32| -> crate::mesher::Vertex {
-            let local = centre + rot((n + ua * (u * 2.0 - 1.0) + va * (v * 2.0 - 1.0)) * h);
+            let local = twist(centre + rot((n + ua * (u * 2.0 - 1.0) + va * (v * 2.0 - 1.0)) * h));
             let w = frame.to_world(local).as_vec3();
             crate::mesher::Vertex {
                 pos: w.to_array(),
@@ -579,26 +717,17 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool) -> Ve
     out
 }
 
-/// How far each arm is extended (0..1): `[right, left]`. The arms take turns.
-pub fn punch_extension(pose: &HandsPose) -> [f32; 2] {
-    let g = pose.guard.clamp(0.0, 1.0);
-    // The right fist strikes in the first half of the cycle, the left one in the second.
-    let c = pose.punch_cycle.rem_euclid(1.0);
-    let right = if c < 0.5 { strike_curve(c * 2.0) } else { 0.0 };
-    let left = if c >= 0.5 { strike_curve((c - 0.5) * 2.0) } else { 0.0 };
-    [right * g, left * g]
-}
-
 /// Builds both first-person arms relative to the camera (camera at the origin).
-/// Vertices: right arm first (72), then left arm (72).
+/// Vertices: right arm first (72 when empty-handed), then the left arm (72).
 pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
     let frame = camera_frame(pose);
-    let ext = punch_extension(pose);
     let (skin_c, _, _, sleeve_c, _) = skin_colors(pose.skin);
 
     let mut v = Vec::with_capacity(4 * 36);
-    for (side, jab) in [(1.0f32, ext[0]), (-1.0, ext[1])] {
-        let (pivot, angle) = arm_place(pose, side, jab);
+    for side in [1.0f32, -1.0] {
+        let a = arm_place(pose, side);
+        let start = v.len();
+        let (pivot, angle) = (a.pos, a.tilt);
         let (x, y, z) = (pivot.x, pivot.y, pivot.z);
         // A held item replaces the hand: only empty hands are drawn as arms.
         let item_in_hand = if side > 0.0 { pose.holding } else { pose.shield };
@@ -621,6 +750,7 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
         } else if pose.shield {
             add_shield(&mut v, &frame, f, pivot, angle);
         }
+        twist_verts(&mut v[start..], &frame, &a, side);
     }
     v
 }
@@ -756,7 +886,7 @@ mod tests {
     use super::*;
 
     fn hands(cycle: f32, guard: f32) -> HandsPose {
-        HandsPose { forward: Vec3::new(0.3, -0.2, -1.0).normalize(), up: Vec3::Y, punch_cycle: cycle, guard, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0 }
+        HandsPose { punch_cycle: cycle, guard, ..HandsPose::rest(Vec3::new(0.3, -0.2, -1.0).normalize(), Vec3::Y) }
     }
 
     /// Furthest reach of an arm along the view direction.
@@ -764,19 +894,85 @@ mod tests {
         verts.iter().map(|v| Vec3::from(v.pos).dot(fwd)).fold(f32::MIN, f32::max)
     }
 
+    fn centre(verts: &[ModelVertex]) -> Vec3 {
+        verts.iter().fold(Vec3::ZERO, |a, v| a + Vec3::from(v.pos)) / verts.len().max(1) as f32
+    }
+
+    fn assert_outward(verts: &[ModelVertex]) {
+        for t in verts.chunks(3) {
+            let (a, b, cc) = (Vec3::from(t[0].pos), Vec3::from(t[1].pos), Vec3::from(t[2].pos));
+            let n = (b - a).cross(cc - a).normalize_or_zero();
+            if n == Vec3::ZERO {
+                continue;
+            }
+            assert!(n.dot(Vec3::from(t[0].normal)) > 0.99, "inside-out triangle");
+        }
+    }
+
     #[test]
     fn hands_face_outwards_and_stay_in_front_of_the_camera() {
-        for (c, g) in [(0.0, 0.0), (0.25, 1.0), (0.75, 1.0), (0.4, 0.5)] {
-            let p = hands(c, g);
+        for (c, g) in [(0.0, 0.0), (0.12, 1.0), (0.35, 1.0), (0.7, 1.0), (0.4, 0.5)] {
+            let mut p = hands(c, g);
+            p.sway = [0.8, -0.6];
+            p.sprint = 1.0;
+            p.bob_amount = 1.0;
+            p.bob_phase = 1.0;
             let verts = build_first_person_hands(&p);
             assert_eq!(verts.len(), 4 * 36);
-            for t in verts.chunks(3) {
-                let (a, b, cc) = (Vec3::from(t[0].pos), Vec3::from(t[1].pos), Vec3::from(t[2].pos));
-                let n = (b - a).cross(cc - a).normalize_or_zero();
-                assert!(n.dot(Vec3::from(t[0].normal)) > 0.99, "inside-out triangle");
-            }
+            assert_outward(&verts);
             let fwd = p.forward.normalize();
             assert!(verts.iter().all(|v| Vec3::from(v.pos).dot(fwd) > 0.08), "arm behind the near plane");
+        }
+    }
+
+    #[test]
+    fn right_arm_is_in_view_at_rest_and_the_left_one_is_not() {
+        let p = hands(0.0, 1.0);
+        let v = build_first_person_hands(&p);
+        let (r, l) = (centre(&v[..72]), centre(&v[72..]));
+        let fwd = p.forward.normalize();
+        // Angle below the view axis: the right hand is on screen, the left one far below it.
+        let down = |c: Vec3| (c - fwd * c.dot(fwd)).length() / c.dot(fwd);
+        assert!(down(r) < 0.9, "right arm visible ({})", down(r));
+        assert!(down(l) > 1.2, "left arm hidden ({})", down(l));
+    }
+
+    #[test]
+    fn a_punch_swings_the_right_arm_in_towards_the_crosshair_and_back() {
+        let p0 = hands(0.0, 1.0);
+        let fwd = p0.forward.normalize();
+        let off_axis = |v: &[ModelVertex]| {
+            let c = centre(v);
+            (c - fwd * c.dot(fwd)).length()
+        };
+        let rest = build_first_person_hands(&p0);
+        let hit = build_first_person_hands(&hands(strike_moment(false), 1.0));
+        let done = build_first_person_hands(&hands(0.999, 1.0));
+        assert!(reach(&hit[..72], fwd) > reach(&rest[..72], fwd) + 0.08, "the fist goes forward");
+        assert!(off_axis(&hit[..72]) < off_axis(&rest[..72]) - 0.05, "and in towards the crosshair");
+        assert!(rest.iter().zip(&done).all(|(a, b)| (Vec3::from(a.pos) - Vec3::from(b.pos)).length() < 0.01), "ends where it started");
+        assert!(rest[72..].iter().zip(&hit[72..]).all(|(a, b)| a.pos == b.pos), "the left arm stays down");
+    }
+
+    #[test]
+    fn every_swing_starts_and_ends_at_rest_without_jumps() {
+        for tool in [None, Some((0u8, 1u8)), Some((1, 1)), Some((2, 1)), Some((3, 1))] {
+            let mk = |c: f32| {
+                let mut p = hands(c, 1.0);
+                p.holding = tool.is_some();
+                p.tool = tool;
+                build_first_person_hands(&p)
+            };
+            let rest = mk(0.0);
+            let mut prev = rest.clone();
+            for i in 1..=200 {
+                let cur = mk(i as f32 / 200.0);
+                let jump = prev.iter().zip(&cur).map(|(a, b)| (Vec3::from(a.pos) - Vec3::from(b.pos)).length()).fold(0.0, f32::max);
+                assert!(jump < 0.06, "{tool:?}: jump {jump} at {i}");
+                prev = cur;
+            }
+            let end = prev.iter().zip(&rest).map(|(a, b)| (Vec3::from(a.pos) - Vec3::from(b.pos)).length()).fold(0.0, f32::max);
+            assert!(end < 1e-4, "{tool:?}: swing must end at rest ({end})");
         }
     }
 
@@ -787,15 +983,15 @@ mod tests {
         p.tool = Some((3, 2));
         p.shield = true;
         let fwd = p.forward.normalize();
-        let raised = build_first_person_hands(&p);
-        p.punch_cycle = 0.5;
+        let rest = build_first_person_hands(&p);
+        p.punch_cycle = strike_moment(true);
         let struck = build_first_person_hands(&p);
-        assert!(raised.len() > 4 * 36, "sword and shield add boxes");
-        assert!(raised.iter().zip(&struck).take(72).any(|(a, b)| a.pos != b.pos), "the sword arm swings");
+        assert!(rest.len() > 4 * 36, "sword and shield add boxes");
+        assert_eq!(rest.len(), struck.len());
+        assert!(rest.iter().zip(&struck).any(|(a, b)| a.pos != b.pos), "the sword arm swings");
         // Shield boxes are the last 3 boxes: their centre moves towards the view axis when blocking.
         let centre = |v: &[ModelVertex]| {
-            let s = &v[v.len() - 3 * 36..];
-            let c = s.iter().fold(Vec3::ZERO, |a, v| a + Vec3::from(v.pos)) / s.len() as f32;
+            let c = centre(&v[v.len() - 3 * 36..]);
             (c - fwd * c.dot(fwd)).length()
         };
         let down = centre(&build_first_person_hands(&p));
@@ -805,30 +1001,39 @@ mod tests {
     }
 
     #[test]
-    fn arms_take_turns_punching() {
-        let fwd = hands(0.0, 1.0).forward.normalize();
-        let r = build_first_person_hands(&hands(0.25, 1.0));
-        let l = build_first_person_hands(&hands(0.75, 1.0));
-        let (r_right, r_left) = (reach(&r[..72], fwd), reach(&r[72..], fwd));
-        let (l_right, l_left) = (reach(&l[..72], fwd), reach(&l[72..], fwd));
-        assert!(r_right > r_left + 0.2, "right jab at a quarter cycle ({r_right} vs {r_left})");
-        assert!(l_left > l_right + 0.2, "left jab at three quarters ({l_left} vs {l_right})");
-        assert_eq!(punch_extension(&hands(0.25, 1.0)), [1.0, 0.0]);
+    fn hand_trails_camera_turns_and_drops_when_sprinting() {
+        let base = hands(0.0, 1.0);
+        let (fwd, up) = (base.forward.normalize(), base.up);
+        let right = fwd.cross(up).normalize();
+        let c0 = centre(&build_first_person_hands(&base)[..72]);
+        // Turning right: the hand is left behind, to the left.
+        let mut turn = base;
+        turn.sway = [-1.0, 0.0];
+        let c1 = centre(&build_first_person_hands(&turn)[..72]);
+        assert!((c1 - c0).dot(right) < -0.03, "sway to the left ({})", (c1 - c0).dot(right));
+        let mut run = base;
+        run.sprint = 1.0;
+        let c2 = centre(&build_first_person_hands(&run)[..72]);
+        let upv = right.cross(fwd);
+        assert!((c2 - c0).dot(upv) < -0.03, "sprinting lowers the hand");
     }
 
     #[test]
-    fn no_punching_at_rest_and_guard_raises_arms() {
-        let rest_a = build_first_person_hands(&hands(0.0, 0.0));
-        let rest_b = build_first_person_hands(&hands(0.3, 0.0));
-        assert!(rest_a.iter().zip(&rest_b).all(|(a, b)| a.pos == b.pos), "cycle must not matter at rest");
-        let guard = build_first_person_hands(&hands(0.0, 1.0));
-        let top = |v: &[ModelVertex]| v.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
-        assert!(top(&guard) > top(&rest_a) + 0.1, "guard lifts the fists");
+    fn held_block_follows_the_swing() {
+        let mut p = hands(0.0, 1.0);
+        p.holding = true;
+        let tiles = [1u16; 6];
+        let rest = build_held_block(&p, tiles, false);
+        p.punch_cycle = strike_moment(false);
+        let hit = build_held_block(&p, tiles, false);
+        assert_eq!(rest.len(), 72);
+        let c = |v: &[crate::mesher::Vertex]| v.iter().fold(Vec3::ZERO, |a, v| a + Vec3::from(v.pos)) / v.len() as f32;
+        assert!((c(&hit) - c(&rest)).length() > 0.08, "the block moves with the punch");
     }
 
     fn pose(up: DVec3) -> PlayerPose {
         let heading = if up.y.abs() > 0.9 { DVec3::X } else { DVec3::Y.cross(up).normalize() };
-        PlayerPose { feet: up * 1000.0, heading, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, skin: 0 }
+        PlayerPose { feet: up * 1000.0, heading, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, skin: 0, attack: 0.0 }
     }
 
     #[test]
@@ -918,3 +1123,4 @@ mod strike_tests {
         }
     }
 }
+

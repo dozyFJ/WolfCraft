@@ -29,7 +29,7 @@ use wolfcraft_engine::mesher::MeshData;
 use wolfcraft_engine::planet::{Planet, splitmix};
 use wolfcraft_engine::player::DAY_LENGTH;
 use wolfcraft_engine::renderer::{FrameParams, WorldRenderer, sky_color};
-use wolfcraft_engine::renderer::model::{HandsPose, PlayerPose, build_first_person_hands, build_held_block, build_player_model};
+use wolfcraft_engine::renderer::model::{HandsPose, PlayerPose, build_first_person_hands, build_held_block, build_player_model, strike_moment, swing_speed};
 use wolfcraft_ui::chat_ui::{self, ChatKind, ChatState};
 use wolfcraft_ui::hud::{self, DebugInfo, HudState};
 use wolfcraft_ui::inventory_ui::{self, InventoryUiState};
@@ -174,11 +174,20 @@ pub struct App {
     /// Open chest / furnace (block cell and kind).
     container: Option<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)>,
     pending_apply: bool,
-    /// First-person arms: punch cycle (1 = right + left jab) and guard blend (0 rest … 1 boxing).
+    /// First-person arm swing progress 0..1 (0 = resting). A swing always plays to the end.
     hand_cycle: f32,
-    hand_guard: f32,
-    /// Keeps a jab going briefly after a short click.
-    hand_click: f32,
+    /// Sprint and sneak blends of the view model (0..1).
+    hand_sprint: f32,
+    hand_sneak: f32,
+    /// Vertical lag of the view model (spring position and velocity).
+    hand_lift: f32,
+    hand_lift_vel: f32,
+    /// How far the hand trails behind camera turns (x right, y up).
+    hand_sway: [f32; 2],
+    /// Camera forward and vertical speed last frame, for sway and landing.
+    hand_prev_fwd: Option<glam::Vec3>,
+    hand_prev_vup: f32,
+    hand_prev_ground: bool,
     /// Shield raise blend (0 down … 1 blocking).
     hand_block: f32,
     /// Block-placing arm motion, 1 -> 0.
@@ -190,7 +199,6 @@ pub struct App {
     /// Connection to a WolfServer while playing online.
     /// A few colours of every block tile, for break particles.
     tile_colors: Vec<[[f32; 3]; 3]>,
-    prev_hand_cycle: f32,
     net: Option<wolfcraft_net::Client>,
     /// Server running inside the game ("host on this device").
     host: Option<wolfcraft_net::server::ServerHandle>,
@@ -288,8 +296,14 @@ impl App {
             container: None,
             pending_apply: false,
             hand_cycle: 0.0,
-            hand_guard: 0.0,
-            hand_click: 0.0,
+            hand_sprint: 0.0,
+            hand_sneak: 0.0,
+            hand_lift: 0.0,
+            hand_lift_vel: 0.0,
+            hand_sway: [0.0; 2],
+            hand_prev_fwd: None,
+            hand_prev_vup: 0.0,
+            hand_prev_ground: true,
             hand_block: 0.0,
             hand_place: 0.0,
             hand_switch: 0.0,
@@ -305,7 +319,6 @@ impl App {
                     [px(3, 4), px(9, 7), px(12, 12)]
                 })
                 .collect(),
-            prev_hand_cycle: 0.0,
             net: None,
             host: None,
             net_players: Vec::new(),
@@ -1556,6 +1569,7 @@ impl App {
                         sneaking: s.player.sneaking,
                         swimming: s.player.body.in_water && !s.player.body.on_ground && !s.player.body.flying,
                         skin: self.settings.skin,
+                        attack: self.hand_cycle,
                     };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
@@ -1565,36 +1579,31 @@ impl App {
                     if pos.length_squared() < 1.0 {
                         continue;
                     }
-                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, skin: rp.skin };
+                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, skin: rp.skin, attack: 0.0 };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));
                 gfx.world.set_model(&gfx.gpu.device, &gfx.gpu.queue, &model_verts);
                 let sky_verts = wolfcraft_engine::renderer::sky::build_sky(&wolfcraft_engine::renderer::sky::SkyParams { eye: cam.eye, sun_dir: sun.as_vec3(), day, planet_radius: s.planet.radius, sky, time: self.time.elapsed(), underwater, cube: s.planet.grid.cube });
                 gfx.world.set_sky(&gfx.gpu.device, &gfx.gpu.queue, &sky_verts);
-                // First-person arms: raise into a boxing guard and jab left/right while LMB is held.
+                // First-person arms (Bedrock-style): one swing per click, a held button keeps
+                // swinging, and a started swing always plays to the end.
                 let first_person = s.camera_mode == crate::session::CameraMode::First && !s.player.survival.dead;
-                // A short click still plays a jab.
-                if self.input.left {
-                    self.hand_click = 0.34;
-                } else {
-                    self.hand_click = (self.hand_click - dt).max(0.0);
+                let tool = s.player.inventory.held().and_then(|st| wolfcraft_engine::items::tool_shape(st.id));
+                let want = self.screen == Screen::Playing && self.input.left && !s.player.survival.dead;
+                let c0 = self.hand_cycle;
+                if self.hand_cycle > 0.0 {
+                    self.hand_cycle += dt * swing_speed(tool);
+                    if self.hand_cycle >= 1.0 {
+                        self.hand_cycle = if want { (self.hand_cycle - 1.0).max(1e-4) } else { 0.0 };
+                    }
+                } else if want {
+                    self.hand_cycle = 1e-4;
                 }
-                let punching = first_person && self.screen == Screen::Playing && (self.input.left || self.hand_click > 0.0);
-                let target = if punching { 1.0 } else { 0.0 };
-                self.hand_guard += (target - self.hand_guard) * (1.0 - (-14.0 * dt).exp());
-                if punching {
-                    // 1.5 cycles/s = 3 punches per second.
-                    self.hand_cycle = (self.hand_cycle + dt * 1.5).rem_euclid(1.0);
-                } else if self.hand_guard < 0.02 {
-                    self.hand_cycle = 0.0;
-                }
-                // The moment a strike lands (fists: 0.25 and 0.75 of the cycle, tools: 0.5).
-                let tool_in_hand = s.player.inventory.held().and_then(|st| wolfcraft_engine::items::tool_shape(st.id)).is_some();
-                let marks: &[f32] = if tool_in_hand { &[0.5] } else { &[0.25, 0.75] };
-                let (c0, c1) = (self.prev_hand_cycle, self.hand_cycle);
-                let landed = punching && marks.iter().any(|m| (c0 < *m && c1 >= *m) || (c1 < c0 && (c0 < *m || c1 >= *m)));
-                self.prev_hand_cycle = self.hand_cycle;
+                // The moment the blow lands: chips and a hit sound while mining.
+                let m = strike_moment(tool.is_some());
+                let c1 = self.hand_cycle;
+                let landed = (c1 > c0 && c0 < m && c1 >= m) || (c1 < c0 && c0 < m);
                 if landed && s.interaction.mining_fraction() > 0.0 {
                     if let Some(h) = s.hit {
                         let corners = s.chunks.grid().cell_corners(h.cell);
@@ -1606,6 +1615,40 @@ impl App {
                         self.audio.play(crate::audio::Sfx::Hit, 0.7);
                     }
                 }
+                // Body motion of the view model: sprint, sneak, turn inertia, jump and landing.
+                let ease = |x: &mut f32, target: f32, rate: f32| *x += (target - *x) * (1.0 - (-rate * dt).exp());
+                ease(&mut self.hand_sprint, if s.player.sprinting && s.player.body.on_ground { 1.0 } else { 0.0 }, 8.0);
+                ease(&mut self.hand_sneak, if s.player.sneaking { 1.0 } else { 0.0 }, 10.0);
+                {
+                    let fwd = cam.forward.as_vec3();
+                    let right = fwd.cross(cam.up.as_vec3()).normalize_or_zero();
+                    let upv = right.cross(fwd).normalize_or_zero();
+                    let (mut tx, mut ty) = (0.0, 0.0);
+                    if let Some(prev) = self.hand_prev_fwd {
+                        let d = fwd - prev;
+                        // Turn speed in rad/s; the hand trails the opposite way.
+                        tx = (-d.dot(right) / dt.max(1e-3) * 0.12).clamp(-1.0, 1.0);
+                        ty = (-d.dot(upv) / dt.max(1e-3) * 0.12).clamp(-1.0, 1.0);
+                    }
+                    self.hand_prev_fwd = Some(fwd);
+                    ease(&mut self.hand_sway[0], tx, 9.0);
+                    ease(&mut self.hand_sway[1], ty, 9.0);
+                }
+                {
+                    let vup = s.player.body.vel.dot(s.player.up()) as f32;
+                    let ground = s.player.body.on_ground;
+                    // Rising leaves the hand a little behind (lower), falling lets it float up.
+                    let target = if ground || s.player.body.flying { 0.0 } else { (-vup * 0.006).clamp(-0.04, 0.05) };
+                    if ground && !self.hand_prev_ground && self.hand_prev_vup < -2.0 {
+                        // Landing: a dip that springs back.
+                        self.hand_lift_vel -= (-self.hand_prev_vup * 0.09).min(1.4);
+                    }
+                    self.hand_prev_ground = ground;
+                    self.hand_prev_vup = vup;
+                    let acc = 140.0 * (target - self.hand_lift) - 14.0 * self.hand_lift_vel;
+                    self.hand_lift_vel += acc * dt.min(0.05);
+                    self.hand_lift = (self.hand_lift + self.hand_lift_vel * dt.min(0.05)).clamp(-0.09, 0.09);
+                }
                 self.hand_place = (self.hand_place - dt * 5.0).max(0.0);
                 if s.player.inventory.selected != self.last_hotbar {
                     self.last_hotbar = s.player.inventory.selected;
@@ -1615,15 +1658,15 @@ impl App {
                 let block_target = if s.player.blocking { 1.0 } else { 0.0 };
                 self.hand_block += (block_target - self.hand_block) * (1.0 - (-16.0 * dt).exp());
                 if first_person {
-                    let hands = build_first_person_hands(&HandsPose {
+                    let hand_pose = HandsPose {
                         forward: cam.forward.as_vec3(),
                         up: cam.up.as_vec3(),
                         punch_cycle: self.hand_cycle,
-                        guard: self.hand_guard * self.settings.hand_anim.clamp(0.4, 1.0),
+                        guard: self.settings.hand_anim.clamp(0.4, 1.0),
                         bob_phase: s.player.anim_phase,
-                        bob_amount: s.player.anim_amount,
+                        bob_amount: if s.player.body.flying { 0.0 } else { s.player.anim_amount },
                         holding: s.player.inventory.held().is_some(),
-                        tool: s.player.inventory.held().and_then(|st| wolfcraft_engine::items::tool_shape(st.id)),
+                        tool,
                         icon: s.player.inventory.held().and_then(|st| match st.info().icon {
                             wolfcraft_engine::items::Icon::Item(i) if st.info().place.is_none() => Some(i),
                             _ => None,
@@ -1632,17 +1675,22 @@ impl App {
                         blocking: self.hand_block,
                         place: self.hand_place,
                         skin: self.settings.skin,
-                    });
-                    // View model placement: settings, idle breathing, item-switch dip, aspect ratio.
+                        sprint: self.hand_sprint,
+                        sneak: self.hand_sneak,
+                        lift: self.hand_lift,
+                        sway: self.hand_sway,
+                        time: self.time.elapsed(),
+                    };
+                    let hands = build_first_person_hands(&hand_pose);
+                    // View model placement: settings, item-switch dip, aspect ratio.
                     let aspect = w as f32 / h.max(1) as f32;
                     let fwd = cam.forward.as_vec3();
                     let upv0 = cam.up.as_vec3();
                     let right = fwd.cross(upv0).normalize_or_zero();
                     let upv = right.cross(fwd).normalize_or_zero();
-                    let t_now = self.time.elapsed();
                     let dip = (self.hand_switch * std::f32::consts::PI * 0.5).sin();
-                    let ox = self.settings.vm_x + 0.03 - (1.6 - aspect).max(0.0) * 0.10 + (t_now * 1.3).cos() * 0.004;
-                    let oy = self.settings.vm_y - 0.02 - dip * 0.40 + (t_now * 1.9).sin() * 0.006;
+                    let ox = self.settings.vm_x + 0.03 - (1.6 - aspect).max(0.0) * 0.10;
+                    let oy = self.settings.vm_y - 0.02 - dip * 0.40;
                     let sc = self.settings.vm_scale;
                     let pivot = fwd * 0.45 + right * 0.30 - upv * 0.30;
                     let xf = move |p: [f32; 3]| -> [f32; 3] {
@@ -1656,21 +1704,7 @@ impl App {
                     gfx.world.set_hands(&gfx.gpu.device, &gfx.gpu.queue, &hands);
                     // The selected block, textured, in the right fist.
                     let held = s.player.inventory.held().and_then(|st| st.info().place).map(|b| {
-                        let pose = HandsPose {
-                            forward: cam.forward.as_vec3(),
-                            up: cam.up.as_vec3(),
-                            punch_cycle: self.hand_cycle,
-                            guard: self.hand_guard * self.settings.hand_anim.clamp(0.4, 1.0),
-                            bob_phase: s.player.anim_phase,
-                            bob_amount: s.player.anim_amount,
-                            holding: true,
-                            tool: None,
-                            icon: None,
-                            shield: s.player.inventory.has_shield(),
-                            blocking: self.hand_block,
-                            place: self.hand_place,
-                            skin: self.settings.skin,
-                        };
+                        let pose = HandsPose { holding: true, tool: None, icon: None, ..hand_pose };
                         let mut vs = build_held_block(&pose, b.info().tiles, b.info().emissive);
                         for v in vs.iter_mut() {
                             v.pos = xf(v.pos);
