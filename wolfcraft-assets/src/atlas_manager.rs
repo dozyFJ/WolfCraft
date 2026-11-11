@@ -213,6 +213,10 @@ impl AtlasManager {
                             }
                         }
                     }
+                    // A little relief on solid block textures (not on animated water).
+                    if kind == AtlasKind::Blocks && name != "water" && name != "lava" {
+                        crate::packs::emboss(img, if img.width <= 16 { 0.45 } else { 1.6 });
+                    }
                 }
             }
             if let Some(pack) = user_pack {

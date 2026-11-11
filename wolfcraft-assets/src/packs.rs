@@ -113,6 +113,52 @@ pub fn vibrant(img: &mut Image) {
     }
 }
 
+/// Gives a flat block texture some depth: the brightness is read as a height map (softened
+/// a little), and each pixel is lit as if the light came from the top-left, so stones bulge
+/// and mortar, cracks and grain sink in. Wraps around the edges, so tiling stays seamless.
+/// Sprites with transparent pixels (glass, plants, torches) are left alone.
+pub fn emboss(img: &mut Image, strength: f32) {
+    let (w, h) = (img.width as i32, img.height as i32);
+    if w < 2 || img.pixels.chunks_exact(4).any(|p| p[3] < 255) {
+        return;
+    }
+    let lum = |x: i32, y: i32| {
+        let p = img.get(x.rem_euclid(w) as u32, y.rem_euclid(h) as u32);
+        (0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32) / 255.0
+    };
+    // Height: a small blur of the brightness (radius grows with the resolution).
+    let r = (w / 32).max(1);
+    let mut height = vec![0.0f32; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = 0.0;
+            let mut n = 0.0;
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    sum += lum(x + dx, y + dy);
+                    n += 1.0;
+                }
+            }
+            height[(y * w + x) as usize] = sum / n;
+        }
+    }
+    let hgt = |x: i32, y: i32| height[(y.rem_euclid(h) * w + x.rem_euclid(w)) as usize];
+    let step = r;
+    let mut out = img.pixels.clone();
+    for y in 0..h {
+        for x in 0..w {
+            // Slope towards the light (top-left) brightens, away from it darkens.
+            let slope = (hgt(x - step, y - step) - hgt(x + step, y + step)) * 4.0;
+            let k = (1.0 - slope * strength).clamp(0.6, 1.4);
+            let i = ((y * w + x) * 4) as usize;
+            for c in 0..3 {
+                out[i + c] = (img.pixels[i + c] as f32 * k).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    img.pixels = out;
+}
+
 /// Smooth HD version of a pixel-art sprite: Scale2x applied `factor` times over, then a soft
 /// deterministic grain so large surfaces do not look flat.
 pub fn upscale(img: &Image, factor: u32) -> Image {
