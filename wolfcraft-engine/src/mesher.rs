@@ -130,11 +130,14 @@ pub struct MeshInput {
     /// Light sources that can reach this chunk: padded coordinates (may lie outside the
     /// padded box, in neighbouring chunks) and light level.
     pub emitters: Vec<([i32; 3], u8)>,
+    /// Per padded column (x, z): is the sky open above the top of the padded box? `None`
+    /// uses `sky_open` for every column.
+    pub sky_cols: Option<Box<[bool; PAD * PAD]>>,
 }
 
 impl MeshInput {
     pub fn new(key: ChunkKey, grid: Grid, sky_open: bool) -> Self {
-        Self { key, grid, blocks: Box::new([0; PADDED_VOL]), sky_open, emitters: Vec::new() }
+        Self { key, grid, blocks: Box::new([0; PADDED_VOL]), sky_open, emitters: Vec::new(), sky_cols: None }
     }
     /// Index for padded coordinates `(x, y, z)` = `(j, k, i)` relative to the chunk, each in -1..=16.
     #[inline]
@@ -185,7 +188,11 @@ const NORMALS: [[i32; 3]; 6] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0
 /// Skylight 0..15 along one column above `q`: open sky gives 15, a roof `k` blocks up gives
 /// a dim value, leaves only take some light away.
 fn sky_ray(inp: &MeshInput, x: i32, y0: i32, z: i32) -> f32 {
-    let open = if inp.sky_open { 15.0 } else { 3.0 };
+    let col_open = match &inp.sky_cols {
+        Some(c) => c[((x.clamp(-1, CHUNK_SIZE) + 1) + (z.clamp(-1, CHUNK_SIZE) + 1) * PAD as i32) as usize],
+        None => inp.sky_open,
+    };
+    let open = if col_open { 15.0 } else { 3.0 };
     let mut light = open;
     for k in 1..=14 {
         let y = y0 + k;

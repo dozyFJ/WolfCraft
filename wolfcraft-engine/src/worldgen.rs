@@ -59,10 +59,18 @@ pub fn generate_chunk(planet: &Planet, key: ChunkKey) -> Chunk {
         crate::structures::apply(planet, key, &mut chunk);
     }
 
-    // Sky hint: is the chunk centre above the terrain?
+    chunk.sky_open = sky_hint(planet, key);
+    chunk.shrink_if_empty();
+    chunk
+}
+
+/// Sky hint for a chunk: is its centre above the terrain? (Used where the chunk above is not
+/// known; the mesher looks at the real blocks above when it can.)
+pub fn sky_hint(planet: &Planet, key: ChunkKey) -> bool {
+    let g = &planet.grid;
     let centre = g.chunk_center(key);
     let rc = g.radial(centre);
-    chunk.sky_open = if planet.hell {
+    if planet.hell {
         false
     } else if rc < planet.radius - 80.0 {
         false
@@ -70,9 +78,7 @@ pub fn generate_chunk(planet: &Planet, key: ChunkKey) -> Chunk {
         true
     } else {
         rc >= planet.surface_radius(planet.grid.col_dir(centre)) - 2.0
-    };
-    chunk.shrink_if_empty();
-    chunk
+    }
 }
 
 fn is_grassy(b: Biome) -> bool {

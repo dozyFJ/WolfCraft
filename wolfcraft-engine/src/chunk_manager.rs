@@ -224,6 +224,25 @@ impl ChunkManager {
             }
         }
         inp.emitters = self.emitters_near(key);
+        // Sky above every column: look at the real blocks in the chunk above (one chunk up),
+        // so light does not change at chunk borders.
+        let mut cols = Box::new([inp.sky_open; crate::mesher::PAD * crate::mesher::PAD]);
+        for z in -1..=CHUNK_SIZE {
+            for x in -1..=CHUNK_SIZE {
+                let Some(first) = g.map_cell(key.f, o.x + z, o.y + x, o.z + CHUNK_SIZE + 1) else { continue };
+                let nk = ChunkKey::of(first);
+                let Some(ch) = self.chunks.get(&nk) else { continue };
+                let open = ch.is_empty() || (0..CHUNK_SIZE).all(|k| {
+                    g.map_cell(key.f, o.x + z, o.y + x, o.z + CHUNK_SIZE + 1 + k).is_none_or(|c| {
+                        let b = self.chunks.get(&ChunkKey::of(c)).map(|cc| cc.get(c.i & 15, c.j & 15, c.k & 15)).unwrap_or(Block::Air);
+                        !b.is_opaque()
+                    })
+                });
+                // Open above the chunk above too is only a guess: trust its own hint there.
+                cols[((x + 1) + (z + 1) * crate::mesher::PAD as i32) as usize] = open && (ch.is_empty() || ch.sky_open || inp.sky_open);
+            }
+        }
+        inp.sky_cols = Some(cols);
         Some(inp)
     }
 
@@ -325,7 +344,15 @@ impl ChunkManager {
             let storage = self.storage.clone();
             let tx = self.gen_tx.clone();
             rayon::spawn(move || {
-                let chunk = storage.load_chunk(key).unwrap_or_else(|| generate_chunk(&planet, key));
+                let chunk = match storage.load_chunk(key) {
+                    // Saved chunks do not store the sky hint: work it out again (it was always
+                    // "underground", so player-built places went dark after a reload).
+                    Some(mut c) => {
+                        c.sky_open = crate::worldgen::sky_hint(&planet, key);
+                        c
+                    }
+                    None => generate_chunk(&planet, key),
+                };
                 let _ = tx.send((key, chunk));
             });
         }
