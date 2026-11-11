@@ -68,7 +68,7 @@ const NEWS: [News; 4] = [
 ];
 
 /// The launcher. `skin` is the selected skin preset.
-pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8) -> MenuAction {
+pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8, worlds: &[crate::main_menu::WorldEntry]) -> MenuAction {
     let p = palette(ctx);
     let mut action = MenuAction::None;
     let tab_id = Id::new("launcher-tab");
@@ -139,7 +139,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
             match TABS[tab].0 {
                 Tab::Home => home(ui, icons, &p, planet, &mut action),
                 Tab::Game => game(ui, icons, &p, planet, &mut action),
-                Tab::Studio => studio(ui, icons, &p, version, &mut action),
+                Tab::Studio => studio(ui, icons, &p, version, worlds, &mut action),
                 Tab::Skins => skins(ui, &p, skin, &mut action),
             }
             ui.add_space(8.0);
@@ -427,7 +427,7 @@ fn tile(ui: &mut Ui, icons: &GuiIcons, p: &Palette, w: f32, ic: u16, title: &str
 // ---------------------------------------------------------------------------------------------
 // Студия
 
-fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, action: &mut MenuAction) {
+fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[crate::main_menu::WorldEntry], action: &mut MenuAction) {
     Frame::none().fill(p.surface).rounding(Rounding::same(14.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(18.0)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
@@ -441,6 +441,36 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, action: &mu
             });
         });
     });
+    section(ui, p, "Мои проекты", "");
+    ui.label(egui::RichText::new("Откройте мир в студии: стройте из ассетов игры, пишите скрипт мира и запускайте его как сервер").size(13.0).color(p.text_muted));
+    for w in worlds {
+        Frame::none().fill(p.surface).rounding(Rounding::same(12.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(10.0)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(56.0), Sense::hover());
+                if let Some(t) = &w.preview {
+                    ui.painter().image(t.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                } else {
+                    ui.painter().rect_filled(r, Rounding::same(8.0), p.bg);
+                }
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(15.0)).color(p.text));
+                    ui.label(egui::RichText::new(format!("Сид {}", w.cfg.seed as i64)).size(12.0).color(p.text_muted));
+                    ui.horizontal(|ui| {
+                        if pill_button(ui, icons, Some(icon::HAMMER), "Студия", ButtonKind::Primary, 120.0, true).clicked() {
+                            *action = MenuAction::OpenStudio(w.cfg.id.clone());
+                        }
+                        if pill_button(ui, icons, Some(icon::GLOBE), "Сервер", ButtonKind::Secondary, 120.0, true).clicked() {
+                            *action = MenuAction::HostServer(Some(w.cfg.id.clone()));
+                        }
+                    });
+                });
+            });
+        });
+    }
+    if pill_button(ui, icons, Some(icon::PLUS), "Новый проект", ButtonKind::Secondary, ui.available_width(), true).clicked() {
+        *action = MenuAction::OpenCreate;
+    }
     section(ui, p, "О игре", "");
     for (t, d) in [
         ("Планета вместо плоского мира", "Шар или куб: обойдите его целиком, улетите в космос и вернитесь"),

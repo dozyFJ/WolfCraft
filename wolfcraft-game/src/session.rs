@@ -123,6 +123,8 @@ pub struct GameSession {
     furnace_t: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, f32>,
     /// The start position was checked for blocks (a structure may have been built over it).
     spawn_checked: bool,
+    /// Opened in the studio: creative rules without changing the world's saved mode.
+    pub studio: bool,
 }
 
 impl GameSession {
@@ -167,6 +169,7 @@ impl GameSession {
             pending_portal: None,
             furnace_t: Default::default(),
             spawn_checked: false,
+            studio: false,
         };
         s.load_containers();
         s.load_block_commands();
@@ -693,7 +696,7 @@ impl GameSession {
     }
 
     pub fn is_creative(&self) -> bool {
-        self.cfg.mode == GameMode::Creative
+        self.studio || self.cfg.mode == GameMode::Creative
     }
 
     // ---- values for rendering / HUD ----

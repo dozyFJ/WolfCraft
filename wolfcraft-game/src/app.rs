@@ -92,6 +92,9 @@ struct LoadState {
     progress_at: Instant,
 }
 
+/// World script written in the studio (chat commands, one per line), next to world.toml.
+const STUDIO_SCRIPT: &str = "studio.txt";
+
 /// Phone folder for the player's resource packs (the app's own shared-storage folder).
 const ANDROID_PACKS_DIR: &str = "/storage/emulated/0/Android/data/com.wolfcraft.mobile/files/resourcepacks";
 
@@ -161,6 +164,11 @@ pub struct App {
     near_table: bool,
     /// Orientation last asked of the phone (launcher upright, the rest in landscape).
     portrait: Option<bool>,
+    /// Studio (world editor) panels while a world is open in the studio, and that world's id.
+    studio: Option<wolfcraft_ui::studio_ui::StudioState>,
+    studio_world: Option<String>,
+    /// The world list was read for the launcher since it was last shown.
+    main_worlds_fresh: bool,
     /// Open chest / furnace (block cell and kind).
     container: Option<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)>,
     pending_apply: bool,
@@ -271,6 +279,9 @@ impl App {
             last_cpu: 0.0,
             near_table: false,
             portrait: None,
+            studio: None,
+            studio_world: None,
+            main_worlds_fresh: false,
             container: None,
             pending_apply: false,
             hand_cycle: 0.0,
@@ -562,7 +573,64 @@ impl App {
         }
     }
 
+    /// Saves the studio's world script next to the world.
+    fn save_studio_script(&self) {
+        if let (Some(st), Some(id)) = (&self.studio, &self.studio_world) {
+            if let Err(e) = std::fs::write(self.worlds_dir.join(id).join(STUDIO_SCRIPT), &st.script) {
+                log::error!("studio script: {e}");
+            }
+        }
+    }
+
+    fn studio_action(&mut self, a: wolfcraft_ui::studio_ui::StudioAction, submitted: &mut Vec<String>, actions: &mut Vec<MenuAction>) {
+        use wolfcraft_ui::studio_ui::{StudioAction, script_commands};
+        let now = self.time.elapsed() as f64;
+        let status = |me: &mut Self, text: &str| {
+            if let Some(st) = &mut me.studio {
+                st.status = text.to_string();
+                st.status_t = now;
+            }
+        };
+        match a {
+            StudioAction::Exit => {
+                self.save_studio_script();
+                actions.push(MenuAction::SaveAndQuit);
+            }
+            StudioAction::RunScript => {
+                let script = self.studio.as_ref().map(|s| s.script.clone()).unwrap_or_default();
+                let cmds = script_commands(&script);
+                let n = cmds.len();
+                submitted.extend(cmds);
+                status(self, &format!("Скрипт выполнен: {n} команд"));
+            }
+            StudioAction::Save => {
+                self.save_studio_script();
+                if let Some(s) = &mut self.session {
+                    s.save();
+                }
+                status(self, "Сохранено");
+            }
+            StudioAction::Publish => {
+                self.save_studio_script();
+                if let Some(id) = self.studio_world.clone() {
+                    if let Some(s) = &mut self.session {
+                        s.save();
+                    }
+                    actions.push(MenuAction::HostServer(Some(id)));
+                }
+            }
+            StudioAction::DayNight => {
+                let day = self.session.as_ref().is_some_and(|s| s.daylight() > 0.5);
+                submitted.push(if day { "/time set ночь".into() } else { "/time set день".into() });
+            }
+        }
+    }
+
     fn leave_world(&mut self) {
+        self.studio = None;
+        self.studio_world = None;
+        self.touch.studio = false;
+        self.touch.blocked.clear();
         self.net = None;
         self.host = None;
         self.net_players.clear();
@@ -949,6 +1017,15 @@ impl App {
     }
 
     fn redraw(&mut self, gfx: &mut Gfx) {
+        // The launcher lists the worlds as studio projects: read them whenever it opens.
+        if self.screen == Screen::Main {
+            if !self.main_worlds_fresh {
+                self.main_worlds_fresh = true;
+                self.refresh_worlds(&gfx.gui.ctx);
+            }
+        } else {
+            self.main_worlds_fresh = false;
+        }
         let portrait = matches!(self.screen, Screen::Splash | Screen::Main);
         if self.portrait != Some(portrait) {
             self.portrait = Some(portrait);
@@ -1086,6 +1163,8 @@ impl App {
         let mut pack_download: Option<String> = None;
         let mut close_inventory = false;
         let mut submitted: Vec<String> = Vec::new();
+        let mut studio_actions: Vec<wolfcraft_ui::studio_ui::StudioAction> = Vec::new();
+        let mut studio_cover: Vec<egui::Rect> = Vec::new();
         let icons = gfx.gui.icons.clone();
         let version = wolfcraft_common::VERSION;
         let data_dir_str = self.data_dir.display().to_string();
@@ -1140,7 +1219,7 @@ impl App {
         let Some(output) = gfx.gpu.acquire() else { return };
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
         let frame = {
-            let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
+            let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, studio, studio_world, .. } = self;
             let touch_size = gfx.gpu.size();
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
@@ -1152,7 +1231,7 @@ impl App {
                     crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
                 Screen::Main => {
-                    actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref(), settings.skin));
+                    actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref(), settings.skin, worlds));
                     crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
@@ -1223,7 +1302,7 @@ impl App {
                             show_fps: settings.show_fps,
                             debug: debug_info.as_ref(),
                             compass: Some(compass_bearing(p.heading, p.up()) as f32),
-                            minimap: minimap_tex,
+                            minimap: if studio.is_some() { None } else { minimap_tex },
                             compact: cfg!(target_os = "android"),
                         };
                         if screen != Screen::Map {
@@ -1234,6 +1313,13 @@ impl App {
                                 submitted.push(line);
                             }
                         }
+                        if let (Some(st), Screen::Playing) = (studio.as_mut(), screen) {
+                            let project = s.cfg.name.clone();
+                            let (a, cover) = wolfcraft_ui::studio_ui::draw(ctx, &icons, st, &project, &mut s.player.inventory, time.elapsed() as f64);
+                            studio_actions = a;
+                            studio_cover = cover;
+                        }
+                        let _ = &studio_world;
                         if s.saved_notice > 0.0 {
                             ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("saved")))
                                 .text(egui::pos2(ctx.screen_rect().center().x, 28.0), egui::Align2::CENTER_CENTER, "Сохранено", egui::FontId::proportional(14.0), theme_manager::palette(ctx).success);
@@ -1365,6 +1451,15 @@ impl App {
             self.world_select.servers_changed = false;
             self.settings.servers = self.world_select.servers.clone();
             self.settings.save(&self.data_dir);
+        }
+        // Studio panels: keep the touch controls off them, then do what the ribbon asked.
+        let ppp = gfx.gui.ctx.pixels_per_point();
+        self.touch.studio = self.studio.is_some();
+        if self.screen == Screen::Playing {
+            self.touch.blocked = studio_cover.iter().map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
+        }
+        for a in studio_actions {
+            self.studio_action(a, &mut submitted, &mut actions);
         }
         for a in actions {
             self.handle_action(a, gfx);
@@ -1646,6 +1741,23 @@ impl App {
                 self.load = None;
                 self.screen = Screen::Playing;
                 self.near_table = false;
+                // Studio: build freely (creative, flying) whatever the world's mode.
+                if self.studio.is_some() {
+                    s.studio = true;
+                    s.player.mode = wolfcraft_engine::config::GameMode::Creative;
+                    s.player.body.flying = true;
+                }
+                // The world's script (written in the studio) runs every time the world starts.
+                if self.net.is_none() {
+                    if let Ok(script) = std::fs::read_to_string(self.worlds_dir.join(&s.cfg.id).join(STUDIO_SCRIPT)) {
+                        let now = self.time.elapsed() as f64;
+                        for line in wolfcraft_ui::studio_ui::script_commands(&script) {
+                            for (kind, text) in crate::commands::run(s, &line) {
+                                self.chat.push(kind, text, now);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1701,8 +1813,27 @@ impl App {
                 self.host = None;
                 self.join_server(&addr);
             }
-            MenuAction::HostServer(world) => self.host_server(world),
+            MenuAction::HostServer(world) => {
+                // Publishing from the studio ends the studio: the server world is played normally.
+                self.studio = None;
+                self.studio_world = None;
+                self.touch.studio = false;
+                self.touch.blocked.clear();
+                self.host_server(world)
+            }
+            MenuAction::OpenStudio(id) => {
+                self.net = None;
+                if let Some(w) = self.worlds.iter().find(|w| w.cfg.id == id) {
+                    let cfg = w.cfg.clone();
+                    let script = std::fs::read_to_string(self.worlds_dir.join(&id).join(STUDIO_SCRIPT)).unwrap_or_default();
+                    self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, script, ..Default::default() });
+                    self.studio_world = Some(id);
+                    self.start_load(cfg, false);
+                }
+            }
             MenuAction::PlayWorld(id) => {
+                self.studio = None;
+                self.studio_world = None;
                 self.net = None;
                 if let Some(w) = self.worlds.iter().find(|w| w.cfg.id == id) {
                     let cfg = w.cfg.clone();

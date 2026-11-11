@@ -31,6 +31,8 @@ pub enum MenuAction {
     SaveGame,
     /// Pick a skin preset (launcher "Скины" tab).
     SetSkin(u8),
+    /// Open this world in the studio (editor).
+    OpenStudio(String),
 }
 
 pub struct WorldEntry {
@@ -175,9 +177,9 @@ fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
 }
 
 /// Home screen: the mobile launcher (toolbar, pages, bottom navigation).
-pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8) -> MenuAction {
+pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8, worlds: &[WorldEntry]) -> MenuAction {
     let _ = data_dir;
-    crate::launcher::show(ctx, icons, version, dark, planet, skin)
+    crate::launcher::show(ctx, icons, version, dark, planet, skin, worlds)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1291,7 +1293,7 @@ mod tests {
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             crate::theme_manager::apply(&ctx, mode);
             frame(&ctx, |c| {
-                main_menu(c, &icons, "0.1.0", "C:\\data", mode == ThemeMode::Dark, None, 0);
+                main_menu(c, &icons, "0.1.0", "C:\\data", mode == ThemeMode::Dark, None, 0, &[]);
             });
             let mut ws = WorldSelectState::default();
             frame(&ctx, |c| {

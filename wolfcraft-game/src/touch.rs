@@ -74,6 +74,10 @@ pub struct TouchState {
     /// Inventory tile and minimap (physical pixels), published by the HUD.
     inv: Option<(f32, f32, f32, f32)>,
     map: Option<(f32, f32, f32, f32)>,
+    /// Studio mode: the top island is replaced by the studio ribbon.
+    pub studio: bool,
+    /// Screen areas covered by other panels (physical pixels): touches there are left to them.
+    pub blocked: Vec<(f32, f32, f32, f32)>,
 }
 
 pub const STICK_R: f32 = 110.0;
@@ -148,7 +152,11 @@ impl TouchState {
                 let (w, h) = (size.0 as f32, size.1 as f32);
                 let on_hotbar = self.hotbar.is_some_and(|(l, t, r, bt)| p.0 >= l - 6.0 && p.0 <= r + 6.0 && p.1 >= t - 6.0 && p.1 <= bt + 6.0);
                 let inside = |r: Option<(f32, f32, f32, f32)>| r.is_some_and(|(l, t, rr, b)| p.0 >= l - 4.0 && p.0 <= rr + 4.0 && p.1 >= t - 4.0 && p.1 <= b + 4.0);
-                let role = if inside(self.inv) {
+                let island = |b: &Btn| matches!(b, Btn::Pause | Btn::Chat | Btn::Camera | Btn::Tab);
+                let role = if self.blocked.iter().any(|r| inside(Some(*r))) {
+                    // A studio panel is there: not a game touch (an inert role so it does nothing).
+                    Role::Hotbar
+                } else if inside(self.inv) {
                     out.push(TouchAction::Inventory);
                     Role::Button(Btn::Inventory)
                 } else if inside(self.map) {
@@ -160,7 +168,7 @@ impl TouchState {
                     let slot = (((p.0 - l) / (r - l).max(1.0)) * 9.0).floor().clamp(0.0, 8.0) as usize;
                     out.push(TouchAction::HotbarSet(slot));
                     Role::Hotbar
-                } else if let Some(b) = BUTTONS.iter().copied().find(|b| hit(*b, size, self.hotbar, p)) {
+                } else if let Some(b) = BUTTONS.iter().copied().filter(|b| !(self.studio && island(b))).find(|b| hit(*b, size, self.hotbar, p)) {
                     match b {
                         Btn::Jump => {
                             self.jump_held = true;
@@ -289,7 +297,7 @@ impl TouchState {
         painter.circle(pt(bx, by), STICK_R * 0.9 / ppp, fill, line);
         painter.circle(pt(kx, ky), 40.0 * u / ppp, Color32::from_rgba_unmultiplied(230, 240, 250, 150), line);
         // Top island: one rounded pill holding chat, camera, debug and pause.
-        {
+        if !self.studio {
             let (x0, y, step) = island_layout(size);
             let hh = 34.0 * u;
             let rect = egui::Rect::from_min_max(pt(x0 - 8.0 * u, y - hh), pt(x0 + step * ISLAND.len() as f32 + 8.0 * u, y + hh));
