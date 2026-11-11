@@ -1084,6 +1084,12 @@ impl App {
                     let t = ScopeTimer::start();
                     let events = s.update(&input, dt, view, frozen);
                     self.profile.chunks_ms = t.ms();
+                    // Changes the game made by itself (buttons springing back) go to the server too.
+                    for (pos, block) in s.net_out.drain(..) {
+                        if let Some(net) = &mut self.net {
+                            net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u8, hell: s.hell });
+                        }
+                    }
                     self.audio.volume = self.settings.volume;
                     // Footsteps: one per half walk-cycle while on the ground.
                     let step_no = (s.player.anim_phase / std::f32::consts::PI).floor() as i64;

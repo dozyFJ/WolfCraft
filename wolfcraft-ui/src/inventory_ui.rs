@@ -20,8 +20,8 @@ const OFFHAND: usize = 99;
 const ARMOR: usize = 95;
 
 /// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
-const CREATIVE_TABS: [&str; 10] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Техника", "Растения", "Предметы", "Инструменты", "Инвентарь"];
-const BACKPACK_TAB: usize = 9;
+const CREATIVE_TABS: [&str; 12] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Техника", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Инвентарь"];
+const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 
 
 #[derive(Default)]
@@ -285,7 +285,7 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                         slot_rects.push((ARMOR + a, rect));
                         draw_slot(ui, icons, p, state, inv, ARMOR + a, rect);
                         if inv.armor[a].is_none() {
-                            let names = ["Шлем", "Броня", "Поножи", "Ботинки"];
+                            let names = ["Шлем", "Нагрудник", "Поножи", "Ботинки"];
                             ui.painter().text(rect.center(), Align2::CENTER_CENTER, names[a], FontId::proportional(8.5), p.text_muted.gamma_multiply(0.6));
                         }
                     }
@@ -384,7 +384,8 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool) {
 fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let palette_all = items::creative_palette();
     // ---- Tabs ----
-    let tab = ((grid_w - 10.0 * 4.0) / 11.0).floor();
+    let n = CREATIVE_TABS.len() as f32 + 1.0; // tabs + close button
+    let tab = ((grid_w - (n - 1.0) * 4.0) / n).floor();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         for (i, name) in CREATIVE_TABS.iter().enumerate() {

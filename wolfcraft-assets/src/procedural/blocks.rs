@@ -183,13 +183,30 @@ fn log_side(base: Rgb, seed: u32, birch: bool) -> Image {
 
 fn leaves(base: Rgb, seed: u32) -> Image {
     p(|q| {
+        // Dark shade between the leaves (not holes: holes let the bright sky shine through as
+        // white dots), then small leaf clumps lit from the top-left. Wraps around, so it tiles.
+        let mut px = vec![base.scale(0.55); (S * S) as usize];
         for y in 0..S {
             for x in 0..S {
-                // Gaps are a darker shade, not holes: holes let the bright sky shine through
-                // as white dots.
-                let n = (rnd(x, y, seed + 1) - 0.5) * 0.12;
-                let c = if rnd(x, y, seed) < 0.15 { base.scale(0.72) } else { base.add(n) };
-                q.put(x, y, c, 1.0);
+                px[(y * S + x) as usize] = base.scale(0.50 + rnd(x, y, seed + 3) * 0.12);
+            }
+        }
+        for cy in 0..4u32 {
+            for cx in 0..4u32 {
+                // One clump per 4x4 cell, jittered; every other row shifted (no visible grid).
+                let ox = cx * 4 + (cy % 2) * 2 + (rnd(cx, cy, seed) * 2.0) as u32;
+                let oy = cy * 4 + (rnd(cx, cy, seed + 1) * 2.0) as u32;
+                let tone = (rnd(cx, cy, seed + 2) - 0.5) * 0.14;
+                for (dx, dy, f) in [(1i32, 0i32, 0.08), (0, 1, 0.08), (1, 1, 0.0), (2, 1, -0.06), (1, 2, -0.08), (2, 2, -0.14), (0, 0, 0.16)] {
+                    let x = (ox as i32 + dx).rem_euclid(S as i32) as u32;
+                    let y = (oy as i32 + dy).rem_euclid(S as i32) as u32;
+                    px[(y * S + x) as usize] = base.add(tone + f + (rnd(x, y, seed + 4) - 0.5) * 0.05);
+                }
+            }
+        }
+        for y in 0..S {
+            for x in 0..S {
+                q.put(x, y, px[(y * S + x) as usize], 1.0);
             }
         }
     })

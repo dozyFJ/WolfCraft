@@ -266,8 +266,8 @@ pub fn recipes() -> &'static [Recipe] {
             v.push(r(&[(b(planks), 4)], (b(Block::CraftingTable), 1), false, "Строительство"));
         }
         // Bow and arrows, wool, torches and new building blocks.
-        v.push(r(&[(ids::STICK, 3), (ids::STRING, 3)], (ids::BOW, 1), true, "Инструменты"));
-        v.push(r(&[(ids::FLINT, 1), (ids::STICK, 1)], (ids::ARROW, 4), false, "Инструменты"));
+        v.push(r(&[(ids::STICK, 3), (ids::STRING, 3)], (ids::BOW, 1), true, "Вооружение"));
+        v.push(r(&[(ids::FLINT, 1), (ids::STICK, 1)], (ids::ARROW, 4), false, "Вооружение"));
         v.push(r(&[(ids::STRING, 4)], (b(Block::Wool), 1), false, "Строительство"));
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerRed), 1)], (b(Block::RedWool), 1), false, "Строительство"));
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerBlue), 1)], (b(Block::BlueWool), 1), false, "Строительство"));
@@ -285,7 +285,7 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::Stone), 1), (ids::COAL, 1)], (b(Block::SmoothStone), 1), true, "Плавка"));
         v.push(r(&[(b(Block::Sandstone), 4)], (b(Block::SandstoneBricks), 4), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::LEATHER, 1)], (b(Block::Bookshelf), 1), true, "Строительство"));
-        v.push(r(&[(ids::LEATHER, 5)], (ids::ARMOR_BASE + 1, 1), true, "Броня"));
+        v.push(r(&[(ids::LEATHER, 5)], (ids::ARMOR_BASE + 1, 1), true, "Доспехи"));
         // Slabs, stairs, vertical slabs, doors, stained glass and panes, fences, walls, signs.
         for (mat, slab) in [(Block::Cobblestone, Block::CobbleSlab), (Block::StoneBricks, Block::StoneBrickSlab), (Block::Sandstone, Block::SandstoneSlab), (Block::Bricks, Block::BrickSlab), (Block::BirchPlanks, Block::BirchSlab), (Block::SprucePlanks, Block::SpruceSlab)] {
             v.push(r(&[(b(mat), 3)], (b(slab), 6), true, "Строительство"));
@@ -328,7 +328,7 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::OakPlanks), 2)], (ids::STICK, 4), false, "Дерево"));
         v.push(r(&[(b(Block::OakPlanks), 4)], (b(Block::CraftingTable), 1), false, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 8)], (b(Block::Chest), 1), true, "Строительство"));
-        v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (ids::SHIELD, 1), true, "Инструменты"));
+        v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (ids::SHIELD, 1), true, "Вооружение"));
         v.push(r(&[(b(Block::Stone), 4)], (b(Block::StoneBricks), 4), true, "Строительство"));
         v.push(r(&[(b(Block::Sand), 4)], (b(Block::Sandstone), 1), false, "Строительство"));
         v.push(r(&[(b(Block::Clay), 4)], (b(Block::Bricks), 1), true, "Строительство"));
@@ -369,7 +369,7 @@ pub fn recipes() -> &'static [Recipe] {
         for (mi, mat) in armor_mats.iter().enumerate() {
             for si in 0..4usize {
                 let (cnt, mid) = if mi == 0 { (armor_units[si] * 2, b(Block::OakPlanks)) } else { (armor_units[si], *mat) };
-                v.push(r(&[(mid, cnt)], (ids::ARMOR_BASE + (mi * 4 + si) as u16, 1), true, "Броня"));
+                v.push(r(&[(mid, cnt)], (ids::ARMOR_BASE + (mi * 4 + si) as u16, 1), true, "Доспехи"));
             }
         }
         // Smelting (needs a crafting table nearby; stands in for a furnace).
@@ -387,7 +387,7 @@ pub fn recipes() -> &'static [Recipe] {
         let shapes = [["MMM", ".S.", ".S."], ["MM.", "MS.", ".S."], [".M.", ".S.", ".S."], [".M.", ".M.", ".S."]];
         for (mi, mat) in mats.iter().enumerate() {
             for ki in 0..4usize {
-                let mut rec = r(&[(*mat, units[ki]), (ids::STICK, sticks[ki])], (ids::tool(mi as u16, ki as u16), 1), true, "Инструменты");
+                let mut rec = r(&[(*mat, units[ki]), (ids::STICK, sticks[ki])], (ids::tool(mi as u16, ki as u16), 1), true, if ki == 3 { "Вооружение" } else { "Инструменты" });
                 rec.shape = Some(pattern(shapes[ki], *mat));
                 v.push(rec);
             }

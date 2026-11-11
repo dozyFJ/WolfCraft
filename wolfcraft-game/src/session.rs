@@ -127,6 +127,8 @@ pub struct GameSession {
     pub studio: bool,
     /// Pressed buttons and the seconds until they spring back.
     buttons: Vec<(wolfcraft_engine::cubesphere::Cell, f32)>,
+    /// Block changes made by the game itself (a button springing back) for the server.
+    pub net_out: Vec<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)>,
 }
 
 impl GameSession {
@@ -173,6 +175,7 @@ impl GameSession {
             spawn_checked: false,
             studio: false,
             buttons: Vec::new(),
+            net_out: Vec::new(),
         };
         s.load_containers();
         s.load_block_commands();
@@ -218,14 +221,30 @@ impl GameSession {
         }
         if !self.remote_edits.is_empty() {
             let chunks = &mut self.chunks;
+            let mut applied = Vec::new();
             self.remote_edits.retain(|(c, b)| {
                 // Keep the edit until its chunk exists; an already equal block needs nothing.
                 match chunks.get_block(*c) {
                     Some(cur) if cur == *b => false,
-                    Some(_) => !chunks.set_block(*c, *b),
+                    Some(_) => {
+                        let done = chunks.set_block(*c, *b);
+                        if done {
+                            applied.push((*c, *b));
+                        }
+                        !done
+                    }
                     None => true,
                 }
             });
+            // Only the edit itself comes over the network: charge the iskrit dust, light the
+            // lamps and release pressed buttons here as well.
+            for (c, b) in applied {
+                wolfcraft_engine::power::update_around(&mut self.chunks, c);
+                wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
+                if b == wolfcraft_engine::block::Block::ButtonOn && !self.buttons.iter().any(|(p, _)| *p == c) {
+                    self.buttons.push((c, 1.0));
+                }
+            }
         }
         if let Some(c) = self.pending_portal {
             if self.ground_ready() {
@@ -430,6 +449,7 @@ impl GameSession {
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, *pos);
             }
             if let InteractionEvent::Placed { pos, block: wolfcraft_engine::block::Block::ButtonOn } = e {
+                self.buttons.retain(|(p, _)| p != pos);
                 self.buttons.push((*pos, 1.0));
             }
         }
@@ -448,6 +468,7 @@ impl GameSession {
             if self.chunks.get_block(pos) == Some(wolfcraft_engine::block::Block::ButtonOn) {
                 self.chunks.set_block(pos, wolfcraft_engine::block::Block::Button);
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, pos);
+                self.net_out.push((pos, wolfcraft_engine::block::Block::Button));
             }
         }
         self.near_table = false;

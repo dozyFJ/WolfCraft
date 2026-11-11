@@ -337,7 +337,13 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
     if id >= ITEM_BASE {
-        return if info(id).tool.is_some() || matches!(id, ids::BOW | ids::ARROW) { "Инструменты" } else { "Предметы" };
+        if armor_slot(id).is_some() {
+            return "Доспехи";
+        }
+        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
+            return "Вооружение";
+        }
+        return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };
     }
     let b = Block::from_u8(id as u8);
     match b.info().render {
@@ -363,6 +369,16 @@ pub fn category(id: ItemId) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weapons_and_armour_have_their_own_tabs() {
+        assert_eq!(category(ids::tool(2, 3)), "Вооружение", "sword");
+        assert_eq!(category(ids::BOW), "Вооружение");
+        assert_eq!(category(ids::ARROW), "Вооружение");
+        assert_eq!(category(ids::SHIELD), "Вооружение");
+        assert_eq!(category(ids::tool(2, 0)), "Инструменты", "pickaxe");
+        assert_eq!(category(ids::ARMOR_BASE + 5), "Доспехи");
+    }
 
     #[test]
     fn every_item_has_info_and_icon_in_range() {
