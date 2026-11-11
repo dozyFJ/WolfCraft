@@ -5,7 +5,7 @@ use crate::mesher::{MeshData, Vertex};
 use self::model::ModelVertex;
 use bytemuck::{Pod, Zeroable};
 use glam::{DVec3, Mat4, Vec3, Vec4};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use wolfcraft_assets::{AtlasKind, AtlasManager, TextureAtlas};
 
 pub mod model;
@@ -112,6 +112,50 @@ struct ChunkGpu {
     /// Bounding sphere for culling.
     center: DVec3,
     radius: f64,
+    /// Opaque indices of blocks and shapes; the rest (grass, flowers) is skipped far away.
+    detail_start: u32,
+}
+
+/// Beyond this distance (blocks) chunks are drawn without small details (grass, flowers).
+pub const DETAIL_DIST: f32 = 56.0;
+
+/// Chunks that can be seen from `start` (cave culling, as in Minecraft): a breadth-first walk
+/// over the chunk grid that only passes from one side of a chunk to another when open blocks
+/// connect them (`vis`), and never turns back towards the camera. Chunks behind solid rock or
+/// walls are not reached. Unknown chunks count as open, so nothing visible is ever lost;
+/// crossing a cube edge also resets the walk to "open" (the axes turn there).
+pub fn reachable_chunks(grid: &Grid, start: ChunkKey, radius_chunks: f64, vis: impl Fn(ChunkKey) -> u64) -> HashSet<ChunkKey> {
+    use crate::mesher::{SIDE_DIRS, sides_connected};
+    let origin = grid.chunk_center(start);
+    let mut seen: HashSet<ChunkKey> = HashSet::new();
+    // (chunk, side it was entered through, directions taken so far)
+    let mut queue: VecDeque<(ChunkKey, Option<usize>, u8)> = VecDeque::new();
+    seen.insert(start);
+    queue.push_back((start, None, 0));
+    while let Some((key, from, dirs)) = queue.pop_front() {
+        let v = vis(key);
+        for (d, &(di, dj, dk)) in SIDE_DIRS.iter().enumerate() {
+            if dirs & (1 << (d ^ 1)) != 0 {
+                continue; // would walk back towards the camera
+            }
+            if let Some(e) = from {
+                if !sides_connected(v, e, d) {
+                    continue;
+                }
+            }
+            let Some(nb) = grid.chunk_neighbor(key, di, dj, dk) else { continue };
+            if seen.contains(&nb) || (grid.chunk_center(nb) - origin).length() / 16.0 > radius_chunks {
+                continue;
+            }
+            seen.insert(nb);
+            if nb.f == key.f {
+                queue.push_back((nb, Some(d ^ 1), dirs | (1 << d)));
+            } else {
+                queue.push_back((nb, None, 0));
+            }
+        }
+    }
+    seen
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -120,6 +164,8 @@ pub struct RenderStats {
     pub triangles: u32,
     pub chunks_total: usize,
     pub chunks_visible: usize,
+    /// In view but hidden behind walls or rock (cave culling).
+    pub chunks_hidden: usize,
     pub buffer_bytes: u64,
     pub uploads_this_frame: u32,
 }
@@ -186,6 +232,15 @@ pub struct WorldRenderer {
     color_format: wgpu::TextureFormat,
     chunks: HashMap<ChunkKey, ChunkGpu>,
     grid: Grid,
+    /// Visibility sets of every meshed chunk (also empty ones), for cave culling.
+    chunk_vis: HashMap<ChunkKey, u64>,
+    /// Chunks reachable from the camera chunk, recomputed when the camera changes chunk or
+    /// chunks were (re)meshed.
+    reachable: Option<(ChunkKey, HashSet<ChunkKey>)>,
+    vis_dirty: bool,
+    frames_since_cull: u32,
+    /// Skip chunks hidden behind walls and rock (on by default).
+    pub occlusion_culling: bool,
     instance_buf: wgpu::Buffer,
     instance_cap: usize,
     line_buf: wgpu::Buffer,
@@ -468,6 +523,11 @@ impl WorldRenderer {
             color_format,
             chunks: HashMap::new(),
             grid: Grid::with_cells(16),
+            chunk_vis: HashMap::new(),
+            reachable: None,
+            vis_dirty: true,
+            frames_since_cull: 0,
+            occlusion_culling: true,
             instance_buf,
             instance_cap,
             line_buf,
@@ -602,7 +662,7 @@ impl WorldRenderer {
     pub fn set_grid(&mut self, grid: Grid) {
         if grid != self.grid {
             self.grid = grid;
-            self.chunks.clear();
+            self.clear();
         }
     }
 
@@ -613,9 +673,12 @@ impl WorldRenderer {
         };
         let opaque = self.upload_buf(device, queue, old_o, &mesh.opaque, &mesh.opaque_idx);
         let water = self.upload_buf(device, queue, old_w, &mesh.water, &mesh.water_idx);
+        if self.chunk_vis.insert(key, mesh.vis) != Some(mesh.vis) {
+            self.vis_dirty = true;
+        }
         if opaque.is_some() || water.is_some() {
             let (center, radius) = self.grid.chunk_bounds(key);
-            self.chunks.insert(key, ChunkGpu { opaque, water, origin: self.grid.chunk_ref(key), center, radius });
+            self.chunks.insert(key, ChunkGpu { opaque, water, origin: self.grid.chunk_ref(key), center, radius, detail_start: mesh.detail_start });
         }
     }
 
@@ -667,10 +730,16 @@ impl WorldRenderer {
 
     pub fn remove_chunk(&mut self, key: ChunkKey) {
         self.chunks.remove(&key);
+        if self.chunk_vis.remove(&key).is_some() {
+            self.vis_dirty = true;
+        }
     }
 
     pub fn clear(&mut self) {
         self.chunks.clear();
+        self.chunk_vis.clear();
+        self.reachable = None;
+        self.vis_dirty = true;
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -704,13 +773,36 @@ impl WorldRenderer {
         gh.view_proj = (Mat4::perspective_rh(vm_fov, p.aspect.max(0.01), 0.02, 8.0) * viewm).to_cols_array_2d();
         queue.write_buffer(&self.globals_hands, 0, bytemuck::bytes_of(&gh));
 
-        // Frustum culling in camera-relative space.
+        // Cave culling: which chunks can be seen from the camera's chunk at all. Recomputed
+        // when the camera enters another chunk, or a few frames after chunks were (re)meshed.
+        self.frames_since_cull += 1;
+        let cam_chunk = ChunkKey::of(self.grid.world_to_cell(p.eye));
+        let radius_chunks = (p.view_distance_blocks / 16.0) as f64 + 1.5;
+        if self.occlusion_culling {
+            let moved = self.reachable.as_ref().is_none_or(|(k, _)| *k != cam_chunk);
+            if moved || (self.vis_dirty && self.frames_since_cull >= 10) {
+                let vis = &self.chunk_vis;
+                let set = reachable_chunks(&self.grid, cam_chunk, radius_chunks, |k| vis.get(&k).copied().unwrap_or(crate::mesher::VIS_ALL));
+                self.reachable = Some((cam_chunk, set));
+                self.vis_dirty = false;
+                self.frames_since_cull = 0;
+            }
+        } else {
+            self.reachable = None;
+        }
+        // Frustum and distance culling in camera-relative space.
         let planes = frustum_planes(&vp);
+        let max_dist = p.view_distance_blocks * 1.15 + 8.0;
         let mut visible: Vec<(ChunkKey, f32)> = Vec::with_capacity(self.chunks.len());
         let mut offsets: Vec<[f32; 4]> = Vec::with_capacity(self.chunks.len());
+        let mut hidden = 0usize;
         for (key, c) in self.chunks.iter() {
             let centre = (c.center - p.eye).as_vec3();
-            if !sphere_in_frustum(&planes, centre, c.radius as f32) {
+            if centre.length() - c.radius as f32 > max_dist || !sphere_in_frustum(&planes, centre, c.radius as f32) {
+                continue;
+            }
+            if self.reachable.as_ref().is_some_and(|(_, set)| !set.contains(key)) {
+                hidden += 1;
                 continue;
             }
             visible.push((*key, centre.length_squared()));
@@ -772,7 +864,8 @@ impl WorldRenderer {
             }
         }
 
-        let mut stats = RenderStats { chunks_total: self.chunks.len(), chunks_visible: visible.len(), ..Default::default() };
+        let mut stats = RenderStats { chunks_total: self.chunks.len(), chunks_visible: visible.len(), chunks_hidden: hidden, ..Default::default() };
+        let detail_d2 = DETAIL_DIST * DETAIL_DIST;
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("world-pass"),
@@ -795,13 +888,20 @@ impl WorldRenderer {
             }
 
             pass.set_pipeline(&self.opaque_pipeline);
-            for (i, (cc, _)) in visible.iter().enumerate() {
-                if let Some(m) = self.chunks.get(cc).and_then(|c| c.opaque.as_ref()) {
-                    pass.set_vertex_buffer(0, m.vb.slice(..));
-                    pass.set_index_buffer(m.ib.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..m.index_count, 0, i as u32..i as u32 + 1);
-                    stats.draw_calls += 1;
-                    stats.triangles += m.index_count / 3;
+            for (i, (cc, d2)) in visible.iter().enumerate() {
+                if let Some(c) = self.chunks.get(cc) {
+                    if let Some(m) = c.opaque.as_ref() {
+                        // Far chunks: blocks only, no grass and flowers (level of detail).
+                        let count = if *d2 > detail_d2 { c.detail_start.min(m.index_count) } else { m.index_count };
+                        if count == 0 {
+                            continue;
+                        }
+                        pass.set_vertex_buffer(0, m.vb.slice(..));
+                        pass.set_index_buffer(m.ib.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..count, 0, i as u32..i as u32 + 1);
+                        stats.draw_calls += 1;
+                        stats.triangles += count / 3;
+                    }
                 }
             }
 
@@ -954,6 +1054,21 @@ pub fn sky_color(day: f32, twilight: f32, altitude: f32) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunks_behind_a_solid_floor_are_not_reached() {
+        let grid = Grid::new(1024.0);
+        let start = ChunkKey::new(4, 40, 40, 64);
+        // Every chunk one layer below the camera is solid rock (no sides connected).
+        let vis = |k: ChunkKey| if k.ck == 63 { 0 } else { crate::mesher::VIS_ALL };
+        let set = reachable_chunks(&grid, start, 4.0, vis);
+        assert!(set.contains(&ChunkKey::new(4, 40, 40, 63)), "the rock right below is seen");
+        assert!(set.contains(&ChunkKey::new(4, 41, 40, 63)), "and the rock beside it");
+        assert!(!set.contains(&ChunkKey::new(4, 40, 40, 62)), "caves under the rock are hidden");
+        assert!(set.contains(&ChunkKey::new(4, 40, 40, 66)), "the air above is open");
+        let all = reachable_chunks(&grid, start, 4.0, |_| crate::mesher::VIS_ALL);
+        assert!(all.contains(&ChunkKey::new(4, 40, 40, 62)), "without rock everything is reachable");
+    }
 
     #[test]
     fn frustum_culls_behind_and_far_sideways() {

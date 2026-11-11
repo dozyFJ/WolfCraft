@@ -1561,7 +1561,7 @@ impl App {
                     viewmodel_fov_y: self.settings.vm_fov.to_radians(),
                 };
                 // Character model is visible in third-person views only.
-                let mut model_verts = wolfcraft_engine::renderer::model::build_mob_models(&s.mobs.mobs, cam.eye);
+                let mut model_verts = wolfcraft_engine::renderer::model::build_mob_models(&s.mobs.mobs, cam.eye, cam.forward, (self.settings.render_distance * 16) as f64 * 1.15);
                 let arrows: Vec<(glam::DVec3, glam::DVec3)> = s.arrows.list.iter().map(|a| (a.pos, a.dir)).collect();
                 model_verts.extend(wolfcraft_engine::renderer::model::build_arrow_models(&arrows, cam.eye));
                 if s.camera_mode != crate::session::CameraMode::First && !s.player.survival.dead {

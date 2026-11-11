@@ -230,10 +230,16 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
 }
 
 /// Builds all creatures relative to `camera` (original blocky designs, flat colours).
-pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3) -> Vec<ModelVertex> {
+/// `forward`: camera view direction; mobs behind the camera or beyond `max_dist` are skipped
+/// (their triangles would be thrown away by the GPU anyway).
+pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3, max_dist: f64) -> Vec<ModelVertex> {
     use crate::mobs::MobKind;
     let mut v = Vec::with_capacity(mobs.len() * 10 * 36);
     for m in mobs {
+        let to = m.body.pos - camera;
+        if to.length_squared() > max_dist * max_dist || (to.dot(forward) < -2.0 && to.length_squared() > 9.0) {
+            continue;
+        }
         let up = crate::physics::up_at(m.body.pos);
         let fwd = (m.heading - up * m.heading.dot(up)).normalize_or_zero();
         if fwd.length_squared() < 0.5 {

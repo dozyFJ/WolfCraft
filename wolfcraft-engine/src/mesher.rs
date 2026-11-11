@@ -27,12 +27,88 @@ pub struct Vertex {
     pub light: [f32; 2],
 }
 
-#[derive(Default)]
 pub struct MeshData {
     pub opaque: Vec<Vertex>,
     pub opaque_idx: Vec<u32>,
     pub water: Vec<Vertex>,
     pub water_idx: Vec<u32>,
+    /// Opaque indices before this one are blocks and shapes; the rest are small details
+    /// (grass, flowers) that far chunks skip.
+    pub detail_start: u32,
+    /// Which sides of the chunk see each other through non-opaque blocks: bit `a * 6 + b` for
+    /// sides `a`, `b` (see [`SIDE_DIRS`]). Lets the renderer skip chunks hidden behind walls.
+    pub vis: u64,
+}
+
+impl Default for MeshData {
+    fn default() -> Self {
+        // No mesh means air: every side sees every other.
+        Self { opaque: Vec::new(), opaque_idx: Vec::new(), water: Vec::new(), water_idx: Vec::new(), detail_start: 0, vis: VIS_ALL }
+    }
+}
+
+/// Chunk sides as (di, dj, dk) chunk steps: -i, +i, -j, +j, -k, +k. Side `s ^ 1` is opposite.
+pub const SIDE_DIRS: [(i32, i32, i32); 6] = [(-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)];
+/// Every side connected to every other (an empty or not yet known chunk).
+pub const VIS_ALL: u64 = (1 << 36) - 1;
+
+/// True when sides `a` and `b` of a chunk with visibility set `vis` see each other.
+#[inline]
+pub fn sides_connected(vis: u64, a: usize, b: usize) -> bool {
+    vis >> (a * 6 + b) & 1 == 1
+}
+
+/// Visibility set of a chunk: flood-fills its non-opaque cells and connects every pair of
+/// sides that one open region touches (as in Minecraft's cave culling).
+pub fn visibility(inp: &MeshInput) -> u64 {
+    const N: i32 = CHUNK_SIZE;
+    let idx = |x: i32, y: i32, z: i32| (x + y * N * N + z * N) as usize;
+    let mut seen = vec![false; (N * N * N) as usize];
+    let mut vis = 0u64;
+    let mut stack: Vec<(i32, i32, i32)> = Vec::new();
+    for y in 0..N {
+        for z in 0..N {
+            for x in 0..N {
+                if seen[idx(x, y, z)] || inp.get(x, y, z).is_opaque() {
+                    continue;
+                }
+                let mut sides = 0u8;
+                seen[idx(x, y, z)] = true;
+                stack.push((x, y, z));
+                while let Some((x, y, z)) = stack.pop() {
+                    // Padded axes are (x, y, z) = (j, k, i).
+                    if z == 0 { sides |= 1 }
+                    if z == N - 1 { sides |= 2 }
+                    if x == 0 { sides |= 4 }
+                    if x == N - 1 { sides |= 8 }
+                    if y == 0 { sides |= 16 }
+                    if y == N - 1 { sides |= 32 }
+                    for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
+                        let (nx, ny, nz) = (x + dx, y + dy, z + dz);
+                        if nx < 0 || ny < 0 || nz < 0 || nx >= N || ny >= N || nz >= N {
+                            continue;
+                        }
+                        let i = idx(nx, ny, nz);
+                        if !seen[i] && !inp.get(nx, ny, nz).is_opaque() {
+                            seen[i] = true;
+                            stack.push((nx, ny, nz));
+                        }
+                    }
+                }
+                for a in 0..6 {
+                    for b in 0..6 {
+                        if sides & (1 << a) != 0 && sides & (1 << b) != 0 {
+                            vis |= 1 << (a * 6 + b);
+                        }
+                    }
+                }
+                if vis == VIS_ALL {
+                    return vis;
+                }
+            }
+        }
+    }
+    vis
 }
 
 impl MeshData {
@@ -115,8 +191,10 @@ pub fn mesh_chunk(inp: &MeshInput) -> MeshData {
     for f in 0..6 {
         mesh_direction(inp, f, &mut out);
     }
-    mesh_cross(inp, &mut out);
     mesh_shapes(inp, &mut out);
+    out.detail_start = out.opaque_idx.len() as u32;
+    mesh_cross(inp, &mut out);
+    out.vis = visibility(inp);
     out
 }
 
@@ -395,13 +473,32 @@ mod tests {
     }
 
     #[test]
+    fn a_wall_hides_one_side_from_the_other() {
+        // Solid layer across the middle of the chunk (k = 8): below and above do not connect.
+        let mut cells = Vec::new();
+        for x in 0..16 {
+            for z in 0..16 {
+                cells.push((x, 8, z, Block::Stone));
+            }
+        }
+        let v = visibility(&input_with(&cells));
+        assert!(!sides_connected(v, 4, 5), "bottom and top are cut off");
+        assert!(sides_connected(v, 4, 0) && sides_connected(v, 5, 1), "the sides still see each other");
+        assert_eq!(visibility(&input_with(&[])), VIS_ALL, "air sees everywhere");
+        let m = mesh_chunk(&input_with(&[(3, 3, 3, Block::Stone), (5, 5, 5, Block::TallGrass)]));
+        assert!(m.detail_start > 0 && (m.detail_start as usize) < m.opaque_idx.len(), "grass comes after the blocks");
+    }
+
+    #[test]
     fn vertices_are_small_chunk_relative_and_follow_the_sphere() {
         let m = mesh_chunk(&input_with(&[(0, 0, 0, Block::Stone), (15, 15, 15, Block::Stone)]));
         for v in &m.opaque {
             assert!(v.pos.iter().all(|c| c.is_finite() && c.abs() < 40.0), "{:?}", v.pos);
         }
-        // Block faces are about one block wide: the bottom-left block spans ~1 unit.
-        let xs: Vec<f32> = m.opaque.iter().take(24).map(|v| v.pos[0]).collect();
+        // Block faces are about one block wide: a single block spans ~1 unit. (Faces are
+        // emitted per direction, so the first vertices of a two-block mesh mix both blocks.)
+        let one = mesh_chunk(&input_with(&[(0, 0, 0, Block::Stone)]));
+        let xs: Vec<f32> = one.opaque.iter().map(|v| v.pos[0]).collect();
         let span = xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min);
         assert!((0.5..1.5).contains(&span), "block span {span}");
     }

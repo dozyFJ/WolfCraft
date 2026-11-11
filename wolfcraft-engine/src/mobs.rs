@@ -92,6 +92,8 @@ const HOSTILE_CAP: usize = 8;
 pub const MAX_DEBRIS: usize = 400;
 const PASSIVE_CAP: usize = 6;
 const DESPAWN_DIST: f64 = 90.0;
+/// Farther than this from the player a calm mob sleeps: no AI, no physics, no animation.
+pub const SLEEP_DIST: f64 = 40.0;
 
 fn tangent(v: DVec3, up: DVec3) -> DVec3 {
     v - up * v.dot(up)
@@ -246,6 +248,11 @@ impl MobManager {
             m.attack_cd = (m.attack_cd - dt as f32).max(0.0);
             let mut wish = DVec3::ZERO;
             m.alert = (m.alert - dt as f32).max(0.0);
+            if dist > SLEEP_DIST && m.alert <= 0.0 && m.body.on_ground {
+                // Asleep: stands still until the player comes closer.
+                m.amount = 0.0;
+                continue;
+            }
             if m.kind.hostile() && targetable && dist < 16.0 {
                 // Sees the player: close enough, in front of the mob and nothing solid between.
                 let facing = flat.normalize_or_zero().dot(m.heading) > -0.2 || dist < 4.0;
