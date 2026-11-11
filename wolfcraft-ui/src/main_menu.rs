@@ -685,6 +685,8 @@ pub struct SettingsResult {
 
 const FPS_LIMITS: [u32; 7] = [0, 30, 60, 90, 120, 144, 240];
 
+const SETTINGS_TABS: [(u16, &str); 5] = [(icon::HEART, "Профиль"), (icon::SUN, "Графика"), (icon::HAMMER, "Рука"), (icon::EDIT, "Интерфейс"), (icon::CROSSHAIR, "Управление")];
+
 pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, version: &str) -> SettingsResult {
     let p = palette(ctx);
     let mut res = SettingsResult::default();
@@ -695,119 +697,129 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
         }
         ui.label(egui::RichText::new("Изменения применяются сразу и сохраняются автоматически").size(13.0).color(p.text_muted));
     });
+    // Selected section is kept in egui memory, so the screen needs no extra state.
+    let tab_id = egui::Id::new("settings-tab");
+    let mut tab: usize = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
+    egui::SidePanel::left("settings-side")
+        .resizable(false)
+        .exact_width(230.0)
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().id_salt("settings-side-scroll").auto_shrink([false, false]).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 10.0;
+                for (i, (ic, label)) in SETTINGS_TABS.iter().enumerate() {
+                    let kind = if tab == i { ButtonKind::Primary } else { ButtonKind::Secondary };
+                    if pill_button(ui, icons, Some(*ic), label, kind, ui.available_width(), true).clicked() {
+                        tab = i;
+                    }
+                }
+            });
+        });
+    ctx.data_mut(|d| d.insert_temp(tab_id, tab));
     egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.set_max_width(780.0);
-                ui.vertical(|ui| {
-                    card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        section_label(ui, "Профиль");
-                        ui.add_space(6.0);
-                        setting_row(ui, "Никнейм", Some("Показывается в чате"), |ui| {
-                            res.changed |= ui.add(egui::TextEdit::singleline(&mut s.nickname).desired_width(200.0).char_limit(16)).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Скин", Some("Видно в виде от третьего лица"), |ui| {
-                            for (i, name) in wolfcraft_engine::renderer::model::SKIN_NAMES.iter().enumerate() {
-                                if ui.selectable_label(s.skin as usize == i, *name).clicked() {
-                                    s.skin = i as u8;
-                                    res.changed = true;
-                                }
-                            }
-                        });
+        egui::ScrollArea::vertical().id_salt("settings-body").auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            section_label(ui, SETTINGS_TABS[tab].1);
+            ui.add_space(8.0);
+            match tab {
+                0 => {
+                    setting_row(ui, "Никнейм", Some("Показывается в чате"), |ui| {
+                        res.changed |= ui.add(egui::TextEdit::singleline(&mut s.nickname).desired_width(200.0).char_limit(16)).changed();
                     });
                     ui.add_space(10.0);
-                    card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        section_label(ui, "Графика");
-                        ui.add_space(6.0);
-                        setting_row(ui, "Дальность прорисовки", Some("В чанках по 16 блоков. Больше — красивее, но тяжелее"), |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.render_distance, 3..=16).suffix(" чанк.")).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Поле зрения", None, |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.fov, 50.0..=110.0).suffix("°").integer()).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Рука: поле зрения", Some("Отдельно от основной камеры"), |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.vm_fov, 40.0..=100.0).suffix("°").integer()).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Рука: масштаб", None, |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.vm_scale, 0.6..=1.6)).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Рука: сдвиг по горизонтали", None, |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.vm_x, -0.3..=0.3)).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Рука: сдвиг по вертикали", None, |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.vm_y, -0.3..=0.3)).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Частицы блоков", Some("0 — выключены"), |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.particles, 0.0..=2.0)).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Размах анимации руки", None, |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.hand_anim, 0.4..=1.0)).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Громкость", Some("Звуки блоков, шагов и урона"), |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.volume, 0.0..=1.0)).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Вертикальная синхронизация", Some("Убирает разрывы изображения"), |ui| {
-                            res.changed |= toggle_switch(ui, &mut s.vsync).changed();
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Ограничение FPS", Some("Работает без VSync"), |ui| {
-                            let labels: Vec<String> = FPS_LIMITS.iter().map(|f| if *f == 0 { "Без ограничения".to_string() } else { format!("{f} FPS") }).collect();
-                            let mut idx = FPS_LIMITS.iter().position(|f| *f == s.max_fps).unwrap_or(0);
-                            if dropdown(ui, icons, "fps-limit", &labels, &mut idx, 200.0) {
-                                s.max_fps = FPS_LIMITS[idx];
+                    ui.label(egui::RichText::new("Скин").font(FontId::proportional(15.0)).color(p.text));
+                    ui.label(egui::RichText::new("Видно в виде от третьего лица").font(FontId::proportional(12.5)).color(p.text_muted));
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        for (i, name) in wolfcraft_engine::renderer::model::SKIN_NAMES.iter().enumerate() {
+                            let kind = if s.skin as usize == i { ButtonKind::Primary } else { ButtonKind::Secondary };
+                            if pill_button(ui, icons, None, name, kind, 0.0, true).clicked() {
+                                s.skin = i as u8;
                                 res.changed = true;
                             }
-                        });
-                        ui.add_space(8.0);
+                        }
+                    });
+                }
+                1 => {
+                    setting_row(ui, "Дальность прорисовки", Some("В чанках по 16 блоков. Больше — красивее, но тяжелее"), |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.render_distance, 3..=16).suffix(" чанк.")).changed();
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Поле зрения", None, |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.fov, 50.0..=110.0).suffix("°").integer()).changed();
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Частицы блоков", Some("0 — выключены"), |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.particles, 0.0..=2.0)).changed();
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Вертикальная синхронизация", Some("Убирает разрывы изображения"), |ui| {
+                        res.changed |= toggle_switch(ui, &mut s.vsync).changed();
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Ограничение FPS", Some("Работает без VSync"), |ui| {
+                        let labels: Vec<String> = FPS_LIMITS.iter().map(|f| if *f == 0 { "Без ограничения".to_string() } else { format!("{f} FPS") }).collect();
+                        let mut idx = FPS_LIMITS.iter().position(|f| *f == s.max_fps).unwrap_or(0);
+                        if dropdown(ui, icons, "fps-limit", &labels, &mut idx, 200.0) {
+                            s.max_fps = FPS_LIMITS[idx];
+                            res.changed = true;
+                        }
+                    });
+                    ui.add_space(8.0);
+                    if !cfg!(target_os = "android") {
                         setting_row(ui, "Полноэкранный режим", None, |ui| {
                             res.changed |= toggle_switch(ui, &mut s.fullscreen).changed();
                         });
                         ui.add_space(8.0);
-                        setting_row(ui, "Показывать FPS", None, |ui| {
-                            res.changed |= toggle_switch(ui, &mut s.show_fps).changed();
-                        });
+                    }
+                    setting_row(ui, "Показывать FPS", None, |ui| {
+                        res.changed |= toggle_switch(ui, &mut s.show_fps).changed();
                     });
-                    ui.add_space(12.0);
-                    card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        section_label(ui, "Интерфейс");
-                        ui.add_space(6.0);
-                        setting_row(ui, "Тема", None, |ui| {
-                            res.changed |= segmented(ui, "theme", &[(ThemeMode::Dark, "Тёмная"), (ThemeMode::Light, "Светлая")], &mut s.theme);
-                        });
-                        ui.add_space(8.0);
-                        setting_row(ui, "Масштаб интерфейса", Some("Учитывает DPI Windows автоматически"), |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.ui_scale, 0.75..=1.75).fixed_decimals(2)).changed();
-                        });
+                }
+                2 => {
+                    setting_row(ui, "Поле зрения руки", Some("Отдельно от основной камеры"), |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.vm_fov, 40.0..=100.0).suffix("°").integer()).changed();
                     });
-                    ui.add_space(12.0);
-                    card(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        section_label(ui, "Управление");
-                        ui.add_space(6.0);
-                        setting_row(ui, "Чувствительность мыши", None, |ui| {
-                            res.changed |= ui.add(egui::Slider::new(&mut s.mouse_sensitivity, 0.2..=3.0).fixed_decimals(2)).changed();
-                        });
-                        setting_row(ui, "Инверсия мыши по вертикали", None, |ui| {
-                            res.changed |= toggle_switch(ui, &mut s.invert_y).changed();
-                        });
-                        ui.add_space(8.0);
-                        ui.label(egui::RichText::new("WASD — движение · Пробел — прыжок · Shift — бег · Ctrl — красться · E — инвентарь · Tab / F3 — отладка · F — вторая рука · ПКМ — щит · F11 — полный экран · 1–9 / колесо — слот · Пробел×2 — полёт (творческий)").size(13.0).color(p.text_muted));
+                    ui.add_space(8.0);
+                    setting_row(ui, "Масштаб", None, |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.vm_scale, 0.6..=1.6)).changed();
                     });
-                });
-            });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Сдвиг по горизонтали", None, |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.vm_x, -0.3..=0.3)).changed();
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Сдвиг по вертикали", None, |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.vm_y, -0.3..=0.3)).changed();
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Размах анимации", None, |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.hand_anim, 0.4..=1.0)).changed();
+                    });
+                }
+                3 => {
+                    setting_row(ui, "Тема", None, |ui| {
+                        res.changed |= segmented(ui, "theme", &[(ThemeMode::Dark, "Тёмная"), (ThemeMode::Light, "Светлая")], &mut s.theme);
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Масштаб интерфейса", None, |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.ui_scale, 0.75..=1.75).fixed_decimals(2)).changed();
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Громкость", Some("Звуки блоков, шагов и урона"), |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.volume, 0.0..=1.0)).changed();
+                    });
+                }
+                _ => {
+                    setting_row(ui, "Чувствительность", Some("Скорость поворота камеры"), |ui| {
+                        res.changed |= ui.add(egui::Slider::new(&mut s.mouse_sensitivity, 0.2..=3.0).fixed_decimals(2)).changed();
+                    });
+                    ui.add_space(8.0);
+                    setting_row(ui, "Инверсия по вертикали", None, |ui| {
+                        res.changed |= toggle_switch(ui, &mut s.invert_y).changed();
+                    });
+                }
+            }
         });
     });
     res
