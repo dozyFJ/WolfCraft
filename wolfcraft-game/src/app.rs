@@ -876,6 +876,23 @@ impl App {
         out
     }
 
+    /// Direction of the ray under the finger (touch targeting), from the camera, the field of
+    /// view and the screen size. Third person still aims from the eyes, along the same ray.
+    fn touch_aim(&self) -> Option<glam::DVec3> {
+        let (px, py) = self.touch.aim_point()?;
+        let s = self.session.as_ref()?;
+        let gfx = self.gfx.as_ref()?;
+        let (w, h) = gfx.gpu.size();
+        let (w, h) = (w.max(1) as f64, h.max(1) as f64);
+        let cam = s.camera();
+        let fwd = cam.forward.normalize();
+        let right = fwd.cross(cam.up).normalize();
+        let up = right.cross(fwd).normalize();
+        let tan = ((self.settings.fov + self.fov_fx) as f64).to_radians().mul_add(0.5, 0.0).tan();
+        let (nx, ny) = (px as f64 / w * 2.0 - 1.0, 1.0 - py as f64 / h * 2.0);
+        Some((fwd + right * (nx * tan * w / h) + up * (ny * tan)).normalize())
+    }
+
     fn take_input_frame(&mut self) -> InputFrame {
         let k = &self.input.keys;
         let axis = |pos: KeyCode, neg: KeyCode| (k.contains(&pos) as i32 - k.contains(&neg) as i32) as f32;
@@ -900,7 +917,10 @@ impl App {
             pick_pressed: std::mem::take(&mut self.input.middle_press),
             hotbar_delta: std::mem::take(&mut self.input.scroll) as i32,
             hotbar_set: self.input.hotbar_set.take(),
+            aim: self.touch_aim(),
+            touch: self.touch.seen,
         };
+        self.touch.tap_point = None;
         self.input.mouse_dx = 0.0;
         self.input.mouse_dy = 0.0;
         f

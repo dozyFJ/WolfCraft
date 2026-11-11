@@ -3,7 +3,7 @@
 
 use crate::gui_renderer::GuiIcons;
 use crate::theme_manager::{ANIM_TIME, palette};
-use egui::{Align2, Color32, Context, FontId, Frame, Id, Key, LayerId, Margin, Order, Pos2, Rect, Rounding, Stroke, Vec2};
+use egui::{Align2, Color32, Context, FontId, Id, Key, LayerId, Order, Pos2, Rect, Stroke, Vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ChatKind {
@@ -110,8 +110,8 @@ fn nick_color(name: &str) -> Color32 {
     COLS[h as usize % COLS.len()]
 }
 
-/// One chat line as rich text: "Ник: текст" with a coloured nick, system lines in grey-green,
-/// errors in red.
+/// One chat line as rich text, Bedrock style: "<Ник> текст" in white, system lines in light
+/// grey-yellow, errors in red. `nick_color` tints the name when `colored` is set.
 fn line_job(l: &ChatLine, size: f32, alpha: f32, wrap: f32) -> egui::text::LayoutJob {
     use egui::text::{LayoutJob, TextFormat};
     let mut job = LayoutJob::default();
@@ -121,112 +121,151 @@ fn line_job(l: &ChatLine, size: f32, alpha: f32, wrap: f32) -> egui::text::Layou
         ChatKind::Player => {
             // Stored as "<Ник> текст".
             if let Some((name, text)) = l.text.strip_prefix('<').and_then(|t| t.split_once("> ")) {
-                job.append(&format!("{name}:"), 0.0, fmt(nick_color(name)));
-                job.append(text, 6.0, fmt(Color32::from_rgb(240, 240, 240)));
+                job.append("<", 0.0, fmt(Color32::WHITE));
+                job.append(name, 0.0, fmt(nick_color(name).lerp_to_gamma(Color32::WHITE, 0.55)));
+                job.append(">", 0.0, fmt(Color32::WHITE));
+                job.append(text, 6.0, fmt(Color32::WHITE));
             } else {
-                job.append(&l.text, 0.0, fmt(Color32::from_rgb(240, 240, 240)));
+                job.append(&l.text, 0.0, fmt(Color32::WHITE));
             }
         }
-        ChatKind::System => job.append(&l.text, 0.0, fmt(Color32::from_rgb(200, 220, 205))),
-        ChatKind::Error => job.append(&l.text, 0.0, fmt(Color32::from_rgb(255, 120, 110))),
+        ChatKind::System => job.append(&l.text, 0.0, fmt(Color32::from_rgb(255, 255, 160))),
+        ChatKind::Error => job.append(&l.text, 0.0, fmt(Color32::from_rgb(255, 95, 85))),
     }
     job
 }
 
-/// Panel rectangle: top-left, under the pause/chat island.
-fn panel_rect(screen: Rect) -> Rect {
-    let w = (screen.width() * 0.40).clamp(290.0, 470.0);
-    let h = (screen.height() * 0.42).clamp(150.0, 300.0);
-    Rect::from_min_size(Pos2::new(screen.left() + 14.0, screen.top() + 92.0), Vec2::new(w, h))
+/// Width of the message column (left side of the screen).
+fn log_width(screen: Rect) -> f32 {
+    (screen.width() * 0.46).clamp(300.0, 560.0)
 }
 
-const PANEL: Color32 = Color32::from_rgba_premultiplied(22, 25, 30, 190);
+/// Background of one message line.
+const LINE_BG: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 128);
+const BAR_BG: Color32 = Color32::from_rgba_premultiplied(18, 18, 20, 235);
+const FIELD_BG: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 200);
+const BUTTON_BG: Color32 = Color32::from_rgb(72, 72, 76);
+const BUTTON_HI: Color32 = Color32::from_rgb(98, 98, 104);
+const TEXT: f32 = 16.0;
 
-/// Open chat: rounded translucent panel with the log and an input field with a send button.
+/// Paints messages bottom-up from `bottom` at `left`, each on its own dark strip, as many as
+/// fit above `top`. Returns nothing: purely visual.
+fn paint_lines(painter: &egui::Painter, lines: &[(&ChatLine, f32)], left: f32, top: f32, bottom: f32, width: f32) {
+    let mut y = bottom;
+    for (l, alpha) in lines.iter().rev() {
+        let g = painter.layout_job(line_job(l, TEXT, *alpha, width - 16.0));
+        let h = g.size().y + 6.0;
+        if y - h < top {
+            break;
+        }
+        y -= h;
+        let bg = Rect::from_min_size(Pos2::new(left, y), Vec2::new(width, h));
+        painter.rect_filled(bg, 0.0, LINE_BG.gamma_multiply(*alpha));
+        painter.galley(Pos2::new(left + 8.0, y + 3.0), g, Color32::WHITE);
+    }
+}
+
+/// A flat square button like the Bedrock UI: grey with a darker bottom edge.
+fn flat_button(ui: &mut egui::Ui, rect: Rect, id: &str) -> egui::Response {
+    let r = ui.interact(rect, Id::new(id), egui::Sense::click());
+    let fill = if r.is_pointer_button_down_on() || r.hovered() { BUTTON_HI } else { BUTTON_BG };
+    ui.painter().rect_filled(rect, 0.0, fill);
+    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 4.0), rect.max), 0.0, Color32::from_rgb(40, 40, 44));
+    ui.painter().rect_stroke(rect, 0.0, Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22)));
+    r
+}
+
+/// Open chat (Bedrock layout): the screen dims, a header bar with a back arrow and the title,
+/// the log on the left, and a full-width input bar at the bottom with a "/" (commands) button,
+/// the text field and a send button.
 fn open_chat(ctx: &Context, st: &mut ChatState, screen: Rect) -> Option<String> {
     let mut submitted = None;
     let mut close = false;
-    let r = panel_rect(screen);
-    egui::Area::new(Id::new("chat-open")).order(Order::Foreground).fixed_pos(r.min).show(ctx, |ui| {
-        Frame::none().fill(PANEL).rounding(Rounding::same(10.0)).inner_margin(Margin::same(10.0)).show(ui, |ui| {
-            ui.set_width(r.width() - 20.0);
-            // Log, newest at the bottom; a small close button in the corner.
-            let top = ui.cursor().min;
-            let log_h = r.height() - 20.0 - 52.0;
-            egui::ScrollArea::vertical().max_height(log_h).min_scrolled_height(log_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 3.0;
-                if st.lines.is_empty() {
-                    ui.label(egui::RichText::new("Напишите сообщение или /help — список команд").size(14.0).color(Color32::from_gray(170)));
-                }
-                for l in st.lines.iter().rev().take(100).collect::<Vec<_>>().into_iter().rev() {
-                    ui.label(line_job(l, 15.0, 1.0, r.width() - 40.0));
-                }
-            });
-            let x = Rect::from_min_size(Pos2::new(top.x + r.width() - 20.0 - 26.0, top.y - 4.0), Vec2::splat(26.0));
-            let xr = ui.interact(x, Id::new("chat-close"), egui::Sense::click());
-            let c = x.center();
-            let col = if xr.hovered() { Color32::WHITE } else { Color32::from_gray(170) };
-            for (a, b) in [(Vec2::new(-5.0, -5.0), Vec2::new(5.0, 5.0)), (Vec2::new(-5.0, 5.0), Vec2::new(5.0, -5.0))] {
-                ui.painter().line_segment([c + a, c + b], Stroke::new(2.0_f32, col));
+    egui::Area::new(Id::new("chat-open")).order(Order::Foreground).fixed_pos(screen.min).fade_in(false).show(ctx, |ui| {
+        let (all, _) = ui.allocate_exact_size(screen.size(), egui::Sense::click());
+        let painter = ui.painter().clone();
+        painter.rect_filled(all, 0.0, Color32::from_black_alpha(110));
+        // Header.
+        let head = Rect::from_min_size(all.min, Vec2::new(all.width(), 52.0));
+        painter.rect_filled(head, 0.0, BAR_BG);
+        painter.text(head.center(), Align2::CENTER_CENTER, "Чат", FontId::proportional(20.0), Color32::WHITE);
+        let back = Rect::from_min_size(head.min + Vec2::new(10.0, 6.0), Vec2::splat(40.0));
+        if flat_button(ui, back, "chat-back").clicked() {
+            close = true;
+        }
+        let c = back.center();
+        for (a, b) in [(Vec2::new(5.0, -9.0), Vec2::new(-5.0, 0.0)), (Vec2::new(-5.0, 0.0), Vec2::new(5.0, 9.0))] {
+            painter.line_segment([c + a, c + b], Stroke::new(3.0_f32, Color32::WHITE));
+        }
+        // Input bar.
+        let bar_h = 58.0;
+        let bar = Rect::from_min_max(Pos2::new(all.left(), all.bottom() - bar_h), all.max);
+        painter.rect_filled(bar, 0.0, BAR_BG);
+        let pad = 8.0;
+        let bh = bar_h - pad * 2.0;
+        let slash = Rect::from_min_size(Pos2::new(bar.left() + pad, bar.top() + pad), Vec2::splat(bh));
+        let send = Rect::from_min_size(Pos2::new(bar.right() - pad - 120.0, bar.top() + pad), Vec2::new(120.0, bh));
+        let field = Rect::from_min_max(Pos2::new(slash.right() + pad, bar.top() + pad), Pos2::new(send.left() - pad, bar.bottom() - pad));
+        if flat_button(ui, slash, "chat-slash").clicked() && !st.input.starts_with('/') {
+            st.input.insert(0, '/');
+        }
+        painter.text(slash.center() - Vec2::new(0.0, 2.0), Align2::CENTER_CENTER, "/", FontId::proportional(22.0), Color32::WHITE);
+        let can_send = !st.input.trim().is_empty();
+        let sr = flat_button(ui, send, "chat-send");
+        painter.text(send.center() - Vec2::new(0.0, 2.0), Align2::CENTER_CENTER, "Отправить", FontId::proportional(16.0), if can_send { Color32::WHITE } else { Color32::from_gray(150) });
+        painter.rect_filled(field, 0.0, FIELD_BG);
+        painter.rect_stroke(field, 0.0, Stroke::new(2.0_f32, Color32::from_rgb(110, 110, 116)));
+        let id = Id::new("chat-input-edit");
+        let inner = field.shrink2(Vec2::new(10.0, 0.0));
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let resp = child.add(
+            egui::TextEdit::singleline(&mut st.input)
+                .id(id)
+                .frame(false)
+                .desired_width(inner.width())
+                .font(FontId::proportional(TEXT))
+                .text_color(Color32::WHITE)
+                .hint_text(egui::RichText::new("Нажмите здесь, чтобы написать в чат").color(Color32::from_gray(150)))
+                .cursor_at_end(true),
+        );
+        if st.just_opened {
+            // Drop the character of the key that opened the chat (T) but keep the "/" prefill.
+            st.input = st.prefill.clone();
+            st.just_opened = false;
+            resp.request_focus();
+            if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+                let end = egui::text::CCursor::new(st.input.chars().count());
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+                state.store(ctx, id);
             }
-            if xr.clicked() {
+        }
+        if resp.has_focus() {
+            if ctx.input(|i| i.key_pressed(Key::ArrowUp)) {
+                st.browse_history(-1);
+            }
+            if ctx.input(|i| i.key_pressed(Key::ArrowDown)) {
+                st.browse_history(1);
+            }
+            if ctx.input(|i| i.key_pressed(Key::Escape)) {
                 close = true;
             }
-            ui.add_space(8.0);
-            // Input field with a send arrow.
-            let (row, _) = ui.allocate_exact_size(Vec2::new(r.width() - 20.0, 40.0), egui::Sense::hover());
-            ui.painter().rect_filled(row, Rounding::same(8.0), Color32::from_rgba_premultiplied(8, 10, 12, 200));
-            ui.painter().rect_stroke(row, Rounding::same(8.0), Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
-            let send = Rect::from_min_size(Pos2::new(row.right() - 40.0, row.top()), Vec2::new(40.0, 40.0));
-            let field = Rect::from_min_max(row.min + Vec2::new(12.0, 0.0), Pos2::new(send.left() - 4.0, row.bottom()));
-            let id = Id::new("chat-input-edit");
-            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)));
-            let resp = child.add(
-                egui::TextEdit::singleline(&mut st.input)
-                    .id(id)
-                    .frame(false)
-                    .desired_width(field.width())
-                    .font(FontId::proportional(15.0))
-                    .text_color(Color32::WHITE)
-                    .hint_text(egui::RichText::new("Нажмите сюда, чтобы написать").color(Color32::from_gray(140)))
-                    .cursor_at_end(true),
-            );
-            if st.just_opened {
-                // Drop the character of the key that opened the chat (T) but keep the "/" prefill.
-                st.input = st.prefill.clone();
-                st.just_opened = false;
-                resp.request_focus();
-                if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
-                    let end = egui::text::CCursor::new(st.input.chars().count());
-                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
-                    state.store(ctx, id);
-                }
+        }
+        // Log: all recent messages on the left, newest just above the input bar.
+        let w = log_width(screen);
+        if st.lines.is_empty() {
+            painter.text(Pos2::new(all.left() + 14.0, bar.top() - 14.0), Align2::LEFT_BOTTOM, "Сообщений пока нет. /help — список команд", FontId::proportional(TEXT), Color32::from_gray(190));
+        }
+        let lines: Vec<(&ChatLine, f32)> = st.lines.iter().rev().take(60).collect::<Vec<_>>().into_iter().rev().map(|l| (l, 1.0)).collect();
+        paint_lines(&painter, &lines, all.left() + 10.0, head.bottom() + 8.0, bar.top() - 8.0, w);
+        let enter = resp.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter));
+        if enter || (sr.clicked() && can_send) {
+            let line = st.input.trim().to_string();
+            if !line.is_empty() {
+                st.remember(&line);
+                submitted = Some(line);
             }
-            if resp.has_focus() {
-                if ctx.input(|i| i.key_pressed(Key::ArrowUp)) {
-                    st.browse_history(-1);
-                }
-                if ctx.input(|i| i.key_pressed(Key::ArrowDown)) {
-                    st.browse_history(1);
-                }
-                if ctx.input(|i| i.key_pressed(Key::Escape)) {
-                    close = true;
-                }
-            }
-            let sr = ui.interact(send, Id::new("chat-send"), egui::Sense::click());
-            let c = send.center();
-            let col = if st.input.trim().is_empty() { Color32::from_gray(120) } else { Color32::WHITE };
-            ui.painter().add(egui::Shape::convex_polygon(vec![c + Vec2::new(-8.0, -8.0), c + Vec2::new(9.0, 0.0), c + Vec2::new(-8.0, 8.0), c + Vec2::new(-4.0, 0.0)], col, Stroke::NONE));
-            let enter = resp.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter));
-            if enter || sr.clicked() {
-                let line = st.input.trim().to_string();
-                if !line.is_empty() {
-                    st.remember(&line);
-                    submitted = Some(line);
-                }
-                close = true;
-            }
-        });
+            close = true;
+        }
     });
     if close {
         st.close();
@@ -236,37 +275,34 @@ fn open_chat(ctx: &Context, st: &mut ChatState, screen: Rect) -> Option<String> 
 
 /// Draws the chat. Returns a submitted line (message or `/command`) when it was sent.
 pub fn draw(ctx: &Context, _icons: &GuiIcons, st: &mut ChatState, now: f64) -> Option<String> {
-    let _ = (palette(ctx), ANIM_TIME, Align2::LEFT_TOP);
+    let _ = (palette(ctx), ANIM_TIME);
     let screen = ctx.screen_rect();
     if st.open {
         return open_chat(ctx, st, screen);
     }
-    // Closed: the last few messages in the same place, fading out.
-    let r = panel_rect(screen);
+    // Closed: the last messages on the left (under the top buttons), each on its own dark
+    // strip, fading out after a few seconds.
     let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("chat-log")));
-    let mut blocks = Vec::new();
-    for l in st.lines.iter().rev().take(7) {
-        let age = now - l.born;
-        if age >= VISIBLE_SECS {
-            continue;
-        }
-        let alpha = ((VISIBLE_SECS - age) / 1.5).clamp(0.0, 1.0) as f32;
-        blocks.push((painter.layout_job(line_job(l, 15.0, alpha, r.width() - 24.0)), alpha));
-    }
-    if blocks.is_empty() {
+    let lines: Vec<(&ChatLine, f32)> = st
+        .lines
+        .iter()
+        .rev()
+        .take(6)
+        .filter(|l| now - l.born < VISIBLE_SECS)
+        .map(|l| (l, ((VISIBLE_SECS - (now - l.born)) / 1.5).clamp(0.0, 1.0) as f32))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if lines.is_empty() {
         return None;
     }
-    blocks.reverse();
-    let total: f32 = blocks.iter().map(|(g, _)| g.size().y + 3.0).sum::<f32>() + 16.0;
-    let max_alpha = blocks.iter().map(|(_, a)| *a).fold(0.0, f32::max);
-    let bg = Rect::from_min_size(r.min, Vec2::new(r.width(), total));
-    painter.rect_filled(bg, 10.0, Color32::from_rgba_premultiplied(22, 25, 30, (150.0 * max_alpha) as u8));
-    let mut y = bg.top() + 8.0;
-    for (g, _) in blocks {
-        let h = g.size().y;
-        painter.galley(Pos2::new(bg.left() + 12.0, y), g, Color32::WHITE);
-        y += h + 3.0;
-    }
+    let top = screen.top() + 92.0;
+    let bottom = top + (screen.height() * 0.42).clamp(150.0, 300.0);
+    // Bottom-up layout, but the block hugs the top: measure first, then paint from the top.
+    let w = log_width(screen);
+    let heights: f32 = lines.iter().map(|(l, a)| painter.layout_job(line_job(l, TEXT, *a, w - 16.0)).size().y + 6.0).sum();
+    paint_lines(&painter, &lines, screen.left() + 14.0, top, (top + heights).min(bottom), w);
     None
 }
 

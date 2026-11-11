@@ -210,9 +210,10 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     painter.text(Pos2::new(x, bar.center().y), Align2::LEFT_CENTER, &right, f, p.text_muted);
     }
 
-    // ---- Crosshair ----
+    // ---- Crosshair (none on phones: blocks are picked with the finger) ----
     let c = screen.center();
-    for (a, b) in [((-9.0, 0.0), (-3.0, 0.0)), ((3.0, 0.0), (9.0, 0.0)), ((0.0, -9.0), (0.0, -3.0)), ((0.0, 3.0), (0.0, 9.0))] {
+    for (a, b) in if s.compact { &[][..] } else { &[((-9.0, 0.0), (-3.0, 0.0)), ((3.0, 0.0), (9.0, 0.0)), ((0.0, -9.0), (0.0, -3.0)), ((0.0, 3.0), (0.0, 9.0))][..] } {
+        let (a, b): ((f32, f32), (f32, f32)) = (*a, *b);
         let (a, b) = (c + Vec2::new(a.0, a.1), c + Vec2::new(b.0, b.1));
         painter.line_segment([a, b], Stroke::new(4.0_f32, Color32::from_black_alpha(130)));
         painter.line_segment([a, b], Stroke::new(2.0_f32, Color32::from_white_alpha(235)));

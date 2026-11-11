@@ -8,7 +8,6 @@
 use crate::block::{Block, Fluid};
 use crate::cubesphere::Cell;
 use crate::interaction::WorldEdit;
-use crate::physics::Voxels;
 use glam::DVec3;
 use std::collections::HashSet;
 
@@ -194,6 +193,7 @@ impl Fluids {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::physics::Voxels;
     use crate::cubesphere::Grid;
     use std::collections::HashMap;
 

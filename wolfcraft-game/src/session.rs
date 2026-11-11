@@ -33,6 +33,10 @@ pub struct InputFrame {
     pub pick_pressed: bool,
     pub hotbar_delta: i32,
     pub hotbar_set: Option<usize>,
+    /// Touch targeting: the direction under the finger (`None`: nothing is targeted).
+    /// Without touch (`touch` false) the view centre is used.
+    pub aim: Option<DVec3>,
+    pub touch: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -136,6 +140,8 @@ pub struct GameSession {
     fx_was_in_water: bool,
     fx_prev_vup: f64,
     fx_was_ground: bool,
+    /// Direction of the current targeting ray (view centre, or under the finger on phones).
+    aim_dir: Option<DVec3>,
     /// Blows that landed on creatures this frame (the app plays the swing and the sound).
     pub mob_hits: u32,
     /// Radiation dose from uranium (seconds of exposure); every 3 s of it costs half a heart.
@@ -194,6 +200,7 @@ impl GameSession {
             fluids: Default::default(),
             radiation: 0.0,
             mob_hits: 0,
+            aim_dir: None,
             fx_amount: 1.0,
             fx_lights: Vec::new(),
             fx_scan: 0.0,
@@ -393,7 +400,9 @@ impl GameSession {
         // Targeting and interaction.
         let eye = self.player.eye_pos();
         let reach = Interaction::reach(&self.player);
-        self.hit = raycast(&self.chunks, eye, self.player.look_dir(), reach);
+        // Phones pick what is under the finger; with no finger on the world nothing is picked.
+        self.aim_dir = if input.touch { input.aim } else { Some(self.player.look_dir()) };
+        self.hit = self.aim_dir.and_then(|d| raycast(&self.chunks, eye, d, reach));
         if !self.player.survival.dead {
             let hit = self.hit;
             events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held, dt, self.cfg.seed));
@@ -930,7 +939,7 @@ impl GameSession {
             return false;
         }
         let eye = self.player.eye_pos();
-        let look = self.player.look_dir();
+        let Some(look) = self.aim_dir else { return false };
         let reach = Interaction::reach(&self.player) - 1.5;
         let Some((i, t)) = self.mobs.raycast(eye, look, reach) else { return false };
         // A block in front of the creature protects it.

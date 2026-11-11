@@ -78,6 +78,8 @@ pub struct TouchState {
     pub studio: bool,
     /// Screen areas covered by other panels (physical pixels): touches there are left to them.
     pub blocked: Vec<(f32, f32, f32, f32)>,
+    /// Where the last short tap landed (physical pixels), for the frame that handles it.
+    pub tap_point: Option<(f32, f32)>,
 }
 
 pub const STICK_R: f32 = 110.0;
@@ -233,6 +235,7 @@ impl TouchState {
                             if f.breaking {
                                 self.breaking = false;
                             } else if f.moved < 24.0 && f.t0.elapsed().as_millis() < 300 && t.phase == TouchPhase::Ended {
+                                self.tap_point = Some(f.last);
                                 out.push(TouchAction::Place);
                             }
                         }
@@ -262,6 +265,12 @@ impl TouchState {
         self.hotbar = read(&wolfcraft_ui::hud::HOTBAR_RECT);
         self.inv = read(&wolfcraft_ui::hud::INV_RECT);
         self.map = read(&wolfcraft_ui::hud::MINIMAP_RECT);
+    }
+
+    /// Tap targeting (as on Bedrock phones): the point under the finger that is on the world,
+    /// or where the last tap landed. `None` when no finger is on the world.
+    pub fn aim_point(&self) -> Option<(f32, f32)> {
+        self.fingers.iter().rev().find(|f| f.role == Role::Look).map(|f| f.last).or(self.tap_point)
     }
 
     /// Takes the accumulated look drag.
