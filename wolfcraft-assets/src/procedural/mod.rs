@@ -1,6 +1,7 @@
 //! Procedural painters for every sprite. All art is original and generated deterministically.
 
 mod blocks;
+pub mod hd;
 mod entities_paint;
 mod gui_paint;
 mod items_paint;

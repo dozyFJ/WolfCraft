@@ -197,10 +197,21 @@ impl AtlasManager {
             let mut sprites = procedural::sprites(kind);
             // Block, item and particle art gets the HD treatment; GUI icons and skins stay as they are.
             if matches!(kind, AtlasKind::Blocks | AtlasKind::Items | AtlasKind::Particles) {
-                for (_, img) in sprites.iter_mut() {
-                    crate::packs::vibrant(img);
-                    if scale > 1 {
-                        *img = crate::packs::upscale(img, scale);
+                for (name, img) in sprites.iter_mut() {
+                    // HD packs: blocks with an HD painter are drawn at full resolution
+                    // (real detail); the rest is a smooth upscale of the 16× art.
+                    let hd = if scale > 1 && kind == AtlasKind::Blocks { procedural::hd::block(name, 16 * scale) } else { None };
+                    match hd {
+                        Some(mut big) => {
+                            crate::packs::vibrant(&mut big);
+                            *img = big;
+                        }
+                        None => {
+                            crate::packs::vibrant(img);
+                            if scale > 1 {
+                                *img = crate::packs::upscale(img, scale);
+                            }
+                        }
                     }
                 }
             }
