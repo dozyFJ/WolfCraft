@@ -803,7 +803,7 @@ impl App {
         if self.screen == Screen::Create {
             let st = &self.create;
             let mut h = st.effective_seed();
-            h = splitmix(h ^ (st.size as u64 + 1) * 31 ^ (st.world_type as u64 + 1) * 131 ^ (st.continents as u64 + 1) * 1031);
+            h = splitmix(h ^ (st.size as u64 + 1) * 31 ^ (st.world_type as u64 + 1) * 131 ^ (st.continents as u64 + 1) * 1031 ^ (st.shape as u64 + 1) * 10007);
             if h != self.create_preview_key {
                 self.create_preview_key = h;
             }
@@ -812,6 +812,7 @@ impl App {
                 cfg.size = st.size;
                 cfg.world_type = st.world_type;
                 cfg.continents = st.continents;
+                cfg.shape = st.shape;
                 self.create_preview_inflight = Some(h);
                 self.create.preview_dirty = false;
                 let tx = self.create_tx.clone();
@@ -826,8 +827,8 @@ impl App {
     fn debug_info(&self, s: &GameSession, gfx: &Gfx) -> DebugInfo {
         let p = &s.player;
         let up = p.up();
-        let r = p.body.pos.length();
-        let surf = s.planet.surface_radius(up);
+        let r = wolfcraft_engine::cubesphere::radial(p.body.pos);
+        let surf = s.planet.surface_radius(p.body.pos.normalize_or_zero());
         let col = s.planet.column(up);
         let north = (DVec3::Y - up * DVec3::Y.dot(up)).normalize_or_zero();
         let east = north.cross(up);
@@ -1237,7 +1238,7 @@ impl App {
                 let day = s.daylight();
                 let d = up.dot(sun);
                 let twilight = (-(d / 0.18).powi(2)).exp() as f32;
-                let r = s.player.eye_pos().length();
+                let r = wolfcraft_engine::cubesphere::radial(s.player.eye_pos());
                 let altitude = ((r - s.planet.radius - 300.0) / (s.planet.radius * 0.4)).clamp(0.0, 1.0) as f32;
                 let underwater = s.eye_in_water();
                 let mut sky = sky_color(day, twilight, altitude);
@@ -1287,12 +1288,12 @@ impl App {
                     if pos.length_squared() < 1.0 {
                         continue;
                     }
-                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: pos.normalize(), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, skin: rp.skin };
+                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, skin: rp.skin };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));
                 gfx.world.set_model(&gfx.gpu.device, &gfx.gpu.queue, &model_verts);
-                let sky_verts = wolfcraft_engine::renderer::sky::build_sky(&wolfcraft_engine::renderer::sky::SkyParams { eye: cam.eye, sun_dir: sun.as_vec3(), day, planet_radius: s.planet.radius, sky, time: self.time.elapsed(), underwater });
+                let sky_verts = wolfcraft_engine::renderer::sky::build_sky(&wolfcraft_engine::renderer::sky::SkyParams { eye: cam.eye, sun_dir: sun.as_vec3(), day, planet_radius: s.planet.radius, sky, time: self.time.elapsed(), underwater, cube: s.planet.grid.cube });
                 gfx.world.set_sky(&gfx.gpu.device, &gfx.gpu.queue, &sky_verts);
                 // First-person arms: raise into a boxing guard and jab left/right while LMB is held.
                 let first_person = s.camera_mode == crate::session::CameraMode::First && !s.player.survival.dead;
@@ -1629,7 +1630,10 @@ fn key_code(ke: &KeyEvent) -> Option<KeyCode> {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.gfx.is_some() {
+        if let Some(gfx) = &mut self.gfx {
+            // Back from the background (phone): the old surface is gone, make a new one.
+            gfx.gpu.resume();
+            gfx.window.request_redraw();
             return;
         }
         match self.create_gfx(event_loop) {
@@ -1642,6 +1646,19 @@ impl ApplicationHandler for App {
                 platform::message_box("WolfCraft — ошибка запуска", &format!("{e}\n\nПодробности в logs/latest.log"));
                 event_loop.exit();
             }
+        }
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        // Phone: the app goes to the background. Save, and let go of the surface.
+        if let Some(s) = &mut self.session {
+            s.save();
+        }
+        if self.screen == Screen::Playing {
+            self.screen = Screen::Paused;
+        }
+        if let Some(gfx) = &mut self.gfx {
+            gfx.gpu.suspend();
         }
     }
 
@@ -1836,7 +1853,7 @@ fn build_minimap_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range
     let right = p.right();
     let feet = p.body.pos;
     let g = s.chunks.grid();
-    let pk = feet.length().floor() as i32;
+    let pk = g.radial(feet).floor() as i32;
     for zy in rows {
         for xx in 0..N {
             let off = right * (xx as f64 - N as f64 / 2.0 + 0.5) + fwd * (N as f64 / 2.0 - zy as f64 - 0.5);
@@ -1844,7 +1861,7 @@ fn build_minimap_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range
             let mut found = None;
             px[zy * N + xx] = egui::Color32::from_rgb(12, 14, 18);
             for k in (pk - 18..=pk + 8).rev() {
-                let c = g.world_to_cell(dir * (k as f64 + 0.5));
+                let c = g.world_to_cell(g.along(dir, k as f64 + 0.5));
                 match s.chunks.get_block(c) {
                     None => break,
                     Some(Block::Air) => continue,

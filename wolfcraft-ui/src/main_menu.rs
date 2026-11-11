@@ -491,6 +491,7 @@ pub struct CreateWorldState {
     pub mode: GameMode,
     pub size: PlanetSize,
     pub world_type: WorldType,
+    pub shape: PlanetShape,
     pub continents: ContinentCount,
     pub structures: bool,
     pub difficulty: Difficulty,
@@ -510,6 +511,7 @@ impl Default for CreateWorldState {
             mode: GameMode::Survival,
             size: PlanetSize::Medium,
             world_type: WorldType::Standard,
+            shape: PlanetShape::Sphere,
             continents: ContinentCount::Auto,
             structures: true,
             difficulty: Difficulty::Normal,
@@ -536,6 +538,7 @@ impl CreateWorldState {
         cfg.mode = self.mode;
         cfg.size = self.size;
         cfg.world_type = self.world_type;
+        cfg.shape = self.shape;
         cfg.continents = self.continents;
         cfg.structures = self.structures;
         cfg.difficulty = self.difficulty;
@@ -641,6 +644,13 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
                     segmented(ui, "cw-diff", &opts, &mut st.difficulty);
                 });
             } else {
+                stacked_row(ui, "Форма планеты", Some("Куб — плоские грани со скруглёнными рёбрами"), |ui| {
+                    let opts: Vec<(PlanetShape, &str)> = PlanetShape::ALL.iter().map(|d| (*d, d.label())).collect();
+                    if segmented(ui, "cw-shape", &opts, &mut st.shape) {
+                        st.preview_dirty = true;
+                    }
+                });
+                ui.add_space(10.0);
                 stacked_row(ui, "Размер планеты", Some(&format!("Окружность ≈ {} блоков", st.size.circumference())), |ui| {
                     let opts: Vec<(PlanetSize, &str)> = PlanetSize::ALL.iter().map(|d| (*d, d.label())).collect();
                     if segmented(ui, "cw-size", &opts, &mut st.size) {

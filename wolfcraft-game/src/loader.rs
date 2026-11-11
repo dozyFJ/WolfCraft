@@ -114,6 +114,8 @@ fn run(req: &LoadRequest, sh: &LoadShared) -> Result<Loaded, String> {
 
     // 2. Continents & oceans.
     sh.set(2, 0.10, "Размещение центров материков".into());
+    // Physics, camera and the sky ask for "up" without a grid at hand: tell them the shape.
+    wolfcraft_engine::cubesphere::set_cube_world(cfg.shape == wolfcraft_engine::config::PlanetShape::Cube);
     let planet = Arc::new(Planet::new(&cfg));
     let mut land = 0;
     let n = 3000;

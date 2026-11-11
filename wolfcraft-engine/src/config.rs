@@ -68,6 +68,25 @@ impl WorldType {
     }
 }
 
+/// Shape of the planet. Worlds saved before cube planets existed load as spheres.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanetShape {
+    #[default]
+    Sphere,
+    Cube,
+}
+
+impl PlanetShape {
+    pub const ALL: [PlanetShape; 2] = [PlanetShape::Cube, PlanetShape::Sphere];
+    pub fn label(self) -> &'static str {
+        match self {
+            PlanetShape::Sphere => "Шар",
+            PlanetShape::Cube => "Куб",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ContinentCount {
@@ -157,6 +176,9 @@ pub struct WorldConfig {
     /// Save format of this world folder (missing in worlds made before 0.2.0 = 1).
     #[serde(default = "first_save_format")]
     pub format_version: u32,
+    /// Planet shape (missing = sphere, the only shape of older worlds).
+    #[serde(default)]
+    pub shape: PlanetShape,
 }
 
 fn first_save_format() -> u32 {
@@ -182,6 +204,7 @@ impl WorldConfig {
             last_played: now,
             generator_version: GENERATOR_VERSION,
             format_version: wolfcraft_common::version::SAVE_FORMAT,
+            shape: PlanetShape::Sphere,
         }
     }
 

@@ -6,7 +6,7 @@
 
 use crate::biome::Biome;
 use crate::block::Block;
-use crate::config::{ContinentCount, WorldConfig, WorldType};
+use crate::config::{ContinentCount, PlanetShape, WorldConfig, WorldType};
 use crate::cubesphere::{Cell, Grid};
 use glam::DVec3;
 use noise::{Fbm, MultiFractal, NoiseFn, OpenSimplex, RidgedMulti};
@@ -161,7 +161,7 @@ impl Planet {
             structures: cfg.structures,
             hell: false,
             layers,
-            grid: Grid::new(radius),
+            grid: if cfg.shape == PlanetShape::Cube { Grid::new_cube(radius) } else { Grid::new(radius) },
             amp,
             max_surface: radius + 300.0 * amp + 40.0,
             continents: vec![],
@@ -682,7 +682,7 @@ impl Planet {
         for k in ((top - 12)..=(top + 24)).rev() {
             let b = self.block_at(Cell::new(base.f, base.i, base.j, k));
             if b.is_solid() && !is_leaf_or_log(b) {
-                return if free(k + 1) && free(k + 2) { Some(dir * (k as f64 + 1.3)) } else { None };
+                return if free(k + 1) && free(k + 2) { Some(self.grid.along(dir, k as f64 + 1.3)) } else { None };
             }
         }
         None

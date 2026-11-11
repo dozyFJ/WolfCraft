@@ -229,7 +229,7 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
         "pos" => {
             let p = s.player.body.pos;
             let up = s.player.up();
-            vec![sys(format!("XYZ {:.1} {:.1} {:.1} · широта {:.2}° долгота {:.2}° · высота {:.1}", p.x, p.y, p.z, up.y.asin().to_degrees(), up.z.atan2(up.x).to_degrees(), p.length() - s.planet.radius))]
+            vec![sys(format!("XYZ {:.1} {:.1} {:.1} · широта {:.2}° долгота {:.2}° · высота {:.1}", p.x, p.y, p.z, up.y.asin().to_degrees(), up.z.atan2(up.x).to_degrees(), s.planet.grid.radial(p) - s.planet.radius))]
         }
         "biome" => {
             let col = s.planet.column(s.player.up());

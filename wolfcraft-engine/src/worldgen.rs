@@ -61,7 +61,7 @@ pub fn generate_chunk(planet: &Planet, key: ChunkKey) -> Chunk {
 
     // Sky hint: is the chunk centre above the terrain?
     let centre = g.chunk_center(key);
-    let rc = centre.length();
+    let rc = g.radial(centre);
     chunk.sky_open = if planet.hell {
         false
     } else if rc < planet.radius - 80.0 {
@@ -69,7 +69,7 @@ pub fn generate_chunk(planet: &Planet, key: ChunkKey) -> Chunk {
     } else if rc > planet.max_surface {
         true
     } else {
-        rc >= planet.surface_radius(centre / rc) - 2.0
+        rc >= planet.surface_radius(centre.normalize()) - 2.0
     };
     chunk.shrink_if_empty();
     chunk

@@ -111,13 +111,14 @@ impl MobManager {
     fn ground(world: &impl Voxels, dir: DVec3, r: f64) -> Option<DVec3> {
         let mut rad = r + 14.0;
         while rad > r - 24.0 {
-            let p = dir * rad;
+            let g = world.grid();
+            let p = g.along(dir, rad);
             let b = world.block_at_world(p);
             if b.is_solid() {
-                let above = world.block_at_world(dir * (rad + 1.0));
-                let above2 = world.block_at_world(dir * (rad + 2.0));
+                let above = world.block_at_world(g.along(dir, rad + 1.0));
+                let above2 = world.block_at_world(g.along(dir, rad + 2.0));
                 if !above.is_solid() && !above.is_fluid() && !above2.is_solid() && !above2.is_fluid() {
-                    return Some(dir * (rad + 0.55));
+                    return Some(g.along(dir, rad + 0.55));
                 }
                 return None;
             }
@@ -211,7 +212,7 @@ impl MobManager {
         if want_hostile && hostile >= HOSTILE_CAP || !want_hostile && passive >= PASSIVE_CAP {
             return;
         }
-        let Some(pos) = Self::ground(world, dir, player.length()) else { return };
+        let Some(pos) = Self::ground(world, dir, world.grid().radial(player)) else { return };
         let pick = self.rand();
         let kind = if want_hostile {
             if pick < 0.6 { MobKind::Ghoul } else { MobKind::Crawler }

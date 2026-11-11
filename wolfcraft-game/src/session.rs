@@ -1,5 +1,6 @@
 //! A running game: planet + chunk streaming + player + interaction.
 
+use wolfcraft_engine::cubesphere::{along, radial};
 use crate::loader::Loaded;
 use glam::DVec3;
 use std::path::PathBuf;
@@ -119,6 +120,7 @@ pub struct GameSession {
 
 impl GameSession {
     pub fn new(l: Loaded) -> Self {
+        wolfcraft_engine::cubesphere::set_cube_world(l.cfg.shape == wolfcraft_engine::config::PlanetShape::Cube);
         let chunks = ChunkManager::new(l.planet.clone(), l.storage.clone());
         let seed = l.cfg.seed;
         let mut s = Self {
@@ -159,7 +161,7 @@ impl GameSession {
         s.load_block_commands();
         s.load_dimension();
         s.player.align_heading();
-        s.prev_radius = s.player.body.pos.length();
+        s.prev_radius = radial(s.player.body.pos);
         s
     }
 
@@ -270,7 +272,7 @@ impl GameSession {
         }
 
         // Smooth automatic steps: the camera lags behind sudden upward jumps of the feet.
-        let r = self.player.body.pos.length();
+        let r = radial(self.player.body.pos);
         let dr = r - self.prev_radius;
         self.prev_radius = r;
         if dr > 0.3 && dr < 2.0 && self.player.body.on_ground {
@@ -278,7 +280,7 @@ impl GameSession {
         }
         self.cam_lag = (self.cam_lag * (-16.0 * dt as f64).exp()).clamp(-1.6, 0.6);
         // Eye height: follow small changes smoothly, jump on big ones (teleport, falling).
-        let er = self.player.eye_pos().length();
+        let er = radial(self.player.eye_pos());
         if (er - self.eye_r).abs() > 0.35 || !self.player.body.on_ground {
             self.eye_r = er;
         } else {
@@ -475,7 +477,7 @@ impl GameSession {
                 self.planet.stand_position((d + a * ang.cos() * off + b * ang.sin() * off).normalize())
             })
         });
-        let pos = pos.unwrap_or_else(|| d * (self.planet.radius + 6.0));
+        let pos = pos.unwrap_or_else(|| self.planet.grid.along(d, self.planet.radius + 6.0));
         self.teleport(pos);
         self.player.body.flying = false;
         // Exit portal two blocks aside, placed once its chunk exists.
@@ -576,8 +578,8 @@ impl GameSession {
     pub fn camera(&self) -> Camera {
         let up = self.player.up();
         let raw_eye = self.player.eye_pos();
-        let eye_r = if self.eye_r > 0.0 { self.eye_r } else { raw_eye.length() };
-        let eye = raw_eye.normalize_or_zero() * eye_r + up * self.cam_lag;
+        let eye_r = if self.eye_r > 0.0 { self.eye_r } else { radial(raw_eye) };
+        let eye = along(raw_eye.normalize_or_zero(), eye_r) + up * self.cam_lag;
         let look = self.player.look_dir();
         match self.camera_mode {
             CameraMode::First => Camera { eye, forward: look, up },
@@ -622,7 +624,7 @@ impl GameSession {
         self.player.body.pos = pos;
         self.player.body.vel = DVec3::ZERO;
         self.player.align_heading();
-        self.prev_radius = pos.length();
+        self.prev_radius = radial(pos);
         self.cam_lag = 0.0;
     }
 
@@ -680,9 +682,67 @@ mod tests {
             if done == total && s.chunks.stats.gen_inflight == 0 {
                 break;
             }
-            assert!(t.elapsed().as_secs() < 90, "chunks never finished");
+            assert!(t.elapsed().as_secs() < 90, "chunks never finished: {done}/{total}, inflight {}, chunk {:?}", s.chunks.stats.gen_inflight, s.player_chunk());
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    /// Cube planet end to end: spawn, stand, then walk over a cube edge onto the next face.
+    /// Ignored by default because it switches the process-wide planet shape; run it alone:
+    /// `cargo test -p wolfcraft-game cube_planet -- --ignored`.
+    #[test]
+    #[ignore]
+    fn cube_planet_spawn_and_walk_over_an_edge() {
+        use wolfcraft_engine::config::{PlanetShape, WorldType};
+        let dir = std::env::temp_dir().join("wc_session_cube");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut cfg = WorldConfig::new("Куб", 5);
+        cfg.size = PlanetSize::Small;
+        cfg.world_type = WorldType::Flat;
+        cfg.structures = false;
+        cfg.shape = PlanetShape::Cube;
+        let sh = start(LoadRequest { cfg, worlds_dir: dir, is_new: true });
+        while !sh.is_done() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let mut s = GameSession::new(sh.take_result().unwrap().unwrap());
+        assert!(s.planet.grid.cube);
+        settle(&mut s);
+        for _ in 0..180 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        }
+        assert!(s.player.body.on_ground, "stands on a cube face");
+        // Go close to the edge between +X and +Y and walk toward +Y.
+        let d = DVec3::new(1.0, 0.93, 0.05).normalize();
+        let start_pos = s.planet.stand_position(d).expect("ground near the edge");
+        s.teleport(start_pos);
+        settle(&mut s);
+        let f0 = s.planet.grid.world_to_cell(s.player.body.pos).f;
+        let walk = InputFrame { forward: 1.0, ..Default::default() };
+        let mut crossed = false;
+        for step in 0..60 * 20 {
+            let up = s.player.up();
+            s.player.heading = (DVec3::Y - up * DVec3::Y.dot(up)).normalize_or_zero();
+            s.update(&walk, 1.0 / 60.0, 4, step % 30 == 0);
+            if step % 60 == 0 {
+                settle(&mut s);
+            }
+            let c = s.planet.grid.world_to_cell(s.player.body.pos);
+            assert!(s.planet.grid.radial(s.player.body.pos) > s.planet.radius - 20.0, "fell into the planet at step {step}");
+            if c.f != f0 {
+                crossed = true;
+            }
+            if crossed && s.player.up().y > 0.95 {
+                break;
+            }
+        }
+        assert!(crossed, "never reached the next face");
+        for _ in 0..60 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        }
+        assert!(s.player.body.on_ground, "stands on the new face");
+        assert!(s.player.up().y > 0.95, "up is now the +Y face normal: {:?}", s.player.up());
+        wolfcraft_engine::cubesphere::set_cube_world(false);
     }
 
     #[test]

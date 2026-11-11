@@ -236,9 +236,9 @@ impl Player {
         };
         let speed: f64 = if self.blocking && !self.body.flying { f64::min(speed, 1.9) } else { speed };
         // Creative flight speeds up with height: in space you cover distances quickly.
-        let speed = if self.body.flying { speed * space_boost(world.grid(), self.body.pos.length()) } else { speed };
+        let speed = if self.body.flying { speed * space_boost(world.grid(), world.grid().radial(self.body.pos)) } else { speed };
         let input = MoveInput { wish, speed, jump: c.jump, up: c.jump, down: c.sneak };
-        let altitude_before = self.body.pos.length();
+        let altitude_before = crate::cubesphere::radial(self.body.pos);
         let was_grounded = self.body.on_ground;
         let impact = physics::step(world, &mut self.body, &input, dt);
         let _ = altitude_before;
@@ -250,7 +250,7 @@ impl Player {
         self.animate(dt as f32);
 
         // Fall tracking.
-        let alt = self.body.pos.length();
+        let alt = crate::cubesphere::radial(self.body.pos);
         if self.body.on_ground || self.body.in_water || self.body.flying {
             self.fall_peak = alt;
         } else {
@@ -424,7 +424,7 @@ impl Player {
         p.survival.xp = xp;
         p.inventory = inventory;
         p.align_heading();
-        p.fall_peak = pos.length();
+        p.fall_peak = crate::cubesphere::radial(pos);
         Some(p)
     }
 }
@@ -467,7 +467,7 @@ pub fn sun_direction(world_time: f64) -> DVec3 {
 /// Flight speed multiplier at distance `r` from the planet centre: 1 near the ground,
 /// growing with altitude up to 60× far out in space.
 pub fn space_boost(grid: &crate::cubesphere::Grid, r: f64) -> f64 {
-    let surface = grid.n as f64 * std::f64::consts::FRAC_2_PI;
+    let surface = if grid.cube { grid.n as f64 / 2.0 } else { grid.n as f64 * std::f64::consts::FRAC_2_PI };
     let h = r - surface - 64.0;
     if h <= 0.0 { 1.0 } else { (1.0 + h / 25.0).min(60.0) }
 }

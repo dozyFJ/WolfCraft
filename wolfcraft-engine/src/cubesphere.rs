@@ -77,18 +77,99 @@ pub struct Obb {
 pub struct Grid {
     /// Cells along one face edge (multiple of 16).
     pub n: i32,
+    /// Cube planet: flat faces with rounded edges (a superellipsoid) instead of a sphere.
+    pub cube: bool,
+}
+
+/// Exponent of the rounded cube |x|^P + |y|^P + |z|^P = r^P: high = sharper edges.
+const CUBE_P: f64 = 8.0;
+
+static CUBE_WORLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Shape of the world being played (set when a world loads). Used by [`radial`] and [`up`],
+/// which are called all over the game without a grid at hand.
+pub fn set_cube_world(cube: bool) {
+    CUBE_WORLD.store(cube, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn cube_world() -> bool {
+    CUBE_WORLD.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Rounded-cube "radius" of `p` (the P-norm).
+pub fn cube_radial(p: DVec3) -> f64 {
+    let a = p.abs();
+    let m = a.max_element();
+    if m <= 0.0 {
+        return 0.0;
+    }
+    let q = a / m;
+    m * (q.x.powf(CUBE_P) + q.y.powf(CUBE_P) + q.z.powf(CUBE_P)).powf(1.0 / CUBE_P)
+}
+
+/// Surface normal of the rounded cube through `p`.
+pub fn cube_up(p: DVec3) -> DVec3 {
+    let m = p.abs().max_element();
+    if m <= 0.0 {
+        return DVec3::Y;
+    }
+    let q = p / m;
+    let g = DVec3::new(q.x.signum() * q.x.abs().powf(CUBE_P - 1.0), q.y.signum() * q.y.abs().powf(CUBE_P - 1.0), q.z.signum() * q.z.abs().powf(CUBE_P - 1.0));
+    g.normalize()
+}
+
+/// Height measure of `p` in the current world: distance from the centre on a sphere,
+/// the rounded-cube radius on a cube planet. Terrain layers (`k`) use the same measure.
+pub fn radial(p: DVec3) -> f64 {
+    if cube_world() { cube_radial(p) } else { p.length() }
+}
+
+/// Local "up" at `p` in the current world.
+pub fn up(p: DVec3) -> DVec3 {
+    if cube_world() {
+        cube_up(p)
+    } else {
+        let l = p.length();
+        if l < 1e-9 { DVec3::Y } else { p / l }
+    }
+}
+
+/// Point at height `r` in direction `dir` (unit) in the current world.
+pub fn along(dir: DVec3, r: f64) -> DVec3 {
+    if cube_world() { dir * (r / cube_radial(dir)) } else { dir * r }
 }
 
 impl Grid {
     /// Grid sized so that one cell is about one block wide at sea level `radius`.
     pub fn new(radius: f64) -> Self {
         let n = ((radius * FRAC_PI_2 / CHUNK as f64).ceil() as i32).max(1) * CHUNK;
-        Self { n }
+        Self { n, cube: false }
+    }
+
+    /// Grid of a cube planet whose faces sit `radius` blocks from the centre (edge = 2·radius).
+    pub fn new_cube(radius: f64) -> Self {
+        let n = ((radius * 2.0 / CHUNK as f64).ceil() as i32).max(1) * CHUNK;
+        Self { n, cube: true }
     }
 
     pub fn with_cells(n: i32) -> Self {
         assert!(n % CHUNK == 0 && n > 0);
-        Self { n }
+        Self { n, cube: false }
+    }
+
+    /// Height measure of `p` for this grid's shape.
+    pub fn radial(&self, p: DVec3) -> f64 {
+        if self.cube { cube_radial(p) } else { p.length() }
+    }
+
+    /// Local up at `p` for this grid's shape.
+    pub fn up(&self, p: DVec3) -> DVec3 {
+        if self.cube { cube_up(p) } else { p.normalize_or(DVec3::Y) }
+    }
+
+    /// Point at height `r` along the unit direction `dir`.
+    pub fn along(&self, dir: DVec3, r: f64) -> DVec3 {
+        if self.cube { dir * (r / cube_radial(dir)) } else { dir * r }
     }
 
     pub fn chunks_per_edge(&self) -> i32 {
@@ -97,7 +178,12 @@ impl Grid {
 
     #[inline]
     fn tan_at(&self, c: f64) -> f64 {
-        (c / self.n as f64 * FRAC_PI_2 - FRAC_PI_4).tan()
+        if self.cube {
+            // Flat faces: evenly spaced cells.
+            c / self.n as f64 * 2.0 - 1.0
+        } else {
+            (c / self.n as f64 * FRAC_PI_2 - FRAC_PI_4).tan()
+        }
     }
 
     /// Unit direction at continuous tangent coordinates (`ci`, `cj` in cell units).
@@ -112,11 +198,11 @@ impl Grid {
 
     /// World position of a point given in continuous grid coordinates.
     pub fn point(&self, f: u8, ci: f64, cj: f64, ck: f64) -> DVec3 {
-        self.dir_at(f, ci, cj) * ck
+        self.along(self.dir_at(f, ci, cj), ck)
     }
 
     pub fn cell_center(&self, c: Cell) -> DVec3 {
-        self.cell_dir(c.f, c.i, c.j) * (c.k as f64 + 0.5)
+        self.along(self.cell_dir(c.f, c.i, c.j), c.k as f64 + 0.5)
     }
 
     /// Cell containing the world point `p`.
@@ -134,8 +220,12 @@ impl Grid {
         let d = p.dot(NORMALS[f].as_dvec3()).max(1e-12);
         let x = p.dot(TAN_A[f].as_dvec3()) / d;
         let y = p.dot(TAN_B[f].as_dvec3()) / d;
-        let to_idx = |t: f64| (((t.atan() + FRAC_PI_4) / FRAC_PI_2 * self.n as f64).floor() as i32).clamp(0, self.n - 1);
-        Cell { f: f as u8, i: to_idx(x), j: to_idx(y), k: p.length().floor() as i32 }
+        let cube = self.cube;
+        let to_idx = |t: f64| {
+            let u = if cube { (t + 1.0) / 2.0 } else { (t.atan() + FRAC_PI_4) / FRAC_PI_2 };
+            ((u * self.n as f64).floor() as i32).clamp(0, self.n - 1)
+        };
+        Cell { f: f as u8, i: to_idx(x), j: to_idx(y), k: self.radial(p).floor() as i32 }
     }
 
     /// Maps a cell whose `i` or `j` may lie outside `0..n` by crossing one cube edge.
@@ -238,7 +328,7 @@ impl Grid {
         let r = c.k as f64 + 0.5;
         let p = |a: f64, b: f64| self.point(c.f, c.i as f64 + a, c.j as f64 + b, r);
         let centre = p(0.5, 0.5);
-        let n = centre.normalize();
+        let n = self.up(centre);
         let ei = (p(1.0, 0.0) - p(0.0, 0.0) + p(1.0, 1.0) - p(0.0, 1.0)) * 0.5;
         let ej = (p(0.0, 1.0) - p(0.0, 0.0) + p(1.0, 1.0) - p(1.0, 0.0)) * 0.5;
         let ui = (ei - n * ei.dot(n)).normalize();
@@ -409,5 +499,51 @@ mod tests {
             assert!((g.cell_center(cell) - c).length() <= r, "cell outside bounds");
         }
         assert!(r < 40.0, "bounding radius {r}");
+    }
+
+    fn cube() -> Grid {
+        Grid { n: 64, cube: true }
+    }
+
+    #[test]
+    fn cube_world_to_cell_roundtrips() {
+        let g = cube();
+        for f in 0..6u8 {
+            for i in (0..g.n).step_by(3) {
+                for j in (0..g.n).step_by(5) {
+                    for k in [20, 32, 60] {
+                        let c = Cell::new(f, i, j, k);
+                        assert_eq!(g.world_to_cell(g.cell_center(c)), c);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cube_faces_are_flat_and_edges_connect() {
+        let g = cube();
+        // Middle of a face: up is the face normal and layers are flat planes.
+        let mid = g.cell_center(Cell::new(0, 32, 32, 32));
+        assert!((g.up(mid) - DVec3::X).length() < 1e-3);
+        let off = g.cell_center(Cell::new(0, 20, 40, 32));
+        assert!((mid.x - off.x).abs() < 0.05, "face is flat: {} vs {}", mid.x, off.x);
+        // Neighbours across every edge are about one block away and lead back.
+        let mut checked = 0;
+        for f in 0..6u8 {
+            for t in (0..g.n).step_by(3) {
+                for (i, j, axis, sign) in [(0, t, 0, -1), (g.n - 1, t, 0, 1), (t, 0, 1, -1), (t, g.n - 1, 1, 1)] {
+                    let c = Cell::new(f, i, j, 32);
+                    let nb = g.neighbor(c, axis, sign).expect("edge crossing");
+                    assert_ne!(nb.f, f);
+                    let gap = (g.cell_center(c) - g.cell_center(nb)).length();
+                    assert!((0.4..1.6).contains(&gap), "face {f} cell {c:?}: neighbour {nb:?} is {gap} away");
+                    let back = (0..2).filter_map(|ax| (0..2).find_map(|s| g.neighbor(nb, ax, if s == 0 { -1 } else { 1 }).filter(|b| *b == c))).next();
+                    assert_eq!(back, Some(c));
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 300);
     }
 }

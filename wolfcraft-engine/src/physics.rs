@@ -48,8 +48,7 @@ impl Body {
 
 #[inline]
 pub fn up_at(p: DVec3) -> DVec3 {
-    let l = p.length();
-    if l < 1e-9 { DVec3::Y } else { p / l }
+    crate::cubesphere::up(p)
 }
 
 /// Per-frame movement intent in the local tangent frame.

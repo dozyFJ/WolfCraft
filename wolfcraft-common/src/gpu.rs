@@ -5,7 +5,9 @@ use winit::window::Window;
 
 pub struct GpuContext {
     pub window: Arc<Window>,
-    pub surface: wgpu::Surface<'static>,
+    /// `None` while the app is in the background (Android takes the window away).
+    pub surface: Option<wgpu::Surface<'static>>,
+    instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -64,7 +66,7 @@ impl GpuContext {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
-        Ok(Self { window, surface, adapter, device, queue, config, adapter_info, timestamps_supported, vsync })
+        Ok(Self { window, surface: Some(surface), instance, adapter, device, queue, config, adapter_info, timestamps_supported, vsync })
     }
 
     fn pick_present_mode(caps: &wgpu::SurfaceCapabilities, vsync: bool) -> wgpu::PresentMode {
@@ -85,7 +87,31 @@ impl GpuContext {
         }
         self.config.width = width;
         self.config.height = height;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(s) = &self.surface {
+            s.configure(&self.device, &self.config);
+        }
+    }
+
+    /// App went to the background: the window's native surface is about to go away.
+    pub fn suspend(&mut self) {
+        self.surface = None;
+    }
+
+    /// App is back: make a new surface for the (new) native window and configure it.
+    pub fn resume(&mut self) {
+        match self.instance.create_surface(self.window.clone()) {
+            Ok(s) => {
+                let size = self.window.inner_size();
+                if size.width > 0 && size.height > 0 {
+                    self.config.width = size.width;
+                    self.config.height = size.height;
+                }
+                s.configure(&self.device, &self.config);
+                self.surface = Some(s);
+                log::info!("surface recreated {}x{}", self.config.width, self.config.height);
+            }
+            Err(e) => log::error!("surface recreate failed: {e}"),
+        }
     }
 
     pub fn set_vsync(&mut self, vsync: bool) {
@@ -94,9 +120,10 @@ impl GpuContext {
         }
         let vsync = vsync || cfg!(target_os = "android");
         self.vsync = vsync;
-        let caps = self.surface.get_capabilities(&self.adapter);
+        let Some(surface) = &self.surface else { return };
+        let caps = surface.get_capabilities(&self.adapter);
         self.config.present_mode = Self::pick_present_mode(&caps, vsync);
-        self.surface.configure(&self.device, &self.config);
+        surface.configure(&self.device, &self.config);
     }
 
     pub fn vsync(&self) -> bool {
@@ -105,7 +132,8 @@ impl GpuContext {
 
     /// Acquires the next swapchain image, reconfiguring on Lost/Outdated. `None` = skip this frame.
     pub fn acquire(&mut self) -> Option<wgpu::SurfaceTexture> {
-        match self.surface.get_current_texture() {
+        let surface = self.surface.as_ref()?;
+        match surface.get_current_texture() {
             Ok(t) => {
                 if t.suboptimal {
                     log::warn!("surface suboptimal");
@@ -114,8 +142,8 @@ impl GpuContext {
             }
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 log::warn!("surface lost/outdated: reconfiguring");
-                self.surface.configure(&self.device, &self.config);
-                self.surface.get_current_texture().ok()
+                surface.configure(&self.device, &self.config);
+                surface.get_current_texture().ok()
             }
             Err(wgpu::SurfaceError::Timeout) => {
                 log::warn!("surface timeout");

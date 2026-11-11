@@ -16,6 +16,8 @@ pub struct SkyParams {
     pub sky: [f32; 3],
     pub time: f32,
     pub underwater: bool,
+    /// Our planet is a (rounded) cube: draw it that way from space.
+    pub cube: bool,
 }
 
 const SKY_TEX: f32 = 3.0;
@@ -65,6 +67,35 @@ impl Out {
     }
 
     /// Ellipse ring around a disc (planet rings), tilted by squashing the second axis.
+    /// A small lit cube in the sky (the neighbouring worlds are cubes too).
+    fn cube(&mut self, dir: Vec3, dist: f32, ang: f32, col: [f32; 3], sky: [f32; 3], vis: f32, sun: Vec3, spin: f32) {
+        let (t1, t2) = basis(dir);
+        // Tilt the cube so three faces show.
+        let (s, c) = spin.sin_cos();
+        let a = (t1 * c + t2 * s + dir * 0.55).normalize();
+        let b = (dir.cross(a) + t2 * 0.3).normalize();
+        let b = (b - a * b.dot(a)).normalize();
+        let n = a.cross(b);
+        let h = dist * ang;
+        let centre = dir * dist;
+        let axes = [a, b, n];
+        for (i, ax) in axes.iter().enumerate() {
+            for sign in [-1.0f32, 1.0] {
+                let fnorm = *ax * sign;
+                // Only faces turned toward the camera (which sits at the origin).
+                if fnorm.dot(-centre) <= 0.0 {
+                    continue;
+                }
+                let (u, v) = (axes[(i + 1) % 3] * h, axes[(i + 2) % 3] * h);
+                let fc = centre + fnorm * h;
+                let lit = 0.35 + 0.65 * fnorm.dot(sun).max(0.0);
+                let shade = mix(sky, [col[0] * lit, col[1] * lit, col[2] * lit], vis);
+                self.tri(fc - u - v, fc + u - v, fc + u + v, shade);
+                self.tri(fc - u - v, fc + u + v, fc - u + v, shade);
+            }
+        }
+    }
+
     fn ring(&mut self, dir: Vec3, dist: f32, inner: f32, outer: f32, squash: f32, tilt: f32, col: [f32; 3]) {
         let (t1, t2) = basis(dir);
         let (s, c) = tilt.sin_cos();
@@ -154,15 +185,11 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
             if hidden(d) {
                 continue;
             }
-            let shade = mix(p.sky, *col, vis);
             if *ring {
                 o.ring(d, 32.5, ang * 1.35, ang * 2.1, 0.28, 0.45, mix(p.sky, [0.80, 0.70, 0.55], vis));
             }
-            o.disc(d, 32.0 - n as f32 * 0.01, *ang, shade, 20);
-            // Terminator shadow on the side away from the sun.
-            let (t1, _) = basis(d);
-            let side = if t1.dot(p.sun_dir) > 0.0 { -t1 } else { t1 };
-            o.disc((d + side * ang * 0.45).normalize(), 31.9, ang * 0.62, mix(p.sky, [col[0] * 0.55, col[1] * 0.55, col[2] * 0.55], vis), 14);
+            // Neighbouring worlds are slowly turning cubes.
+            o.cube(d, 32.0 - n as f32 * 0.01, ang * 0.8, *col, p.sky, vis, p.sun_dir.normalize_or_zero(), p.time * 0.02 + n as f32 * 1.7);
         }
         // Comet: a bright head with a fading tail drifting across the sky.
         let phi = p.time * 0.012;
@@ -224,12 +251,14 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
         halo(1.07, mix(p.sky, [0.10, 0.20, 0.45], space.max(0.6)), &mut o);
         halo(1.035, mix(p.sky, [0.30, 0.55, 0.95], space.max(0.6)), &mut o);
         // Globe: latitude/longitude patches coloured by a cheap continent noise.
-        let (lat_n, lon_n) = (14u32, 28u32);
+        let (lat_n, lon_n) = if p.cube { (28u32, 56u32) } else { (14u32, 28u32) };
         let sun_n = p.sun_dir.normalize_or_zero();
+        let cube = p.cube;
         let vert = |la: u32, lo: u32| -> Vec3 {
             let th = std::f32::consts::PI * la as f32 / lat_n as f32;
             let ph = std::f32::consts::TAU * lo as f32 / lon_n as f32;
-            Vec3::new(th.sin() * ph.cos(), th.cos(), th.sin() * ph.sin())
+            let v = Vec3::new(th.sin() * ph.cos(), th.cos(), th.sin() * ph.sin());
+            if cube { v / crate::cubesphere::cube_radial(v.as_dvec3()) as f32 } else { v }
         };
         let land = |n: Vec3| -> [f32; 3] {
             let f = (n.x * 3.1 + 1.3).sin() * (n.y * 2.7).cos() + (n.z * 4.3 - n.x * 1.7).sin() * 0.6 + (n.y * 7.0 + n.z * 5.0).sin() * 0.25;
@@ -265,7 +294,7 @@ mod tests {
     use super::*;
 
     fn params(eye: DVec3, day: f32) -> SkyParams {
-        SkyParams { eye, sun_dir: Vec3::new(0.0, 1.0, 0.0), day, planet_radius: 1000.0, sky: [0.1, 0.2, 0.4], time: 1.0, underwater: false }
+        SkyParams { eye, sun_dir: Vec3::new(0.0, 1.0, 0.0), day, planet_radius: 1000.0, sky: [0.1, 0.2, 0.4], time: 1.0, underwater: false, cube: false }
     }
 
     #[test]
