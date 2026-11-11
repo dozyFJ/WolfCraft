@@ -45,7 +45,7 @@ jobs:
           unset ANDROID_SDK_ROOT
           echo "SDK=$ANDROID_HOME NDK=$ANDROID_NDK_ROOT"
           ls "$ANDROID_NDK_ROOT/source.properties"
-          cargo apk build -p wolfcraft-game --release --target aarch64-linux-android
+          cargo apk build -p wolfcraft-game --lib --release --target aarch64-linux-android
           find target -name "*.apk" -path "*release*" | head
           cp "$(find target -name '*.apk' -path '*release*' | head -1)" WolfCraft.apk
           ls -lh WolfCraft.apk
