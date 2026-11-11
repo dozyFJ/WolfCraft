@@ -176,6 +176,12 @@ pub struct WorldSelectState {
     /// Why the last connection attempt failed.
     pub net_error: Option<String>,
     pub search: String,
+    /// Search field shown in the header (opened with the magnifier button).
+    pub search_open: bool,
+    /// Focus the search field on the next frame (just opened).
+    pub search_focus: bool,
+    /// Sort menu under the header sort button.
+    pub sort_open: bool,
     pub sort: usize,
     pub selected: Option<String>,
     pub rename: Option<(String, String)>,
@@ -229,10 +235,109 @@ pub fn sorted_filtered<'a>(worlds: &'a [WorldEntry], search: &str, sort: usize) 
     v
 }
 
+const SORT_NAMES: [&str; 3] = ["Недавние", "По названию", "По созданию"];
+
+/// Square outlined icon button for the header; `active` paints it in the accent colour.
+fn square_button(ui: &mut Ui, icons: &GuiIcons, ic: u16, active: bool) -> egui::Response {
+    let p = palette(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
+    let (fill, stroke, fg) = if active {
+        (p.accent, p.accent, p.on_accent)
+    } else if resp.hovered() || resp.is_pointer_button_down_on() {
+        (p.surface_hover, p.accent, p.text)
+    } else {
+        (p.surface_hi, p.outline, p.text)
+    };
+    ui.painter().rect_filled(rect, Rounding::ZERO, fill);
+    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, stroke));
+    icons.paint(ui.painter(), Rect::from_center_size(rect.center(), Vec2::splat(22.0)), ic, fg);
+    resp
+}
+
+/// World-select header: logo and title left; settings, version, sort and search (square icons) right.
+/// The magnifier opens a search field right in the header. Returns true if settings was clicked.
+fn world_select_header(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, version: &str) -> bool {
+    let p = palette(ctx);
+    let mut settings = false;
+    let mut sort_anchor = None;
+    egui::TopBottomPanel::top("menu-topbar")
+        .exact_height(58.0)
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(18.0, 8.0)))
+        .show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
+                icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("WolfCraft").font(bold_font(21.0)).color(p.text));
+                if !st.search_open {
+                    ui.label(egui::RichText::new("›").size(18.0).color(p.text_muted));
+                    ui.label(egui::RichText::new("Выбор мира").size(16.0).color(p.text_muted));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if square_button(ui, icons, icon::GEAR, false).clicked() {
+                        settings = true;
+                    }
+                    if st.mode == 0 {
+                        let sort = square_button(ui, icons, icon::SORT, st.sort_open);
+                        if sort.clicked() {
+                            st.sort_open = !st.sort_open;
+                        }
+                        sort_anchor = Some(sort.rect);
+                        if square_button(ui, icons, if st.search_open { icon::CLOSE } else { icon::SEARCH }, st.search_open).clicked() {
+                            st.search_open = !st.search_open;
+                            st.search_focus = st.search_open;
+                            if !st.search_open {
+                                st.search.clear();
+                            }
+                        }
+                        if st.search_open {
+                            let w = (ui.available_width() - 8.0).clamp(140.0, 360.0);
+                            let r = text_input(ui, icons, &mut st.search, "Поиск миров…", w, Some(icon::SEARCH));
+                            if st.search_focus {
+                                st.search_focus = false;
+                                r.request_focus();
+                            }
+                        }
+                    }
+                    if !st.search_open {
+                        badge(ui, &format!("v{version}"), p.accent);
+                    }
+                });
+            });
+        });
+    // Sort menu drops down under its button.
+    if st.mode == 0 && st.sort_open {
+        if let Some(a) = sort_anchor {
+            let area = egui::Area::new(egui::Id::new("world-sort-menu"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(Pos2::new(a.right() - 200.0, a.bottom() + 8.0))
+                .show(ctx, |ui| {
+                    Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::same(8.0)).show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 6.0;
+                        for (i, name) in SORT_NAMES.iter().enumerate() {
+                            let kind = if st.sort == i { ButtonKind::Primary } else { ButtonKind::Ghost };
+                            if pill_button(ui, icons, if st.sort == i { Some(icon::CHECK) } else { None }, name, kind, 184.0, true).clicked() {
+                                st.sort = i;
+                                st.sort_open = false;
+                            }
+                        }
+                    });
+                });
+            // Tap outside closes the menu.
+            let clicked_outside = ctx.input(|i| i.pointer.any_click()) && !area.response.rect.contains(ctx.input(|i| i.pointer.interact_pos()).unwrap_or_default()) && !a.contains(ctx.input(|i| i.pointer.interact_pos()).unwrap_or_default());
+            if clicked_outside {
+                st.sort_open = false;
+            }
+        }
+    }
+    settings
+}
+
 pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, worlds: &[WorldEntry], version: &str) -> MenuAction {
     let p = palette(ctx);
     let mut action = MenuAction::None;
-    if top_bar(ctx, icons, "Выбор мира", version, true) {
+    if world_select_header(ctx, icons, st, version) {
         action = MenuAction::OpenSettings;
     }
     bottom_bar(ctx, |ui| {
@@ -274,14 +379,6 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
             }
             return;
         }
-        ui.horizontal(|ui| {
-            text_input(ui, icons, &mut st.search, "Поиск миров…", 260.0, Some(icon::SEARCH));
-            ui.add_space(12.0);
-            let (r, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-            icons.paint(ui.painter(), r, icon::SORT, p.text_muted);
-            segmented(ui, "world-sort", &[(0usize, "Недавние"), (1, "По названию"), (2, "По созданию")], &mut st.sort);
-        });
-        ui.add_space(12.0);
         let list = sorted_filtered(worlds, &st.search, st.sort);
         if list.is_empty() {
             ui.add_space(60.0);
