@@ -194,17 +194,15 @@ impl GuiRenderer {
     }
 
     /// Runs the UI closure and tessellates the result.
-    pub fn run(&mut self, window: &Window, add_ui: impl FnOnce(&egui::Context)) -> GuiFrame {
+    pub fn run(&mut self, window: &Window, mut add_ui: impl FnMut(&egui::Context)) -> GuiFrame {
         let mut input = self.state.take_egui_input(window);
         if let (Ok(i), Some(r)) = (SAFE_INSETS.read(), input.screen_rect.as_mut()) {
             *r = egui::Rect::from_min_max(r.min + egui::vec2(i[0], i[1]), r.max - egui::vec2(i[2], i[3]));
         }
-        let mut add_ui = Some(add_ui);
-        let output = self.ctx.run(input, |c| {
-            if let Some(f) = add_ui.take() {
-                f(c);
-            }
-        });
+        // egui may run the closure several times per frame (a pass can be discarded when layout
+        // changes). Every pass must draw the UI, otherwise the frame comes out empty and the
+        // whole interface blinks.
+        let output = self.ctx.run(input, |c| add_ui(c));
         let mut platform = output.platform_output;
         if self.hide_cursor {
             platform.cursor_icon = egui::CursorIcon::None;
