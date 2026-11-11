@@ -1,0 +1,52 @@
+name: Android APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust + Android target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo-apk
+        run: cargo install cargo-apk --locked || cargo install cargo-apk
+
+      - name: Build APK (arm64)
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_LATEST_HOME }}
+          CARGO_APK_RELEASE_KEYSTORE: ${{ github.workspace }}/ci/wolfcraft-release.keystore
+          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: android
+        run: |
+          echo "SDK=$ANDROID_HOME NDK=$ANDROID_NDK_ROOT"
+          cargo apk build -p wolfcraft-game --release --target aarch64-linux-android
+          find target -name "*.apk" -path "*release*" | head
+          cp "$(find target -name '*.apk' -path '*release*' | head -1)" WolfCraft.apk
+          ls -lh WolfCraft.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WolfCraft-apk
+          path: WolfCraft.apk
+
+      - name: Publish "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest -y --cleanup-tag || true
+          gh release create latest WolfCraft.apk --prerelease --target "$GITHUB_SHA" \
+            --title "WolfCraft (сборка #${{ github.run_number }})" \
+            --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай WolfCraft.apk ниже."
