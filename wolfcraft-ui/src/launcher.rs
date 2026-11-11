@@ -84,7 +84,11 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new("WolfCraft").font(bold_font(20.0)).color(p.text));
-                ui.label(egui::RichText::new(TABS[tab].1).size(14.0).color(p.text_muted));
+                // Upright phone: room only for the name and the two buttons.
+                let wide = ui.ctx().screen_rect().width() > 480.0;
+                if wide {
+                    ui.label(egui::RichText::new(TABS[tab].1).size(14.0).color(p.text_muted));
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     if round_icon(ui, icons, &p, icon::GEAR).clicked() {
@@ -93,9 +97,11 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                     if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).clicked() {
                         action = MenuAction::ToggleTheme;
                     }
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(64.0, 26.0), Sense::hover());
-                    ui.painter().rect_stroke(r, Rounding::same(13.0), Stroke::new(1.5_f32, p.accent));
-                    ui.painter().text(r.center(), Align2::CENTER_CENTER, format!("v{version}"), FontId::proportional(12.0), p.accent);
+                    if wide {
+                        let (r, _) = ui.allocate_exact_size(Vec2::new(64.0, 26.0), Sense::hover());
+                        ui.painter().rect_stroke(r, Rounding::same(13.0), Stroke::new(1.5_f32, p.accent));
+                        ui.painter().text(r.center(), Align2::CENTER_CENTER, format!("v{version}"), FontId::proportional(12.0), p.accent);
+                    }
                 });
             });
         });
@@ -220,7 +226,7 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
 fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, action: &mut MenuAction) {
     let ctx = ui.ctx().clone();
     let w = ui.available_width();
-    let h = (w * 0.36).clamp(150.0, 220.0);
+    let h = (w * 0.36).clamp(180.0, 220.0);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click_and_drag());
     let id = Id::new("launcher-banner");
     let now = ctx.input(|i| i.time);
@@ -274,7 +280,7 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
                 let c = Pos2::new(r.right() - d * 0.32, r.center().y + d * 0.18);
                 clip.image(tex.id(), Rect::from_center_size(c, Vec2::splat(d)), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
             }
-        } else {
+        } else if r.width() > 480.0 {
             for (j, (dx, dy, s)) in [(0.14f32, 0.30f32, 0.34f32), (0.30, 0.62, 0.22), (0.06, 0.70, 0.16)].iter().enumerate() {
                 let side = r.height() * s;
                 let c = Pos2::new(r.right() - r.height() * (dx + 0.12) - side * 0.5, r.top() + r.height() * dy);
@@ -284,7 +290,7 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
             }
         }
         // Text on the left, over a soft shade.
-        let text_w = r.width() * 0.62;
+        let text_w = if r.width() > 480.0 { r.width() * 0.62 } else { r.width() - 40.0 };
         let x = r.left() + 20.0;
         clip.text(Pos2::new(x, r.top() + 22.0), Align2::LEFT_TOP, "WOLFCRAFT", FontId::proportional(11.0), Color32::from_white_alpha(170));
         let title = clip.layout(b.title.to_string(), bold_font(22.0), Color32::WHITE, text_w);

@@ -159,6 +159,8 @@ pub struct App {
     frames: u64,
     last_cpu: f32,
     near_table: bool,
+    /// Orientation last asked of the phone (launcher upright, the rest in landscape).
+    portrait: Option<bool>,
     /// Open chest / furnace (block cell and kind).
     container: Option<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)>,
     pending_apply: bool,
@@ -268,6 +270,7 @@ impl App {
             frames: 0,
             last_cpu: 0.0,
             near_table: false,
+            portrait: None,
             container: None,
             pending_apply: false,
             hand_cycle: 0.0,
@@ -946,6 +949,11 @@ impl App {
     }
 
     fn redraw(&mut self, gfx: &mut Gfx) {
+        let portrait = matches!(self.screen, Screen::Splash | Screen::Main);
+        if self.portrait != Some(portrait) {
+            self.portrait = Some(portrait);
+            crate::orientation::set_portrait(portrait);
+        }
         self.time.tick();
         let dt = self.time.delta();
         self.frames += 1;

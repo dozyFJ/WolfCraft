@@ -48,10 +48,42 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     use winit::event_loop::EventLoopBuilder;
     use winit::platform::android::EventLoopBuilderExtAndroid;
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("WolfCraft"));
+    orientation::set_app(app.clone());
     let data_dir = app.internal_data_path().unwrap_or_else(|| std::path::PathBuf::from("/data/local/tmp/WolfCraft"));
     let args = LaunchArgs { data_dir: Some(data_dir), game_version: None, from_launcher: false };
     match EventLoopBuilder::default().with_android_app(app).build() {
         Ok(e) => run(args, e),
         Err(e) => log::error!("event loop: {e}"),
+    }
+}
+/// Screen orientation on phones: the launcher stands upright, the game lies in landscape.
+pub mod orientation {
+    #[cfg(target_os = "android")]
+    static APP: std::sync::OnceLock<winit::platform::android::activity::AndroidApp> = std::sync::OnceLock::new();
+
+    #[cfg(target_os = "android")]
+    pub fn set_app(app: winit::platform::android::activity::AndroidApp) {
+        let _ = APP.set(app);
+    }
+
+    /// Asks the activity for portrait (`true`) or landscape, following the sensor within it.
+    pub fn set_portrait(portrait: bool) {
+        #[cfg(target_os = "android")]
+        {
+            let Some(app) = APP.get() else { return };
+            // ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT = 7, SENSOR_LANDSCAPE = 6.
+            let value = if portrait { 7 } else { 6 };
+            let Ok(vm) = (unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) }) else { return };
+            let Ok(mut env) = vm.attach_current_thread() else { return };
+            let activity = unsafe { jni::objects::JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject) };
+            if env.call_method(&activity, "setRequestedOrientation", "(I)V", &[jni::objects::JValue::Int(value)]).is_err() {
+                let _ = env.exception_clear();
+                log::warn!("could not change the screen orientation");
+            }
+            // The activity reference belongs to the app: do not delete it.
+            std::mem::forget(activity);
+        }
+        #[cfg(not(target_os = "android"))]
+        let _ = portrait;
     }
 }

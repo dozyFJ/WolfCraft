@@ -3888,6 +3888,7 @@ dependencies = [
  "egui",
  "glam",
  "image",
+ "jni 0.21.1",
  "log",
  "oboe",
  "rayon",
