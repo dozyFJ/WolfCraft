@@ -889,6 +889,10 @@ const SETTINGS_TABS: [(u16, &str); 6] = [(icon::HEART, "Профиль"), (icon:
 
 /// Resource packs: built-in ones and the player's own, plus import from a link.
 fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs: &PacksView, res: &mut SettingsResult) {
+    setting_row(ui, "Шейдеры", Some("Лёгкие: качается листва и трава, волны на воде. Ультра: ещё рельеф блоков на солнце"), |ui| {
+        res.changed |= segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкие"), (2, "Ультра")], &mut s.shaders);
+    });
+    ui.add_space(10.0);
     for pack in packs.list {
         let sel = s.texture_pack == pack.id;
         let resp = row_card(ui, sel, |ui| {

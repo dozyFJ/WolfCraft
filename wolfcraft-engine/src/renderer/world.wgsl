@@ -3,7 +3,7 @@ struct Globals {
     sun: vec4<f32>,      // xyz: direction to the sun (world), w: unused
     cam: vec4<f32>,      // xyz: camera position in world space (f32, planet-sized)
     fog: vec4<f32>,      // rgb: fog colour, a: density (1 / fog distance)
-    misc: vec4<f32>,     // x: time, y: underwater (0/1), z: unused, w: unused
+    misc: vec4<f32>,     // x: time, y: underwater (0/1), z: crack, w: shader preset (0 off, 1 light, 2 ultra)
     tiles: array<vec4<f32>, 128>, // xy: uv min, zw: uv size of every block sprite
 };
 
@@ -33,7 +33,22 @@ struct VsOut {
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
     var out: VsOut;
-    let rel = in.pos + in.inst.xyz;
+    var rel = in.pos + in.inst.xyz;
+    // Shaders: leaves and plants sway in the wind. The phase comes from the world position,
+    // so corners shared by neighbouring blocks move together (no cracks).
+    let sway_leaves = (in.flags >> 24u) & 1u;
+    let sway_plant = (in.flags >> 25u) & 1u;
+    if (g.misc.w > 0.5 && (sway_leaves + sway_plant) > 0u) {
+        let w = g.cam.xyz + rel;
+        let t = g.misc.x;
+        let phase = dot(w, vec3<f32>(0.37, 0.23, 0.31));
+        var amp = 0.03;
+        if (sway_plant == 1u) {
+            amp = 0.09 * clamp(1.0 - in.uv.y, 0.0, 1.0); // the top sways, the root stays
+        }
+        let gust = 0.6 + 0.4 * sin(t * 0.35 + phase * 0.05);
+        rel = rel + vec3<f32>(sin(t * 1.7 + phase), sin(t * 1.3 + phase * 1.3) * 0.4, cos(t * 1.5 + phase * 0.8)) * amp * gust;
+    }
     out.clip = g.view_proj * vec4<f32>(rel, 1.0);
     out.uv = in.uv;
     out.flags = in.flags;
@@ -109,6 +124,40 @@ fn shade(in: VsOut, color: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     return rgb;
 }
 
+// Shaders: gentle colour grading (a little contrast and saturation, warm highlights).
+fn grade(c: vec3<f32>) -> vec3<f32> {
+    if (g.misc.w < 0.5) {
+        return c;
+    }
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    var o = mix(vec3<f32>(l), c, 1.12);
+    o = o * o * (3.0 - 2.0 * o) * 0.35 + o * 0.65; // soft S-curve
+    return o * vec3<f32>(1.02, 1.0, 0.97);
+}
+
+// Ultra: per-pixel relief from the texture itself. The brightness of the tile is used as a
+// height map; its slope tilts the face normal, so the sun lights one side of every bump.
+fn bump_normal(in: VsOut, n: vec3<f32>, dpx: vec3<f32>, dpy: vec3<f32>, duvx: vec2<f32>, duvy: vec2<f32>) -> vec3<f32> {
+    let tile = in.flags & 0xFFFFu;
+    let r = g.tiles[tile];
+    let size = vec2<f32>(textureDimensions(atlas, 0));
+    let texel = 1.0 / max(r.z * size.x, 1.0); // one pixel of the tile in fract(uv) units
+    let f = clamp(fract(in.uv), vec2<f32>(0.001), vec2<f32>(0.999));
+    let lum = vec3<f32>(0.299, 0.587, 0.114);
+    let h0 = dot(textureSampleLevel(atlas, samp, r.xy + clamp(f, vec2<f32>(0.0), vec2<f32>(1.0)) * r.zw, 0.0).rgb, lum);
+    let hx = dot(textureSampleLevel(atlas, samp, r.xy + clamp(f + vec2<f32>(texel, 0.0), vec2<f32>(0.0), vec2<f32>(0.999)) * r.zw, 0.0).rgb, lum);
+    let hy = dot(textureSampleLevel(atlas, samp, r.xy + clamp(f + vec2<f32>(0.0, texel), vec2<f32>(0.0), vec2<f32>(0.999)) * r.zw, 0.0).rgb, lum);
+    // Tangent frame from screen-space derivatives (no tangents stored in the mesh).
+    let det = duvx.x * duvy.y - duvx.y * duvy.x;
+    if (abs(det) < 1e-12) {
+        return n;
+    }
+    let t = normalize((dpx * duvy.y - dpy * duvx.y) / det);
+    let b = normalize((dpy * duvx.x - dpx * duvy.x) / det);
+    let k = 2.2;
+    return normalize(n - t * (hx - h0) * k - b * (hy - h0) * k);
+}
+
 // The swapchain is not sRGB (egui needs that), so the world shader encodes its own output.
 fn to_srgb(c: vec3<f32>) -> vec3<f32> {
     return pow(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(1.0 / 2.2));
@@ -124,18 +173,47 @@ fn sample_tile(in: VsOut) -> vec4<f32> {
 @fragment
 fn fs_opaque(in: VsOut) -> @location(0) vec4<f32> {
     let c = sample_tile(in);
-    let n = geom_normal(in.rel);
+    var n = geom_normal(in.rel);
+    // Derivatives must be taken in uniform control flow (before discard and branches).
+    let dpx = dpdx(in.rel);
+    let dpy = dpdy(in.rel);
+    let duvx = dpdx(in.uv);
+    let duvy = dpdy(in.uv);
     if (c.a < 0.5) {
         discard;
     }
-    return vec4<f32>(to_srgb(shade(in, c, n)), 1.0);
+    if (g.misc.w > 1.5 && length(in.rel) < 40.0) {
+        n = bump_normal(in, n, dpx, dpy, duvx, duvy);
+    }
+    return vec4<f32>(to_srgb(grade(shade(in, c, n))), 1.0);
 }
 
 @fragment
 fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let c = sample_tile(in);
-    let rgb = to_srgb(shade(in, c, geom_normal(in.rel)));
-    return vec4<f32>(rgb, c.a);
+    var n = geom_normal(in.rel);
+    var rgb = shade(in, c, n);
+    var a = c.a;
+    if (g.misc.w > 0.5 && g.misc.y < 0.5) {
+        // Shaders: small moving waves, a sun glint and more sky reflected at grazing angles.
+        let w = in.world;
+        let t = g.misc.x;
+        let wave = vec3<f32>(
+            sin(dot(w, vec3<f32>(1.3, 0.2, 0.7)) * 1.7 + t * 1.9) + 0.5 * sin(dot(w, vec3<f32>(-0.4, 0.9, 1.6)) * 2.9 + t * 2.7),
+            0.0,
+            cos(dot(w, vec3<f32>(0.6, -0.8, 1.1)) * 1.9 + t * 1.6) + 0.5 * cos(dot(w, vec3<f32>(1.7, 0.3, -0.5)) * 3.3 + t * 2.2),
+        );
+        let nw = normalize(n + wave * 0.06);
+        let v = normalize(-in.rel);
+        let sun = normalize(g.sun.xyz);
+        let up = normalize(in.world);
+        let day = smoothstep(-0.12, 0.28, dot(up, sun));
+        let spec = pow(max(dot(reflect(-sun, nw), v), 0.0), 120.0) * day * in.light.y;
+        let fres = pow(1.0 - max(dot(nw, v), 0.0), 3.0);
+        rgb = mix(rgb, g.fog.rgb * mix(0.35, 1.0, day), fres * 0.55) + vec3<f32>(1.0, 0.95, 0.85) * spec * 1.4;
+        a = mix(a, 1.0, fres * 0.5);
+    }
+    return vec4<f32>(to_srgb(grade(rgb)), a);
 }
 
 // ---- block outline ----

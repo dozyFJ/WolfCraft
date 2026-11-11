@@ -171,6 +171,9 @@ pub struct RenderStats {
 }
 
 pub struct FrameParams {
+    /// Shader preset: 0 off, 1 light (swaying leaves and grass, water waves, colour
+    /// grading), 2 ultra (also texture relief lit by the sun).
+    pub shaders: u8,
     pub eye: DVec3,
     pub forward: Vec3,
     pub up: Vec3,
@@ -760,7 +763,7 @@ impl WorldRenderer {
             cam: [p.eye.x as f32, p.eye.y as f32, p.eye.z as f32, 0.0],
             // Fog is mixed in linear space inside the shader; the caller passes display colours.
             fog: [fog_color[0].powf(2.2), fog_color[1].powf(2.2), fog_color[2].powf(2.2), 1.0 / (p.view_distance_blocks * 1.15).max(16.0)],
-            misc: [p.time, p.underwater as u32 as f32, p.crack, 0.0],
+            misc: [p.time, p.underwater as u32 as f32, p.crack, p.shaders as f32],
             tiles: self.tile_rects,
         };
         if p.underwater {

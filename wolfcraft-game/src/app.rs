@@ -1571,6 +1571,7 @@ impl App {
                 let fx_target = if s.bow_charge > 0.0 { -14.0 * s.bow_charge } else if s.player.sprinting { 9.0 } else if s.player.body.flying { 4.0 } else if underwater { -4.0 } else { 0.0 };
                 self.fov_fx += (fx_target - self.fov_fx) * (1.0 - (-dt as f32 * 7.0).exp());
                 let params = FrameParams {
+                    shaders: self.settings.shaders,
                     eye: cam.eye,
                     forward: cam.forward.as_vec3(),
                     up: cam.up.as_vec3(),

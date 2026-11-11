@@ -21,7 +21,8 @@ pub struct Vertex {
     /// Position relative to the chunk's reference corner.
     pub pos: [f32; 3],
     pub uv: [f32; 2],
-    /// bits 0..16 tile, bit 16 emissive, bits 17..20 face id (0..5), bits 20..24 block light
+    /// bits 0..16 tile, bit 16 emissive, bits 17..20 face id (0..5), bits 20..24 block light,
+    /// bit 24 leaves (sway with the wind), bit 25 plant (sways, more at the top)
     pub flags: u32,
     /// x = ambient occlusion factor (0..1), y = skylight (0..1)
     pub light: [f32; 2],
@@ -467,7 +468,8 @@ fn mesh_direction(inp: &MeshInput, f: usize, out: &mut MeshData, bl: &dyn Fn([i3
                 let sky = if info.emissive { 15 } else { sky_at(inp, q) as u64 };
                 let trans = (info.render == RenderKind::Translucent) as u64;
                 let lit = bl(q) as u64;
-                let key = (1u64 << 63) | (tile as u64) | (ao[0] << 16) | (ao[1] << 18) | (ao[2] << 20) | (ao[3] << 22) | (sky << 24) | (emit << 28) | (trans << 29) | (lit << 30);
+                let leaves = (info.render == RenderKind::Cutout && b.blocks_light()) as u64;
+                let key = (1u64 << 63) | (tile as u64) | (ao[0] << 16) | (ao[1] << 18) | (ao[2] << 20) | (ao[3] << 22) | (sky << 24) | (emit << 28) | (trans << 29) | (lit << 30) | (leaves << 34);
                 mask[(i + j * 16) as usize] = key;
                 any = true;
             }
@@ -506,7 +508,7 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
     let sky = ((key >> 24) & 15) as f32 / 15.0;
     let emit = ((key >> 28) & 1) as u32;
     let trans = (key >> 29) & 1 == 1;
-    let lit = ((key >> 30) & 15) as u32;
+    let lit = ((key >> 30) & 15) as u32 | (((key >> 34) & 1) as u32) << 4;
 
     let plane = (s + if sign > 0 { 1 } else { 0 }) as f32;
     let corners = [(i0, j0), (i0 + w, j0), (i0 + w, j0 + h), (i0, j0 + h)];
@@ -549,7 +551,9 @@ fn mesh_cross(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32)
                     continue;
                 }
                 let sky = sky_at(inp, [x, y, z]) as f32 / 15.0;
-                let tile = b.info().tiles[0] as u32 | (bl([x, y, z]) << 20);
+                // Torches and other emissive "plants" stay still.
+                let sway = if b.info().emissive { 0 } else { 1u32 << 25 };
+                let tile = b.info().tiles[0] as u32 | (bl([x, y, z]) << 20) | sway;
                 let verts = &mut out.opaque;
                 let idx = &mut out.opaque_idx;
                 // Two diagonal planes through the block centre; each emitted double-sided.
