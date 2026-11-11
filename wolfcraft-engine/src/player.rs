@@ -235,6 +235,8 @@ impl Player {
             4.3
         };
         let speed: f64 = if self.blocking && !self.body.flying { f64::min(speed, 1.9) } else { speed };
+        // Creative flight speeds up with height: in space you cover distances quickly.
+        let speed = if self.body.flying { speed * space_boost(world.grid(), self.body.pos.length()) } else { speed };
         let input = MoveInput { wish, speed, jump: c.jump, up: c.jump, down: c.sneak };
         let altitude_before = self.body.pos.length();
         let was_grounded = self.body.on_ground;
@@ -460,6 +462,14 @@ pub fn sun_direction(world_time: f64) -> DVec3 {
     let tilt: f64 = 0.41;
     let (s, c) = a.sin_cos();
     DVec3::new(c, s * tilt.cos(), s * tilt.sin()).normalize()
+}
+
+/// Flight speed multiplier at distance `r` from the planet centre: 1 near the ground,
+/// growing with altitude up to 60× far out in space.
+pub fn space_boost(grid: &crate::cubesphere::Grid, r: f64) -> f64 {
+    let surface = grid.n as f64 * std::f64::consts::FRAC_2_PI;
+    let h = r - surface - 64.0;
+    if h <= 0.0 { 1.0 } else { (1.0 + h / 25.0).min(60.0) }
 }
 
 #[cfg(test)]

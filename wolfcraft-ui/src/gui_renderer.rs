@@ -151,6 +151,8 @@ pub struct GuiRenderer {
     ui_scale: f32,
     pub last_vertices: usize,
     pub last_meshes: usize,
+    /// Last non-empty frame, shown again if egui ever hands back an empty one (no blinking).
+    last_jobs: Vec<egui::ClippedPrimitive>,
     /// The game has captured the mouse: keep the OS cursor hidden (egui would show it again).
     pub hide_cursor: bool,
 }
@@ -170,7 +172,7 @@ impl GuiRenderer {
         let state = egui_winit::State::new(ctx.clone(), egui::ViewportId::ROOT, window, Some(window.scale_factor() as f32), None, None);
         let renderer = egui_wgpu::Renderer::new(device, color_format, None, 1, false);
         let icons = Arc::new(GuiIcons::new(&ctx, atlases));
-        Self { ctx, state, renderer, icons, ui_scale: 1.0, last_vertices: 0, last_meshes: 0, hide_cursor: false }
+        Self { ctx, state, renderer, icons, ui_scale: 1.0, last_vertices: 0, last_meshes: 0, last_jobs: Vec::new(), hide_cursor: false }
     }
 
     /// Feeds a window event to egui; returns true if egui wants it (UI consumed the input).
@@ -209,11 +211,14 @@ impl GuiRenderer {
         }
         self.state.handle_platform_output(window, platform);
         let ppp = output.pixels_per_point;
-        let paint_jobs = self.ctx.tessellate(output.shapes, ppp);
-        self.last_meshes = paint_jobs.len();
+        let mut paint_jobs = self.ctx.tessellate(output.shapes, ppp);
         if paint_jobs.is_empty() {
-            log::warn!("empty gui frame (ppp {ppp})");
+            log::warn!("empty gui frame (ppp {ppp}): showing the previous one");
+            paint_jobs = self.last_jobs.clone();
+        } else {
+            self.last_jobs = paint_jobs.clone();
         }
+        self.last_meshes = paint_jobs.len();
         self.last_vertices = paint_jobs
             .iter()
             .map(|p| match &p.primitive {
