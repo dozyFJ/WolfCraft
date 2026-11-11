@@ -104,6 +104,10 @@ pub fn draw_stack(painter: &Painter, icons: &GuiIcons, rect: Rect, s: &ItemStack
 
 /// Hotbar rectangle (min x, min y, max x, max y) in points, published for the touch buttons.
 pub static HOTBAR_RECT: std::sync::RwLock<[f32; 4]> = std::sync::RwLock::new([0.0; 4]);
+/// Inventory tile next to the hotbar (phones), in points.
+pub static INV_RECT: std::sync::RwLock<[f32; 4]> = std::sync::RwLock::new([0.0; 4]);
+/// Minimap with its compass frame, in points: tapping it opens the world map.
+pub static MINIMAP_RECT: std::sync::RwLock<[f32; 4]> = std::sync::RwLock::new([0.0; 4]);
 
 pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     let p = palette(ctx);
@@ -151,26 +155,40 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     let _ = &s.hint;
 
     // ---- Bottom area: XP, health/hunger, hotbar ----
-    let slot_sz = if s.compact { 32.0 } else { SLOT };
-    let hb_w = HOTBAR as f32 * slot_sz + (HOTBAR as f32 - 1.0) * SLOT_GAP + 16.0;
-    let hb_h = slot_sz + 14.0;
-    let hotbar = Rect::from_center_size(Pos2::new(screen.center().x, screen.bottom() - 18.0 - hb_h / 2.0), Vec2::new(hb_w, hb_h));
+    // Separate slots, each on its own dark tile (no panel behind them); on phones the
+    // inventory button is a tenth tile to the right of the hotbar.
+    let slot_sz = if s.compact { 34.0 } else { SLOT };
+    let gap = if s.compact { 6.0 } else { SLOT_GAP };
+    let inv_gap = 14.0;
+    let slots_w = HOTBAR as f32 * slot_sz + (HOTBAR as f32 - 1.0) * gap;
+    let hb_w = slots_w;
+    let total_w = slots_w + if s.compact { inv_gap + slot_sz } else { 0.0 };
+    let left = screen.center().x - total_w / 2.0;
+    let hotbar = Rect::from_min_size(Pos2::new(left, screen.bottom() - 14.0 - slot_sz), Vec2::new(slots_w, slot_sz));
     if let Ok(mut h) = HOTBAR_RECT.write() {
         *h = [hotbar.min.x, hotbar.min.y, hotbar.max.x, hotbar.max.y];
     }
-    painter.rect_filled(hotbar, Rounding::ZERO, p.surface.gamma_multiply(0.86));
-    painter.rect_stroke(hotbar, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+    let tile = Color32::from_rgba_unmultiplied(14, 16, 22, 200);
     for i in 0..HOTBAR {
-        let r = Rect::from_min_size(Pos2::new(hotbar.left() + 8.0 + i as f32 * (slot_sz + SLOT_GAP), hotbar.top() + 7.0), Vec2::splat(slot_sz));
+        let r = Rect::from_min_size(Pos2::new(hotbar.left() + i as f32 * (slot_sz + gap), hotbar.top()), Vec2::splat(slot_sz));
         let sel = i == s.inventory.selected;
         let t = ctx.animate_bool_with_time(egui::Id::new(("hb", i)), sel, 0.12);
         let rr = r.expand(t * 2.0);
-        painter.rect_filled(rr, Rounding::ZERO, if sel { p.surface_hover } else { p.surface_hi });
-        painter.rect_stroke(rr, Rounding::ZERO, Stroke::new(2.0 + t * 2.0, if sel { p.accent } else { p.outline }));
+        painter.rect_filled(rr, Rounding::ZERO, tile);
+        painter.rect_stroke(rr, Rounding::ZERO, Stroke::new(1.5 + t * 1.5, if sel { p.accent } else { Color32::from_white_alpha(40) }));
         if let Some(st) = &s.inventory.slots[i] {
             draw_stack(&painter, icons, rr, st, &p);
         }
-        painter.text(Pos2::new(r.left() + 5.0, r.top() + 3.0), Align2::LEFT_TOP, (i + 1).to_string(), FontId::proportional(10.5), p.text_muted.gamma_multiply(0.8));
+        painter.text(Pos2::new(r.left() + 4.0, r.top() + 2.0), Align2::LEFT_TOP, (i + 1).to_string(), FontId::proportional(9.5), Color32::from_white_alpha(110));
+    }
+    if s.compact {
+        let r = Rect::from_min_size(Pos2::new(hotbar.right() + inv_gap, hotbar.top()), Vec2::splat(slot_sz));
+        painter.rect_filled(r, Rounding::ZERO, tile);
+        painter.rect_stroke(r, Rounding::ZERO, Stroke::new(1.5, Color32::from_white_alpha(70)));
+        icons.paint(&painter, r.shrink(slot_sz * 0.22), icon::BACKPACK, Color32::WHITE);
+        if let Ok(mut h) = INV_RECT.write() {
+            *h = [r.min.x, r.min.y, r.max.x, r.max.y];
+        }
     }
     // XP bar.
     let xp_y = hotbar.top() - 10.0;
@@ -211,31 +229,49 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     }
     // Compass strip above the hotbar (and above hearts / hunger in survival).
     let compass_bottom = hotbar.top() - if s.creative { 14.0 } else { 62.0 };
-    if let Some(b) = s.compass {
+    if let (Some(b), false) = (s.compass, s.compact) {
         draw_compass(&painter, &p, Rect::from_center_size(Pos2::new(hotbar.center().x, compass_bottom - 12.0), Vec2::new(hb_w.min(420.0), 24.0)), b);
     }
     // Selected item name.
     if let Some((name, t)) = &s.item_name {
         let a = (t * 2.0).clamp(0.0, 1.0);
-        let y = if s.compass.is_some() { compass_bottom - 32.0 } else { hotbar.top() - if s.creative { 24.0 } else { 70.0 } };
+        let y = if s.compass.is_some() && !s.compact { compass_bottom - 32.0 } else { hotbar.top() - if s.creative { 24.0 } else { 70.0 } };
         painter.text(Pos2::new(hotbar.center().x, y), Align2::CENTER_BOTTOM, name, FontId::proportional(16.0), p.text.gamma_multiply(a));
     }
     // Minimap, bottom-right.
     if let Some(tex) = s.minimap {
         let size = if s.compact { 104.0 } else { 156.0 };
         let r = if s.compact {
-            Rect::from_min_size(Pos2::new(screen.right() - size - 12.0, screen.top() + 12.0), Vec2::splat(size))
+            Rect::from_min_size(Pos2::new(screen.right() - size - 22.0, screen.top() + 20.0), Vec2::splat(size))
         } else {
             Rect::from_min_size(Pos2::new(screen.right() - size - 16.0, screen.bottom() - size - 16.0), Vec2::splat(size))
         };
-        painter.rect_filled(r.expand(4.0), Rounding::ZERO, p.surface.gamma_multiply(0.85));
+        // Compass frame around the map: a wide border with the four cardinal letters riding
+        // on it (the map turns with the view, so the letters move around the frame).
+        let frame = r.expand(13.0);
+        painter.rect_filled(frame, Rounding::ZERO, Color32::from_rgba_unmultiplied(14, 16, 22, 215));
         painter.image(tex, r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-        painter.rect_stroke(r.expand(4.0), Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+        painter.rect_stroke(r, Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
+        painter.rect_stroke(frame, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+        if let Some(b) = s.compass {
+            let half = frame.width() / 2.0 - 6.5;
+            for (deg, name) in [(0.0f32, "С"), (90.0, "В"), (180.0, "Ю"), (270.0, "З")] {
+                let a = (deg - b).to_radians();
+                let (dx, dy) = (a.sin(), -a.cos());
+                let k = half / dx.abs().max(dy.abs()).max(1e-3);
+                let pos = frame.center() + Vec2::new(dx * k, dy * k);
+                let col = if deg == 0.0 { p.danger } else { Color32::WHITE };
+                painter.text(pos + Vec2::splat(1.0), Align2::CENTER_CENTER, name, bold_font(12.0), Color32::from_black_alpha(200));
+                painter.text(pos, Align2::CENTER_CENTER, name, bold_font(12.0), col);
+            }
+        }
+        if let Ok(mut h) = MINIMAP_RECT.write() {
+            *h = [frame.min.x, frame.min.y, frame.max.x, frame.max.y];
+        }
         // Player arrow (the map turns with the view, so it always points up).
         let c = r.center();
         let pts = vec![c + Vec2::new(0.0, -8.0), c + Vec2::new(6.0, 7.0), c + Vec2::new(0.0, 3.5), c + Vec2::new(-6.0, 7.0)];
         painter.add(egui::Shape::convex_polygon(pts, p.accent, Stroke::new(1.5_f32, Color32::from_black_alpha(200))));
-        painter.text(Pos2::new(r.center().x, r.top() + 2.0), Align2::CENTER_TOP, "▲", FontId::proportional(9.0), p.text_muted.gamma_multiply(0.7));
     }
 
     if let Some(d) = s.debug {

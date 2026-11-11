@@ -49,11 +49,13 @@ enum Screen {
     Paused,
     Inventory,
     Dead,
+    /// Full-screen world map (tap on the minimap).
+    Map,
 }
 
 impl Screen {
     fn in_world(self) -> bool {
-        matches!(self, Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead)
+        matches!(self, Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead | Screen::Map)
     }
 }
 
@@ -116,6 +118,13 @@ pub struct App {
     pack_dl: Option<Receiver<Result<String, String>>>,
     /// Text of the last crash (logs/crash.txt), shown once in the main menu.
     crash_report: Option<String>,
+    /// World map screen: texture, pixels being rebuilt row by row, view and the colours of
+    /// every column seen so far (so explored land stays on the map).
+    world_map: Option<TextureHandle>,
+    map_px: Vec<egui::Color32>,
+    map_row: usize,
+    map_view: MapView,
+    map_explored: HashMap<(u8, i32, i32), egui::Color32>,
     /// Seconds the splash has been shown.
     splash_t: f32,
     /// Big planet drawn behind the main menu.
@@ -219,6 +228,11 @@ impl App {
             pack_status: String::new(),
             pack_dl: None,
             splash_t: 0.0,
+            world_map: None,
+            map_px: vec![egui::Color32::BLACK; MAP_N * MAP_N],
+            map_row: 0,
+            map_view: MapView::default(),
+            map_explored: HashMap::new(),
             crash_report,
             menu_planet: None,
             menu_planet_requested: false,
@@ -673,6 +687,7 @@ impl App {
                 self.pending_apply = true;
             }
             (Screen::Playing, KeyCode::Escape) => self.screen = Screen::Paused,
+            (Screen::Map, KeyCode::Escape) => self.screen = Screen::Playing,
             (Screen::Paused, KeyCode::Escape) => self.screen = Screen::Playing,
             (Screen::Playing, KeyCode::KeyE) => {
                 self.inv_ui = InventoryUiState::default();
@@ -903,7 +918,7 @@ impl App {
         let view = self.settings.render_distance as i32;
         let mut deaths = false;
         match self.screen {
-            Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead => {
+            Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead | Screen::Map => {
                 let input = if self.screen == Screen::Playing && !self.chat.open { self.take_input_frame() } else { InputFrame::default() };
                 self.input.mouse_dx = 0.0;
                 self.input.mouse_dy = 0.0;
@@ -1009,6 +1024,7 @@ impl App {
         let mut pack_refresh = false;
         let mut splash_skip = false;
         let mut crash_close = false;
+        let mut map_result = MapUi::default();
         // Splash: about 2.8 s, a little longer if the menu planet is not rendered yet.
         if self.screen == Screen::Splash {
             self.splash_t += dt;
@@ -1027,6 +1043,25 @@ impl App {
         gfx.gui.hide_cursor = self.grabbed;
         // Minimap: rebuilt 4 times a second while in the world.
         self.minimap_age += dt;
+        if self.screen == Screen::Map {
+            if self.block_colors.is_empty() {
+                self.block_colors = block_top_colors(&gfx.atlases);
+            }
+            if let Some(s) = &self.session {
+                let rows = self.map_row..(self.map_row + 8).min(MAP_N);
+                build_world_map_rows(s, &self.block_colors, rows, &mut self.map_px, &self.map_view, &mut self.map_explored);
+                self.map_row += 8;
+                let img = egui::ColorImage { size: [MAP_N, MAP_N], pixels: self.map_px.clone() };
+                match &mut self.world_map {
+                    Some(t) => t.set(img, egui::TextureOptions::NEAREST),
+                    None => self.world_map = Some(gfx.gui.ctx.load_texture("world-map", img, egui::TextureOptions::NEAREST)),
+                }
+                if self.map_row >= MAP_N {
+                    // Keep refreshing: the player moves and chunks stream in.
+                    self.map_row = 0;
+                }
+            }
+        }
         if self.screen.in_world() && self.minimap_age > 0.05 {
             self.minimap_age = 0.0;
             if self.block_colors.is_empty() {
@@ -1048,7 +1083,7 @@ impl App {
         }
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
         let frame = {
-            let App { settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
+            let App { world_map, map_view, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
             let touch_size = gfx.gpu.size();
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
@@ -1098,7 +1133,7 @@ impl App {
                         }
                     }
                 }
-                Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead => {
+                Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead | Screen::Map => {
                     if touch.seen && screen == Screen::Playing {
                         touch.sync_hotbar(ctx.pixels_per_point());
                         touch.draw(&ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("touch"))), touch_size, ctx.pixels_per_point());
@@ -1159,6 +1194,11 @@ impl App {
                             }
                         }
                         Screen::Dead => actions.push(main_menu::death_screen(ctx, &icons)),
+                        Screen::Map => {
+                            if let Some(s) = session.as_ref() {
+                                map_result = world_map_ui(ctx, &icons, world_map.as_ref(), map_view, s);
+                            }
+                        }
                         Screen::Inventory => {
                             if let Some(s) = session {
                                 if let Some((pos, wolfcraft_engine::block::Block::CommandBlock)) = *container {
@@ -1210,6 +1250,12 @@ impl App {
         self.profile.ui_ms = t_ui.ms();
 
         // ---- apply UI results ----
+        if map_result.close {
+            self.screen = Screen::Playing;
+        }
+        if map_result.changed {
+            self.map_row = 0;
+        }
         if crash_close {
             self.crash_report = None;
             let _ = std::fs::remove_file(self.data_dir.join("logs").join("crash.txt"));
@@ -1764,6 +1810,14 @@ impl ApplicationHandler for App {
                             TouchAction::Chat => self.chat.open(""),
                             TouchAction::HotbarSet(i) => self.input.hotbar_set = Some(i),
                             TouchAction::Inventory => self.handle_key(KeyCode::KeyE, true, false),
+                            TouchAction::Map => {
+                                self.screen = Screen::Map;
+                                self.map_row = 0;
+                                if let Some(s) = &self.session {
+                                    self.map_view.center = s.player.body.pos;
+                                    self.map_view.pan = (0.0, 0.0);
+                                }
+                            }
                             TouchAction::Pause => self.handle_key(KeyCode::Escape, true, false),
                             TouchAction::Debug => self.handle_key(KeyCode::Tab, true, false),
                         }
@@ -1946,4 +2000,158 @@ fn show_crash_report(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::Gu
         });
     });
     close || dismissed
+}
+
+const MAP_N: usize = 256;
+
+/// World map view: blocks per pixel, pan from the centre (east, north blocks), centre point.
+#[derive(Clone, Copy)]
+struct MapView {
+    bpp: f64,
+    pan: (f64, f64),
+    center: DVec3,
+}
+
+impl Default for MapView {
+    fn default() -> Self {
+        Self { bpp: 1.0, pan: (0.0, 0.0), center: DVec3::Y }
+    }
+}
+
+#[derive(Default)]
+struct MapUi {
+    close: bool,
+    /// The view changed: redraw the map from the top.
+    changed: bool,
+}
+
+/// North-up frame (east, north) at `p`.
+fn map_axes(up: DVec3) -> (DVec3, DVec3) {
+    let axis = if up.y.abs() > 0.995 { DVec3::Z } else { DVec3::Y };
+    let north = (axis - up * axis.dot(up)).normalize_or_zero();
+    (north.cross(up), north)
+}
+
+/// North-up map around `view.center`: top block colour shaded by height. Columns in unloaded
+/// chunks come from the explored cache, so places you have been stay on the map.
+fn build_world_map_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range<usize>, px: &mut [egui::Color32], view: &MapView, explored: &mut HashMap<(u8, i32, i32), egui::Color32>) {
+    use wolfcraft_engine::block::{Block, RenderKind};
+    let g = s.chunks.grid();
+    let centre = view.center;
+    let up = wolfcraft_engine::physics::up_at(centre);
+    let (east, north) = map_axes(up);
+    let pk = g.radial(s.player.body.pos).floor() as i32;
+    let origin = centre + east * view.pan.0 + north * view.pan.1;
+    for zy in rows {
+        for xx in 0..MAP_N {
+            let off = east * ((xx as f64 - MAP_N as f64 / 2.0 + 0.5) * view.bpp) + north * ((MAP_N as f64 / 2.0 - zy as f64 - 0.5) * view.bpp);
+            let dir = (origin + off).normalize();
+            let col_cell = g.world_to_cell(g.along(dir, pk as f64));
+            let key = (col_cell.f, col_cell.i, col_cell.j);
+            let mut found = None;
+            let mut loaded = true;
+            for k in (pk - 40..=pk + 24).rev() {
+                let c = g.world_to_cell(g.along(dir, k as f64 + 0.5));
+                match s.chunks.get_block(c) {
+                    None => {
+                        loaded = false;
+                        break;
+                    }
+                    Some(Block::Air) => continue,
+                    Some(b) if b.info().render == RenderKind::Invisible => continue,
+                    Some(b) => {
+                        found = Some((b, k));
+                        break;
+                    }
+                }
+            }
+            let colour = if let Some((b, k)) = found {
+                let base = if b == Block::Water { [52, 96, 200] } else { colors.get(b as usize).copied().unwrap_or([128, 128, 128]) };
+                let shade = (1.0 + (k - pk) as f32 * 0.03).clamp(0.55, 1.35);
+                let ch = |v: u8| ((v as f32 * shade).clamp(0.0, 255.0)) as u8;
+                let c = egui::Color32::from_rgb(ch(base[0]), ch(base[1]), ch(base[2]));
+                if explored.len() < 2_000_000 {
+                    explored.insert(key, c);
+                }
+                c
+            } else if !loaded {
+                explored.get(&key).copied().unwrap_or(egui::Color32::from_rgb(10, 12, 16))
+            } else {
+                egui::Color32::from_rgb(10, 12, 16)
+            };
+            px[zy * MAP_N + xx] = colour;
+        }
+    }
+}
+
+/// Full-screen map: drag to move, +/− to zoom, "к себе" to centre on the player.
+fn world_map_ui(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::GuiIcons, tex: Option<&TextureHandle>, view: &mut MapView, s: &GameSession) -> MapUi {
+    use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
+    use wolfcraft_ui::ui_components::{ButtonKind, pill_button};
+    let mut out = MapUi::default();
+    let p = theme_manager::palette(ctx);
+    egui::CentralPanel::default().frame(egui::Frame::none().fill(Color32::from_rgba_unmultiplied(6, 8, 12, 245))).show(ctx, |ui| {
+        let rect = ui.max_rect();
+        let size = (rect.height() - 24.0).min(rect.width() - 260.0).max(160.0);
+        let map = Rect::from_center_size(Pos2::new(rect.left() + 20.0 + size / 2.0, rect.center().y), Vec2::splat(size));
+        let resp = ui.allocate_rect(map, Sense::drag());
+        let painter = ui.painter();
+        painter.rect_filled(map.expand(4.0), egui::Rounding::ZERO, Color32::from_rgb(14, 16, 22));
+        if let Some(t) = tex {
+            painter.image(t.id(), map, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        }
+        painter.rect_stroke(map.expand(4.0), egui::Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+        // Drag pans the map (block units: screen points → map pixels → blocks).
+        if resp.dragged() {
+            let d = resp.drag_delta();
+            let k = MAP_N as f64 / size as f64 * view.bpp;
+            view.pan.0 -= d.x as f64 * k;
+            view.pan.1 += d.y as f64 * k;
+            out.changed = true;
+        }
+        // Player marker.
+        let up = wolfcraft_engine::physics::up_at(view.center);
+        let (east, north) = map_axes(up);
+        let rel = s.player.body.pos - (view.center + east * view.pan.0 + north * view.pan.1);
+        let scale = size as f64 / (MAP_N as f64 * view.bpp);
+        let mp = Pos2::new(map.center().x + (rel.dot(east) * scale) as f32, map.center().y - (rel.dot(north) * scale) as f32);
+        if map.contains(mp) {
+            let b = compass_bearing(s.player.heading, s.player.up()).to_radians() as f32;
+            let rot = |v: Vec2| Vec2::new(v.x * b.cos() - v.y * b.sin(), v.x * b.sin() + v.y * b.cos());
+            let pts: Vec<Pos2> = [Vec2::new(0.0, -10.0), Vec2::new(7.0, 8.0), Vec2::new(0.0, 4.0), Vec2::new(-7.0, 8.0)].iter().map(|v| mp + rot(*v)).collect();
+            painter.add(egui::Shape::convex_polygon(pts, p.accent, Stroke::new(1.5_f32, Color32::BLACK)));
+        }
+        painter.text(Pos2::new(map.center().x, map.top() + 4.0), Align2::CENTER_TOP, "С", wolfcraft_ui::theme_manager::bold_font(16.0), p.danger);
+        // Side panel.
+        let side = Rect::from_min_max(Pos2::new(map.right() + 24.0, rect.top() + 16.0), Pos2::new(rect.right() - 16.0, rect.bottom() - 16.0));
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(side), |ui| {
+            ui.spacing_mut().item_spacing.y = 10.0;
+            ui.label(egui::RichText::new("Карта мира").font(wolfcraft_ui::theme_manager::bold_font(20.0)).color(p.text));
+            let pos = s.player.body.pos;
+            ui.label(egui::RichText::new(format!("X {:.0}  Y {:.0}  Z {:.0}", pos.x, pos.y, pos.z)).size(13.0).color(p.text_muted));
+            ui.label(egui::RichText::new(format!("Масштаб: {} бл/пикс", view.bpp)).size(13.0).color(p.text_muted));
+            let w = ui.available_width();
+            ui.horizontal(|ui| {
+                if pill_button(ui, icons, None, "+", ButtonKind::Secondary, (w - 8.0) / 2.0, view.bpp > 0.25).clicked() {
+                    view.bpp /= 2.0;
+                    out.changed = true;
+                }
+                if pill_button(ui, icons, None, "−", ButtonKind::Secondary, (w - 8.0) / 2.0, view.bpp < 8.0).clicked() {
+                    view.bpp *= 2.0;
+                    out.changed = true;
+                }
+            });
+            if pill_button(ui, icons, Some(wolfcraft_assets::gui::CROSSHAIR), "К себе", ButtonKind::Secondary, w, true).clicked() {
+                view.center = s.player.body.pos;
+                view.pan = (0.0, 0.0);
+                out.changed = true;
+            }
+            if pill_button(ui, icons, Some(wolfcraft_assets::gui::CLOSE), "Закрыть", ButtonKind::Primary, w, true).clicked() {
+                out.close = true;
+            }
+            ui.label(egui::RichText::new("Тащите карту пальцем. Где вы уже были, карта запоминает.").size(12.0).color(p.text_muted));
+        });
+        let _ = FontId::default();
+    });
+    out
 }

@@ -16,6 +16,8 @@ pub enum TouchAction {
     HotbarSet(usize),
     Place,
     Hotbar(i32),
+    /// Tap on the minimap: open the world map.
+    Map,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -63,6 +65,9 @@ pub struct TouchState {
     pub breaking: bool,
     /// Hotbar rectangle in physical pixels (set while drawing), for the buttons beside it.
     hotbar: Option<(f32, f32, f32, f32)>,
+    /// Inventory tile and minimap (physical pixels), published by the HUD.
+    inv: Option<(f32, f32, f32, f32)>,
+    map: Option<(f32, f32, f32, f32)>,
 }
 
 pub const STICK_R: f32 = 110.0;
@@ -109,10 +114,13 @@ fn island_layout(size: (u32, u32)) -> (f32, f32, f32) {
     let u = unit(size);
     let step = 78.0 * u;
     let w = step * ISLAND.len() as f32;
-    (size.0 as f32 * 0.5 - w * 0.5, 48.0 * u, step)
+    let _ = w;
+    // Top-left corner, clear of the screen's rounded corner.
+    (40.0 * u, 48.0 * u, step)
 }
 
-const BUTTONS: [Btn; 9] = [Btn::Jump, Btn::Sneak, Btn::Inventory, Btn::Pause, Btn::Chat, Btn::Camera, Btn::Tab, Btn::Prev, Btn::Next];
+/// Round on-screen buttons (the inventory is a tile next to the hotbar, drawn by the HUD).
+const BUTTONS: [Btn; 6] = [Btn::Jump, Btn::Sneak, Btn::Pause, Btn::Chat, Btn::Camera, Btn::Tab];
 
 fn hit(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>, p: (f32, f32)) -> bool {
     let (cx, cy, r) = button_rect(b, size, hotbar);
@@ -130,7 +138,14 @@ impl TouchState {
             TouchPhase::Started => {
                 let (w, h) = (size.0 as f32, size.1 as f32);
                 let on_hotbar = self.hotbar.is_some_and(|(l, t, r, bt)| p.0 >= l - 6.0 && p.0 <= r + 6.0 && p.1 >= t - 6.0 && p.1 <= bt + 6.0);
-                let role = if on_hotbar {
+                let inside = |r: Option<(f32, f32, f32, f32)>| r.is_some_and(|(l, t, rr, b)| p.0 >= l - 4.0 && p.0 <= rr + 4.0 && p.1 >= t - 4.0 && p.1 <= b + 4.0);
+                let role = if inside(self.inv) {
+                    out.push(TouchAction::Inventory);
+                    Role::Button(Btn::Inventory)
+                } else if inside(self.map) {
+                    out.push(TouchAction::Map);
+                    Role::Button(Btn::Tab)
+                } else if on_hotbar {
                     // Tapping the hotbar picks that slot (it must not start the stick or the look).
                     let (l, _, r, _) = self.hotbar.unwrap_or((0.0, 0.0, 1.0, 1.0));
                     let slot = (((p.0 - l) / (r - l).max(1.0)) * 9.0).floor().clamp(0.0, 8.0) as usize;
@@ -210,9 +225,10 @@ impl TouchState {
 
     /// Reads the hotbar rectangle the HUD published (points -> physical pixels).
     pub fn sync_hotbar(&mut self, ppp: f32) {
-        if let Ok(h) = wolfcraft_ui::hud::HOTBAR_RECT.read() {
-            self.hotbar = if h[2] > h[0] { Some((h[0] * ppp, h[1] * ppp, h[2] * ppp, h[3] * ppp)) } else { None };
-        }
+        let read = |l: &std::sync::RwLock<[f32; 4]>| l.read().ok().and_then(|h| (h[2] > h[0]).then(|| (h[0] * ppp, h[1] * ppp, h[2] * ppp, h[3] * ppp)));
+        self.hotbar = read(&wolfcraft_ui::hud::HOTBAR_RECT);
+        self.inv = read(&wolfcraft_ui::hud::INV_RECT);
+        self.map = read(&wolfcraft_ui::hud::MINIMAP_RECT);
     }
 
     /// Takes the accumulated look drag.
