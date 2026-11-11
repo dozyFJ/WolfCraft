@@ -201,6 +201,7 @@ impl AtlasManager {
                     // HD packs: blocks with an HD painter are drawn at full resolution
                     // (real detail); the rest is a smooth upscale of the 16× art.
                     let hd = if scale > 1 && kind == AtlasKind::Blocks { procedural::hd::block(name, 16 * scale) } else { None };
+                    let native = scale == 1 || hd.is_some();
                     match hd {
                         Some(mut big) => {
                             crate::packs::vibrant(&mut big);
@@ -214,7 +215,7 @@ impl AtlasManager {
                         }
                     }
                     // A little relief on solid block textures (not on animated water).
-                    if kind == AtlasKind::Blocks && name != "water" && name != "lava" {
+                    if native && kind == AtlasKind::Blocks && name != "water" && name != "lava" {
                         crate::packs::emboss(img, if img.width <= 16 { 0.45 } else { 1.6 });
                     }
                 }

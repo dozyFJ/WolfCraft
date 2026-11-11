@@ -140,6 +140,44 @@ pub mod tiles {
     pub const ISKRIT_LAMP: u16 = 129;
     pub const ISKRIT_LAMP_ON: u16 = 130;
     pub const BUTTON: u16 = 131;
+    pub const DOOR_OAK: u16 = 132;
+    pub const DOOR_BIRCH: u16 = 133;
+    pub const DOOR_SPRUCE: u16 = 134;
+    pub const DOOR_IRON: u16 = 135;
+}
+
+/// Door leaf: a frame, two raised panels, a four-pane window at the top and a handle.
+fn door(wood: Rgb, iron: bool, seed: u32) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let grain = (rnd(x / 3, y, seed) - 0.5) * 0.08 + if x % 4 == 0 { -0.04 } else { 0.0 };
+                let mut c = if iron { wood.add((rnd(x, y, seed) - 0.5) * 0.04) } else { wood.add(grain) };
+                let frame = x == 0 || x == 15 || y == 0 || y == 15 || x == 1 || x == 14 || y == 1 || y == 14;
+                let window = (3..=12).contains(&x) && (3..=6).contains(&y);
+                let mullion = x == 7 || x == 8 || y == 5;
+                let panel_l = (3..=6).contains(&x) && (9..=12).contains(&y);
+                let panel_r = (9..=12).contains(&x) && (9..=12).contains(&y);
+                if frame {
+                    c = c.scale(0.68);
+                } else if window {
+                    c = if mullion { wood.scale(0.7) } else { Rgb(0.62, 0.78, 0.86).add((y as f32 - 4.5) * -0.03) };
+                } else if panel_l || panel_r {
+                    // Raised panel: light top-left edge, dark bottom-right edge.
+                    let (px0, py0) = (if panel_l { 3 } else { 9 }, 9);
+                    let edge_lt = x == px0 || y == py0;
+                    let edge_rb = x == px0 + 3 || y == py0 + 3;
+                    c = if edge_lt { c.scale(1.35) } else if edge_rb { c.scale(0.55) } else { c.scale(0.92) };
+                }
+                q.put(x, y, c, 1.0);
+            }
+        }
+        // Handle on the right.
+        for y in 7..=8 {
+            q.put(12, y, Rgb(0.20, 0.18, 0.16), 1.0);
+            q.put(13, y, Rgb(0.78, 0.70, 0.40), 1.0);
+        }
+    })
 }
 
 const S: u32 = 16;
@@ -1355,6 +1393,10 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
         bevel(q, 0, 0, 15, 15, Rgb(0.82, 0.82, 0.84), Rgb(0.36, 0.36, 0.38));
     }));
+    l.add(DOOR_OAK, "door_oak", door(Rgb(0.62, 0.45, 0.25), false, 201));
+    l.add(DOOR_BIRCH, "door_birch", door(Rgb(0.84, 0.76, 0.55), false, 202));
+    l.add(DOOR_SPRUCE, "door_spruce", door(Rgb(0.42, 0.30, 0.18), false, 203));
+    l.add(DOOR_IRON, "door_iron", door(Rgb(0.74, 0.76, 0.80), true, 204));
     // Pixel-art finish. Natural, noisy materials get clumps instead of per-pixel static, a
     // gentle large-scale variation and a few luminance bands (the hand-painted look); every
     // opaque pixel then gets a touch more contrast and a limited palette.

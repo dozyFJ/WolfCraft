@@ -127,7 +127,7 @@ pub fn emboss(img: &mut Image, strength: f32) {
         (0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32) / 255.0
     };
     // Height: a small blur of the brightness (radius grows with the resolution).
-    let r = (w / 32).max(1);
+    let r = (w / 64).max(1);
     let mut height = vec![0.0f32; (w * h) as usize];
     for y in 0..h {
         for x in 0..w {

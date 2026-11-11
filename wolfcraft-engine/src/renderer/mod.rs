@@ -12,7 +12,7 @@ pub mod model;
 pub mod sky;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const MAX_TILES: usize = 128;
+const MAX_TILES: usize = 256;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

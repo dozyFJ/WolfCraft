@@ -118,7 +118,10 @@ fn dirt(x: f32, y: f32, seed: u32) -> Rgb {
 }
 
 fn grass(x: f32, y: f32, seed: u32) -> Rgb {
-    let base = rgb(98, 160, 62);
+    grass_c(x, y, rgb(98, 160, 62), seed)
+}
+
+fn grass_c(x: f32, y: f32, base: Rgb, seed: u32) -> Rgb {
     let m = fbm(x, y, 3, 4, seed);
     // Blades: thin streaks in many directions, from hashed short strokes.
     let (_, _, id) = worley(x, y, 40, seed + 2);
@@ -303,6 +306,20 @@ pub fn block(name: &str, size: u32) -> Option<Image> {
         "dirt" => solid(s, |x, y| dirt(x, y, 2)),
         "grass_top" => solid(s, |x, y| grass(x, y, 40)),
         "grass_side" => solid(s, grass_side),
+        "swamp_grass_top" => solid(s, |x, y| grass_c(x, y, rgb(76, 108, 56), 80)),
+        "dry_grass_top" => solid(s, |x, y| grass_c(x, y, rgb(140, 158, 82), 81)),
+        "moss" => solid(s, |x, y| grass_c(x, y, rgb(84, 130, 52), 82)),
+        "swamp_grass_side" | "dry_grass_side" | "podzol_side" => {
+            let top = match name {
+                "swamp_grass_side" => rgb(76, 108, 56),
+                "dry_grass_side" => rgb(140, 158, 82),
+                _ => rgb(110, 76, 38),
+            };
+            solid(s, move |x, y| {
+                let depth = 0.2 + 0.12 * fbm(x, 0.0, 6, 3, 41) + 0.08 * fbm(x, 0.5, 24, 1, 42);
+                if y < depth { grass_c(x, y, top, 83).scale(0.95) } else if y < depth + 0.03 { dirt(x, y, 43).scale(0.7) } else { dirt(x, y, 43) }
+            })
+        }
         "snow" => solid(s, |x, y| rgb(240, 245, 250).scale(0.93 + 0.08 * fbm(x, y, 4, 4, 5))),
         "snow_side" => solid(s, |x, y| {
             let depth = 0.22 + 0.1 * fbm(x, 0.0, 6, 3, 44);

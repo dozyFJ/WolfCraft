@@ -679,7 +679,8 @@ fn camera_frame(pose: &HandsPose) -> Frame {
 
 /// Textured mini block held in the right fist (camera-relative world-pipeline vertices).
 /// `tiles`: atlas sprite per face (+X, -X, +Y, -Y, +Z, -Z), as in `BlockInfo::tiles`.
-pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool) -> Vec<crate::mesher::Vertex> {
+/// `cross`: a plant or torch: two crossed sprites standing in the fist instead of a cube.
+pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool, cross: bool) -> Vec<crate::mesher::Vertex> {
     let frame = camera_frame(pose);
     let a = arm_place(pose, 1.0);
     // Fist centre after the forearm tilt, then a bit above and in front of it.
@@ -694,6 +695,23 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool) -> Ve
     };
     let twist = |l: Vec3| a.pos + twist_dir(l - a.pos, a.yaw, a.roll, 1.0);
     let mut out = Vec::with_capacity(72);
+    if cross {
+        // Two crossed sprites standing up from the fist (torch flame / flower on top).
+        let foot = fist + Vec3::new(0.02, -0.04, 0.04);
+        let (hw, ht) = (0.13f32, 0.30f32);
+        for ang in [0.6f32, 0.6 + std::f32::consts::FRAC_PI_2] {
+            let d = Vec3::new(ang.cos(), 0.0, ang.sin()) * hw;
+            let corner = |u: f32, v: f32| -> crate::mesher::Vertex {
+                let local = twist(foot + d * (u * 2.0 - 1.0) + Vec3::Y * (v * ht));
+                crate::mesher::Vertex { pos: frame.to_world(local).as_vec3().to_array(), uv: [0.001 + u * 0.998, 0.999 - v * 0.998], flags: tiles[0] as u32 | ((emissive as u32) << 16) | (2 << 17), light: [1.0, 1.0] }
+            };
+            let q = [corner(0.0, 0.0), corner(1.0, 0.0), corner(1.0, 1.0), corner(0.0, 1.0)];
+            for i in [0usize, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2] {
+                out.push(q[i]);
+            }
+        }
+        return out;
+    }
     // (face index in tiles, normal, u axis, v axis)
     let faces: [(usize, Vec3, Vec3, Vec3); 6] = [
         (0, Vec3::X, Vec3::Z, Vec3::Y),
@@ -1029,9 +1047,10 @@ mod tests {
         let mut p = hands(0.0, 1.0);
         p.holding = true;
         let tiles = [1u16; 6];
-        let rest = build_held_block(&p, tiles, false);
+        let rest = build_held_block(&p, tiles, false, false);
         p.punch_cycle = strike_moment(false);
-        let hit = build_held_block(&p, tiles, false);
+        let hit = build_held_block(&p, tiles, false, false);
+        assert_eq!(build_held_block(&p, tiles, false, true).len(), 24, "a torch is two crossed sprites");
         assert_eq!(rest.len(), 72);
         let c = |v: &[crate::mesher::Vertex]| v.iter().fold(Vec3::ZERO, |a, v| a + Vec3::from(v.pos)) / v.len() as f32;
         assert!((c(&hit) - c(&rest)).length() > 0.08, "the block moves with the punch");

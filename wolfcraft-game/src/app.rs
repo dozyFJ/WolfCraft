@@ -1737,7 +1737,7 @@ impl App {
                     // The selected block, textured, in the right fist.
                     let held = s.player.inventory.held().and_then(|st| st.info().place).map(|b| {
                         let pose = HandsPose { holding: true, tool: None, icon: None, ..hand_pose };
-                        let mut vs = build_held_block(&pose, b.info().tiles, b.info().emissive);
+                        let mut vs = build_held_block(&pose, b.info().tiles, b.info().emissive, b.info().render == wolfcraft_engine::block::RenderKind::Cross);
                         for v in vs.iter_mut() {
                             v.pos = xf(v.pos);
                         }

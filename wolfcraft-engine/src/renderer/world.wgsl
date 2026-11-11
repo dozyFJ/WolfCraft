@@ -4,7 +4,7 @@ struct Globals {
     cam: vec4<f32>,      // xyz: camera position in world space (f32, planet-sized)
     fog: vec4<f32>,      // rgb: fog colour, a: density (1 / fog distance)
     misc: vec4<f32>,     // x: time, y: underwater (0/1), z: crack, w: shader preset (0 off, 1 light, 2 ultra)
-    tiles: array<vec4<f32>, 128>, // xy: uv min, zw: uv size of every block sprite
+    tiles: array<vec4<f32>, 256>, // xy: uv min, zw: uv size of every block sprite
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
