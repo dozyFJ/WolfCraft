@@ -316,7 +316,7 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
     // Tap: the slide's button.
     if resp.clicked() {
         *action = match cur {
-            2 => MenuAction::OpenWorldSelect,
+            2 => MenuAction::OpenNetwork,
             3 => MenuAction::OpenSettings,
             _ => MenuAction::OpenWorldSelect,
         };
@@ -396,8 +396,8 @@ fn game(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
         if tile(ui, icons, p, half, icon::PLUS, "Новый мир", "Сид, режим, форма планеты").clicked() {
             *action = MenuAction::OpenCreate;
         }
-        if tile(ui, icons, p, half, icon::GLOBE, "Игра по сети", "Серверы и миры друзей").clicked() {
-            *action = MenuAction::OpenWorldSelect;
+        if tile(ui, icons, p, half, icon::GLOBE, "Игра по сети", "Wi-Fi, точка доступа, код").clicked() {
+            *action = MenuAction::OpenNetwork;
         }
     });
     ui.horizontal(|ui| {

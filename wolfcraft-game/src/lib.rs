@@ -66,6 +66,42 @@ pub mod orientation {
         let _ = APP.set(app);
     }
 
+    /// Lets the Wi-Fi chip pass broadcast packets to the app (many phones drop them to save
+    /// power), so servers on the local network show up in "Рядом". Done once.
+    pub fn acquire_multicast_lock() {
+        #[cfg(target_os = "android")]
+        {
+            static DONE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+            if DONE.set(()).is_err() {
+                return;
+            }
+            let Some(app) = APP.get() else { return };
+            let Ok(vm) = (unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) }) else { return };
+            let Ok(mut env) = vm.attach_current_thread() else { return };
+            let activity = unsafe { jni::objects::JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject) };
+            let r = (|| -> jni::errors::Result<()> {
+                let svc = env.new_string("wifi")?;
+                let wm = env.call_method(&activity, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", &[jni::objects::JValue::Object(&svc)])?.l()?;
+                if wm.is_null() {
+                    return Ok(());
+                }
+                let tag = env.new_string("wolfcraft")?;
+                let lock = env.call_method(&wm, "createMulticastLock", "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;", &[jni::objects::JValue::Object(&tag)])?.l()?;
+                env.call_method(&lock, "acquire", "()V", &[])?;
+                // Keep the lock alive for the whole run.
+                std::mem::forget(env.new_global_ref(lock)?);
+                Ok(())
+            })();
+            if let Err(e) = r {
+                let _ = env.exception_clear();
+                log::warn!("multicast lock: {e}");
+            } else {
+                log::info!("multicast lock acquired");
+            }
+            std::mem::forget(activity);
+        }
+    }
+
     /// Asks the activity for portrait (`true`) or landscape, following the sensor within it.
     pub fn set_portrait(portrait: bool) {
         #[cfg(target_os = "android")]

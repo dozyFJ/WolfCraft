@@ -33,6 +33,8 @@ pub enum MenuAction {
     SetSkin(u8),
     /// Open this world in the studio (editor).
     OpenStudio(String),
+    /// World list opened straight on "Игра по сети → Рядом".
+    OpenNetwork,
 }
 
 pub struct WorldEntry {
@@ -191,8 +193,11 @@ pub struct WorldSelectState {
     pub mode: usize,
     /// Address typed for a network game.
     pub address: String,
-    /// Right sidebar in "Игра по сети": 0 servers, 1 private worlds, 2 by address.
+    /// Right sidebar in "Игра по сети": 0 nearby (found on the local network), 1 host a
+    /// server, 2 by code or address, 3 saved servers.
     pub net_tab: usize,
+    /// Servers heard on the local network (Wi-Fi, hotspot): (name, address, players, max).
+    pub nearby: Vec<(String, String, usize, usize)>,
     /// Saved servers (name, address); `servers_changed` tells the app to save them.
     pub servers: Vec<(String, String)>,
     pub servers_changed: bool,
@@ -222,6 +227,56 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
     }
     match st.net_tab {
         0 => {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Рядом").font(bold_font(18.0)).color(p.text));
+                // Little radar: the list refreshes by itself.
+                let t = ui.ctx().input(|i| i.time) as f32;
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+                ui.painter().circle_stroke(r.center(), 4.0 + (t * 1.5).fract() * 7.0, Stroke::new(1.5_f32, p.accent.gamma_multiply(1.0 - (t * 1.5).fract())));
+                ui.painter().circle_filled(r.center(), 3.0, p.accent);
+                ui.label(egui::RichText::new("ищем игры в вашей сети Wi-Fi и точке доступа").size(13.0).color(p.text_muted));
+            });
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+            ui.add_space(6.0);
+            egui::ScrollArea::vertical().id_salt("nearby").max_height(ui.available_height() - 10.0).show(ui, |ui| {
+                for (name, addr, players, max) in &st.nearby {
+                    row_card(ui, false, |ui| {
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+                            icons.paint(ui.painter(), r, icon::GLOBE, p.success);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(name).font(bold_font(16.0)).color(p.text));
+                                ui.label(egui::RichText::new(format!("игроков {players}/{max} · {addr}")).size(12.5).color(p.text_muted));
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 0.0, players < max).clicked() {
+                                    st.net_error = None;
+                                    act = Some(MenuAction::JoinServer(addr.clone()));
+                                }
+                            });
+                        });
+                    });
+                    ui.add_space(6.0);
+                }
+                if st.nearby.is_empty() {
+                    ui.label(egui::RichText::new("Пока никого. Сервер появится здесь сам, как только друг его откроет.").size(13.5).color(p.text_muted));
+                }
+                ui.add_space(10.0);
+                for (title, text) in [
+                    ("Одна сеть Wi-Fi", "Один игрок открывает мир во вкладке «Создать сервер» — у остальных он сразу появляется в этом списке."),
+                    ("Только мобильный интернет", "Операторы не пропускают входящие подключения, поэтому напрямую через мобильную сеть сыграть нельзя. Включите точку доступа на телефоне с сервером и подключите к ней друзей: сервер появится здесь, а интернет на игру не тратится."),
+                    ("Код приглашения", "Сервер показывает в чате код вида ABCD-EFGH. Его можно ввести во вкладке «По коду»."),
+                ] {
+                    row_card(ui, false, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(egui::RichText::new(title).font(bold_font(15.0)).color(p.text));
+                        ui.label(egui::RichText::new(text).size(13.0).color(p.text_muted));
+                    });
+                    ui.add_space(6.0);
+                }
+            });
+        }
+        3 => {
             ui.label(egui::RichText::new("Мои серверы").font(bold_font(18.0)).color(p.text));
             ui.add_space(6.0);
             let mut remove = None;
@@ -270,8 +325,8 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
             });
         }
         1 => {
-            ui.label(egui::RichText::new("Приватные миры").font(bold_font(18.0)).color(p.text));
-            ui.label(egui::RichText::new("Откройте свой мир для друзей: телефон станет сервером, адрес появится в чате. Друзья подключаются из «Мои серверы» или «По адресу» (одна сеть Wi-Fi).").size(13.0).color(p.text_muted));
+            ui.label(egui::RichText::new("Создать сервер").font(bold_font(18.0)).color(p.text));
+            ui.label(egui::RichText::new("Выберите мир — телефон станет сервером. Друзья в той же сети Wi-Fi или подключённые к вашей точке доступа увидят его во вкладке «Рядом»; код приглашения появится в чате.").size(13.0).color(p.text_muted));
             ui.add_space(8.0);
             egui::ScrollArea::vertical().id_salt("private-worlds").max_height(ui.available_height() - 60.0).show(ui, |ui| {
                 for w in worlds {
@@ -307,10 +362,10 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
             }
         }
         _ => {
-            ui.label(egui::RichText::new("Подключиться по адресу").font(bold_font(18.0)).color(p.text));
+            ui.label(egui::RichText::new("По коду или адресу").font(bold_font(18.0)).color(p.text));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                text_input(ui, icons, &mut st.address, "Адрес, например 192.168.0.10:25570", 360.0, Some(icon::GLOBE));
+                text_input(ui, icons, &mut st.address, "Код ABCD-EFGH или адрес 192.168.0.10", 360.0, Some(icon::GLOBE));
                 ui.add_space(8.0);
                 let ready = !st.address.trim().is_empty();
                 if pill_button(ui, icons, Some(icon::PLAY), "Подключиться", ButtonKind::Primary, 0.0, ready).clicked() {
@@ -321,7 +376,7 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
             ui.add_space(14.0);
             row_card(ui, false, |ui| {
                 ui.label(egui::RichText::new("Как играть вместе").font(bold_font(16.0)).color(p.text));
-                ui.label(egui::RichText::new("Один игрок открывает мир (Приватные миры) — в чате появится адрес. Остальные в той же сети Wi-Fi вводят этот адрес здесь. Вы окажетесь в одном мире: видите друг друга, общие постройки и чат.").size(13.5).color(p.text_muted));
+                ui.label(egui::RichText::new("Один игрок открывает мир («Создать сервер») — в чате появятся код приглашения и адрес. Остальные вводят код здесь или просто выбирают сервер во вкладке «Рядом». Вы окажетесь в одном мире: видите друг друга, общие постройки и чат.").size(13.5).color(p.text_muted));
             });
         }
     }
@@ -474,7 +529,7 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
             .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 10.0;
-                for (i, ic, label) in [(0usize, icon::GLOBE, "Серверы"), (1, icon::STAR, "Приватные миры"), (2, icon::EDIT, "По адресу")] {
+                for (i, ic, label) in [(0usize, icon::SEARCH, "Рядом"), (1, icon::STAR, "Создать сервер"), (2, icon::EDIT, "По коду"), (3, icon::GLOBE, "Мои серверы")] {
                     let kind = if st.net_tab == i { ButtonKind::Primary } else { ButtonKind::Secondary };
                     if pill_button(ui, icons, Some(ic), label, kind, ui.available_width(), true).clicked() {
                         st.net_tab = i;

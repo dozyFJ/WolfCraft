@@ -293,6 +293,11 @@ pub fn start(name: &str, world_toml: String, dir: &Path, port: u16, echo: bool) 
             })
             .map_err(|e| e.to_string())?;
     }
+    // Tell the local networks (Wi-Fi, hotspot) that a game is open here.
+    {
+        let s2 = shared.clone();
+        crate::lan::start_beacon(name.to_string(), port, Arc::new(move || (s2.lock().map(|s| s.players.len()).unwrap_or(0), MAX_PLAYERS)), running.clone());
+    }
     Ok(ServerHandle { shared, running, port })
 }
 

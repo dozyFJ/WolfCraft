@@ -169,6 +169,8 @@ pub struct App {
     studio_world: Option<String>,
     /// The world list was read for the launcher since it was last shown.
     main_worlds_fresh: bool,
+    /// Listens for servers on the local network while the world list is open.
+    discovery: Option<wolfcraft_net::lan::Discovery>,
     /// Open chest / furnace (block cell and kind).
     container: Option<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)>,
     pending_apply: bool,
@@ -282,6 +284,7 @@ impl App {
             studio: None,
             studio_world: None,
             main_worlds_fresh: false,
+            discovery: None,
             container: None,
             pending_apply: false,
             hand_cycle: 0.0,
@@ -420,6 +423,9 @@ impl App {
 
     /// Connects to a WolfServer and loads its world (generated locally from the server settings).
     fn join_server(&mut self, addr: &str) {
+        // An invite code ("ABCD-EFGH") or an address.
+        let resolved = wolfcraft_net::lan::resolve_input(addr);
+        let addr = resolved.as_str();
         let nick = if self.settings.nickname.trim().is_empty() { "Игрок" } else { self.settings.nickname.trim() };
         let client = match wolfcraft_net::Client::connect(addr, nick, self.settings.skin) {
             Ok(c) => c,
@@ -498,8 +504,9 @@ impl App {
             return;
         }
         let now = self.time.elapsed() as f64;
-        for a in wolfcraft_net::server::lan_addresses(port) {
-            self.chat.push(ChatKind::System, format!("Сервер запущен. Адрес для друзей: {a}"), now);
+        self.chat.push(ChatKind::System, "Сервер запущен: друзья увидят его в «Игра по сети → Рядом»", now);
+        for line in wolfcraft_net::lan::host_lines(port) {
+            self.chat.push(ChatKind::System, line, now);
         }
     }
 
@@ -1025,6 +1032,19 @@ impl App {
             }
         } else {
             self.main_worlds_fresh = false;
+        }
+        // "Рядом": hear servers on Wi-Fi / hotspot while the world list is open.
+        if self.screen == Screen::WorldSelect {
+            if self.discovery.is_none() {
+                crate::orientation::acquire_multicast_lock();
+                self.discovery = wolfcraft_net::lan::Discovery::start();
+            }
+            if let Some(d) = &self.discovery {
+                self.world_select.nearby = d.servers().into_iter().map(|f| (f.name, f.addr, f.players, f.max)).collect();
+            }
+        } else if self.discovery.is_some() {
+            self.discovery = None;
+            self.world_select.nearby.clear();
         }
         let portrait = matches!(self.screen, Screen::Splash | Screen::Main);
         if self.portrait != Some(portrait) {
@@ -1769,6 +1789,12 @@ impl App {
     fn handle_action(&mut self, a: MenuAction, gfx: &mut Gfx) {
         match a {
             MenuAction::None => {}
+            MenuAction::OpenNetwork => {
+                self.world_select.mode = 1;
+                self.world_select.net_tab = 0;
+                self.refresh_worlds(&gfx.gui.ctx);
+                self.push(Screen::WorldSelect);
+            }
             MenuAction::OpenWorldSelect => {
                 self.refresh_worlds(&gfx.gui.ctx);
                 self.push(Screen::WorldSelect);

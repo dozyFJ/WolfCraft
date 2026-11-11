@@ -4,6 +4,7 @@
 //! from the world settings it receives, and the server relays block edits, player states and chat
 //! and keeps the list of edits so that late joiners see the same world.
 
+pub mod lan;
 pub mod server;
 
 use serde::de::DeserializeOwned;
