@@ -299,7 +299,7 @@ impl WorldRenderer {
             })
         };
         let opaque_pipeline = make("opaque", "fs_opaque", Some(wgpu::Face::Back), None, true);
-        let water_pipeline = make("water", "fs_water", None, Some(wgpu::BlendState::ALPHA_BLENDING), false);
+        let water_pipeline = make("water", "fs_water", None, Some(KEEP_ALPHA_BLEND), false);
 
         let line_attrs = wgpu::vertex_attr_array![0 => Float32x3];
         let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -318,7 +318,7 @@ impl WorldRenderer {
                 module: &shader,
                 entry_point: "fs_line",
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: color_format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
+                targets: &[Some(wgpu::ColorTargetState { format: color_format, blend: Some(KEEP_ALPHA_BLEND), write_mask: wgpu::ColorWrites::ALL })],
             }),
             multiview: None,
             cache: None,
@@ -341,7 +341,7 @@ impl WorldRenderer {
                 module: &shader,
                 entry_point: "fs_crack",
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: color_format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
+                targets: &[Some(wgpu::ColorTargetState { format: color_format, blend: Some(KEEP_ALPHA_BLEND), write_mask: wgpu::ColorWrites::ALL })],
             }),
             multiview: None,
             cache: None,
@@ -992,3 +992,10 @@ mod tests {
         assert!(d[2] > n[2] * 5.0);
     }
 }
+
+/// Normal alpha blending for colour, but the target keeps alpha = 1: the phone compositor
+/// treats a pixel with alpha < 1 as see-through.
+const KEEP_ALPHA_BLEND: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::SrcAlpha, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+    alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+};

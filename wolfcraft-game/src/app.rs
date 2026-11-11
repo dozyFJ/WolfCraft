@@ -888,8 +888,8 @@ impl App {
         let p = &s.player;
         let up = p.up();
         let r = wolfcraft_engine::cubesphere::radial(p.body.pos);
-        let surf = s.planet.surface_radius(p.body.pos.normalize_or_zero());
-        let col = s.planet.column(up);
+        let surf = s.planet.surface_radius(wolfcraft_engine::cubesphere::col_dir(p.body.pos));
+        let col = s.planet.column(wolfcraft_engine::cubesphere::col_dir(p.body.pos));
         let north = (DVec3::Y - up * DVec3::Y.dot(up)).normalize_or_zero();
         let east = north.cross(up);
         let ang = p.heading.dot(east).atan2(p.heading.dot(north)).to_degrees().rem_euclid(360.0);
@@ -1126,6 +1126,10 @@ impl App {
                 }
             }
         }
+        // Take the swapchain image before building the UI: if there is none this frame, skip
+        // the UI too, so its texture updates are never lost and every shown frame has the UI.
+        let t_render = ScopeTimer::start();
+        let Some(output) = gfx.gpu.acquire() else { return };
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
         let frame = {
             let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, .. } = self;
@@ -1375,8 +1379,6 @@ impl App {
         }
 
         // ---- render ----
-        let t_render = ScopeTimer::start();
-        let Some(output) = gfx.gpu.acquire() else { return };
         let view_tex = output.texture.create_view(&Default::default());
         let mut encoder = gfx.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
         let (w, h) = gfx.gpu.size();
@@ -1575,8 +1577,11 @@ impl App {
                 occlusion_query_set: None,
             });
         }
-        let extra = gfx.gui.render(&gfx.gpu.device, &gfx.gpu.queue, &mut encoder, &view_tex, [w, h], frame);
-        gfx.gpu.queue.submit(extra.into_iter().chain(std::iter::once(encoder.finish())));
+        // The world and the UI go to the GPU separately: an error in one never drops the other.
+        gfx.gpu.queue.submit(std::iter::once(encoder.finish()));
+        let mut gui_encoder = gfx.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gui") });
+        let extra = gfx.gui.render(&gfx.gpu.device, &gfx.gpu.queue, &mut gui_encoder, &view_tex, [w, h], frame);
+        gfx.gpu.queue.submit(extra.into_iter().chain(std::iter::once(gui_encoder.finish())));
         output.present();
         self.profile.render_ms = t_render.ms();
         thread_local! {
@@ -2029,7 +2034,7 @@ fn build_minimap_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range
     for zy in rows {
         for xx in 0..N {
             let off = right * (xx as f64 - N as f64 / 2.0 + 0.5) + fwd * (N as f64 / 2.0 - zy as f64 - 0.5);
-            let dir = (feet + off).normalize();
+            let dir = g.col_dir(feet + off);
             let mut found = None;
             px[zy * N + xx] = egui::Color32::from_rgb(12, 14, 18);
             for k in (pk - 18..=pk + 8).rev() {
@@ -2129,7 +2134,7 @@ fn build_world_map_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Ran
     for zy in rows {
         for xx in 0..MAP_W {
             let off = east * ((xx as f64 - MAP_W as f64 / 2.0 + 0.5) * view.bpp) + north * ((MAP_H as f64 / 2.0 - zy as f64 - 0.5) * view.bpp);
-            let dir = (origin + off).normalize();
+            let dir = g.col_dir(origin + off);
             let col_cell = g.world_to_cell(g.along(dir, pk as f64));
             let key = (col_cell.f, col_cell.i, col_cell.j);
             let mut found = None;

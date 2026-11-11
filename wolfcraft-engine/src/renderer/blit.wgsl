@@ -18,5 +18,5 @@ fn vs(@builtin(vertex_index) i: u32) -> Out {
 
 @fragment
 fn fs(in: Out) -> @location(0) vec4<f32> {
-    return textureSample(src, smp, in.uv);
+    return vec4<f32>(textureSample(src, smp, in.uv).rgb, 1.0);
 }

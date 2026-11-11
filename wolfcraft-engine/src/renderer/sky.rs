@@ -258,7 +258,7 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
             let th = std::f32::consts::PI * la as f32 / lat_n as f32;
             let ph = std::f32::consts::TAU * lo as f32 / lon_n as f32;
             let v = Vec3::new(th.sin() * ph.cos(), th.cos(), th.sin() * ph.sin());
-            if cube { v / crate::cubesphere::cube_radial(v.as_dvec3()) as f32 } else { v }
+            if cube { crate::cubesphere::Grid { n: 2, cube: true }.along(v.as_dvec3(), 1.0).as_vec3() } else { v }
         };
         let land = |n: Vec3| -> [f32; 3] {
             let f = (n.x * 3.1 + 1.3).sin() * (n.y * 2.7).cos() + (n.z * 4.3 - n.x * 1.7).sin() * 0.6 + (n.y * 7.0 + n.z * 5.0).sin() * 0.25;

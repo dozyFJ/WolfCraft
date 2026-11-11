@@ -207,7 +207,7 @@ impl MobManager {
         let t2 = up.cross(t1);
         let ang = self.rand() * std::f64::consts::TAU;
         let dist = 22.0 + self.rand() * 22.0;
-        let dir = (player + (t1 * ang.cos() + t2 * ang.sin()) * dist).normalize();
+        let dir = world.grid().col_dir(player + (t1 * ang.cos() + t2 * ang.sin()) * dist);
         let want_hostile = !day;
         if want_hostile && hostile >= HOSTILE_CAP || !want_hostile && passive >= PASSIVE_CAP {
             return;

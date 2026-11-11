@@ -99,11 +99,9 @@ pub fn render_cube(cfg: &WorldConfig, size: usize) -> ColorImage {
     let x_axis = up_hint.cross(z_axis).normalize();
     let y_axis = z_axis.cross(x_axis);
     let light = (z_axis * 0.7 + y_axis * 0.55 - x_axis * 0.45).normalize();
-    let inside = |p: DVec3| {
-        let (x, y, z) = (p.x * p.x, p.y * p.y, p.z * p.z);
-        let (x, y, z) = (x * x, y * y, z * z);
-        x * x + y * y + z * z < 1.0
-    };
+    // Unit-size cube planet (same shape as the real one).
+    let unit = wolfcraft_engine::cubesphere::Grid { n: 2, cube: true };
+    let inside = |p: DVec3| unit.radial(p) < 1.0;
     let n = size as f64;
     let scale = 1.62;
     let pixels: Vec<Color32> = (0..size * size)
@@ -138,9 +136,9 @@ pub fn render_cube(cfg: &WorldConfig, size: usize) -> ColorImage {
                 let v = (0.02 + star).clamp(0.0, 1.0);
                 return Color32::from_rgb((v * 120.0) as u8, (v * 190.0 + 4.0) as u8, (v * 255.0 + 8.0).min(255.0) as u8);
             };
-            let col = planet.column(p.normalize());
+            let col = planet.column(unit.col_dir(p));
             let c = biome_color(&col);
-            let normal = wolfcraft_engine::cubesphere::cube_up(p);
+            let normal = unit.up(p);
             let l = normal.dot(light).max(0.0) as f32;
             let shade = 0.32 + 0.75 * l;
             let rim = (1.0 - normal.dot(z_axis).max(0.0) as f32).powi(3) * 0.35;

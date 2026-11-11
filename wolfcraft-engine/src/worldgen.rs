@@ -69,7 +69,7 @@ pub fn generate_chunk(planet: &Planet, key: ChunkKey) -> Chunk {
     } else if rc > planet.max_surface {
         true
     } else {
-        rc >= planet.surface_radius(centre.normalize()) - 2.0
+        rc >= planet.surface_radius(planet.grid.col_dir(centre)) - 2.0
     };
     chunk.shrink_if_empty();
     chunk

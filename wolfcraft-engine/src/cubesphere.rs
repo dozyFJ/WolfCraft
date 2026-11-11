@@ -81,13 +81,22 @@ pub struct Grid {
     pub cube: bool,
 }
 
-/// Exponent of the rounded cube |x|^P + |y|^P + |z|^P = r^P: high = sharper edges.
-const CUBE_P: f64 = 8.0;
+/// Cube planet shape: a cube of half-size `CUBE_FLAT · R` grown by a ball (flat faces, round
+/// edges and corners). Block columns run along the surface normal, so on a cube face walls
+/// and trees stand exactly perpendicular to the flat ground. Below the depth `(1 - CUBE_FLAT)·R`
+/// the layers shrink towards the centre (only the deep core).
+pub const CUBE_FLAT: f64 = 0.7;
 
 static CUBE_WORLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CUBE_N: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(2048);
 
-/// Shape of the world being played (set when a world loads). Used by [`radial`] and [`up`],
-/// which are called all over the game without a grid at hand.
+/// Shape of the world being played (set when a world loads). Used by [`radial`], [`up`],
+/// [`along`] and [`col_dir`], which are called all over the game without a grid at hand.
+pub fn set_world_grid(g: Grid) {
+    CUBE_N.store(g.n, std::sync::atomic::Ordering::Relaxed);
+    CUBE_WORLD.store(g.cube, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn set_cube_world(cube: bool) {
     CUBE_WORLD.store(cube, std::sync::atomic::Ordering::Relaxed);
 }
@@ -96,47 +105,102 @@ pub fn cube_world() -> bool {
     CUBE_WORLD.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Rounded-cube "radius" of `p` (the P-norm).
-pub fn cube_radial(p: DVec3) -> f64 {
-    let a = p.abs();
-    let m = a.max_element();
-    if m <= 0.0 {
-        return 0.0;
-    }
-    let q = a / m;
-    m * (q.x.powf(CUBE_P) + q.y.powf(CUBE_P) + q.z.powf(CUBE_P)).powf(1.0 / CUBE_P)
+fn world_grid() -> Grid {
+    Grid { n: CUBE_N.load(std::sync::atomic::Ordering::Relaxed), cube: cube_world() }
 }
 
-/// Surface normal of the rounded cube through `p`.
-pub fn cube_up(p: DVec3) -> DVec3 {
-    let m = p.abs().max_element();
-    if m <= 0.0 {
-        return DVec3::Y;
-    }
-    let q = p / m;
-    let g = DVec3::new(q.x.signum() * q.x.abs().powf(CUBE_P - 1.0), q.y.signum() * q.y.abs().powf(CUBE_P - 1.0), q.z.signum() * q.z.abs().powf(CUBE_P - 1.0));
-    g.normalize()
+/// Rounded cube with surface (reference) radius `big_r`: the pieces of the shape.
+#[derive(Clone, Copy)]
+struct CubeShape {
+    big_r: f64,
+    l: f64,
 }
 
-/// Height measure of `p` in the current world: distance from the centre on a sphere,
-/// the rounded-cube radius on a cube planet. Terrain layers (`k`) use the same measure.
+impl CubeShape {
+    fn of(n: i32) -> Self {
+        let big_r = n as f64 / 2.0;
+        Self { big_r, l: big_r * CUBE_FLAT }
+    }
+
+    /// Distance along the unit ray `d` to the surface layer (`r = big_r`).
+    fn hit(&self, d: DVec3) -> f64 {
+        let mut a = [d.x.abs(), d.y.abs(), d.z.abs()];
+        a.sort_by(|x, y| y.partial_cmp(x).unwrap_or(std::cmp::Ordering::Equal));
+        let (l, w) = (self.l, self.big_r - self.l);
+        let mut best = self.big_r;
+        for m in 1..=3 {
+            let (s1, s2): (f64, f64) = (a[..m].iter().sum(), a[..m].iter().map(|v| v * v).sum());
+            // s2·t² − 2·l·s1·t + m·l² − w² = 0, larger root.
+            let disc = (l * s1).powi(2) - s2 * (m as f64 * l * l - w * w);
+            if disc < 0.0 || s2 <= 0.0 {
+                continue;
+            }
+            let t = (l * s1 + disc.sqrt()) / s2;
+            let ok_in = a[..m].iter().all(|v| t * v >= l - 1e-9);
+            let ok_out = m == 3 || t * a[m] <= l + 1e-9;
+            if ok_in && ok_out {
+                best = t;
+                break;
+            }
+        }
+        best
+    }
+
+    /// (core point, column normal) of the column through the unit direction `d`.
+    fn column(&self, d: DVec3) -> (DVec3, DVec3) {
+        let y = d * self.hit(d);
+        let c = y.clamp(DVec3::splat(-self.l), DVec3::splat(self.l));
+        let e = y - c;
+        let len = e.length();
+        (c, if len > 1e-12 { e / len } else { d })
+    }
+
+    fn along(&self, d: DVec3, r: f64) -> DVec3 {
+        let (c, n) = self.column(d);
+        if r >= self.l { c + n * (r - self.l) } else { c * (r / self.l) }
+    }
+
+    fn radial(&self, p: DVec3) -> f64 {
+        let c = p.clamp(DVec3::splat(-self.l), DVec3::splat(self.l));
+        let e = (p - c).length();
+        if e > 0.0 { self.l + e } else { p.abs().max_element() }
+    }
+
+    fn up(&self, p: DVec3) -> DVec3 {
+        let c = p.clamp(DVec3::splat(-self.l), DVec3::splat(self.l));
+        let e = p - c;
+        let len = e.length();
+        if len > 1e-9 { e / len } else { p.normalize_or(DVec3::Y) }
+    }
+
+    /// Unit direction that names the column through `p` (inverse of [`along`]).
+    fn col_dir(&self, p: DVec3) -> DVec3 {
+        let c = p.clamp(DVec3::splat(-self.l), DVec3::splat(self.l));
+        let e = p - c;
+        let len = e.length();
+        if len > 1e-9 { (c + e * ((self.big_r - self.l) / len)).normalize() } else { p.normalize_or(DVec3::Y) }
+    }
+}
+
+/// Height measure of `p` in the current world: distance from the centre on a sphere, the
+/// layer of the rounded cube on a cube planet. Terrain layers (`k`) use the same measure.
 pub fn radial(p: DVec3) -> f64 {
-    if cube_world() { cube_radial(p) } else { p.length() }
+    world_grid().radial(p)
 }
 
 /// Local "up" at `p` in the current world.
 pub fn up(p: DVec3) -> DVec3 {
-    if cube_world() {
-        cube_up(p)
-    } else {
-        let l = p.length();
-        if l < 1e-9 { DVec3::Y } else { p / l }
-    }
+    world_grid().up(p)
 }
 
-/// Point at height `r` in direction `dir` (unit) in the current world.
+/// Point at height `r` on the column named by the unit direction `dir` in the current world.
 pub fn along(dir: DVec3, r: f64) -> DVec3 {
-    if cube_world() { dir * (r / cube_radial(dir)) } else { dir * r }
+    world_grid().along(dir, r)
+}
+
+/// Column direction of `p` in the current world (`along(col_dir(p), radial(p)) == p`).
+pub fn col_dir(p: DVec3) -> DVec3 {
+    world_grid().col_dir(p)
 }
 
 impl Grid {
@@ -159,17 +223,22 @@ impl Grid {
 
     /// Height measure of `p` for this grid's shape.
     pub fn radial(&self, p: DVec3) -> f64 {
-        if self.cube { cube_radial(p) } else { p.length() }
+        if self.cube { CubeShape::of(self.n).radial(p) } else { p.length() }
     }
 
     /// Local up at `p` for this grid's shape.
     pub fn up(&self, p: DVec3) -> DVec3 {
-        if self.cube { cube_up(p) } else { p.normalize_or(DVec3::Y) }
+        if self.cube { CubeShape::of(self.n).up(p) } else { p.normalize_or(DVec3::Y) }
     }
 
-    /// Point at height `r` along the unit direction `dir`.
+    /// Point at height `r` on the column named by the unit direction `dir`.
     pub fn along(&self, dir: DVec3, r: f64) -> DVec3 {
-        if self.cube { dir * (r / cube_radial(dir)) } else { dir * r }
+        if self.cube { CubeShape::of(self.n).along(dir, r) } else { dir * r }
+    }
+
+    /// Unit direction naming the column through `p`.
+    pub fn col_dir(&self, p: DVec3) -> DVec3 {
+        if self.cube { CubeShape::of(self.n).col_dir(p) } else { p.normalize_or(DVec3::Y) }
     }
 
     pub fn chunks_per_edge(&self) -> i32 {
@@ -206,7 +275,8 @@ impl Grid {
     }
 
     /// Cell containing the world point `p`.
-    pub fn world_to_cell(&self, p: DVec3) -> Cell {
+    pub fn world_to_cell(&self, p0: DVec3) -> Cell {
+        let p = if self.cube { self.col_dir(p0) } else { p0 };
         let a = p.abs();
         let f: usize = if a.x >= a.y && a.x >= a.z {
             if p.x >= 0.0 { 0 } else { 1 }
@@ -225,7 +295,7 @@ impl Grid {
             let u = if cube { (t + 1.0) / 2.0 } else { (t.atan() + FRAC_PI_4) / FRAC_PI_2 };
             ((u * self.n as f64).floor() as i32).clamp(0, self.n - 1)
         };
-        Cell { f: f as u8, i: to_idx(x), j: to_idx(y), k: self.radial(p).floor() as i32 }
+        Cell { f: f as u8, i: to_idx(x), j: to_idx(y), k: self.radial(p0).floor() as i32 }
     }
 
     /// Maps a cell whose `i` or `j` may lie outside `0..n` by crossing one cube edge.
@@ -331,7 +401,8 @@ impl Grid {
         let n = self.up(centre);
         let ei = (p(1.0, 0.0) - p(0.0, 0.0) + p(1.0, 1.0) - p(0.0, 1.0)) * 0.5;
         let ej = (p(0.0, 1.0) - p(0.0, 0.0) + p(1.0, 1.0) - p(1.0, 0.0)) * 0.5;
-        let ui = (ei - n * ei.dot(n)).normalize();
+        // Deep in a cube planet's core cells near an edge get very thin: keep the box valid.
+        let ui = (ei - n * ei.dot(n)).try_normalize().unwrap_or_else(|| n.any_orthonormal_vector());
         let uj = n.cross(ui);
         Obb { center: centre, axes: [ui, uj, n], half: [ei.dot(ui).abs() * 0.5, ej.dot(uj).abs() * 0.5, 0.5] }
     }
@@ -511,7 +582,8 @@ mod tests {
         for f in 0..6u8 {
             for i in (0..g.n).step_by(3) {
                 for j in (0..g.n).step_by(5) {
-                    for k in [20, 32, 60] {
+                    // Layers above the core (below it, edge columns meet and cannot be told apart).
+                    for k in [26, 32, 60] {
                         let c = Cell::new(f, i, j, k);
                         assert_eq!(g.world_to_cell(g.cell_center(c)), c);
                     }

@@ -121,11 +121,13 @@ pub struct GameSession {
     pub containers: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, Vec<Option<wolfcraft_engine::items::ItemStack>>>,
     /// Smelting progress in seconds per furnace.
     furnace_t: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, f32>,
+    /// The start position was checked for blocks (a structure may have been built over it).
+    spawn_checked: bool,
 }
 
 impl GameSession {
     pub fn new(l: Loaded) -> Self {
-        wolfcraft_engine::cubesphere::set_cube_world(l.cfg.shape == wolfcraft_engine::config::PlanetShape::Cube);
+        wolfcraft_engine::cubesphere::set_world_grid(l.planet.grid);
         let chunks = ChunkManager::new(l.planet.clone(), l.storage.clone());
         let seed = l.cfg.seed;
         let mut s = Self {
@@ -164,6 +166,7 @@ impl GameSession {
             portal_t: -2.0,
             pending_portal: None,
             furnace_t: Default::default(),
+            spawn_checked: false,
         };
         s.load_containers();
         s.load_block_commands();
@@ -284,6 +287,25 @@ impl GameSession {
                 self.last_jump_press = -10.0;
             } else {
                 self.last_jump_press = self.clock;
+            }
+        }
+
+        // Never start inside blocks: climb out to the first spot with room for the body.
+        if !self.spawn_checked && self.ground_ready() {
+            self.spawn_checked = true;
+            let mut p = self.player.body.pos;
+            for _ in 0..256 {
+                let up = wolfcraft_engine::cubesphere::up(p);
+                let blocked = |h: f64| self.chunks.block_at_world(p + up * h).is_solid();
+                if !blocked(0.5) && !blocked(1.5) {
+                    break;
+                }
+                p += up;
+            }
+            if p != self.player.body.pos {
+                log::warn!("start position was inside blocks: moved up {:.0} blocks", (p - self.player.body.pos).length());
+                self.player.body.pos = p;
+                self.player.body.vel = DVec3::ZERO;
             }
         }
 
@@ -506,7 +528,7 @@ impl GameSession {
             self.overworld_pos = Some(here);
         }
         self.enter_dimension(to_hell);
-        let d = if to_hell { here.normalize_or_zero() } else { self.overworld_pos.unwrap_or(here).normalize_or_zero() };
+        let d = if to_hell { self.planet.grid.col_dir(here) } else { self.planet.grid.col_dir(self.overworld_pos.unwrap_or(here)) };
         let target = if !to_hell { self.overworld_pos } else { None };
         let pos = target.or_else(|| {
             // Look for a safe spot around the same direction.
@@ -621,7 +643,7 @@ impl GameSession {
         let up = self.player.up();
         let raw_eye = self.player.eye_pos();
         let eye_r = if self.eye_r > 0.0 { self.eye_r } else { radial(raw_eye) };
-        let eye = along(raw_eye.normalize_or_zero(), eye_r) + up * self.cam_lag;
+        let eye = along(wolfcraft_engine::cubesphere::col_dir(raw_eye), eye_r) + up * self.cam_lag;
         let look = self.player.look_dir();
         match self.camera_mode {
             CameraMode::First => Camera { eye, forward: look, up },

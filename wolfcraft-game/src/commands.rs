@@ -83,8 +83,8 @@ fn parse_difficulty(s: &str) -> Option<Difficulty> {
 
 /// Pushes a position that lies inside generated terrain outwards until it is free.
 fn lift_out_of_terrain(s: &GameSession, pos: DVec3) -> DVec3 {
-    let d = pos.normalize_or_zero();
-    if d == DVec3::ZERO {
+    let d = wolfcraft_engine::cubesphere::up(pos);
+    if pos == DVec3::ZERO {
         return pos;
     }
     let mut p = pos;
@@ -245,7 +245,7 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
 
 fn teleport_spawn(s: &mut GameSession) -> Reply {
     let spawn = s.player.spawn;
-    let dir = spawn.normalize();
+    let dir = wolfcraft_engine::cubesphere::col_dir(spawn);
     let pos = s.planet.stand_position(dir).unwrap_or(spawn);
     s.teleport(pos);
     vec![sys("Вы в точке появления")]

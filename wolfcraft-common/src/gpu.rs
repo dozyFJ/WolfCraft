@@ -64,6 +64,7 @@ impl GpuContext {
             }
         }));
         let caps = surface.get_capabilities(&adapter);
+        log::info!("surface caps: formats {:?}, present {:?}, alpha {:?}", caps.formats, caps.present_modes, caps.alpha_modes);
         // egui expects a non-sRGB target (it blends in gamma space); the 3D shader converts itself.
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
         let size = window.inner_size();
@@ -73,7 +74,9 @@ impl GpuContext {
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: Self::pick_present_mode(&caps, vsync),
-            alpha_mode: if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) { wgpu::CompositeAlphaMode::Opaque } else { caps.alpha_modes[0] },
+            // Opaque, or Inherit (Android's usual one, the window is opaque): never a blended mode,
+            // where any pixel with alpha < 1 would show what is behind the window.
+            alpha_mode: [wgpu::CompositeAlphaMode::Opaque, wgpu::CompositeAlphaMode::Inherit].into_iter().find(|m| caps.alpha_modes.contains(m)).unwrap_or(caps.alpha_modes[0]),
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
