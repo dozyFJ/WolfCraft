@@ -5,6 +5,7 @@ pub mod container_ui;
 pub mod gui_renderer;
 pub mod hud;
 pub mod inventory_ui;
+pub mod launcher;
 pub mod main_menu;
 pub mod theme_manager;
 pub mod ui_components;

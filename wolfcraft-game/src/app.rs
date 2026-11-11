@@ -1144,7 +1144,7 @@ impl App {
                     crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
                 Screen::Main => {
-                    actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref()));
+                    actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref(), settings.skin));
                     crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
@@ -1680,6 +1680,10 @@ impl App {
                     s.save();
                 }
                 self.quit = true;
+            }
+            MenuAction::SetSkin(n) => {
+                self.settings.skin = n;
+                self.settings.save(&self.data_dir);
             }
             MenuAction::ToggleTheme => {
                 self.settings.theme = if self.settings.theme == ThemeMode::Dark { ThemeMode::Light } else { ThemeMode::Dark };
