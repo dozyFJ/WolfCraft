@@ -276,8 +276,11 @@ fn planks(base: Rgb, seed: u32) -> Image {
             for x in 0..S {
                 let board = y / 4;
                 let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
-                let n = (rnd(x, y, seed) - 0.5) * 0.06 + (rnd(board, 0, seed + 1) - 0.5) * 0.06;
-                q.put(x, y, if seam { base.scale(0.68) } else { base.add(n) }, 1.0);
+                let n = (rnd(x, y, seed) - 0.5) * 0.04 + (rnd(board, 0, seed + 1) - 0.5) * 0.07;
+                // Wood grain: dark streaks along the board, lighter edge on top of each board.
+                let grain = (rnd(x / 3 + board * 7, y, seed + 2) < 0.22) as u32 as f32 * -0.06;
+                let edge = if y % 4 == 0 { 0.05 } else { 0.0 };
+                q.put(x, y, if seam { base.scale(0.62) } else { base.add(n + grain + edge) }, 1.0);
             }
         }
     })
@@ -322,6 +325,201 @@ fn stained_glass(c: Rgb) -> Image {
             }
         }
     })
+}
+
+/// 1-pixel raised edge: light top/left, dark bottom/right (inclusive corners).
+fn bevel(q: &mut Painter, x0: u32, y0: u32, x1: u32, y1: u32, hi: Rgb, lo: Rgb) {
+    for x in x0..=x1 {
+        q.put(x, y0, hi, 1.0);
+        q.put(x, y1, lo, 1.0);
+    }
+    for y in y0..=y1 {
+        q.put(x0, y, hi, 1.0);
+        q.put(x1, y, lo, 1.0);
+    }
+}
+
+/// Recessed window: dark top/left edge, light bottom/right edge.
+fn inset(q: &mut Painter, x0: u32, y0: u32, x1: u32, y1: u32) {
+    bevel(q, x0, y0, x1, y1, Rgb(0.14, 0.15, 0.18), Rgb(0.78, 0.80, 0.84));
+}
+
+/// Brushed steel plate: lighter at the top, raised edge, dark outline, corner rivets and (for a
+/// casing) a seam across the middle.
+fn steel_plate(seed: u32, seam: bool) -> Image {
+    p(|q| {
+        for y in 0..S {
+            let streak = (rnd(0, y, seed) - 0.5) * 0.05;
+            for x in 0..S {
+                let g = 0.60 - y as f32 * 0.012 + streak + (rnd(x, y, seed ^ 3) - 0.5) * 0.025;
+                q.put(x, y, Rgb(g * 0.92, g * 0.96, g * 1.04), 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, Rgb(0.20, 0.22, 0.26), Rgb(0.16, 0.17, 0.20));
+        bevel(q, 1, 1, 14, 14, Rgb(0.80, 0.83, 0.88), Rgb(0.34, 0.36, 0.41));
+        if seam {
+            for x in 2..14u32 {
+                q.put(x, 7, Rgb(0.30, 0.32, 0.37), 1.0);
+                q.put(x, 8, Rgb(0.74, 0.77, 0.82), 1.0);
+            }
+            for y in 3..13u32 {
+                if y != 7 && y != 8 && y % 2 == 1 {
+                    q.put(7, y, Rgb(0.40, 0.42, 0.47), 1.0);
+                }
+            }
+        }
+        for (x, y) in [(3u32, 3u32), (12, 3), (3, 12), (12, 12)] {
+            q.put(x, y, Rgb(0.90, 0.92, 0.95), 1.0);
+            q.put(x + 1, y + 1, Rgb(0.26, 0.28, 0.32), 1.0);
+            q.put(x + 1, y, Rgb(0.62, 0.64, 0.68), 1.0);
+            q.put(x, y + 1, Rgb(0.62, 0.64, 0.68), 1.0);
+        }
+    })
+}
+
+/// Dark machine casing (battery body).
+fn dark_casing(seed: u32) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let g = 0.22 - y as f32 * 0.006 + (rnd(x, y, seed) - 0.5) * 0.025;
+                q.put(x, y, Rgb(g * 0.95, g, g * 1.10), 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, Rgb(0.10, 0.11, 0.13), Rgb(0.06, 0.06, 0.08));
+        bevel(q, 1, 1, 14, 14, Rgb(0.40, 0.43, 0.48), Rgb(0.12, 0.13, 0.15));
+    })
+}
+
+/// Polished metal block: diagonal sheen, raised edge and a pressed inner frame.
+fn metal_block(base: Rgb, seed: u32) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let sheen = (1.0 - ((x as f32 - y as f32 + 3.0).abs() / 6.0)).max(0.0) * 0.16;
+                let t = (x + y) as f32 / 30.0;
+                let c = base.scale(1.08 - t * 0.22).add(sheen + (rnd(x, y, seed) - 0.5) * 0.03);
+                q.put(x, y, c, 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, base.scale(0.55), base.scale(0.45));
+        bevel(q, 1, 1, 14, 14, base.scale(1.30).add(0.05), base.scale(0.70));
+        // Pressed inner frame.
+        bevel(q, 4, 4, 11, 11, base.scale(0.72), base.scale(1.22));
+    })
+}
+
+/// Gem block: a grid of faceted gems.
+fn gem_block(base: Rgb, seed: u32) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let (lx, ly) = (x % 4, y % 4);
+                let c = match (lx, ly) {
+                    (0, _) | (_, 0) => base.scale(0.62),
+                    (1, 1) => base.scale(1.35).add(0.12),
+                    (3, 3) => base.scale(0.82),
+                    (1, _) | (_, 1) => base.scale(1.15),
+                    _ => base,
+                };
+                q.put(x, y, c.add((rnd(x, y, seed) - 0.5) * 0.03), 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, base.scale(1.30).add(0.05), base.scale(0.45));
+    })
+}
+
+/// Electric lamp: steel frame, glass with a cross grid; lit = warm glow from the centre.
+fn lamp(on: bool, seed: u32) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt() / 7.5;
+                let c = if on {
+                    Rgb(1.0, 0.98, 0.85).lerp(Rgb(1.0, 0.78, 0.32), d.min(1.0))
+                } else {
+                    Rgb(0.78, 0.86, 0.92).lerp(Rgb(0.52, 0.60, 0.68), d.min(1.0))
+                };
+                q.put(x, y, c.add((rnd(x, y, seed) - 0.5) * 0.03), 1.0);
+            }
+        }
+        let grid = if on { Rgb(0.85, 0.62, 0.25) } else { Rgb(0.40, 0.46, 0.52) };
+        for i in 2..14u32 {
+            q.put(i, 7, grid, 1.0);
+            q.put(7, i, grid, 1.0);
+        }
+        let frame = if on { Rgb(0.62, 0.62, 0.66) } else { Rgb(0.40, 0.42, 0.47) };
+        bevel(q, 0, 0, 15, 15, frame.scale(0.5), frame.scale(0.4));
+        bevel(q, 1, 1, 14, 14, frame.scale(1.4), frame.scale(0.75));
+    })
+}
+
+/// Smooth value noise in 0..1 with cells of `cell` pixels, tiling over a 16 px sprite.
+fn value_noise(x: u32, y: u32, cell: u32, seed: u32) -> f32 {
+    let n = (S / cell).max(1);
+    let (gx, gy) = (x / cell, y / cell);
+    let (fx, fy) = ((x % cell) as f32 / cell as f32, (y % cell) as f32 / cell as f32);
+    let v = |a: u32, b: u32| rnd(a % n, b % n, seed);
+    let s = |t: f32| t * t * (3.0 - 2.0 * t);
+    let (sx, sy) = (s(fx), s(fy));
+    let top = v(gx, gy) + (v(gx + 1, gy) - v(gx, gy)) * sx;
+    let bot = v(gx, gy + 1) + (v(gx + 1, gy + 1) - v(gx, gy + 1)) * sx;
+    top + (bot - top) * sy
+}
+
+/// Turns per-pixel static into clumps with a few tones: pixels lean towards their 2×2 block,
+/// a soft large-scale shading is added, then brightness snaps to five bands around the mean.
+fn painterly(img: &mut Image, seed: u32) {
+    let w = img.width;
+    let h = img.height;
+    let get = |img: &Image, x: u32, y: u32| {
+        let p = img.get(x % w, y % h);
+        [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]
+    };
+    let lum = |c: [f32; 3]| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    let mut mean = 0.0;
+    for y in 0..h {
+        for x in 0..w {
+            mean += lum(get(img, x, y));
+        }
+    }
+    mean /= (w * h) as f32;
+    if mean <= 0.01 {
+        return;
+    }
+    let src = img.clone();
+    for y in 0..h {
+        for x in 0..w {
+            if src.get(x, y)[3] != 255 {
+                continue;
+            }
+            let c = get(&src, x, y);
+            // 2×2 clump (offset per row of clumps so they do not form a grid).
+            let ox = x / 2 * 2 + (y / 2 % 2);
+            let oy = y / 2 * 2;
+            let mut avg = [0.0f32; 3];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let q = get(&src, ox + dx, oy + dy);
+                for k in 0..3 {
+                    avg[k] += q[k] * 0.25;
+                }
+            }
+            let mut m = [0.0f32; 3];
+            for k in 0..3 {
+                m[k] = c[k] * 0.55 + avg[k] * 0.45;
+            }
+            // Large soft patches.
+            let shade = (value_noise(x, y, 8, seed) - 0.5) * 0.10 + (value_noise(x, y, 4, seed ^ 0x55) - 0.5) * 0.06;
+            let l = lum(m).max(0.001);
+            // Five bands: ±11 % steps around the tile's mean.
+            let rel = (l / mean - 1.0 + shade) * 1.15;
+            let band = (rel / 0.11).round().clamp(-2.0, 2.0) * 0.11;
+            let target = mean * (1.0 + band);
+            let k = target / l;
+            let to = |v: f32| ((v * k).clamp(0.0, 1.0) * 255.0) as u8;
+            img.set(x, y, [to(m[0]), to(m[1]), to(m[2]), 255]);
+        }
+    }
 }
 
 pub(crate) fn build() -> Vec<(String, Image)> {
@@ -380,17 +578,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
-    l.add(PLANKS, "planks", p(|q| {
-        for y in 0..S {
-            for x in 0..S {
-                let board = y / 4;
-                let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
-                let n = (rnd(x, y, 15) - 0.5) * 0.06 + (rnd(board, 0, 16) - 0.5) * 0.06;
-                let c = if seam { Rgb(0.45, 0.33, 0.19) } else { Rgb(0.66 + n, 0.50 + n, 0.30 + n) };
-                q.put(x, y, c, 1.0);
-            }
-        }
-    }));
+    l.add(PLANKS, "planks", planks(Rgb(0.66, 0.50, 0.30), 15));
     l.add(LEAVES, "oak_leaves", leaves(Rgb(0.32, 0.58, 0.22), 17));
     l.add(WATER, "water", water_frame(0));
     l.add(GLASS, "glass", p(|q| {
@@ -669,15 +857,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         q.noisy(Rgb(0.55, 0.70, 0.92), 0.05, 108);
         q.speckle(Rgb(0.72, 0.84, 0.98), 0.15, 109);
     }));
-    l.add(GOLD_BLOCK, "gold_block", p(|q| {
-        q.noisy(Rgb(0.95, 0.80, 0.25), 0.06, 110);
-        for i in 0..S {
-            q.put(i, 0, Rgb(1.0, 0.92, 0.5), 1.0);
-            q.put(0, i, Rgb(1.0, 0.92, 0.5), 1.0);
-            q.put(i, 15, Rgb(0.75, 0.6, 0.15), 1.0);
-            q.put(15, i, Rgb(0.75, 0.6, 0.15), 1.0);
-        }
-    }));
+    l.add(GOLD_BLOCK, "gold_block", metal_block(Rgb(0.98, 0.80, 0.26), 110));
     l.add(RED_SAND, "red_sand", p(|q| q.noisy(Rgb(0.76, 0.42, 0.20), 0.08, 111)));
     l.add(TERRACOTTA, "terracotta", p(|q| {
         for y in 0..S {
@@ -734,22 +914,24 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(TIN_ORE, "tin_ore", ore(Rgb(0.80, 0.84, 0.86), 130));
     l.add(SILVER_ORE, "silver_ore", ore(Rgb(0.88, 0.90, 0.96), 131));
     l.add(COBALT_ORE, "cobalt_ore", ore(Rgb(0.20, 0.35, 0.85), 132));
-    let metal = |base: Rgb, hi: Rgb, lo: Rgb, seed: u32| {
-        p(|q| {
-            q.noisy(base, 0.05, seed);
-            for i in 0..S {
-                q.put(i, 0, hi, 1.0);
-                q.put(0, i, hi, 1.0);
-                q.put(i, 15, lo, 1.0);
-                q.put(15, i, lo, 1.0);
+    l.add(COPPER_BLOCK, "copper_block", metal_block(Rgb(0.80, 0.46, 0.30), 133));
+    l.add(IRON_BLOCK, "iron_block", metal_block(Rgb(0.80, 0.81, 0.84), 134));
+    l.add(DIAMOND_BLOCK, "diamond_block", gem_block(Rgb(0.36, 0.86, 0.84), 135));
+    l.add(COAL_BLOCK, "coal_block", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let lump = value_noise(x, y, 4, 136);
+                let b = 0.07 + lump * 0.10 + (rnd(x, y, 137) - 0.5) * 0.03;
+                q.put(x, y, Rgb(b, b, b * 1.06), 1.0);
+                // Glints on the lumps.
+                if lump > 0.72 && rnd(x, y, 138) < 0.25 {
+                    q.put(x, y, Rgb(0.34, 0.34, 0.38), 1.0);
+                }
             }
-        })
-    };
-    l.add(COPPER_BLOCK, "copper_block", metal(Rgb(0.80, 0.46, 0.30), Rgb(0.95, 0.65, 0.45), Rgb(0.55, 0.30, 0.20), 133));
-    l.add(IRON_BLOCK, "iron_block", metal(Rgb(0.82, 0.83, 0.85), Rgb(0.95, 0.96, 0.98), Rgb(0.58, 0.59, 0.62), 134));
-    l.add(DIAMOND_BLOCK, "diamond_block", metal(Rgb(0.42, 0.88, 0.86), Rgb(0.75, 1.0, 0.98), Rgb(0.25, 0.60, 0.62), 135));
-    l.add(COAL_BLOCK, "coal_block", metal(Rgb(0.12, 0.12, 0.14), Rgb(0.22, 0.22, 0.25), Rgb(0.06, 0.06, 0.07), 136));
-    l.add(BRONZE_BLOCK, "bronze_block", metal(Rgb(0.70, 0.50, 0.22), Rgb(0.88, 0.70, 0.38), Rgb(0.46, 0.32, 0.14), 137));
+        }
+        bevel(q, 0, 0, 15, 15, Rgb(0.24, 0.24, 0.27), Rgb(0.02, 0.02, 0.03));
+    }));
+    l.add(BRONZE_BLOCK, "bronze_block", metal_block(Rgb(0.72, 0.52, 0.24), 137));
     l.add(SALT, "salt_block", p(|q| {
         q.noisy(Rgb(0.93, 0.92, 0.90), 0.04, 138);
         q.speckle(Rgb(0.80, 0.80, 0.82), 0.15, 139);
@@ -767,104 +949,143 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
     }));
     // ---- Tech ----
-    let steel = Rgb(0.46, 0.50, 0.55);
-    let plate = |seed: u32| {
-        p(|q| {
-            q.noisy(steel, 0.04, seed);
-            for i in 0..S {
-                q.put(i, 0, Rgb(0.30, 0.33, 0.38), 1.0);
-                q.put(i, 15, Rgb(0.30, 0.33, 0.38), 1.0);
-                q.put(0, i, Rgb(0.30, 0.33, 0.38), 1.0);
-                q.put(15, i, Rgb(0.30, 0.33, 0.38), 1.0);
-            }
-            for (x, y) in [(2, 2), (13, 2), (2, 13), (13, 13)] {
-                q.put(x, y, Rgb(0.72, 0.74, 0.78), 1.0);
-            }
-        })
-    };
-    l.add(MACHINE_CASING, "machine_casing", plate(144));
+    l.add(MACHINE_CASING, "machine_casing", steel_plate(144, true));
     l.add(GENERATOR_FRONT, "generator_front", {
-        let mut img = plate(145);
-        for y in 5..11u32 {
+        let mut q = Painter { img: steel_plate(145, false) };
+        inset(&mut q, 3, 4, 12, 12);
+        for y in 5..12u32 {
             for x in 4..12u32 {
-                img.set(x, y, [255, (170 + (x * 7 + y * 5) % 50) as u8, 40, 255]);
+                // Fire: bright at the bottom, flickering tongues upwards.
+                let h = (11 - y) as f32 / 6.0;
+                let tongue = value_noise(x, 0, 2, 146) * 0.6 + 0.2;
+                let heat = (1.0 - h / (tongue + 0.35)).clamp(0.0, 1.0);
+                let c = Rgb(0.20, 0.05, 0.03).lerp(Rgb(0.95, 0.35, 0.05), heat).lerp(Rgb(1.0, 0.88, 0.40), (heat - 0.6).max(0.0) * 2.0);
+                q.put(x, y, c, 1.0);
             }
         }
-        img
+        for y in 5..12u32 {
+            for x in [6u32, 9] {
+                q.put(x, y, Rgb(0.16, 0.17, 0.20), 1.0);
+            }
+        }
+        q.finish()
     });
     l.add(CABLE, "cable", p(|q| {
-        q.noisy(Rgb(0.20, 0.20, 0.22), 0.04, 146);
         for y in 0..S {
-            for x in 6..10u32 {
-                q.put(x, y, Rgb(0.80, 0.46, 0.28).add(if x == 6 { 0.1 } else { 0.0 }), 1.0);
+            for x in 0..S {
+                let n = (rnd(x, y, 146) - 0.5) * 0.04;
+                q.put(x, y, Rgb(0.17, 0.18, 0.20).add(n), 1.0);
             }
         }
-        for x in 0..S {
-            for y in 6..10u32 {
-                q.put(x, y, Rgb(0.80, 0.46, 0.28).add(if y == 6 { 0.1 } else { 0.0 }), 1.0);
+        // Copper core in rubber, shaded like a round wire.
+        let wire = |t: u32| -> Rgb {
+            match t {
+                0 | 5 => Rgb(0.10, 0.10, 0.12),
+                1 => Rgb(0.98, 0.70, 0.48),
+                2 => Rgb(0.86, 0.52, 0.32),
+                3 => Rgb(0.72, 0.42, 0.25),
+                _ => Rgb(0.55, 0.30, 0.18),
+            }
+        };
+        for i in 0..S {
+            for t in 0..6u32 {
+                q.put(i, 5 + t, wire(t), 1.0);
+                q.put(5 + t, i, wire(t), 1.0);
+            }
+        }
+        for t in 0..6u32 {
+            for k in 0..6u32 {
+                q.put(5 + t, 5 + k, wire(k.min(t).min(5 - t).min(5 - k) + 1).add(0.05), 1.0);
             }
         }
     }));
-    l.add(BATTERY_SIDE, "battery_side", p(|q| {
-        q.noisy(Rgb(0.18, 0.20, 0.24), 0.04, 147);
+    l.add(BATTERY_SIDE, "battery_side", {
+        let mut q = Painter { img: dark_casing(147) };
+        inset(&mut q, 4, 2, 11, 13);
         for y in 3..13u32 {
-            let on = y > 6;
             for x in 5..11u32 {
-                q.put(x, y, if on { Rgb(0.25, 0.85, 0.35) } else { Rgb(0.12, 0.30, 0.15) }, 1.0);
+                let level = y >= 6;
+                let seg_line = (y - 3) % 2 == 1 && y < 12;
+                let shine = if x == 5 { 0.10 } else if x == 10 { -0.08 } else { 0.0 };
+                let c = if seg_line {
+                    Rgb(0.06, 0.08, 0.07)
+                } else if level {
+                    Rgb(0.18, 0.75, 0.30).lerp(Rgb(0.45, 0.98, 0.50), (12 - y) as f32 / 6.0)
+                } else {
+                    Rgb(0.10, 0.22, 0.13)
+                };
+                q.put(x, y, c.add(shine), 1.0);
             }
         }
-    }));
-    l.add(BATTERY_TOP, "battery_top", p(|q| {
-        q.noisy(steel, 0.04, 148);
-        for y in 5..11u32 {
-            for x in 5..11u32 {
-                q.put(x, y, Rgb(0.80, 0.46, 0.28), 1.0);
-            }
+        for y in [4u32, 7, 10] {
+            q.put(12, y, Rgb(0.70, 0.74, 0.80), 1.0);
         }
-    }));
-    l.add(ELECTRIC_LAMP, "electric_lamp", p(|q| {
-        for y in 0..S {
-            for x in 0..S {
-                let frame = x < 2 || y < 2 || x > 13 || y > 13;
-                let n = (rnd(x, y, 149) - 0.5) * 0.06;
-                q.put(x, y, if frame { Rgb(0.35, 0.38, 0.43) } else { Rgb(0.85, 0.96, 1.0).add(n) }, 1.0);
-            }
-        }
-    }));
-    l.add(FURNACE_FRONT, "electric_furnace_front", {
-        let mut img = plate(150);
-        for y in 6..12u32 {
-            for x in 4..12u32 {
-                img.set(x, y, if y > 8 { [255, 120, 30, 255] } else { [30, 20, 20, 255] });
-            }
-        }
-        img
+        q.finish()
     });
-    l.add(ELECTRIC_LAMP_ON, "electric_lamp_on", p(|q| {
-        for y in 0..S {
-            for x in 0..S {
-                let frame = x < 2 || y < 2 || x > 13 || y > 13;
-                let n = (rnd(x, y, 151) - 0.5) * 0.06;
-                q.put(x, y, if frame { Rgb(0.55, 0.58, 0.62) } else { Rgb(1.0, 0.98, 0.70).add(n) }, 1.0);
-            }
-        }
-    }));
-    let switch = |on: bool, seed: u32| {
-        p(|q| {
-            q.noisy(Rgb(0.30, 0.32, 0.36), 0.04, seed);
-            for y in 3..13u32 {
-                for x in 5..11u32 {
-                    q.put(x, y, Rgb(0.14, 0.15, 0.18), 1.0);
-                }
-            }
-            // Handle: up = on, down = off.
-            let (y0, y1, c) = if on { (3u32, 8u32, Rgb(0.30, 0.95, 0.40)) } else { (8, 13, Rgb(0.85, 0.25, 0.22)) };
-            for y in y0..y1 {
-                for x in 7..9u32 {
+    l.add(BATTERY_TOP, "battery_top", {
+        let mut q = Painter { img: steel_plate(148, false) };
+        for (cx, plus) in [(5u32, true), (10u32, false)] {
+            for y in 6..10u32 {
+                for x in cx - 2..cx + 2 {
+                    let c = Rgb(0.88, 0.55, 0.34).lerp(Rgb(0.55, 0.30, 0.18), (y - 6) as f32 / 3.0);
                     q.put(x, y, c, 1.0);
                 }
             }
-        })
+            let mark = if plus { Rgb(0.90, 0.20, 0.18) } else { Rgb(0.15, 0.15, 0.18) };
+            q.put(cx - 1, 3, mark, 1.0);
+            q.put(cx, 3, mark, 1.0);
+            if plus {
+                q.put(cx - 1, 2, mark, 1.0);
+                q.put(cx - 1, 4, mark, 1.0);
+                q.put(cx - 2, 3, mark, 1.0);
+            }
+        }
+        q.finish()
+    });
+    l.add(ELECTRIC_LAMP, "electric_lamp", lamp(false, 149));
+    l.add(FURNACE_FRONT, "electric_furnace_front", {
+        let mut q = Painter { img: steel_plate(150, false) };
+        inset(&mut q, 3, 5, 12, 13);
+        for y in 6..13u32 {
+            for x in 4..12u32 {
+                let coil = y >= 9 && (y - 9) % 2 == 0;
+                let glow = (y as f32 - 6.0) / 6.0;
+                let c = if coil { Rgb(1.0, 0.62, 0.18).lerp(Rgb(1.0, 0.90, 0.55), (rnd(x, y, 150) < 0.3) as u32 as f32) } else { Rgb(0.10, 0.07, 0.07).lerp(Rgb(0.55, 0.18, 0.06), glow * glow) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+        // Little display above the chamber.
+        for x in 5..11u32 {
+            q.put(x, 2, Rgb(0.08, 0.10, 0.12), 1.0);
+            q.put(x, 3, Rgb(0.08, 0.10, 0.12), 1.0);
+        }
+        q.put(6, 2, Rgb(1.0, 0.55, 0.15), 1.0);
+        q.put(7, 2, Rgb(1.0, 0.55, 0.15), 1.0);
+        q.finish()
+    });
+    l.add(ELECTRIC_LAMP_ON, "electric_lamp_on", lamp(true, 151));
+    let switch = |on: bool, seed: u32| {
+        let mut q = Painter { img: steel_plate(seed, false) };
+        inset(&mut q, 6, 2, 9, 13);
+        for y in 3..13u32 {
+            q.put(7, y, Rgb(0.06, 0.06, 0.08), 1.0);
+            q.put(8, y, Rgb(0.10, 0.10, 0.12), 1.0);
+        }
+        // Lever knob: up = on, down = off.
+        let ky = if on { 3u32 } else { 9u32 };
+        for y in ky..ky + 4 {
+            for x in 5..11u32 {
+                let c = Rgb(0.88, 0.88, 0.90).lerp(Rgb(0.45, 0.46, 0.50), (y - ky) as f32 / 3.0);
+                q.put(x, y, if x == 5 || x == 10 { c.scale(0.8) } else { c }, 1.0);
+            }
+        }
+        // Indicator light.
+        let led = if on { Rgb(0.30, 1.0, 0.40) } else { Rgb(0.95, 0.20, 0.18) };
+        q.put(12, 3, led, 1.0);
+        q.put(13, 3, led.scale(0.8), 1.0);
+        q.put(12, 4, led.scale(0.8), 1.0);
+        q.put(13, 4, led.scale(0.6), 1.0);
+        q.finish()
     };
     l.add(SWITCH_OFF, "switch_off", switch(false, 152));
     l.add(SWITCH_ON, "switch_on", switch(true, 153));
@@ -1025,9 +1246,17 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(GLASS_BLUE, "glass_blue", stained_glass(Rgb(0.22, 0.36, 0.85)));
     l.add(GLASS_GREEN, "glass_green", stained_glass(Rgb(0.28, 0.70, 0.30)));
     l.add(GLASS_YELLOW, "glass_yellow", stained_glass(Rgb(0.95, 0.82, 0.22)));
-    // Pixel-art finish for every opaque pixel: a touch more contrast and a limited palette
-    // (14 levels per channel) so textures look hand-painted instead of smooth noise.
-    for (_, img) in l.0.iter_mut() {
+    // Pixel-art finish. Natural, noisy materials get clumps instead of per-pixel static, a
+    // gentle large-scale variation and a few luminance bands (the hand-painted look); every
+    // opaque pixel then gets a touch more contrast and a limited palette.
+    const NATURAL: [&str; 27] = [
+        "grass_top", "dirt", "stone", "sand", "snow", "granite", "limestone", "salt_block", "peat", "ash", "red_sand", "mud", "clay", "marble",
+        "netherrack", "dry_grass_top", "swamp_grass_top", "podzol_top", "moss", "wool", "wool_red", "wool_blue", "wool_yellow", "terracotta", "packed_ice", "slate", "smooth_stone",
+    ];
+    for (i, (name, img)) in l.0.iter_mut().enumerate() {
+        if NATURAL.contains(&name.as_str()) {
+            painterly(img, 900 + i as u32);
+        }
         for y in 0..img.height {
             for x in 0..img.width {
                 let mut px = img.get(x, y);
