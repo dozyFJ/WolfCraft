@@ -1,0 +1,57 @@
+[package]
+name = "wolfcraft-game"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "wolfcraft_game"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "WolfCraft"
+path = "src/main.rs"
+
+[dependencies]
+wolfcraft-common.workspace = true
+wolfcraft-assets.workspace = true
+wolfcraft-engine.workspace = true
+wolfcraft-ui.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+egui.workspace = true
+glam.workspace = true
+rayon.workspace = true
+log.workspace = true
+image.workspace = true
+rodio.workspace = true
+wolfcraft-net.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { workspace = true, features = ["android-native-activity"] }
+android_logger = "0.14"
+oboe = { version = "0.6", features = ["shared-stdcxx"] }
+
+[package.metadata.android]
+package = "com.wolfcraft.game"
+apk_name = "WolfCraft"
+build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android", "i686-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[package.metadata.android.application]
+label = "WolfCraft"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+orientation = "landscape"
+config_changes = "orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode"
+[package.metadata.android.signing.release]
+path = "C:/Users/ADMIN/.android/debug.keystore"
+keystore_password = "android"

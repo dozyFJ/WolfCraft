@@ -1,0 +1,16 @@
+[package]
+name = "wolfcraft-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+wolfcraft-common.workspace = true
+wolfcraft-assets.workspace = true
+wolfcraft-engine.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+log.workspace = true
