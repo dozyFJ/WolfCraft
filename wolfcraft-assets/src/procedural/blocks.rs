@@ -102,6 +102,31 @@ pub mod tiles {
     pub const TERMINAL: u16 = 95;
     pub const NETHERRACK: u16 = 93;
     pub const PORTAL: u16 = 94;
+    // Added: biome and building blocks.
+    pub const WOOL: u16 = 96;
+    pub const BIRCH_PLANKS: u16 = 97;
+    pub const SPRUCE_PLANKS: u16 = 98;
+    pub const ACACIA_PLANKS: u16 = 99;
+    pub const TORCH: u16 = 100;
+    pub const PUMPKIN_SIDE: u16 = 101;
+    pub const PUMPKIN_TOP: u16 = 102;
+    pub const MELON_SIDE: u16 = 103;
+    pub const MELON_TOP: u16 = 104;
+    pub const SUGAR_CANE: u16 = 105;
+    pub const FERN: u16 = 106;
+    pub const FLOWER_BLUE: u16 = 107;
+    pub const PODZOL_TOP: u16 = 108;
+    pub const PODZOL_SIDE: u16 = 109;
+    pub const MOSS: u16 = 110;
+    pub const POLISHED_GRANITE: u16 = 111;
+    pub const POLISHED_MARBLE: u16 = 112;
+    pub const SMOOTH_STONE: u16 = 113;
+    pub const SANDSTONE_BRICKS: u16 = 114;
+    pub const BOOKSHELF: u16 = 115;
+    pub const LANTERN: u16 = 116;
+    pub const WOOL_RED: u16 = 117;
+    pub const WOOL_BLUE: u16 = 118;
+    pub const WOOL_YELLOW: u16 = 119;
 }
 
 const S: u32 = 16;
@@ -114,9 +139,8 @@ fn p(f: impl FnOnce(&mut Painter)) -> Image {
 
 fn side_with_top(base: Rgb, top: Rgb, seed: u32) -> Image {
     p(|q| {
-        q.noisy(Rgb(0.47, 0.33, 0.22), 0.14, 3);
-        q.speckle(Rgb(0.38, 0.26, 0.17), 0.25, 4);
-        let _ = base;
+        q.noisy(base, 0.09, 3);
+        q.speckle(base.scale(0.88), 0.2, 4);
         for x in 0..S {
             let depth = 3 + (hash(x, 0, seed) % 3);
             for y in 0..depth {
@@ -237,6 +261,43 @@ pub fn water_frame(frame: u32) -> Image {
                     + ((y as f32 * 0.9 - ph * 2.0).cos() * 0.03)
                     + (rnd(x, y, 18) - 0.5) * 0.03;
                 q.put(x, y, Rgb(0.18 + w, 0.36 + w, 0.78 + w), 0.72);
+            }
+        }
+    })
+}
+
+fn planks(base: Rgb, seed: u32) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let board = y / 4;
+                let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
+                let n = (rnd(x, y, seed) - 0.5) * 0.06 + (rnd(board, 0, seed + 1) - 0.5) * 0.06;
+                q.put(x, y, if seam { base.scale(0.68) } else { base.add(n) }, 1.0);
+            }
+        }
+    })
+}
+
+fn wool(base: Rgb, seed: u32) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                // Soft knitted rows.
+                let row = if (x + (y / 2) % 2) % 2 == 0 { 0.02 } else { -0.02 };
+                q.put(x, y, base.add(row + (rnd(x, y, seed) - 0.5) * 0.06), 1.0);
+            }
+        }
+    })
+}
+
+fn polished(base: Rgb, seed: u32) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let edge = x == 0 || y == 0 || x == 15 || y == 15;
+                let c = if edge { base.scale(0.82) } else { base.add((rnd(x, y, seed) - 0.5) * 0.05 + if x + y < 8 { 0.03 } else { 0.0 }) };
+                q.put(x, y, c, 1.0);
             }
         }
     })
@@ -832,6 +893,113 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             q.put(x, y, Rgb(0.30, 0.95, 0.45), 1.0);
         }
     }));
+    // ---- biome and building blocks ----
+    l.add(WOOL, "wool", wool(Rgb(0.92, 0.92, 0.89), 160));
+    l.add(BIRCH_PLANKS, "birch_planks", planks(Rgb(0.82, 0.74, 0.52), 161));
+    l.add(SPRUCE_PLANKS, "spruce_planks", planks(Rgb(0.44, 0.31, 0.19), 162));
+    l.add(ACACIA_PLANKS, "acacia_planks", planks(Rgb(0.74, 0.42, 0.24), 163));
+    l.add(TORCH, "torch", p(|q| {
+        for y in 6..16u32 {
+            q.put(7, y, Rgb(0.50, 0.36, 0.20), 1.0);
+            q.put(8, y, Rgb(0.40, 0.28, 0.15), 1.0);
+        }
+        for (x, y, c) in [(7u32, 4u32, Rgb(1.0, 0.85, 0.30)), (8, 4, Rgb(1.0, 0.75, 0.25)), (7, 5, Rgb(1.0, 0.60, 0.15)), (8, 5, Rgb(0.95, 0.50, 0.10)), (7, 3, Rgb(1.0, 0.95, 0.60)), (8, 3, Rgb(1.0, 0.90, 0.50))] {
+            q.put(x, y, c, 1.0);
+        }
+    }));
+    l.add(PUMPKIN_SIDE, "pumpkin_side", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let rib = if x % 4 == 0 { -0.10 } else { 0.0 };
+                q.put(x, y, Rgb(0.88, 0.52, 0.12).add(rib + (rnd(x, y, 164) - 0.5) * 0.05), 1.0);
+            }
+        }
+    }));
+    l.add(PUMPKIN_TOP, "pumpkin_top", p(|q| {
+        q.noisy(Rgb(0.86, 0.50, 0.12), 0.05, 165);
+        for (x, y) in [(7u32, 7u32), (8, 7), (7, 8), (8, 8)] {
+            q.put(x, y, Rgb(0.40, 0.45, 0.18), 1.0);
+        }
+    }));
+    l.add(MELON_SIDE, "melon_side", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let stripe = if (x / 2) % 2 == 0 { 0.06 } else { -0.04 };
+                q.put(x, y, Rgb(0.42, 0.62, 0.22).add(stripe + (rnd(x, y, 166) - 0.5) * 0.05), 1.0);
+            }
+        }
+    }));
+    l.add(MELON_TOP, "melon_top", p(|q| {
+        q.noisy(Rgb(0.45, 0.64, 0.24), 0.06, 167);
+        q.put(7, 7, Rgb(0.45, 0.35, 0.18), 1.0);
+    }));
+    l.add(SUGAR_CANE, "sugar_cane", p(|q| {
+        for (x0, seed) in [(3u32, 168u32), (7, 169), (11, 170)] {
+            for y in 0..S {
+                let joint = (y + seed) % 5 == 0;
+                let c = if joint { Rgb(0.45, 0.62, 0.30) } else { Rgb(0.58, 0.78, 0.40) };
+                q.put(x0, y, c, 1.0);
+                q.put(x0 + 1, y, c.scale(0.88), 1.0);
+            }
+            q.put(x0 + 2, 4 + seed % 5, Rgb(0.50, 0.72, 0.34), 1.0);
+        }
+    }));
+    l.add(FERN, "fern", p(|q| {
+        let g = Rgb(0.30, 0.56, 0.24);
+        for y in 3..16u32 {
+            q.put(7, y, g.scale(0.85), 1.0);
+            let w = (16 - y) / 3;
+            for d in 1..=w {
+                if y % 2 == 0 {
+                    q.put(7 - d, y - d / 2, g.add((rnd(d, y, 171) - 0.5) * 0.1), 1.0);
+                    q.put(7 + d, y - d / 2, g.add((rnd(d, y, 172) - 0.5) * 0.1), 1.0);
+                }
+            }
+        }
+    }));
+    l.add(FLOWER_BLUE, "flower_blue", flower(Rgb(0.30, 0.45, 0.92)));
+    let podzol = Rgb(0.42, 0.30, 0.18);
+    l.add(PODZOL_TOP, "podzol_top", p(|q| {
+        q.noisy(podzol, 0.08, 173);
+        q.speckle(Rgb(0.55, 0.40, 0.20), 0.2, 174);
+        q.speckle(Rgb(0.28, 0.40, 0.20), 0.08, 175);
+    }));
+    l.add(PODZOL_SIDE, "podzol_side", side_with_top(dirt, podzol, 176));
+    l.add(MOSS, "moss", p(|q| {
+        q.noisy(Rgb(0.36, 0.52, 0.22), 0.08, 177);
+        q.speckle(Rgb(0.44, 0.60, 0.26), 0.2, 178);
+    }));
+    l.add(POLISHED_GRANITE, "polished_granite", polished(Rgb(0.66, 0.44, 0.38), 179));
+    l.add(POLISHED_MARBLE, "polished_marble", polished(Rgb(0.90, 0.89, 0.86), 180));
+    l.add(SMOOTH_STONE, "smooth_stone", polished(Rgb(0.60, 0.60, 0.62), 181));
+    l.add(SANDSTONE_BRICKS, "sandstone_bricks", bricks_pattern(Rgb(0.86, 0.79, 0.58), Rgb(0.70, 0.62, 0.44), 4, 2, 182, 0.0, false));
+    l.add(BOOKSHELF, "bookshelf", p(|q| {
+        let colors = [Rgb(0.62, 0.20, 0.18), Rgb(0.22, 0.36, 0.62), Rgb(0.30, 0.52, 0.26), Rgb(0.70, 0.58, 0.22), Rgb(0.45, 0.28, 0.50)];
+        for y in 0..S {
+            for x in 0..S {
+                let shelf = y == 0 || y == 7 || y == 8 || y == 15 || x == 0 || x == 15;
+                let c = if shelf {
+                    Rgb(0.60, 0.45, 0.26).add((rnd(x, y, 183) - 0.5) * 0.06)
+                } else {
+                    let book = (x + (y / 8) * 3) / 2;
+                    colors[(hash(book, y / 8, 184) % 5) as usize].add(if x % 2 == 0 { 0.04 } else { -0.04 })
+                };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(LANTERN, "lantern", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let frame = x < 2 || x > 13 || y < 2 || y > 13 || x == 7 || x == 8;
+                let c = if frame { Rgb(0.25, 0.25, 0.28) } else { Rgb(1.0, 0.82, 0.40).add((rnd(x, y, 185) - 0.5) * 0.08) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(WOOL_RED, "wool_red", wool(Rgb(0.74, 0.20, 0.20), 186));
+    l.add(WOOL_BLUE, "wool_blue", wool(Rgb(0.22, 0.34, 0.70), 187));
+    l.add(WOOL_YELLOW, "wool_yellow", wool(Rgb(0.92, 0.80, 0.25), 188));
     // Pixel-art finish for every opaque pixel: a touch more contrast and a limited palette
     // (14 levels per channel) so textures look hand-painted instead of smooth noise.
     for (_, img) in l.0.iter_mut() {

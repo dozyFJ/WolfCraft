@@ -774,7 +774,7 @@ impl App {
             look: ((self.input.mouse_dx + tl.0 as f64 * 1.4) * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy + tl.1 as f64 * 1.4) * sens),
             break_held: self.input.left || self.touch.breaking,
             use_pressed: std::mem::take(&mut self.input.right_press),
-            use_held: self.input.right,
+            use_held: self.input.right || self.touch.place_held,
             swap_hands: std::mem::take(&mut self.input.swap_press),
             pick_pressed: std::mem::take(&mut self.input.middle_press),
             hotbar_delta: std::mem::take(&mut self.input.scroll) as i32,
@@ -1194,6 +1194,7 @@ impl App {
                             flying: p.body.flying,
                             hint: if screen == Screen::Playing { hint } else { None },
                             mining: s.interaction.mining_fraction(),
+                            bow_charge: s.bow_charge,
                             item_name: s.item_name.clone(),
                             show_fps: settings.show_fps,
                             debug: debug_info.as_ref(),
@@ -1369,7 +1370,7 @@ impl App {
                 }
                 let cam = s.camera();
                 // Smooth FOV kick: wider while sprinting or flying fast, a touch narrower underwater.
-                let fx_target = if s.player.sprinting { 9.0 } else if s.player.body.flying { 4.0 } else if underwater { -4.0 } else { 0.0 };
+                let fx_target = if s.bow_charge > 0.0 { -14.0 * s.bow_charge } else if s.player.sprinting { 9.0 } else if s.player.body.flying { 4.0 } else if underwater { -4.0 } else { 0.0 };
                 self.fov_fx += (fx_target - self.fov_fx) * (1.0 - (-dt as f32 * 7.0).exp());
                 let params = FrameParams {
                     eye: cam.eye,
@@ -1388,6 +1389,8 @@ impl App {
                 };
                 // Character model is visible in third-person views only.
                 let mut model_verts = wolfcraft_engine::renderer::model::build_mob_models(&s.mobs.mobs, cam.eye);
+                let arrows: Vec<(glam::DVec3, glam::DVec3)> = s.arrows.list.iter().map(|a| (a.pos, a.dir)).collect();
+                model_verts.extend(wolfcraft_engine::renderer::model::build_arrow_models(&arrows, cam.eye));
                 if s.camera_mode != crate::session::CameraMode::First && !s.player.survival.dead {
                     let pose = PlayerPose {
                         feet: s.player.body.pos,

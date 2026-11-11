@@ -30,7 +30,12 @@ pub mod items {
     pub const ROTTEN_FLESH: u16 = 36;
     /// Armor: ARMOR_BASE + material * 4 + slot (helmet, chestplate, leggings, boots).
     pub const ARMOR_BASE: u16 = 37;
-    pub const COUNT: u16 = 53;
+    pub const BOW: u16 = 53;
+    pub const ARROW: u16 = 54;
+    pub const STRING: u16 = 55;
+    pub const FLINT: u16 = 56;
+    pub const LEATHER: u16 = 57;
+    pub const COUNT: u16 = 58;
 }
 
 const PICKAXE: [&str; 16] = [
@@ -236,6 +241,40 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             l.add(ARMOR_BASE + (mi * 4 + si) as u16, &format!("armor_{}_{}", mi, armor_names[si]), img);
         }
     }
+    l.add(BOW, "bow", p(|q| {
+        // Wooden arc on the left, string on the right.
+        let wood = Rgb(0.55, 0.38, 0.20);
+        for y in 1..15u32 {
+            let t = (y as f32 - 7.5) / 7.0;
+            let x = (4.0 + (t * t) * 5.0) as u32;
+            q.put(x, y, wood, 1.0);
+            q.put(x + 1, y, wood.scale(0.8), 1.0);
+        }
+        for y in 2..14u32 {
+            q.put(10, y, Rgb(0.90, 0.90, 0.86), 1.0);
+        }
+    }));
+    l.add(ARROW, "arrow", p(|q| {
+        for i in 3..13u32 {
+            q.put(i, 15 - i, Rgb(0.55, 0.40, 0.22), 1.0);
+        }
+        for (x, y) in [(12u32, 2u32), (13, 2), (13, 3), (12, 3), (11, 3), (12, 4)] {
+            q.put(x, y, Rgb(0.70, 0.72, 0.76), 1.0);
+        }
+        for (x, y) in [(2u32, 12u32), (2, 13), (3, 13), (3, 14), (1, 12), (2, 11)] {
+            q.put(x, y, Rgb(0.92, 0.92, 0.90), 1.0);
+        }
+    }));
+    l.add(STRING, "string", p(|q| {
+        for i in 2..14u32 {
+            let y = 8.0 + ((i as f32) * 0.9).sin() * 3.0;
+            q.put(i, y as u32, Rgb(0.92, 0.92, 0.90), 1.0);
+        }
+    }));
+    l.add(FLINT, "flint", blob(Rgb(0.22, 0.22, 0.24), 4.5, 90));
+    l.add(LEATHER, "leather", p(|q| {
+        q.shape(Rgb(0.58, 0.36, 0.20), &|u, v| ((u - 0.5) / 0.38).powi(2) + ((v - 0.5) / 0.32).powi(2) < 1.0 && !(v < 0.25 && (u - 0.5).abs() < 0.12));
+    }));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

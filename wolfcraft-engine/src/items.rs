@@ -39,7 +39,12 @@ pub mod ids {
     /// 0 leather, 1 bronze, 2 iron, 3 diamond.
     pub const ARMOR_BASE: ItemId = 293;
     pub const ARMOR_LAST: ItemId = 308;
-    pub const LAST: ItemId = 308;
+    pub const BOW: ItemId = 309;
+    pub const ARROW: ItemId = 310;
+    pub const STRING: ItemId = 311;
+    pub const FLINT: ItemId = 312;
+    pub const LEATHER: ItemId = 313;
+    pub const LAST: ItemId = 313;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -138,6 +143,11 @@ pub fn info(id: ItemId) -> ItemInfo {
             ItemInfo { name: ARMOR_NAMES[n], max_stack: 1, durability: 100 + (n / 4) as u16 * 120, ..plain(ARMOR_NAMES[n], sp::ARMOR_BASE + n as u16) }
         }
         ids::SHIELD => ItemInfo { max_stack: 1, durability: 336, ..plain("Щит", sp::SHIELD) },
+        ids::BOW => ItemInfo { max_stack: 1, durability: 384, ..plain("Лук", sp::BOW) },
+        ids::ARROW => plain("Стрела", sp::ARROW),
+        ids::STRING => plain("Нить", sp::STRING),
+        ids::FLINT => plain("Кремень", sp::FLINT),
+        ids::LEATHER => plain("Кожа", sp::LEATHER),
         t if (ids::TOOLS_BASE..=ids::TOOLS_LAST).contains(&t) => {
             let n = (t - ids::TOOLS_BASE) as usize;
             let (mat, kind) = (n / 4, n % 4);
@@ -223,6 +233,9 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         Block::DoorOpen => vec![ItemStack::of_block(Block::Door, 1)],
         Block::Glass | Block::Ice | Block::PackedIce | Block::TallGrass | Block::Seagrass | Block::Kelp => vec![],
         Block::Snow => vec![ItemStack::of_block(Block::Snow, 1)],
+        Block::Gravel if roll < 0.12 => vec![ItemStack::new(ids::FLINT, 1)],
+        Block::Podzol | Block::MossBlock => vec![ItemStack::of_block(Block::Dirt, 1)],
+        Block::Fern => vec![],
         Block::Basalt => vec![ItemStack::of_block(Block::Basalt, 1)],
         b => vec![ItemStack::of_block(b, 1)],
     }
@@ -233,10 +246,10 @@ pub fn mob_drops(kind: crate::mobs::MobKind, salt: u64) -> Vec<ItemStack> {
     use crate::mobs::MobKind;
     let roll = to01(hash3(salt, 7, 11, 13));
     match kind {
-        MobKind::Boar => vec![ItemStack::new(ids::RAW_MEAT, 1 + (roll * 2.0) as u8)],
-        MobKind::Sheep => vec![ItemStack::new(ids::RAW_MEAT, 1), ItemStack::new(ids::STICK, 1)],
+        MobKind::Boar => vec![ItemStack::new(ids::RAW_MEAT, 1 + (roll * 2.0) as u8), ItemStack::new(ids::LEATHER, 1)],
+        MobKind::Sheep => vec![ItemStack::new(ids::RAW_MEAT, 1), ItemStack::of_block(Block::Wool, 1)],
         MobKind::Ghoul => vec![ItemStack::new(ids::ROTTEN_FLESH, 1 + (roll * 2.0) as u8), ItemStack::new(ids::COAL, 1)],
-        MobKind::Crawler => vec![ItemStack::new(ids::STICK, 1 + (roll * 2.0) as u8)],
+        MobKind::Crawler => vec![ItemStack::new(ids::STRING, 1 + (roll * 2.0) as u8)],
     }
 }
 
@@ -316,12 +329,15 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
     if id >= ITEM_BASE {
-        return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };
+        return if info(id).tool.is_some() || matches!(id, ids::BOW | ids::ARROW) { "Инструменты" } else { "Предметы" };
     }
     let b = Block::from_u8(id as u8);
     match b.info().render {
-        RenderKind::Cross => "Растения",
+        RenderKind::Cross if b != Block::Torch => "Растения",
         _ => match b {
+            Block::BirchPlanks | Block::SprucePlanks | Block::AcaciaPlanks => "Дерево",
+            Block::Wool | Block::RedWool | Block::BlueWool | Block::YellowWool | Block::Torch | Block::PolishedGranite | Block::PolishedMarble | Block::SmoothStone | Block::SandstoneBricks | Block::Bookshelf | Block::Lantern => "Строительство",
+            Block::Pumpkin | Block::Melon => "Растения",
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Generator | Block::Cable | Block::Battery | Block::ElectricLamp | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",

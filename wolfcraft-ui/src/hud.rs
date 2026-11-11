@@ -66,6 +66,8 @@ pub struct HudState<'a> {
     pub flying: bool,
     pub hint: Option<String>,
     pub mining: f32,
+    /// Bow draw 0..1 (a bar under the crosshair while drawing).
+    pub bow_charge: f32,
     pub item_name: Option<(String, f32)>,
     pub show_fps: bool,
     pub debug: Option<&'a DebugInfo>,
@@ -173,6 +175,14 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         let (a, b) = (c + Vec2::new(a.0, a.1), c + Vec2::new(b.0, b.1));
         painter.line_segment([a, b], Stroke::new(4.0_f32, Color32::from_black_alpha(130)));
         painter.line_segment([a, b], Stroke::new(2.0_f32, Color32::from_white_alpha(235)));
+    }
+    // Bow draw: a small bar under the crosshair, turning gold when fully drawn.
+    if s.bow_charge > 0.0 {
+        let r = Rect::from_center_size(c + Vec2::new(0.0, 22.0), Vec2::new(44.0, 5.0));
+        painter.rect_filled(r, Rounding::ZERO, Color32::from_black_alpha(150));
+        let full = s.bow_charge >= 1.0;
+        let col = if full { Color32::from_rgb(250, 200, 60) } else { Color32::from_white_alpha(230) };
+        painter.rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width() * s.bow_charge.clamp(0.0, 1.0), r.height())), Rounding::ZERO, col);
     }
     // No hint pill under the crosshair: the view stays clean.
     let _ = &s.hint;
@@ -421,6 +431,7 @@ mod tests {
                     flying: false,
                     hint: Some("ЛКМ — сломать".into()),
                     mining: 0.5,
+                    bow_charge: 0.5,
                     item_name: Some(("Лампа".into(), 1.0)),
                     show_fps: true,
                     debug: Some(&dbg),

@@ -116,11 +116,19 @@ pub fn flora(planet: &Planet, f: u8, i: i32, j: i32, col: &Column) -> Vec<(i32, 
     if !is_grassy(b) {
         return vec![];
     }
+    // Sugar cane on low shores (1-3 high).
+    if col.elev < 2.5 && !matches!(b, Biome::Tundra) {
+        let h = splitmix(hash3(planet.seed ^ FLORA_SEED ^ 0x5C4, i, j, f as i32));
+        if to01(h) < 0.05 {
+            let height = 1 + (splitmix(h) % 3) as i32;
+            return (0..height).map(|d| (k_above + d, Block::SugarCane)).collect();
+        }
+    }
     let pick = match b {
-        Biome::Plains => table(u, &[(0.22, Block::TallGrass), (0.235, Block::FlowerRed), (0.25, Block::FlowerYellow), (0.256, Block::Shrub)]),
-        Biome::Forest | Biome::BirchForest => table(u, &[(0.14, Block::TallGrass), (0.150, Block::FlowerRed), (0.158, Block::FlowerYellow), (0.166, Block::MushroomBrown), (0.172, Block::MushroomRed)]),
-        Biome::Jungle => table(u, &[(0.30, Block::TallGrass), (0.37, Block::Shrub), (0.375, Block::FlowerRed)]),
-        Biome::Taiga => table(u, &[(0.08, Block::TallGrass), (0.088, Block::MushroomBrown), (0.092, Block::MushroomRed)]),
+        Biome::Plains => table(u, &[(0.22, Block::TallGrass), (0.235, Block::FlowerRed), (0.25, Block::FlowerYellow), (0.256, Block::Shrub), (0.262, Block::FlowerBlue), (0.2635, Block::Pumpkin)]),
+        Biome::Forest | Biome::BirchForest => table(u, &[(0.14, Block::TallGrass), (0.150, Block::FlowerRed), (0.158, Block::FlowerYellow), (0.166, Block::MushroomBrown), (0.172, Block::MushroomRed), (0.19, Block::Fern), (0.196, Block::FlowerBlue)]),
+        Biome::Jungle => table(u, &[(0.30, Block::TallGrass), (0.37, Block::Shrub), (0.375, Block::FlowerRed), (0.42, Block::Fern), (0.424, Block::Melon)]),
+        Biome::Taiga => table(u, &[(0.08, Block::TallGrass), (0.088, Block::MushroomBrown), (0.092, Block::MushroomRed), (0.16, Block::Fern)]),
         Biome::Savanna => table(u, &[(0.12, Block::TallGrass), (0.13, Block::Shrub)]),
         Biome::Swamp => table(u, &[(0.15, Block::TallGrass), (0.165, Block::MushroomBrown), (0.18, Block::MushroomRed), (0.19, Block::FlowerYellow)]),
         Biome::Tundra => table(u, &[(0.04, Block::TallGrass)]),

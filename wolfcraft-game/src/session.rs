@@ -97,6 +97,11 @@ pub struct GameSession {
     /// Smoothed third-person distance.
     tp_dist: f64,
     pub mobs: wolfcraft_engine::mobs::MobManager,
+    /// Arrows in flight or stuck in blocks.
+    pub arrows: wolfcraft_engine::projectiles::Arrows,
+    /// Bow draw 0..1 while the use button is held with a bow.
+    pub bow_charge: f32,
+    prev_use_held: bool,
     attack_cd: f32,
     death_burst_done: bool,
     /// Contents of chests (27 slots) and electric furnaces (0 input, 1 output) by block cell.
@@ -146,6 +151,9 @@ impl GameSession {
             mobs: wolfcraft_engine::mobs::MobManager::new(seed),
             attack_cd: 0.0,
             death_burst_done: false,
+            arrows: Default::default(),
+            bow_charge: 0.0,
+            prev_use_held: false,
             containers: Default::default(),
             block_commands: Default::default(),
             hell: false,
@@ -227,10 +235,29 @@ impl GameSession {
             self.player.inventory.swap_offhand();
         }
         // Shield up while RMB is held, unless the main hand has its own right-click use.
-        let main_use = self.player.inventory.held().is_some_and(|s| {
-            let i = s.info();
-            i.place.is_some() || i.food.is_some()
-        });
+        let holding_bow = self.player.inventory.held().is_some_and(|s| s.id == wolfcraft_engine::items::ids::BOW);
+        let main_use = holding_bow
+            || self.player.inventory.held().is_some_and(|s| {
+                let i = s.info();
+                i.place.is_some() || i.food.is_some()
+            });
+        // Bow: hold to draw (one second for full power), release to shoot.
+        let has_arrows = self.player.is_creative() || self.player.inventory.count(wolfcraft_engine::items::ids::ARROW) > 0;
+        if holding_bow && input.use_held && has_arrows && !self.player.survival.dead {
+            self.bow_charge = (self.bow_charge + dt).min(1.0);
+        } else {
+            if holding_bow && self.prev_use_held && !input.use_held && self.bow_charge > 0.12 && has_arrows {
+                let power = self.bow_charge;
+                let creative = self.player.is_creative();
+                if !creative {
+                    self.player.inventory.take(wolfcraft_engine::items::ids::ARROW, 1);
+                    self.player.inventory.wear_selected();
+                }
+                self.arrows.shoot(self.player.eye_pos(), self.player.look_dir(), power, !creative);
+            }
+            self.bow_charge = 0.0;
+        }
+        self.prev_use_held = input.use_held;
         self.player.blocking = input.use_held && self.player.inventory.has_shield() && !main_use && !self.player.survival.dead;
         if let Some(i) = input.hotbar_set {
             self.player.inventory.selected = i.min(8);
@@ -339,6 +366,21 @@ impl GameSession {
                         self.attack_cd = 0.45;
                     }
                 }
+            }
+        }
+        // Arrows: flight, hits, pickup.
+        if self.ground_ready() {
+            let feet = self.player.body.pos;
+            let can_pick = !self.player.survival.dead;
+            let ev = self.arrows.step(&self.chunks, &mut self.mobs, feet, can_pick, dt.min(0.1) as f64);
+            for kind in ev.killed {
+                for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64) {
+                    self.player.inventory.add(drop);
+                }
+                self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
+            }
+            if ev.picked > 0 {
+                self.player.inventory.add(wolfcraft_engine::items::ItemStack::new(wolfcraft_engine::items::ids::ARROW, ev.picked as u8));
             }
         }
         // Containers: broken chests spill into the inventory; furnaces smelt while powered.
@@ -762,6 +804,38 @@ mod tests {
         assert!(s.player.body.on_ground, "stands on the new face");
         assert!(s.player.up().y > 0.95, "up is now the +Y face normal: {:?}", s.player.up());
         wolfcraft_engine::cubesphere::set_cube_world(false);
+    }
+
+    #[test]
+    fn bow_draws_shoots_and_the_arrow_sticks() {
+        use wolfcraft_engine::items::{ItemStack, ids};
+        let mut s = load("bow", 21, false);
+        settle(&mut s);
+        for _ in 0..120 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        }
+        s.player.inventory.slots[0] = Some(ItemStack::new(ids::BOW, 1));
+        s.player.inventory.slots[1] = Some(ItemStack::new(ids::ARROW, 5));
+        s.player.inventory.selected = 0;
+        s.player.pitch = 0.2;
+        let hold = InputFrame { use_held: true, ..Default::default() };
+        for _ in 0..70 {
+            s.update(&hold, 1.0 / 60.0, 4, false);
+        }
+        assert!(s.bow_charge >= 1.0, "fully drawn after a second: {}", s.bow_charge);
+        s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        assert_eq!(s.arrows.list.len(), 1, "release shoots");
+        assert_eq!(s.player.inventory.count(ids::ARROW), 4, "one arrow used");
+        let start = s.arrows.list[0].pos;
+        for _ in 0..600 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+            if s.arrows.list.first().is_some_and(|a| a.stuck) {
+                break;
+            }
+        }
+        let a = &s.arrows.list[0];
+        assert!(a.stuck, "the arrow lands and sticks");
+        assert!((a.pos - start).length() > 10.0, "it flew some distance: {}", (a.pos - start).length());
     }
 
     #[test]

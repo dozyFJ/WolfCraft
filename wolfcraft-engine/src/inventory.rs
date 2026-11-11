@@ -237,9 +237,29 @@ pub fn recipes() -> &'static [Recipe] {
     R.get_or_init(|| {
         let b = |x: Block| x as ItemId;
         let mut v = Vec::new();
-        for log in [Block::OakLog, Block::BirchLog, Block::SpruceLog, Block::AcaciaLog] {
-            v.push(r(&[(b(log), 1)], (b(Block::OakPlanks), 4), false, "Дерево"));
+        // Each log gives its own planks; any planks make sticks and a crafting table.
+        for (log, planks) in [(Block::OakLog, Block::OakPlanks), (Block::BirchLog, Block::BirchPlanks), (Block::SpruceLog, Block::SprucePlanks), (Block::AcaciaLog, Block::AcaciaPlanks)] {
+            v.push(r(&[(b(log), 1)], (b(planks), 4), false, "Дерево"));
         }
+        for planks in [Block::BirchPlanks, Block::SprucePlanks, Block::AcaciaPlanks] {
+            v.push(r(&[(b(planks), 2)], (ids::STICK, 4), false, "Дерево"));
+            v.push(r(&[(b(planks), 4)], (b(Block::CraftingTable), 1), false, "Строительство"));
+        }
+        // Bow and arrows, wool, torches and new building blocks.
+        v.push(r(&[(ids::STICK, 3), (ids::STRING, 3)], (ids::BOW, 1), true, "Инструменты"));
+        v.push(r(&[(ids::FLINT, 1), (ids::STICK, 1)], (ids::ARROW, 4), false, "Инструменты"));
+        v.push(r(&[(ids::STRING, 4)], (b(Block::Wool), 1), false, "Строительство"));
+        v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerRed), 1)], (b(Block::RedWool), 1), false, "Строительство"));
+        v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerBlue), 1)], (b(Block::BlueWool), 1), false, "Строительство"));
+        v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerYellow), 1)], (b(Block::YellowWool), 1), false, "Строительство"));
+        v.push(r(&[(ids::COAL, 1), (ids::STICK, 2)], (b(Block::Torch), 4), false, "Строительство"));
+        v.push(r(&[(b(Block::Torch), 1), (ids::IRON_INGOT, 1)], (b(Block::Lantern), 1), true, "Строительство"));
+        v.push(r(&[(b(Block::Granite), 4)], (b(Block::PolishedGranite), 4), true, "Строительство"));
+        v.push(r(&[(b(Block::Marble), 4)], (b(Block::PolishedMarble), 4), true, "Строительство"));
+        v.push(r(&[(b(Block::Stone), 1), (ids::COAL, 1)], (b(Block::SmoothStone), 1), true, "Плавка"));
+        v.push(r(&[(b(Block::Sandstone), 4)], (b(Block::SandstoneBricks), 4), true, "Строительство"));
+        v.push(r(&[(b(Block::OakPlanks), 6), (ids::LEATHER, 1)], (b(Block::Bookshelf), 1), true, "Строительство"));
+        v.push(r(&[(ids::LEATHER, 5)], (ids::ARMOR_BASE + 1, 1), true, "Броня"));
         v.push(r(&[(b(Block::OakPlanks), 2)], (ids::STICK, 4), false, "Дерево"));
         v.push(r(&[(b(Block::OakPlanks), 4)], (b(Block::CraftingTable), 1), false, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 8)], (b(Block::Chest), 1), true, "Строительство"));
@@ -440,7 +460,7 @@ mod tests {
         assert!(inv.craft(planks, false));
         assert_eq!(inv.count(Block::OakPlanks as ItemId), 4);
         assert_eq!(inv.count(Block::OakLog as ItemId), 1);
-        let sticks = recipes().iter().find(|r| r.output.0 == ids::STICK).unwrap();
+        let sticks = recipes().iter().find(|r| r.output.0 == ids::STICK && r.ingredients[0].0 == Block::OakPlanks as ItemId).unwrap();
         assert!(inv.craft(sticks, false));
         assert_eq!(inv.count(ids::STICK), 4);
         assert_eq!(inv.count(Block::OakPlanks as ItemId), 2);

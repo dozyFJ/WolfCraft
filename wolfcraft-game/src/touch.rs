@@ -63,6 +63,8 @@ pub struct TouchState {
     pub sneak: bool,
     /// Sprint toggle (on-screen button).
     pub sprint: bool,
+    /// The "Поставить" button is held (draws a bow, raises a shield).
+    pub place_held: bool,
     pub jump_held: bool,
     /// Accumulated look drag in pixels since the last frame.
     pub look: (f32, f32),
@@ -176,7 +178,10 @@ impl TouchState {
                                 self.sneak = false;
                             }
                         }
-                        Btn::Place => out.push(TouchAction::Place),
+                        Btn::Place => {
+                            self.place_held = true;
+                            out.push(TouchAction::Place);
+                        }
                         Btn::Inventory => out.push(TouchAction::Inventory),
                         Btn::Pause => out.push(TouchAction::Pause),
                         Btn::Chat => out.push(TouchAction::Chat),
@@ -224,6 +229,7 @@ impl TouchState {
                             }
                         }
                         Role::Button(Btn::Jump) => self.jump_held = false,
+                        Role::Button(Btn::Place) => self.place_held = false,
                         Role::Button(_) | Role::Hotbar => {}
                     }
                 }
@@ -260,6 +266,7 @@ impl TouchState {
         self.fingers.clear();
         self.move_vec = (0.0, 0.0);
         self.jump_held = false;
+        self.place_held = false;
         self.breaking = false;
         self.look = (0.0, 0.0);
     }

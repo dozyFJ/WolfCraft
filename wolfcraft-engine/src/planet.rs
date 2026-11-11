@@ -542,6 +542,13 @@ impl Planet {
                     t = Block::Grass;
                 }
             }
+            // Patches: podzol under the taiga, moss in jungles and swamps.
+            let patch = hash3(self.seed ^ 0x9D2, c.i >> 2, c.j >> 2, c.f as i32 * 8192) % 100;
+            if col.biome == Biome::Taiga && patch < 35 {
+                t = Block::Podzol;
+            } else if matches!(col.biome, Biome::Jungle | Biome::Swamp) && patch < 12 {
+                t = Block::MossBlock;
+            }
             (t, f, u)
         };
         if depth < 1.0 {

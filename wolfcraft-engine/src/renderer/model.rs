@@ -360,6 +360,28 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3) -> Vec<ModelVe
     v
 }
 
+/// Arrows in flight or stuck in blocks: `(tip position, direction)` relative to nothing
+/// (world space); drawn relative to `camera`.
+pub fn build_arrow_models(arrows: &[(DVec3, DVec3)], camera: DVec3) -> Vec<ModelVertex> {
+    let mut v = Vec::with_capacity(arrows.len() * 3 * 36);
+    for (pos, dir) in arrows {
+        let fwd = dir.normalize_or_zero();
+        if fwd.length_squared() < 0.5 {
+            continue;
+        }
+        let helper = if fwd.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let right = fwd.cross(helper).normalize();
+        let up = right.cross(fwd);
+        let f = Frame { origin: *pos - camera, right, up, fwd };
+        let z = Vec3::ZERO;
+        add_box(&mut v, &f, Vec3::new(-0.025, -0.025, -0.62), Vec3::new(0.025, 0.025, -0.06), z, 0.0, [0.55, 0.40, 0.22]);
+        add_box(&mut v, &f, Vec3::new(-0.045, -0.045, -0.08), Vec3::new(0.045, 0.045, 0.02), z, 0.0, [0.72, 0.74, 0.78]);
+        add_box(&mut v, &f, Vec3::new(-0.08, -0.008, -0.62), Vec3::new(0.08, 0.008, -0.48), z, 0.0, [0.94, 0.94, 0.92]);
+        add_box(&mut v, &f, Vec3::new(-0.008, -0.08, -0.62), Vec3::new(0.008, 0.08, -0.48), z, 0.0, [0.94, 0.94, 0.92]);
+    }
+    v
+}
+
 /// First-person arms: camera basis and animation state.
 #[derive(Clone, Copy, Debug)]
 pub struct HandsPose {

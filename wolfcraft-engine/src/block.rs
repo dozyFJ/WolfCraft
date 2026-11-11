@@ -206,6 +206,28 @@ blocks! {
     95 StoneWall => needs_pick(info("Каменная стена", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
     96 Door => info("Дверь", Shape, 2.0, Axe, all(t::PLANKS)),
     97 DoorOpen => info("Дверь (открыта)", Shape, 2.0, Axe, all(t::PLANKS)),
+    // Biome and building blocks
+    98 Wool => info("Белая шерсть", Opaque, 1.2, Hand, all(t::WOOL)),
+    99 BirchPlanks => info("Берёзовые доски", Opaque, 3.0, Axe, all(t::BIRCH_PLANKS)),
+    100 SprucePlanks => info("Еловые доски", Opaque, 3.0, Axe, all(t::SPRUCE_PLANKS)),
+    101 AcaciaPlanks => info("Акациевые доски", Opaque, 3.0, Axe, all(t::ACACIA_PLANKS)),
+    102 Torch => emissive(info("Факел", Cross, 0.0, Hand, all(t::TORCH))),
+    103 Pumpkin => info("Тыква", Opaque, 1.5, Axe, column(t::PUMPKIN_SIDE, t::PUMPKIN_TOP, t::PUMPKIN_TOP)),
+    104 Melon => info("Арбуз", Opaque, 1.5, Axe, column(t::MELON_SIDE, t::MELON_TOP, t::MELON_TOP)),
+    105 SugarCane => info("Тростник", Cross, 0.0, Hand, all(t::SUGAR_CANE)),
+    106 Fern => info("Папоротник", Cross, 0.0, Hand, all(t::FERN)),
+    107 FlowerBlue => info("Синий цветок", Cross, 0.0, Hand, all(t::FLOWER_BLUE)),
+    108 Podzol => info("Подзол", Opaque, 0.9, Shovel, column(t::PODZOL_SIDE, t::PODZOL_TOP, t::DIRT)),
+    109 MossBlock => info("Мох", Opaque, 0.6, Hand, all(t::MOSS)),
+    110 PolishedGranite => needs_pick(info("Полированный гранит", Opaque, 8.0, Pickaxe, all(t::POLISHED_GRANITE))),
+    111 PolishedMarble => needs_pick(info("Полированный мрамор", Opaque, 8.0, Pickaxe, all(t::POLISHED_MARBLE))),
+    112 SmoothStone => needs_pick(info("Гладкий камень", Opaque, 8.0, Pickaxe, all(t::SMOOTH_STONE))),
+    113 SandstoneBricks => needs_pick(info("Песчаниковые кирпичи", Opaque, 4.0, Pickaxe, all(t::SANDSTONE_BRICKS))),
+    114 Bookshelf => info("Книжная полка", Opaque, 2.0, Axe, column(t::BOOKSHELF, t::PLANKS, t::PLANKS)),
+    115 Lantern => emissive(info("Фонарь", Opaque, 1.5, Pickaxe, all(t::LANTERN))),
+    116 RedWool => info("Красная шерсть", Opaque, 1.2, Hand, all(t::WOOL_RED)),
+    117 BlueWool => info("Синяя шерсть", Opaque, 1.2, Hand, all(t::WOOL_BLUE)),
+    118 YellowWool => info("Жёлтая шерсть", Opaque, 1.2, Hand, all(t::WOOL_YELLOW)),
 }
 
 impl Block {
