@@ -162,6 +162,10 @@ impl Interaction {
             }
         }
         let Some(stack) = player.inventory.held() else { return events };
+        // Armor in hand: put it on.
+        if player.inventory.equip_selected() {
+            return events;
+        }
         let info = stack.info();
         if let Some((hunger, sat)) = info.food {
             if player.survival.hunger < 20.0 && !player.is_creative() {

@@ -473,7 +473,8 @@ fn arm_place_base(pose: &HandsPose, side: f32, jab: f32) -> (Vec3, f32) {
             // Shovel: a digging thrust forward and down.
             2 => (-0.03 * sw, -0.02 * g - 0.10 * sw, -0.05 * g + 0.22 * sw, g * (0.25 + 0.45 * sw)),
             // Sword: a quick sideways sweep.
-            _ => (0.15 * g - 0.36 * sw, 0.02 * g - 0.03 * sw, 0.05 * sw, g * (-0.25 + 0.55 * sw)),
+            // Sword: Minecraft-style diagonal slash from upper right down to the centre.
+            _ => (0.12 * g - 0.30 * sw, 0.06 * g - 0.14 * sw, 0.08 * sw, g * (-0.45 + 1.05 * sw)),
         };
         return (Vec3::new(0.30 + dx + bob_x, -0.30 + dy - bob_y, 0.42 + dz), 0.2 + tilt);
     }
@@ -605,12 +606,15 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         // 3D item: every opaque icon pixel is a little box. The icon's handle (bottom-left)
         // sits in the fist; its right edge points left and a bit away, so the tip leans
         // towards the crosshair.
-        let a = 0.42f32;
+        // Minecraft-like grip: the icon diagonal (handle -> head) points up, forward and
+        // towards the crosshair, the flat side half-turned to the camera.
+        let a = 0.62f32;
         let u = Vec3::new(-a.cos(), 0.0, a.sin());
-        let w = Vec3::Y;
+        let w0 = Vec3::new(0.0, 0.88, 0.48).normalize();
+        let w = (w0 - u * u.dot(w0)).normalize();
         let n = u.cross(w).normalize();
-        let s = 0.36;
-        let o = f + Vec3::new(0.03, -0.10, 0.0);
+        let s = 0.46;
+        let o = f + Vec3::new(0.06, -0.08, -0.06);
         add_voxel_icon(v, frame, &px, o, u, w, n, s, pivot, angle);
         return;
     }

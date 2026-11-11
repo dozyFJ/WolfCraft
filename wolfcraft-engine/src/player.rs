@@ -184,15 +184,9 @@ impl Player {
         }
     }
 
-    /// Total defence from armor pieces carried in the inventory: the best piece per slot counts.
+    /// Total defence from the worn armor.
     pub fn armor_points(&self) -> u32 {
-        let mut best = [0u8; 4];
-        for s in self.inventory.slots.iter().flatten() {
-            if let Some(slot) = crate::items::armor_slot(s.id) {
-                best[slot] = best[slot].max(crate::items::armor_points(s.id));
-            }
-        }
-        best.iter().map(|b| *b as u32).sum()
+        self.inventory.armor.iter().flatten().map(|s| crate::items::armor_points(s.id) as u32).sum()
     }
 
     pub fn damage(&mut self, amount: f32, difficulty: Difficulty) {

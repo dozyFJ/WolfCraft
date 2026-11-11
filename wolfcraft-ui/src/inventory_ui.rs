@@ -16,9 +16,11 @@ const GAP: f32 = 5.0;
 /// Drag ids: 0..SLOTS = inventory, OFFHAND = second hand, GRID.. = crafting cells.
 const GRID: usize = 100;
 const OFFHAND: usize = 99;
+/// Worn armor: ARMOR..ARMOR+4 (helmet, chestplate, leggings, boots).
+const ARMOR: usize = 95;
 
 /// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
-const CREATIVE_TABS: [&str; 10] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Техника", "Растения", "Предметы", "Инструменты", "Рюкзак"];
+const CREATIVE_TABS: [&str; 10] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Техника", "Растения", "Предметы", "Инструменты", "Инвентарь"];
 const BACKPACK_TAB: usize = 9;
 
 
@@ -74,6 +76,8 @@ fn in_tab(id: ItemId, tab: usize) -> bool {
 fn get(inv: &Inventory, grid: &CraftGrid, slot: usize) -> Option<ItemStack> {
     if slot >= GRID {
         grid.cells[slot - GRID]
+    } else if (ARMOR..ARMOR + 4).contains(&slot) {
+        inv.armor[slot - ARMOR]
     } else if slot == OFFHAND {
         inv.offhand
     } else {
@@ -84,6 +88,8 @@ fn get(inv: &Inventory, grid: &CraftGrid, slot: usize) -> Option<ItemStack> {
 fn set(inv: &mut Inventory, grid: &mut CraftGrid, slot: usize, v: Option<ItemStack>) {
     if slot >= GRID {
         grid.cells[slot - GRID] = v
+    } else if (ARMOR..ARMOR + 4).contains(&slot) {
+        inv.armor[slot - ARMOR] = v
     } else if slot == OFFHAND {
         inv.offhand = v
     } else {
@@ -94,6 +100,11 @@ fn set(inv: &mut Inventory, grid: &mut CraftGrid, slot: usize, v: Option<ItemSta
 /// Drag & drop between any two slots (inventory or grid): merge equal stacks, else swap.
 fn move_any(inv: &mut Inventory, grid: &mut CraftGrid, a: usize, b: usize) {
     if a == b {
+        return;
+    }
+    // Armor slots take only the matching piece (in either direction of a swap).
+    let fits = |slot: usize, s: Option<ItemStack>| !(ARMOR..ARMOR + 4).contains(&slot) || s.is_none_or(|s| items::armor_slot(s.id) == Some(slot - ARMOR));
+    if !fits(b, get(inv, grid, a)) || !fits(a, get(inv, grid, b)) {
         return;
     }
     match (get(inv, grid, a), get(inv, grid, b)) {
@@ -264,6 +275,20 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
             section_label(ui, "Персонаж");
             ui.add_space(4.0);
             ui.horizontal_top(|ui| {
+                // Armor: helmet, chestplate, leggings, boots.
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = GAP;
+                    for a in 0..4 {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(CELL * 0.75), Sense::hover());
+                        slot_rects.push((ARMOR + a, rect));
+                        draw_slot(ui, icons, p, state, inv, ARMOR + a, rect);
+                        if inv.armor[a].is_none() {
+                            let names = ["Шлем", "Броня", "Поножи", "Ботинки"];
+                            ui.painter().text(rect.center(), Align2::CENTER_CENTER, names[a], FontId::proportional(8.5), p.text_muted.gamma_multiply(0.6));
+                        }
+                    }
+                });
+                ui.add_space(GAP);
                 let h = 3.0 * (CELL + GAP) - GAP;
                 let (r, _) = ui.allocate_exact_size(Vec2::new(h * 0.62, h), Sense::hover());
                 ui.painter().rect_filled(r, Rounding::ZERO, p.surface_hi);
@@ -405,22 +430,16 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     // ---- Grid ----
     let grid_h = rows as f32 * (cell + GAP) - GAP;
     if state.tab == BACKPACK_TAB {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
+        // The survival inventory inside the creative one: armor, second hand, 2x2 crafting,
+        // backpack and hotbar (scrolls on small screens).
+        let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h + 10.0 + cell), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
-        egui::ScrollArea::vertical().id_salt("backpack-scroll").auto_shrink([false, false]).show(&mut ui2, |ui| {
-            let backpack: Vec<usize> = (HOTBAR..SLOTS).collect();
-            for row in backpack.chunks(9) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-                    for &slot in row {
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
-                        slot_rects.push((slot, rect));
-                        draw_slot(ui, icons, p, state, inv, slot, rect);
-                    }
-                });
-                ui.add_space(GAP - ui.spacing().item_spacing.y);
+        egui::ScrollArea::vertical().id_salt("creative-survival-inv").auto_shrink([false, false]).show(&mut ui2, |ui| {
+            if let Some(msg) = survival_layout(ui, icons, p, state, inv, false, grid_w - 16.0, slot_rects) {
+                result.crafted = Some(msg);
             }
         });
+        return;
     } else {
         let list: Vec<ItemId> = palette_all.into_iter().filter(|id| in_tab(*id, state.tab) && matches_search(*id, &state.search)).collect();
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());

@@ -13,11 +13,13 @@ pub struct Inventory {
     pub selected: usize,
     /// Second hand (shield). Swapped with the selected slot by F.
     pub offhand: Option<ItemStack>,
+    /// Worn armor: helmet, chestplate, leggings, boots.
+    pub armor: [Option<ItemStack>; 4],
 }
 
 impl Default for Inventory {
     fn default() -> Self {
-        Self { slots: [None; SLOTS], selected: 0, offhand: None }
+        Self { slots: [None; SLOTS], selected: 0, offhand: None, armor: [None; 4] }
     }
 }
 
@@ -29,6 +31,15 @@ impl Inventory {
     /// Swaps the selected hotbar slot with the second hand.
     pub fn swap_offhand(&mut self) {
         std::mem::swap(&mut self.slots[self.selected], &mut self.offhand);
+    }
+
+    /// Puts on the armor piece in the selected slot (swapping with what was worn).
+    /// Returns true if something was equipped.
+    pub fn equip_selected(&mut self) -> bool {
+        let Some(s) = self.slots[self.selected] else { return false };
+        let Some(slot) = crate::items::armor_slot(s.id) else { return false };
+        std::mem::swap(&mut self.slots[self.selected], &mut self.armor[slot]);
+        true
     }
 
     pub fn has_shield(&self) -> bool {
@@ -172,14 +183,16 @@ impl Inventory {
                 None => out.extend_from_slice(&[0xFF, 0xFF, 0, 0, 0]),
             }
         }
-        // Off-hand, appended (older saves simply end before it).
-        match &self.offhand {
-            Some(s) => {
-                out.extend_from_slice(&s.id.to_le_bytes());
-                out.push(s.count);
-                out.extend_from_slice(&s.damage.to_le_bytes());
+        // Off-hand and then the worn armor, appended (older saves simply end before them).
+        for s in std::iter::once(&self.offhand).chain(self.armor.iter()) {
+            match s {
+                Some(s) => {
+                    out.extend_from_slice(&s.id.to_le_bytes());
+                    out.push(s.count);
+                    out.extend_from_slice(&s.damage.to_le_bytes());
+                }
+                None => out.extend_from_slice(&[0xFF, 0xFF, 0, 0, 0]),
             }
-            None => out.extend_from_slice(&[0xFF, 0xFF, 0, 0, 0]),
         }
     }
 
@@ -196,14 +209,21 @@ impl Inventory {
                 inv.slots[i] = Some(ItemStack { id, count: data[o + 2], damage: u16::from_le_bytes([data[o + 3], data[o + 4]]) });
             }
         }
-        if let Some(o) = data.get(need..need + 5) {
+        let read = |o: &[u8]| {
             let id = u16::from_le_bytes([o[0], o[1]]);
-            if id != 0xFFFF && crate::items::is_valid(id) && o[2] > 0 {
-                inv.offhand = Some(ItemStack { id, count: o[2], damage: u16::from_le_bytes([o[3], o[4]]) });
+            (id != 0xFFFF && crate::items::is_valid(id) && o[2] > 0).then(|| ItemStack { id, count: o[2], damage: u16::from_le_bytes([o[3], o[4]]) })
+        };
+        let mut used = need;
+        if let Some(o) = data.get(used..used + 5) {
+            inv.offhand = read(o);
+            used += 5;
+            for a in 0..4 {
+                let Some(o) = data.get(used..used + 5) else { break };
+                inv.armor[a] = read(o).filter(|s| crate::items::armor_slot(s.id) == Some(a));
+                used += 5;
             }
-            return Some((inv, need + 5));
         }
-        Some((inv, need))
+        Some((inv, used))
     }
 }
 
