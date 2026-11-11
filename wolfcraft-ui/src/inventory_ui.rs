@@ -137,11 +137,14 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
 
     let left_w = 9.0 * (CELL + GAP) - GAP;
     if creative {
-        // Cell size follows the screen height so the hotbar always fits on a phone.
-        let h = ctx.screen_rect().height();
-        let cell = if h < 640.0 { 38.0 } else { CELL };
-        // Keep the bottom row clear of the phone's gesture bar.
-        let rows = (((h - 215.0 - cell) / (cell + GAP)).floor() as usize).clamp(2, 6);
+        // Cells as big as the screen allows: three rows of items plus the hotbar must fit the
+        // height (with the tabs, title and the phone's gesture bar), ten cells the width.
+        let (sw, h) = (ctx.screen_rect().width(), ctx.screen_rect().height());
+        let tabs_k = 10.5 / 13.0; // tab size relative to a cell
+        let by_height = (h - 110.0) / (4.0 + tabs_k + 4.0 * GAP / 40.0);
+        let by_width = (sw - 60.0 - 8.0 * GAP - 14.0) / 10.0;
+        let cell = by_height.min(by_width).clamp(40.0, 84.0).floor();
+        let rows = (((h - 110.0 - cell * (1.0 + tabs_k)) / (cell + GAP)).floor() as usize).clamp(2, 7);
         // Hotbar (9) + gap + bin; the tab row (10 tabs + close) is laid out to the same width.
         let width = 10.0 * cell + 8.0 * GAP + 14.0;
         let grid_w = width;
