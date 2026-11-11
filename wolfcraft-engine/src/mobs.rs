@@ -104,7 +104,7 @@ impl MobManager {
         Self { mobs: Vec::new(), debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
     }
 
-    fn rand(&mut self) -> f64 {
+    pub fn rand(&mut self) -> f64 {
         self.rng = splitmix(self.rng);
         (self.rng >> 11) as f64 / (1u64 << 53) as f64
     }
@@ -142,7 +142,7 @@ impl MobManager {
             let vel = (t1 * a.cos() + t2 * a.sin()) * s + up * (3.0 + self.rand() * 5.0);
             let size = (0.10 + self.rand() * 0.14) as f32;
             let spin = (self.rand() * 6.0) as f32;
-            self.debris.push(Debris { pos: pos + up * h, vel, color: palette[i % palette.len()], size, age: 0.0, spin });
+            self.debris.push(Debris { pos: pos + up * h, vel, color: palette[i % palette.len()], size, age: 0.0, spin, kind: FxKind::Fall, glow: false });
         }
     }
 
@@ -164,7 +164,7 @@ impl MobManager {
             let size = (0.045 + self.rand() * 0.055) as f32;
             let spin = (self.rand() * 6.0) as f32;
             // Start aged so chips live about a second instead of three.
-            let d = Debris { pos: pos + off, vel, color: palette[i % palette.len()], size, age: 2.0 + (self.rand() * 0.4) as f32, spin };
+            let d = Debris { pos: pos + off, vel, color: palette[i % palette.len()], size, age: 2.0 + (self.rand() * 0.4) as f32, spin, kind: FxKind::Fall, glow: false };
             if self.debris.len() >= MAX_DEBRIS {
                 let oldest = self.debris.iter().enumerate().max_by(|a, b| a.1.age.total_cmp(&b.1.age)).map(|(i, _)| i).unwrap_or(0);
                 self.debris[oldest] = d;
@@ -174,10 +174,56 @@ impl MobManager {
         }
     }
 
+    /// One effect particle (embers, smoke, leaves, splashes, dust) living `life` seconds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fx(&mut self, pos: DVec3, vel: DVec3, color: [f32; 3], size: f32, life: f32, kind: FxKind) {
+        let spin = (self.rand() * 6.0) as f32;
+        let d = Debris { pos, vel, color, size, age: (3.0 - life).clamp(0.0, 2.9), spin, kind, glow: false };
+        if self.debris.len() >= MAX_DEBRIS {
+            // Full: replace the oldest particle.
+            if let Some((i, _)) = self.debris.iter().enumerate().max_by(|a, b| a.1.age.total_cmp(&b.1.age)) {
+                self.debris[i] = d;
+            }
+        } else {
+            self.debris.push(d);
+        }
+    }
+
+    /// A glowing effect particle (embers, sparks): bright even at night.
+    pub fn fx_glow(&mut self, pos: DVec3, vel: DVec3, color: [f32; 3], size: f32, life: f32, kind: FxKind) {
+        self.fx(pos, vel, color, size, life, kind);
+        if let Some(d) = self.debris.iter_mut().find(|d| d.pos == pos && !d.glow) {
+            d.glow = true;
+        }
+    }
+
     fn step_debris(&mut self, world: &impl Voxels, dt: f64) {
         for d in self.debris.iter_mut() {
             d.age += dt as f32;
             let up = up_at(d.pos);
+            match d.kind {
+                FxKind::Fall => {}
+                FxKind::Rise => {
+                    // Embers and smoke: float up and slow down, no collisions.
+                    d.vel = d.vel * (-1.8 * dt).exp() + up * 0.9 * dt;
+                    d.pos += d.vel * dt;
+                    continue;
+                }
+                FxKind::Leaf => {
+                    // Leaves flutter down slowly, swaying from side to side.
+                    let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+                    let side = tangent(helper, up).normalize();
+                    let target = -up * 0.9 + side * ((d.age * 2.6 + d.spin).sin() as f64 * 0.8);
+                    d.vel += (target - d.vel) * (1.0 - (-3.0 * dt).exp());
+                    let next = d.pos + d.vel * dt;
+                    if !world.block_at_world(next).is_solid() {
+                        d.pos = next;
+                    } else {
+                        d.vel = DVec3::ZERO;
+                    }
+                    continue;
+                }
+            }
             d.vel -= up * 20.0 * dt;
             let next = d.pos + d.vel * dt;
             if world.block_at_world(next).is_solid() {
@@ -395,6 +441,20 @@ pub struct Debris {
     pub size: f32,
     pub age: f32,
     pub spin: f32,
+    pub kind: FxKind,
+    /// Glows in the dark (embers, sparks): drawn unlit.
+    pub glow: bool,
+}
+
+/// How a particle moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FxKind {
+    /// Falls and bounces (chips, cubes of dead creatures, splashes, dust).
+    Fall,
+    /// Floats up and fades (embers, smoke, puffs).
+    Rise,
+    /// Flutters down slowly (falling leaves).
+    Leaf,
 }
 
 impl MobKind {

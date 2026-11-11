@@ -127,6 +127,15 @@ pub struct GameSession {
     pub studio: bool,
     /// Pressed buttons and the seconds until they spring back.
     buttons: Vec<(wolfcraft_engine::cubesphere::Cell, f32)>,
+    /// Special effects: amount (the particles setting), light sources nearby (refreshed twice
+    /// a second), timers and the player's state last frame (for splashes and landing dust).
+    pub fx_amount: f32,
+    fx_lights: Vec<(DVec3, wolfcraft_engine::block::Block)>,
+    fx_scan: f32,
+    fx_dust: f32,
+    fx_was_in_water: bool,
+    fx_prev_vup: f64,
+    fx_was_ground: bool,
     /// Radiation dose from uranium (seconds of exposure); every 3 s of it costs half a heart.
     radiation: f32,
     /// Flowing water and lava around edits.
@@ -182,6 +191,13 @@ impl GameSession {
             net_out: Vec::new(),
             fluids: Default::default(),
             radiation: 0.0,
+            fx_amount: 1.0,
+            fx_lights: Vec::new(),
+            fx_scan: 0.0,
+            fx_dust: 0.0,
+            fx_was_in_water: false,
+            fx_prev_vup: 0.0,
+            fx_was_ground: true,
         };
         s.load_containers();
         s.load_block_commands();
@@ -461,6 +477,7 @@ impl GameSession {
                 self.buttons.push((*pos, 1.0));
             }
         }
+        self.special_effects(dt);
         // Radiation: uranium carried or within two blocks hurts slowly. A full set of armour
         // keeps it out.
         if !self.player.survival.dead && !self.player.is_creative() {
@@ -773,6 +790,147 @@ impl GameSession {
         let sign = if self.camera_mode == CameraMode::ThirdFront { 1.0 } else { -1.0 };
         let eye = self.player.eye_pos() + self.player.up() * self.cam_lag;
         self.room_along(eye, look * sign)
+    }
+
+    /// Particles that bring the world to life: embers and smoke over torches, bubbles and
+    /// sparks over lava, glowing motes around uranium, falling leaves, a splash when the
+    /// player jumps into water, dust on landing and behind a sprinting player.
+    fn special_effects(&mut self, dt: f32) {
+        use wolfcraft_engine::block::Block;
+        use wolfcraft_engine::mobs::FxKind;
+        let k = self.fx_amount.clamp(0.0, 2.0);
+        if k <= 0.0 || self.player.survival.dead {
+            return;
+        }
+        let g = self.chunks.grid();
+        let pos = self.player.body.pos;
+        let up = self.player.up();
+        let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let t1 = (helper - up * helper.dot(up)).normalize();
+        let t2 = up.cross(t1);
+        let jitter = |m: &mut wolfcraft_engine::mobs::MobManager, s: f64| (t1 * (m.rand() - 0.5) + t2 * (m.rand() - 0.5)) * s;
+        // Light sources within 16 blocks, from the chunks' emitter lists (cheap).
+        self.fx_scan -= dt;
+        if self.fx_scan <= 0.0 {
+            self.fx_scan = 0.5;
+            self.fx_lights.clear();
+            let centre = ChunkKey::of(g.world_to_cell(pos));
+            for dk in -1..=1 {
+                for dj in -1..=1 {
+                    for di in -1..=1 {
+                        let Some(key) = g.chunk_neighbor(centre, di, dj, dk) else { continue };
+                        let Some(ch) = self.chunks.chunk(key) else { continue };
+                        let o = key.origin();
+                        for &(idx, _) in ch.emitters() {
+                            let (li, lj, lk) = wolfcraft_engine::cubesphere::idx_to_local(idx as usize);
+                            let c = wolfcraft_engine::cubesphere::Cell::new(key.f, o.x + li, o.y + lj, o.z + lk);
+                            let p = g.cell_center(c);
+                            if (p - pos).length() < 16.0 {
+                                self.fx_lights.push((p, ch.get(li, lj, lk)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let lights = self.fx_lights.clone();
+        for (p, b) in lights {
+            let r = self.mobs.rand();
+            let rate = k as f64 * dt as f64;
+            let lup = wolfcraft_engine::physics::up_at(p);
+            match b {
+                Block::Torch | Block::Lantern | Block::IskritTorch => {
+                    if r < rate * 2.5 {
+                        let col = if b == Block::IskritTorch { [1.0, 0.35, 0.75] } else if self.mobs.rand() < 0.5 { [1.0, 0.62, 0.15] } else { [1.0, 0.85, 0.35] };
+                        let v = lup * (0.4 + self.mobs.rand() * 0.5) + jitter(&mut self.mobs, 0.3);
+                        let o = jitter(&mut self.mobs, 0.08);
+                        self.mobs.fx_glow(p + lup * 0.42 + o, v, col, 0.035, 0.9, FxKind::Rise);
+                    } else if r < rate * 3.3 && b == Block::Torch {
+                        let v = lup * 0.5 + jitter(&mut self.mobs, 0.15);
+                        self.mobs.fx(p + lup * 0.55, v, [0.35, 0.35, 0.37], 0.06, 1.6, FxKind::Rise);
+                    }
+                }
+                Block::Lava => {
+                    if r < rate * 0.6 {
+                        // A bubble pops: a few sparks fly up and fall back.
+                        for _ in 0..3 {
+                            let v = lup * (2.5 + self.mobs.rand() * 2.5) + jitter(&mut self.mobs, 2.0);
+                            self.mobs.fx_glow(p + lup * 0.55, v, [1.0, 0.45, 0.08], 0.05, 1.2, FxKind::Fall);
+                        }
+                    }
+                }
+                Block::UraniumOre | Block::UraniumBlock => {
+                    if r < rate * 1.2 {
+                        let o = jitter(&mut self.mobs, 1.2) + lup * (self.mobs.rand() - 0.3);
+                        let v = lup * 0.25 + jitter(&mut self.mobs, 0.2);
+                        self.mobs.fx_glow(p + o, v, [0.5, 1.0, 0.35], 0.03, 1.5, FxKind::Rise);
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Falling leaves: try a few random cells around the player each frame.
+        let tries = (6.0 * k) as usize;
+        let feet = g.world_to_cell(pos);
+        for _ in 0..tries {
+            let (di, dj, dk) = ((self.mobs.rand() * 25.0) as i32 - 12, (self.mobs.rand() * 25.0) as i32 - 12, (self.mobs.rand() * 14.0) as i32 - 2);
+            let Some(c) = g.offset(feet, di, dj, dk) else { continue };
+            let b = self.chunks.get_block(c).unwrap_or(Block::Air);
+            if !matches!(b, Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves) {
+                continue;
+            }
+            let below = g.neighbor(c, 2, -1).and_then(|n| self.chunks.get_block(n)).unwrap_or(Block::Stone);
+            if below != Block::Air || self.mobs.rand() > 0.12 {
+                continue;
+            }
+            let col = match b {
+                Block::BirchLeaves => [0.55, 0.72, 0.25],
+                Block::SpruceLeaves => [0.20, 0.42, 0.24],
+                Block::AcaciaLeaves => [0.62, 0.70, 0.22],
+                _ => if self.mobs.rand() < 0.2 { [0.85, 0.62, 0.18] } else { [0.32, 0.62, 0.20] },
+            };
+            let p = g.cell_center(c) - wolfcraft_engine::physics::up_at(g.cell_center(c)) * 0.55;
+            self.mobs.fx(p, DVec3::ZERO, col, 0.06, 2.9, FxKind::Leaf);
+        }
+        // Splash on entering water, dust on landing and while sprinting.
+        let vup = self.player.body.vel.dot(up);
+        let in_water = self.player.body.in_water;
+        if in_water && !self.fx_was_in_water && self.fx_prev_vup < -3.0 {
+            let n = ((-self.fx_prev_vup).min(20.0) * 2.0 * k as f64) as usize;
+            for _ in 0..n {
+                let v = up * (3.0 + self.mobs.rand() * 4.0) + jitter(&mut self.mobs, 5.0);
+                let col = if self.mobs.rand() < 0.5 { [0.75, 0.88, 1.0] } else { [0.35, 0.60, 0.95] };
+                self.mobs.fx(pos + up * 0.6, v, col, 0.07, 1.1, FxKind::Fall);
+            }
+        }
+        let ground = self.player.body.on_ground;
+        let under = g.neighbor(feet, 2, -1).and_then(|c| self.chunks.get_block(c)).unwrap_or(Block::Dirt);
+        let dust = match under {
+            Block::Sand | Block::Sandstone => [0.86, 0.80, 0.58],
+            Block::Snow | Block::SnowyGrass => [0.95, 0.97, 1.0],
+            Block::Grass | Block::Dirt | Block::Podzol => [0.55, 0.42, 0.30],
+            _ => [0.62, 0.60, 0.58],
+        };
+        if ground && !self.fx_was_ground && self.fx_prev_vup < -7.0 {
+            let n = ((-self.fx_prev_vup).min(25.0) * 0.8 * k as f64) as usize;
+            for _ in 0..n {
+                let v = jitter(&mut self.mobs, 4.0) + up * (0.5 + self.mobs.rand());
+                self.mobs.fx(pos + up * 0.1, v, dust, 0.08, 0.8, FxKind::Rise);
+            }
+        }
+        if ground && self.player.sprinting {
+            self.fx_dust -= dt * k;
+            if self.fx_dust <= 0.0 {
+                self.fx_dust = 0.07;
+                let back = -self.player.body.vel.normalize_or_zero();
+                let v = back * 0.8 + up * 0.4 + jitter(&mut self.mobs, 0.6);
+                let o = jitter(&mut self.mobs, 0.4);
+                self.mobs.fx(pos + up * 0.08 + o, v, dust, 0.07, 0.6, FxKind::Rise);
+            }
+        }
+        self.fx_was_in_water = in_water;
+        self.fx_was_ground = ground;
+        self.fx_prev_vup = vup;
     }
 
     pub fn cycle_camera(&mut self) {

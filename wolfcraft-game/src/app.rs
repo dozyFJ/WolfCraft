@@ -1107,6 +1107,7 @@ impl App {
                 if let Some(s) = &mut self.session {
                     let frozen = self.screen != Screen::Playing;
                     let t = ScopeTimer::start();
+                    s.fx_amount = self.settings.particles;
                     let events = s.update(&input, dt, view, frozen);
                     self.profile.chunks_ms = t.ms();
                     // Changes the game made by itself (buttons springing back) go to the server too.

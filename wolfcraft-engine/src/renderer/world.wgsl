@@ -321,7 +321,7 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
         let h = fract(sin(dot(cell, vec2<f32>(12.9898, 78.233))) * 43758.5453);
         base = base * (0.80 + 0.36 * h);
     }
-    if (in.tex > 1.5) {
+    if (in.tex > 1.5 && in.tex < 2.5) {
         if (item.a < 0.5) {
             discard;
         }
@@ -333,7 +333,10 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     let sun = normalize(g.sun.xyz);
     let day = smoothstep(-0.12, 0.28, dot(up, sun));
     let diffuse = max(dot(normalize(in.normal), sun), 0.0);
-    let light = max(mix(0.11, 0.62 + 0.45 * diffuse, day), 0.16);
+    var light = max(mix(0.11, 0.62 + 0.45 * diffuse, day), 0.16);
+    if (in.tex > 2.5) {
+        light = 1.25; // glowing particles: embers, sparks
+    }
     var rgb = base * light;
     let d = length(in.rel);
     let f = clamp(1.0 - exp(-pow(d * g.fog.a, 2.0)), 0.0, 1.0);

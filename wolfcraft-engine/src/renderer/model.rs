@@ -14,7 +14,8 @@ pub struct ModelVertex {
     pub color: [f32; 3],
     /// Atlas uv (used when `tex` > 0).
     pub uv: [f32; 2],
-    /// 0 = flat `color`, 1 = entities atlas (skins), 2 = items atlas (cut-out icons).
+    /// 0 = flat `color`, 1 = entities atlas (skins), 2 = items atlas (cut-out icons), 3 = flat
+    /// and unlit (glowing particles).
     pub tex: f32,
 }
 
@@ -1125,7 +1126,13 @@ pub fn build_debris(debris: &[crate::mobs::Debris], camera: DVec3) -> Vec<ModelV
         // Shrinks away in the last half second.
         let k = ((3.0 - d.age) / 0.5).clamp(0.0, 1.0);
         let h = h * k.max(0.05);
+        let start = v.len();
         add_box(&mut v, &f, Vec3::new(-h, -h, -h), Vec3::new(h, h, h), Vec3::ZERO, d.spin + d.age * 6.0, d.color);
+        if d.glow {
+            for vx in &mut v[start..] {
+                vx.tex = 3.0; // unlit
+            }
+        }
     }
     v
 }
