@@ -182,6 +182,20 @@ fn add_box(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: V
 
 #[allow(clippy::too_many_arguments)]
 fn add_box_r(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: Vec3, angle: f32, color: [f32; 3], rounded: bool) {
+    add_box_opts(out, f, min, max, pivot, angle, color, if rounded { 0.26 } else { 0.0 }, true);
+}
+
+/// First-person arm part: flat colour (no skin patches) and only a small chamfer.
+#[allow(clippy::too_many_arguments)]
+fn add_hand_box(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: Vec3, angle: f32, color: [f32; 3]) {
+    let r = if ROUNDED.load(std::sync::atomic::Ordering::Relaxed) { 0.10 } else { 0.0 };
+    add_box_opts(out, f, min, max, pivot, angle, color, r, false);
+}
+
+/// `round`: chamfer radius as a share of the box's thinnest side (0 = sharp box);
+/// `textured`: skin colours are painted from the player skin.
+#[allow(clippy::too_many_arguments)]
+fn add_box_opts(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: Vec3, angle: f32, color: [f32; 3], round_k: f32, textured: bool) {
     let (s, c) = angle.sin_cos();
     let rot = |p: Vec3| -> Vec3 {
         let d = p - pivot;
@@ -199,10 +213,10 @@ fn add_box_r(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot:
         (Vec3::Z, [(true, false, true), (true, true, true), (false, true, true), (false, false, true)]),
         (Vec3::NEG_Z, [(false, false, false), (false, true, false), (true, true, false), (true, false, false)]),
     ];
-    let skin = textures().and_then(|t| t.player).zip(skin_rows(color));
+    let skin = if textured { textures().and_then(|t| t.player).zip(skin_rows(color)) } else { None };
     let size = max - min;
     // Cartoon style: chamfered edges, radius from the part's thinnest side (thin overlays stay sharp).
-    let round = (rounded && size.min_element() >= 0.05).then(|| (size.min_element() * 0.26).min(0.08));
+    let round = (round_k > 0.0 && size.min_element() >= 0.05).then(|| (size.min_element() * round_k).min(0.08));
     let centre = (min + max) * 0.5;
     let half = size * 0.5;
     // Box corner as signs (-1/+1 per axis) and its point pulled in by `r` on every axis but `axis`.
@@ -1071,13 +1085,16 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool, cross
 }
 
 /// Builds both first-person arms relative to the camera (camera at the origin).
-/// Vertices: right arm first (72 when empty-handed), then the left arm (72).
+/// Vertices: right arm first (`ARM` when empty-handed), then the left arm (`ARM`).
+/// Vertices of one bare arm: sleeve, cuff and hand, 36 each (sharp boxes).
+pub const ARM: usize = 3 * 36;
+
 pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
     let frame = camera_frame(pose);
     let (skin_c, _, _, sleeve_c, _) = skin_colors(pose.skin);
     let sleeve_c = pose.sleeve.unwrap_or(sleeve_c);
 
-    let mut v = Vec::with_capacity(4 * 36);
+    let mut v = Vec::with_capacity(2 * ARM);
     for side in [1.0f32, -1.0] {
         let a = arm_place(pose, side);
         let start = v.len();
@@ -1087,8 +1104,11 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
         // shield); the right one grips the held item, like in Minecraft.
         {
             // Square arm like the third-person body: sleeve with a slightly wider hand.
-            add_box(&mut v, &frame, Vec3::new(x - 0.07, y - 0.07, z), Vec3::new(x + 0.07, y + 0.07, z + 0.26), pivot, angle, sleeve_c);
-            add_box(&mut v, &frame, Vec3::new(x - 0.075, y - 0.075, z + 0.25), Vec3::new(x + 0.075, y + 0.075, z + 0.36), pivot, angle, skin_c);
+            // Sleeve, a darker cuff and the hand: clean flat colours (no skin patches).
+            let cuff = [sleeve_c[0] * 0.72, sleeve_c[1] * 0.72, sleeve_c[2] * 0.72];
+            add_hand_box(&mut v, &frame, Vec3::new(x - 0.07, y - 0.07, z), Vec3::new(x + 0.07, y + 0.07, z + 0.15), pivot, angle, sleeve_c);
+            add_hand_box(&mut v, &frame, Vec3::new(x - 0.074, y - 0.074, z + 0.14), Vec3::new(x + 0.074, y + 0.074, z + 0.18), pivot, angle, cuff);
+            add_hand_box(&mut v, &frame, Vec3::new(x - 0.066, y - 0.066, z + 0.175), Vec3::new(x + 0.066, y + 0.066, z + 0.36), pivot, angle, skin_c);
         }
         let f = Vec3::new(x, y, z + 0.29); // fist centre before the tilt
         if side > 0.0 {
@@ -1372,7 +1392,7 @@ mod tests {
             p.bob_amount = 1.0;
             p.bob_phase = 1.0;
             let verts = build_first_person_hands(&p);
-            assert_eq!(verts.len(), 4 * 36);
+            assert_eq!(verts.len(), 2 * ARM);
             assert_outward(&verts);
             let fwd = p.forward.normalize();
             assert!(verts.iter().all(|v| Vec3::from(v.pos).dot(fwd) > 0.08), "arm behind the near plane");
@@ -1383,7 +1403,7 @@ mod tests {
     fn right_arm_is_in_view_at_rest_and_the_left_one_is_not() {
         let p = hands(0.0, 1.0);
         let v = build_first_person_hands(&p);
-        let (r, l) = (centre(&v[..72]), centre(&v[72..]));
+        let (r, l) = (centre(&v[..ARM]), centre(&v[ARM..]));
         let fwd = p.forward.normalize();
         // Angle below the view axis: the right hand is on screen, the left one far below it.
         let down = |c: Vec3| (c - fwd * c.dot(fwd)).length() / c.dot(fwd);
@@ -1402,10 +1422,10 @@ mod tests {
         let rest = build_first_person_hands(&p0);
         let hit = build_first_person_hands(&hands(strike_moment(false), 1.0));
         let done = build_first_person_hands(&hands(0.999, 1.0));
-        assert!(reach(&hit[..72], fwd) > reach(&rest[..72], fwd) + 0.08, "the fist goes forward");
-        assert!(off_axis(&hit[..72]) < off_axis(&rest[..72]) - 0.05, "and in towards the crosshair");
+        assert!(reach(&hit[..ARM], fwd) > reach(&rest[..ARM], fwd) + 0.08, "the fist goes forward");
+        assert!(off_axis(&hit[..ARM]) < off_axis(&rest[..ARM]) - 0.05, "and in towards the crosshair");
         assert!(rest.iter().zip(&done).all(|(a, b)| (Vec3::from(a.pos) - Vec3::from(b.pos)).length() < 0.01), "ends where it started");
-        assert!(rest[72..].iter().zip(&hit[72..]).all(|(a, b)| a.pos == b.pos), "the left arm stays down");
+        assert!(rest[ARM..].iter().zip(&hit[ARM..]).all(|(a, b)| a.pos == b.pos), "the left arm stays down");
     }
 
     #[test]
@@ -1440,7 +1460,7 @@ mod tests {
         let rest = build_first_person_hands(&p);
         p.punch_cycle = strike_moment(true);
         let struck = build_first_person_hands(&p);
-        assert!(rest.len() > 4 * 36, "sword and shield add boxes");
+        assert!(rest.len() > 2 * ARM, "sword and shield add boxes");
         assert_eq!(rest.len(), struck.len());
         assert!(rest.iter().zip(&struck).any(|(a, b)| a.pos != b.pos), "the sword arm swings");
         // Shield boxes are the last 3 boxes: their centre moves towards the view axis when blocking.
@@ -1459,15 +1479,15 @@ mod tests {
         let base = hands(0.0, 1.0);
         let (fwd, up) = (base.forward.normalize(), base.up);
         let right = fwd.cross(up).normalize();
-        let c0 = centre(&build_first_person_hands(&base)[..72]);
+        let c0 = centre(&build_first_person_hands(&base)[..ARM]);
         // Turning right: the hand is left behind, to the left.
         let mut turn = base;
         turn.sway = [-1.0, 0.0];
-        let c1 = centre(&build_first_person_hands(&turn)[..72]);
+        let c1 = centre(&build_first_person_hands(&turn)[..ARM]);
         assert!((c1 - c0).dot(right) < -0.03, "sway to the left ({})", (c1 - c0).dot(right));
         let mut run = base;
         run.sprint = 1.0;
-        let c2 = centre(&build_first_person_hands(&run)[..72]);
+        let c2 = centre(&build_first_person_hands(&run)[..ARM]);
         let upv = right.cross(fwd);
         assert!((c2 - c0).dot(upv) < -0.03, "sprinting lowers the hand");
     }
