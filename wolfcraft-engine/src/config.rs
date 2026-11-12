@@ -329,7 +329,7 @@ pub enum ThemeMode {
 }
 
 /// Current version of the default look (see `Settings::migrate`).
-pub const STYLE_VERSION: u32 = 4;
+pub const STYLE_VERSION: u32 = 5;
 
 /// Global user settings (`settings.toml` in the data directory).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -454,7 +454,7 @@ impl Default for Settings {
             volume: 0.6,
             particles: 1.0,
             hand_anim: 1.0,
-            texture_pack: "builtin:toon".into(),
+            texture_pack: "builtin:toon16".into(),
             refresh_rate: 120,
             servers: Vec::new(),
         }
@@ -488,6 +488,11 @@ impl Settings {
         if self.style_version < 4 {
             self.texture_pack = "builtin:toon".into();
         }
+        // 5: the light 16× cartoon pack with the light cartoon shaders is the main look.
+        if self.style_version < 5 {
+            self.texture_pack = "builtin:toon16".into();
+            self.apply_shader_preset(4);
+        }
         self.style_version = STYLE_VERSION;
     }
     pub fn save(&self, data_dir: &Path) {
@@ -507,7 +512,7 @@ mod tests {
         let mut s: Settings = toml::from_str("texture_pack = \"builtin:16\"\nshaders = 2\n").unwrap();
         assert_eq!(s.style_version, 0);
         s.migrate();
-        assert_eq!(s.texture_pack, "builtin:toon");
+        assert_eq!(s.texture_pack, "builtin:toon16");
         assert!(s.fx_toon && s.shaders == 4);
         // A player who picks classic again keeps it.
         s.texture_pack = "builtin:16".into();
