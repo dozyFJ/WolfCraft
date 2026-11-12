@@ -7,6 +7,11 @@ on:
 permissions:
   contents: write
 
+# One build at a time: two runs publishing "latest" together can clobber each other.
+concurrency:
+  group: android-apk
+  cancel-in-progress: false
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -46,9 +51,13 @@ jobs:
           echo "SDK=$ANDROID_HOME NDK=$ANDROID_NDK_ROOT"
           ls "$ANDROID_NDK_ROOT/source.properties"
           cargo apk build -p wolfcraft-game --lib --release --target aarch64-linux-android
-          find target -name "*.apk" -path "*release*" | head
-          cp "$(find target -name '*.apk' -path '*release*' | head -1)" Cubix.apk
+          ls -l target/release/apk/
+          # Only the signed, aligned APK (never the "-unaligned" intermediate).
+          cp target/release/apk/Cubix.apk Cubix.apk
           ls -lh Cubix.apk
+          # Refuse to publish a package Android would reject.
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs Cubix.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 Cubix.apk | tail -1
 
       - uses: actions/upload-artifact@v4
         with:
