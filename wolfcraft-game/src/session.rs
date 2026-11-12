@@ -1118,6 +1118,25 @@ impl GameSession {
         let n = ((4.0 + dmg * 1.5) * self.fx_amount) as usize;
         self.mobs.chips(at - look * 0.3, &[[0.95, 0.15, 0.12], [1.0, 1.0, 1.0], [0.75, 0.05, 0.05]], n, 2.2 + dmg as f64 * 0.15);
         if let Some(kind) = self.mobs.hurt(i, dmg, self.player.body.pos) {
+            // Finishing blow: a puff of smoke and a ring of little stars.
+            {
+                use wolfcraft_engine::mobs::FxKind;
+                let up = wolfcraft_engine::physics::up_at(at);
+                let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+                let t1 = up.cross(helper).normalize();
+                let t2 = up.cross(t1);
+                for k in 0..10 {
+                    let a = k as f64 * std::f64::consts::TAU / 10.0;
+                    let side = t1 * a.cos() + t2 * a.sin();
+                    self.mobs.fx(at + side * 0.25, side * 1.2 + up * 0.6, [0.92, 0.92, 0.94], 0.16 + (k % 3) as f32 * 0.04, 0.9, FxKind::Rise);
+                }
+                for k in 0..8 {
+                    let a = k as f64 * std::f64::consts::TAU / 8.0;
+                    let side = t1 * a.cos() + t2 * a.sin();
+                    let col = if k % 2 == 0 { [1.0, 0.92, 0.35] } else { [1.0, 1.0, 0.85] };
+                    self.mobs.fx_glow(at + up * 0.5 + side * 0.4, side * 1.8 + up * 1.4, col, 0.05, 0.8, FxKind::Rise);
+                }
+            }
             for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64) {
                 self.drops.pop_from_block(drop, at);
             }
