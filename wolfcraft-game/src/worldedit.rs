@@ -30,6 +30,9 @@ pub struct WorldEdit {
     clipboard: Vec<((i32, i32, i32), Block)>,
     undo: Vec<Vec<(Cell, Block)>>,
     redo: Vec<Vec<(Cell, Block)>>,
+    /// A brush stroke is going on: its dabs join one undo step.
+    stroke: bool,
+    stroke_started: bool,
 }
 
 fn sys(t: impl Into<String>) -> Reply {
@@ -95,7 +98,14 @@ fn apply(s: &mut GameSession, cells: impl IntoIterator<Item = (Cell, Block)>) ->
         }
     }
     let n = log.len();
-    if n > 0 {
+    if n > 0 && s.we.stroke && s.we.stroke_started {
+        // Later dabs of the same brush stroke: one undo step for the whole stroke.
+        if let Some(last) = s.we.undo.last_mut() {
+            last.extend(log);
+        }
+        s.we.redo.clear();
+    } else if n > 0 {
+        s.we.stroke_started = s.we.stroke;
         s.we.undo.push(log);
         if s.we.undo.len() > HISTORY {
             s.we.undo.remove(0);
@@ -321,4 +331,110 @@ pub fn run(s: &mut GameSession, cmd: &str, args: &[&str]) -> Option<Reply> {
         }
         _ => return None,
     })
+}
+
+
+/// What the studio brush does (like sculpting brushes in Blender, on blocks).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum BrushOp {
+    /// Adds a ball of the block where you point.
+    #[default]
+    Add,
+    /// Removes blocks in the ball.
+    Erase,
+    /// Repaints the visible surface in the ball with the block.
+    Paint,
+    /// Grows the ground by one layer of the block.
+    Raise,
+    /// Evens out bumps and holes.
+    Smooth,
+    /// Levels everything to the height of the point.
+    Flatten,
+}
+
+impl BrushOp {
+    pub const ALL: [BrushOp; 6] = [BrushOp::Add, BrushOp::Erase, BrushOp::Paint, BrushOp::Raise, BrushOp::Smooth, BrushOp::Flatten];
+    pub fn name(self) -> &'static str {
+        match self {
+            BrushOp::Add => "Добавить",
+            BrushOp::Erase => "Стереть",
+            BrushOp::Paint => "Покрасить",
+            BrushOp::Raise => "Поднять",
+            BrushOp::Smooth => "Сгладить",
+            BrushOp::Flatten => "Выровнять",
+        }
+    }
+}
+
+/// Starts or ends a brush stroke (all dabs while the finger is down are one undo step).
+pub fn stroke(s: &mut GameSession, on: bool) {
+    s.we.stroke = on;
+    if !on {
+        s.we.stroke_started = false;
+    }
+}
+
+/// One dab of the brush at the block the player points at. `cube` uses a cube instead of a
+/// ball; `block` is the block in hand (for adding and painting). Returns blocks changed.
+pub fn brush(s: &mut GameSession, op: BrushOp, radius: i32, cube: bool, block: Block) -> usize {
+    let Some(hit) = s.hit else { return 0 };
+    let g = s.chunks.grid();
+    let r = radius.clamp(1, 12);
+    let centre = if matches!(op, BrushOp::Add) { hit.front_cell(&g).unwrap_or(hit.cell) } else { hit.cell };
+    let inside = |di: i32, dj: i32, dk: i32| cube || ((di * di + dj * dj + dk * dk) as f64) <= (r as f64 + 0.4).powi(2);
+    let get = |s: &GameSession, c: Cell| s.chunks.get_block(c).unwrap_or(Block::Air);
+    let solid = |b: Block| b.is_solid() && !b.is_fluid();
+    let mut cells = Vec::new();
+    for di in -r..=r {
+        for dj in -r..=r {
+            for dk in -r..=r {
+                if !inside(di, dj, dk) {
+                    continue;
+                }
+                let Some(c) = g.offset(centre, di, dj, dk) else { continue };
+                let b = get(s, c);
+                let up = g.neighbor(c, 2, 1).map(|u| get(s, u)).unwrap_or(Block::Air);
+                let down = g.neighbor(c, 2, -1).map(|d| get(s, d)).unwrap_or(Block::Air);
+                let target = match op {
+                    BrushOp::Add => (!solid(b)).then_some(block),
+                    BrushOp::Erase => (b != Block::Air).then_some(Block::Air),
+                    BrushOp::Paint => (solid(b) && !solid(up)).then_some(block),
+                    BrushOp::Raise => (!solid(b) && solid(down)).then_some(block),
+                    BrushOp::Flatten => {
+                        if dk > 0 && b != Block::Air {
+                            Some(Block::Air)
+                        } else if dk <= 0 && !solid(b) {
+                            Some(if dk == 0 { block } else { Block::Dirt })
+                        } else {
+                            None
+                        }
+                    }
+                    BrushOp::Smooth => {
+                        // Six neighbours vote: mostly air around a block removes it, mostly
+                        // ground around a gap fills it with the commonest neighbour.
+                        let ns: Vec<Block> = [(0, 1), (0, -1), (1, 1), (1, -1), (2, 1), (2, -1)].iter().filter_map(|(a, sg)| g.neighbor(c, *a, *sg)).map(|n| get(s, n)).collect();
+                        let full = ns.iter().filter(|n| solid(**n)).count();
+                        if solid(b) && full <= 2 {
+                            Some(Block::Air)
+                        } else if !solid(b) && full >= 4 {
+                            let mut best = (Block::Dirt, 0);
+                            for n in ns.iter().filter(|n| solid(**n)) {
+                                let k = ns.iter().filter(|m| *m == n).count();
+                                if k > best.1 {
+                                    best = (*n, k);
+                                }
+                            }
+                            Some(best.0)
+                        } else {
+                            None
+                        }
+                    }
+                };
+                if let Some(t) = target {
+                    cells.push((c, t));
+                }
+            }
+        }
+    }
+    apply(s, cells).0
 }

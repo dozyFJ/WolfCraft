@@ -35,7 +35,19 @@ pub mod gui {
     pub const CROSSHAIR: u16 = 25;
     pub const CUBE: u16 = 26;
     pub const WARNING: u16 = 27;
-    pub const COUNT: u16 = 28;
+    pub const BRUSH: u16 = 28;
+    pub const TREE: u16 = 29;
+    pub const PROPS: u16 = 30;
+    pub const OUTPUT: u16 = 31;
+    pub const CODE: u16 = 32;
+    pub const UNDO: u16 = 33;
+    pub const REDO: u16 = 34;
+    pub const COPY: u16 = 35;
+    pub const PASTE: u16 = 36;
+    pub const SELECT: u16 = 37;
+    pub const STOP: u16 = 38;
+    pub const FILL: u16 = 39;
+    pub const COUNT: u16 = 40;
 }
 
 const WHITE: Rgb = Rgb(1.0, 1.0, 1.0);
@@ -295,5 +307,75 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             q.erase(&circle(0.5, 0.72, 0.05));
         }),
     );
+    // Studio icons.
+    l.add(BRUSH, "brush", icon(|q| {
+        q.shape(WHITE, &segment(0.82, 0.12, 0.42, 0.56, 0.09));
+        q.shape(WHITE, &polygon(vec![(0.34, 0.50), (0.50, 0.66), (0.30, 0.90), (0.10, 0.92), (0.16, 0.72)]));
+    }));
+    l.add(TREE, "tree", icon(|q| {
+        q.shape(WHITE, &rrect(0.10, 0.10, 0.40, 0.28, 0.03));
+        q.shape(WHITE, &rrect(0.40, 0.42, 0.90, 0.58, 0.03));
+        q.shape(WHITE, &rrect(0.40, 0.72, 0.90, 0.88, 0.03));
+        q.shape(WHITE, &segment(0.22, 0.28, 0.22, 0.80, 0.05));
+        q.shape(WHITE, &segment(0.22, 0.50, 0.40, 0.50, 0.05));
+        q.shape(WHITE, &segment(0.22, 0.80, 0.40, 0.80, 0.05));
+    }));
+    l.add(PROPS, "props", icon(|q| {
+        for (i, y) in [0.22f32, 0.5, 0.78].iter().enumerate() {
+            q.shape(WHITE, &segment(0.10, *y, 0.90, *y, 0.05));
+            let x = [0.30f32, 0.65, 0.45][i];
+            q.shape(WHITE, &circle(x, *y, 0.09));
+        }
+    }));
+    l.add(OUTPUT, "output", icon(|q| {
+        q.shape(WHITE, &rrect(0.08, 0.16, 0.92, 0.84, 0.08));
+        q.erase(&rrect(0.14, 0.24, 0.86, 0.78, 0.04));
+        q.shape(WHITE, &segment(0.24, 0.36, 0.40, 0.50, 0.05));
+        q.shape(WHITE, &segment(0.40, 0.50, 0.24, 0.64, 0.05));
+        q.shape(WHITE, &segment(0.48, 0.66, 0.72, 0.66, 0.05));
+    }));
+    l.add(CODE, "code", icon(|q| {
+        q.shape(WHITE, &segment(0.32, 0.26, 0.12, 0.50, 0.07));
+        q.shape(WHITE, &segment(0.12, 0.50, 0.32, 0.74, 0.07));
+        q.shape(WHITE, &segment(0.68, 0.26, 0.88, 0.50, 0.07));
+        q.shape(WHITE, &segment(0.88, 0.50, 0.68, 0.74, 0.07));
+        q.shape(WHITE, &segment(0.56, 0.18, 0.44, 0.82, 0.06));
+    }));
+    l.add(UNDO, "undo", icon(|q| {
+        q.shape(WHITE, &ring(0.55, 0.56, 0.30, 0.09));
+        q.erase(&polygon(vec![(0.0, 0.0), (0.55, 0.0), (0.55, 0.56), (0.0, 0.56)]));
+        q.shape(WHITE, &polygon(vec![(0.10, 0.40), (0.42, 0.20), (0.42, 0.62)]));
+        q.shape(WHITE, &segment(0.40, 0.41, 0.56, 0.26, 0.09));
+    }));
+    l.add(REDO, "redo", icon(|q| {
+        q.shape(WHITE, &ring(0.45, 0.56, 0.30, 0.09));
+        q.erase(&polygon(vec![(0.45, 0.0), (1.0, 0.0), (1.0, 0.56), (0.45, 0.56)]));
+        q.shape(WHITE, &polygon(vec![(0.90, 0.40), (0.58, 0.20), (0.58, 0.62)]));
+        q.shape(WHITE, &segment(0.60, 0.41, 0.44, 0.26, 0.09));
+    }));
+    l.add(COPY, "copy", icon(|q| {
+        q.shape(WHITE, &rrect(0.30, 0.30, 0.88, 0.88, 0.06));
+        q.erase(&rrect(0.37, 0.37, 0.81, 0.81, 0.03));
+        q.shape(WHITE, &rrect(0.12, 0.12, 0.62, 0.62, 0.06));
+    }));
+    l.add(PASTE, "paste", icon(|q| {
+        q.shape(WHITE, &rrect(0.16, 0.18, 0.84, 0.92, 0.06));
+        q.erase(&rrect(0.23, 0.30, 0.77, 0.85, 0.03));
+        q.shape(WHITE, &rrect(0.34, 0.08, 0.66, 0.26, 0.04));
+        q.shape(WHITE, &segment(0.32, 0.50, 0.68, 0.50, 0.05));
+        q.shape(WHITE, &segment(0.32, 0.66, 0.60, 0.66, 0.05));
+    }));
+    l.add(SELECT, "select", icon(|q| {
+        q.shape(WHITE, &polygon(vec![(0.18, 0.10), (0.80, 0.52), (0.52, 0.58), (0.68, 0.88), (0.56, 0.93), (0.40, 0.63), (0.20, 0.82)]));
+    }));
+    l.add(STOP, "stop", icon(|q| {
+        q.shape(WHITE, &rrect(0.20, 0.20, 0.80, 0.80, 0.06));
+    }));
+    l.add(FILL, "fill", icon(|q| {
+        q.shape(WHITE, &polygon(vec![(0.5, 0.10), (0.86, 0.46), (0.50, 0.82), (0.14, 0.46)]));
+        q.erase(&polygon(vec![(0.5, 0.22), (0.74, 0.46), (0.50, 0.70), (0.26, 0.46)]));
+        q.shape(WHITE, &polygon(vec![(0.26, 0.46), (0.74, 0.46), (0.50, 0.70)]));
+        q.shape(WHITE, &circle(0.86, 0.80, 0.08));
+    }));
     l.0
 }
