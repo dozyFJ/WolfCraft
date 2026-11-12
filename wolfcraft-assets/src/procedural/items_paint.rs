@@ -44,7 +44,15 @@ pub mod items {
     pub const CARROT: u16 = 66;
     pub const POTATO: u16 = 67;
     pub const BAKED_POTATO: u16 = 68;
-    pub const COUNT: u16 = 69;
+    pub const SLIME: u16 = 69;
+    /// Spawn souls, one per creature (order of `SOUL_COLORS`).
+    pub const SOUL_BASE: u16 = 70;
+    pub const COUNT: u16 = 78;
+    /// Glow of each spawn soul: ghoul, crawler, boar, sheep, cow, chicken, wolf, slime.
+    pub const SOUL_COLORS: [[f32; 3]; 8] = [
+        [0.55, 0.80, 0.45], [0.62, 0.35, 0.85], [0.80, 0.55, 0.45], [0.95, 0.95, 0.92],
+        [0.95, 0.80, 0.85], [1.0, 0.85, 0.40], [0.70, 0.75, 0.85], [0.45, 1.0, 0.45],
+    ];
 }
 
 // Every tool runs from the handle at the bottom-right (the hand model grips it at about pixel
@@ -394,6 +402,46 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     };
     l.add(POTATO, "potato", potato(false));
     l.add(BAKED_POTATO, "baked_potato", potato(true));
+    l.add(SLIME, "slime", p(|q| {
+        // A wobbly green ball of slime with a highlight.
+        for y in 3..14u32 {
+            for x in 2..14u32 {
+                let dx = (x as f32 - 7.8) / 5.6;
+                let dy = (y as f32 - 8.6) / 5.0;
+                if dx * dx + dy * dy > 1.0 {
+                    continue;
+                }
+                let c = Rgb(0.40, 0.85, 0.36).add(-(dx + dy) * 0.08);
+                q.put(x, y, c, 1.0);
+            }
+        }
+        for (x, y) in [(5u32, 6u32), (6, 5), (6, 6)] {
+            q.put(x, y, Rgb(0.85, 1.0, 0.80), 1.0);
+        }
+    }));
+    for (i, c) in SOUL_COLORS.iter().enumerate() {
+        let c = Rgb(c[0], c[1], c[2]);
+        l.add(SOUL_BASE + i as u16, &format!("soul_{i}"), p(move |q| {
+            // A glowing wisp: a bright orb with a flickering flame tail and two little eyes.
+            for y in 0..16u32 {
+                for x in 0..16u32 {
+                    let dx = x as f32 - 7.5;
+                    let dy = y as f32 - 9.5;
+                    let d = (dx * dx + dy * dy).sqrt();
+                    let flame = y < 9 && dx.abs() < (9.0 - y as f32) * 0.45 + if (x + y) % 3 == 0 { 0.6 } else { 0.0 } && y > 1;
+                    if d < 5.2 {
+                        let k = 1.0 - d / 5.2;
+                        q.put(x, y, c.lerp(Rgb(1.0, 1.0, 1.0), k * 0.7), 1.0);
+                    } else if flame {
+                        q.put(x, y, c.scale(0.9), 1.0);
+                    }
+                }
+            }
+            for x in [6u32, 9] {
+                q.put(x, 10, Rgb(0.10, 0.10, 0.14), 1.0);
+            }
+        }));
+    }
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

@@ -644,6 +644,34 @@ impl Block {
     }
 
     /// Door states: (closed, open) pairs toggle on use.
+    /// Fences (1) and walls (2) join their neighbours with rails.
+    pub fn post_family(self) -> Option<u8> {
+        use Block::*;
+        match self {
+            Fence | BirchFence | SpruceFence => Some(1),
+            StoneWall | StoneBrickWall | SandstoneWall => Some(2),
+            _ => None,
+        }
+    }
+
+    /// Does a fence or wall reach out to `n`? Same family, or a full solid block.
+    pub fn post_joins(self, n: Block) -> bool {
+        let Some(f) = self.post_family() else { return false };
+        n.post_family() == Some(f) || (n.info().render == RenderKind::Opaque && n.is_solid())
+    }
+
+    /// The rails from a fence or wall post towards the neighbour along `axis` (0 i, 1 j) on
+    /// side `sign`: two thin rails for a fence, one thick low wall for walls.
+    pub fn post_arms(self, axis: usize, sign: i32) -> Vec<[f32; 6]> {
+        let (lo, hi) = if sign > 0 { (0.5, 1.0) } else { (0.0, 0.5) };
+        let bar = |w0: f32, w1: f32, k0: f32, k1: f32| if axis == 0 { [lo, w0, k0, hi, w1, k1] } else { [w0, lo, k0, w1, hi, k1] };
+        match self.post_family() {
+            Some(1) => vec![bar(0.4375, 0.5625, 0.38, 0.56), bar(0.4375, 0.5625, 0.72, 0.9)],
+            Some(2) => vec![bar(0.3125, 0.6875, 0.0, 0.8125)],
+            _ => vec![],
+        }
+    }
+
     /// A crop and whether it is ripe.
     pub fn crop(self) -> Option<(Block, bool)> {
         use Block::*;

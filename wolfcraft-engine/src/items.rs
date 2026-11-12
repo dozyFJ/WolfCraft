@@ -54,7 +54,11 @@ pub mod ids {
     pub const CARROT: ItemId = 322;
     pub const POTATO: ItemId = 323;
     pub const BAKED_POTATO: ItemId = 324;
-    pub const LAST: ItemId = 324;
+    pub const SLIME: ItemId = 325;
+    /// Spawn souls: SOUL_BASE + index in `mobs::ALL_MOBS`.
+    pub const SOUL_BASE: ItemId = 326;
+    pub const SOUL_LAST: ItemId = 333;
+    pub const LAST: ItemId = 333;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -170,6 +174,12 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::CARROT => ItemInfo { place: Some(Block::CarrotYoung), food: Some((3.0, 3.6)), ..plain("Морковь", sp::CARROT) },
         ids::POTATO => ItemInfo { place: Some(Block::PotatoYoung), food: Some((1.0, 0.6)), ..plain("Картофель", sp::POTATO) },
         ids::BAKED_POTATO => ItemInfo { food: Some((5.0, 6.0)), ..plain("Печёный картофель", sp::BAKED_POTATO) },
+        ids::SLIME => plain("Слизь", sp::SLIME),
+        s if (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&s) => {
+            const NAMES: [&str; 8] = ["Душа спавна: Упырь", "Душа спавна: Ползун", "Душа спавна: Кабан", "Душа спавна: Овца", "Душа спавна: Корова", "Душа спавна: Курица", "Душа спавна: Волк", "Душа спавна: Слизень"];
+            let i = (s - ids::SOUL_BASE) as usize;
+            plain(NAMES[i], sp::SOUL_BASE + i as u16)
+        }
         t if (ids::TOOLS_BASE..=ids::TOOLS_LAST).contains(&t) => {
             let n = (t - ids::TOOLS_BASE) as usize;
             let (mat, kind) = (n / 4, n % 4);
@@ -291,6 +301,11 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
     }
 }
 
+/// The creature a spawn soul brings to life.
+pub fn soul_mob(id: ItemId) -> Option<crate::mobs::MobKind> {
+    (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&id).then(|| crate::mobs::ALL_MOBS[(id - ids::SOUL_BASE) as usize])
+}
+
 /// Colour of the gems in an ore (its shards fly out when it is mined), `None` for other blocks.
 pub fn ore_glow(b: Block) -> Option<[f32; 3]> {
     Some(match b {
@@ -321,6 +336,10 @@ pub fn mob_drops(kind: crate::mobs::MobKind, salt: u64) -> Vec<ItemStack> {
         MobKind::Ghoul if roll < 0.12 => vec![ItemStack::new(ids::ROTTEN_FLESH, 1), ItemStack::new(ids::RAW_URANIUM, 1)],
         MobKind::Ghoul => vec![ItemStack::new(ids::ROTTEN_FLESH, 1 + (roll * 2.0) as u8), ItemStack::new(ids::COAL, 1)],
         MobKind::Crawler => vec![ItemStack::new(ids::STRING, 1 + (roll * 2.0) as u8)],
+        MobKind::Cow => vec![ItemStack::new(ids::RAW_MEAT, 1 + (roll * 3.0) as u8), ItemStack::new(ids::LEATHER, 1 + (roll * 2.0) as u8)],
+        MobKind::Chicken => vec![ItemStack::new(ids::RAW_MEAT, 1)],
+        MobKind::Wolf => vec![ItemStack::new(ids::LEATHER, 1 + (roll * 2.0) as u8)],
+        MobKind::Slime => vec![ItemStack::new(ids::SLIME, 1 + (roll * 2.0) as u8)],
     }
 }
 
@@ -415,6 +434,9 @@ pub fn category(id: ItemId) -> &'static str {
         }
         if (ids::HOE_BASE..=ids::HOE_LAST).contains(&id) {
             return "Инструменты";
+        }
+        if (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&id) {
+            return "Мобы";
         }
         if matches!(id, ids::WHEAT_SEEDS | ids::WHEAT | ids::CARROT | ids::POTATO) {
             return "Растения";

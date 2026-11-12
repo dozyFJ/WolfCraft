@@ -21,7 +21,7 @@ const ARMOR: usize = 95;
 
 /// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
 // "Техника" is put away for now (its items are still under "Все" and in the search).
-const CREATIVE_TABS: [&str; 11] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Инвентарь"];
+const CREATIVE_TABS: [&str; 12] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "Инвентарь"];
 const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 
 
@@ -176,11 +176,14 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         let by_width = (sw - 60.0 - 8.0 * GAP - 14.0 - 10.0) / (10.0 + 0.92);
         let cell = by_height.min(by_width).clamp(40.0, 84.0).floor();
         let rows = (((h - 100.0 - top - cell) / (cell + GAP)).floor() as usize).clamp(2, 7);
-        // Category sidebar + the grid (hotbar of 9 + gap + bin is as wide).
-        let grid_w = 10.0 * cell + 8.0 * GAP + 14.0;
-        let width = grid_w + (cell * 0.92).floor() + 16.0;
+        // The whole screen width: as many columns as fit beside the category sidebar.
+        let sidebar = (cell * 0.92).floor() + 16.0;
+        let avail = sw - 40.0 - 24.0 - sidebar;
+        let cols = (((avail + GAP) / (cell + GAP)).floor() as usize).clamp(10, 20);
+        let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;
+        let width = grid_w + sidebar;
         let dismissed = crate::ui_components::game_screen(ctx, "inventory", "Творческий режим", width.min(ctx.screen_rect().width() - 40.0), |ui| {
-            creative_layout(ui, icons, &p, state, inv, cell, rows, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
+            creative_layout(ui, icons, &p, state, inv, cell, rows, cols, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
         if dismissed {
             result.close = true;
@@ -524,7 +527,7 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool, armor: [Optio
 /// Creative inventory laid out like the classic block game: a row of icon tabs on top,
 /// the item grid below, then the hotbar with the bin slot on its right.
 #[allow(clippy::too_many_arguments)]
-fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
+fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, cols: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let palette_all = items::creative_palette();
     // ---- Categories: a vertical sidebar on the left (scrolls if the screen is short) ----
     let tab = (cell * 0.92).floor();
@@ -565,14 +568,14 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
             });
         });
         ui.vertical(|ui| {
-            creative_main(ui, icons, p, state, inv, cell, rows, grid_w, palette_all, slot_rects, trash_rect, result);
+            creative_main(ui, icons, p, state, inv, cell, rows, cols, grid_w, palette_all, slot_rects, trash_rect, result);
         });
     });
 }
 
 /// Right part of the creative inventory: category title and search, the item grid, the hotbar.
 #[allow(clippy::too_many_arguments)]
-fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, grid_w: f32, palette_all: Vec<ItemId>, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
+fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, cols: usize, grid_w: f32, palette_all: Vec<ItemId>, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let _ = &result;
     // ---- Tab title + search ----
     ui.horizontal(|ui| {
@@ -613,7 +616,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             .drag_to_scroll(true)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .show(&mut ui2, |ui| {
-            for chunk in list.chunks(10) {
+            for chunk in list.chunks(cols) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::splat(GAP);
                     for id in chunk {
@@ -653,7 +656,9 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             slot_rects.push((slot, rect));
             draw_slot(ui, icons, p, state, inv, slot, rect);
         }
-        ui.add_space(14.0 - GAP);
+        // The bin sits at the right edge of the full-width grid.
+        let used = HOTBAR as f32 * (cell + GAP);
+        ui.add_space((grid_w - used - cell - 14.0).max(14.0 - GAP));
         let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
         let hot = resp.hovered() || state.drag_slot.is_some();
         ui.painter().rect_filled(rect, Rounding::ZERO, p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
