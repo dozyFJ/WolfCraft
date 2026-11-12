@@ -302,6 +302,61 @@ pub fn game_window(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(&
     modal_opts(ctx, id, "", width, false, add)
 }
 
+/// Height of the header bar of [`game_screen`].
+pub const SCREEN_BAR: f32 = 52.0;
+
+/// Bedrock-style game screen, the same look as the chat: the world dims, a dark header bar
+/// across the top carries a back arrow and the title, and the content sits in a panel centred
+/// below it. Returns true when it should close (back arrow, a tap outside, Escape).
+pub fn game_screen(ctx: &egui::Context, id: &str, title: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+    let p: Palette = palette(ctx);
+    let screen = ctx.screen_rect();
+    let mut dismissed = false;
+    egui::Area::new(Id::new(id).with("screen")).order(egui::Order::Foreground).fixed_pos(screen.min).fade_in(false).show(ctx, |ui| {
+        let (rect, resp) = ui.allocate_exact_size(screen.size(), Sense::click());
+        let painter = ui.painter().clone();
+        painter.rect_filled(rect, 0.0, Color32::from_black_alpha(110));
+        let bar = Rect::from_min_size(rect.min, Vec2::new(rect.width(), SCREEN_BAR));
+        painter.rect_filled(bar, 0.0, Color32::from_rgba_premultiplied(18, 18, 20, 235));
+        painter.text(bar.center(), Align2::CENTER_CENTER, title, FontId::proportional(20.0), Color32::WHITE);
+        // Back arrow: a flat grey square button.
+        let back = Rect::from_min_size(bar.min + Vec2::new(10.0, 6.0), Vec2::splat(40.0));
+        let br = ui.interact(back, Id::new(id).with("back"), Sense::click());
+        let fill = if br.hovered() || br.is_pointer_button_down_on() { Color32::from_rgb(98, 98, 104) } else { Color32::from_rgb(72, 72, 76) };
+        painter.rect_filled(back, 0.0, fill);
+        painter.rect_filled(Rect::from_min_max(Pos2::new(back.left(), back.bottom() - 4.0), back.max), 0.0, Color32::from_rgb(40, 40, 44));
+        painter.rect_stroke(back, 0.0, Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22)));
+        let c = back.center();
+        for (a, b) in [(Vec2::new(5.0, -9.0), Vec2::new(-5.0, 0.0)), (Vec2::new(-5.0, 0.0), Vec2::new(5.0, 9.0))] {
+            painter.line_segment([c + a, c + b], Stroke::new(3.0_f32, Color32::WHITE));
+        }
+        if br.clicked() || (resp.clicked() && !bar.contains(resp.interact_pointer_pos().unwrap_or(Pos2::ZERO))) {
+            dismissed = true;
+        }
+    });
+    let body_centre = Vec2::new(0.0, SCREEN_BAR * 0.5);
+    egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, body_centre).fade_in(false).show(ctx, |ui| {
+        Frame::none()
+            .fill(p.surface)
+            .rounding(Rounding::ZERO)
+            .stroke(Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22)))
+            .inner_margin(Margin::same(14.0))
+            .show(ui, |ui| {
+                ui.set_width(width);
+                // On a short phone screen the content scrolls instead of running under the
+                // header bar or off the bottom.
+                let max_h = screen.height() - SCREEN_BAR - 2.0 * 14.0 - 16.0;
+                egui::ScrollArea::vertical().id_salt(Id::new(id).with("scroll")).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+                    add(ui);
+                });
+            });
+    });
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        dismissed = true;
+    }
+    dismissed
+}
+
 fn modal_opts(ctx: &egui::Context, id: &str, title: &str, width: f32, scrim: bool, add: impl FnOnce(&mut Ui)) -> bool {
     let p: Palette = palette(ctx);
     let screen = ctx.screen_rect();

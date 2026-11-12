@@ -2,10 +2,9 @@
 //! Click a slot to move its whole stack to the other side.
 
 use crate::gui_renderer::GuiIcons;
-use crate::theme_manager::{bold_font, palette};
-use crate::ui_components::{ButtonKind, icon_button, progress_bar};
+use crate::theme_manager::palette;
+use crate::ui_components::progress_bar;
 use egui::{Align2, Color32, FontId, Rect, Rounding, Sense, Stroke, Ui, Vec2};
-use wolfcraft_assets::gui as icon;
 use wolfcraft_engine::inventory::Inventory;
 use wolfcraft_engine::items::ItemStack;
 
@@ -74,16 +73,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, slots: 
     let mut close = false;
     let cols = view.columns.max(1);
     let width = cols.max(9) as f32 * (CELL + GAP) - GAP;
-    let dismissed = crate::ui_components::game_window(ctx, "container", width + 4.0, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(view.title).font(bold_font(20.0)).color(p.text));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_button(ui, icons, icon::CLOSE, 30.0, ButtonKind::Ghost).clicked() {
-                    close = true;
-                }
-            });
-        });
-        ui.add_space(8.0);
+    let dismissed = crate::ui_components::game_screen(ctx, "container", view.title, width + 4.0, |ui| {
         // Container slots.
         let rows = slots.len().div_ceil(cols);
         let (area, _) = ui.allocate_exact_size(Vec2::new(width, rows as f32 * (CELL + GAP) - GAP), Sense::hover());
