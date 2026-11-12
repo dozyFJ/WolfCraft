@@ -398,7 +398,7 @@ fn draw_compass(painter: &Painter, p: &Palette, r: Rect, bearing: f32) {
 fn draw_debug(painter: &Painter, p: &Palette, d: &DebugInfo) {
     // Minecraft-style F3: world info on the left, performance on the right; the game stays visible.
     let left = [
-        format!("WolfCraft · {} · seed {}", d.world_name, d.seed),
+        format!("Кубикс: Планеты · {} · seed {}", d.world_name, d.seed),
         format!("{:.0} FPS ({:.2} ms avg, {:.2} ms max) VSync {}", d.fps, d.frame_ms_avg, d.frame_ms_max, if d.vsync { "вкл" } else { "выкл" }),
         String::new(),
         format!("XYZ: {:.2} / {:.2} / {:.2}", d.pos[0], d.pos[1], d.pos[2]),
