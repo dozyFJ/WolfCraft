@@ -920,7 +920,8 @@ impl GameSession {
                         self.mobs.fx_glow(p + lup * 0.42 + o, v, col, 0.035, 0.9, FxKind::Rise);
                     } else if r < rate * 3.3 && b == Block::Torch {
                         let v = lup * 0.5 + jitter(&mut self.mobs, 0.15);
-                        self.mobs.fx(p + lup * 0.55, v, [0.35, 0.35, 0.37], 0.06, 1.6, FxKind::Rise);
+                        // Light grey puffs (dark ones read as black squares against the walls).
+                        self.mobs.fx(p + lup * 0.55, v, [0.78, 0.78, 0.80], 0.05, 1.2, FxKind::Rise);
                     }
                 }
                 Block::Lava => {
