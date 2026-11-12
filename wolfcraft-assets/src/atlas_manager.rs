@@ -221,7 +221,8 @@ impl AtlasManager {
                     if toon {
                         if kind == AtlasKind::Blocks {
                             crate::packs::vibrant(img);
-                            *img = crate::packs::toon(img, 16 * kscale, crate::packs::toon_bevel(name));
+                            let seed = name.bytes().fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
+                            *img = crate::packs::toon_seeded(img, 16 * kscale, crate::packs::toon_bevel(name), seed);
                         } else {
                             crate::packs::vibrant(img);
                             crate::packs::vibrant(img);

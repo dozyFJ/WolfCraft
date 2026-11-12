@@ -1662,7 +1662,8 @@ impl App {
                     underwater,
                     view_distance_blocks: (self.settings.render_distance * 16) as f32,
                     time: self.time.elapsed(),
-                    outline: if self.screen == Screen::Playing { s.hit.map(|h| s.chunks.grid().cell_corners(h.cell)) } else { None },
+                    // The outline hugs the block's shape (torches, plants, slabs, doors…).
+                    outline: if self.screen == Screen::Playing { s.hit.map(|h| block_outline(&s.chunks.grid(), h.cell, h.block)) } else { None },
                     crack: if self.screen == Screen::Playing { s.interaction.mining_fraction() } else { 0.0 },
                     viewmodel_fov_y: self.settings.vm_fov.to_radians(),
                 };
@@ -2767,6 +2768,27 @@ fn held_visual(inv: &wolfcraft_engine::inventory::Inventory, tile_colors: &[[[f3
 }
 
 /// Worn armour per slot as material index (leather, bronze, iron, diamond).
+/// Corners of the box the outline is drawn around: the union of the block's shape boxes, a
+/// slim box for plants and torches, the whole cell for full blocks.
+fn block_outline(g: &wolfcraft_engine::cubesphere::Grid, c: wolfcraft_engine::cubesphere::Cell, b: wolfcraft_engine::block::Block) -> [glam::DVec3; 8] {
+    use wolfcraft_engine::block::{Block, RenderKind};
+    let bx: [f32; 6] = if !b.boxes().is_empty() {
+        b.boxes().iter().fold([1.0, 1.0, 1.0, 0.0, 0.0, 0.0], |a, s| [a[0].min(s[0]), a[1].min(s[1]), a[2].min(s[2]), a[3].max(s[3]), a[4].max(s[4]), a[5].max(s[5])])
+    } else if matches!(b, Block::Torch | Block::IskritTorch) {
+        [0.40, 0.40, 0.0, 0.60, 0.60, 0.65]
+    } else if b.info().render == RenderKind::Cross {
+        [0.15, 0.15, 0.0, 0.85, 0.85, 0.85]
+    } else {
+        [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+    };
+    let mut out = [glam::DVec3::ZERO; 8];
+    for (n, p) in out.iter_mut().enumerate() {
+        let pick = |bit: usize, lo: f32, hi: f32| if n >> bit & 1 == 1 { hi as f64 } else { lo as f64 };
+        *p = g.point(c.f, c.i as f64 + pick(0, bx[0], bx[3]), c.j as f64 + pick(1, bx[1], bx[4]), c.k as f64 + pick(2, bx[2], bx[5]));
+    }
+    out
+}
+
 fn worn_armor(inv: &wolfcraft_engine::inventory::Inventory) -> [Option<u8>; 4] {
     let mut out = [None; 4];
     for (i, slot) in inv.armor.iter().enumerate() {

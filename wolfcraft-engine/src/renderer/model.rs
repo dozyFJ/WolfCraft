@@ -266,7 +266,9 @@ fn add_box_r(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot:
             let pts: Vec<Vec3> = quad.iter().map(|q| inset(*q, axis, r)).collect();
             for idx in [0usize, 2, 1, 0, 3, 2] {
                 let s = corner_sign(quad[idx]);
-                let ln = (n + s * 0.35).normalize();
+                // Low poly: every facet is flat.
+                let _ = s;
+                let ln = n;
                 let p = f.to_world(rot(pts[idx])).as_vec3().to_array();
                 out.push(ModelVertex { pos: p, normal: f.dir(rot_n(ln)).normalize_or_zero().to_array(), color, uv: uvs[idx], tex });
             }
@@ -306,7 +308,7 @@ fn add_box_r(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot:
                     let uv0 = face_uv[fa][sign_index(c0)];
                     let uv1 = face_uv[fa][sign_index(c1)];
                     let p = |s: Vec3, axis: usize| inset_s(s, axis, r);
-                    let blend = |nf: Vec3, s: Vec3| (nf * 0.6 + mid * 0.6 + s * 0.2).normalize();
+                    let blend = |_nf: Vec3, _s: Vec3| mid;
                     let q = [(p(c0, a), blend(na, c0), uv0), (p(c1, a), blend(na, c1), uv1), (p(c1, b), blend(nb, c1), uv1), (p(c0, b), blend(nb, c0), uv0)];
                     tri(&[q[0], q[1], q[2]], face_tex[fa]);
                     tri(&[q[0], q[2], q[3]], face_tex[fa]);
@@ -319,7 +321,7 @@ fn add_box_r(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot:
         let fx = (s.x < 0.0) as usize;
         let uv = face_uv[fx][sign_index(s)];
         let nc = s.normalize();
-        let pts: Vec<(Vec3, Vec3, [f32; 2])> = (0..3).map(|axis| (inset_s(s, axis, r), (face_n(axis, s[axis]) * 0.5 + nc).normalize(), uv)).collect();
+        let pts: Vec<(Vec3, Vec3, [f32; 2])> = (0..3).map(|axis| (inset_s(s, axis, r), nc, uv)).collect();
         tri(&pts, face_tex[fx]);
     }
 }
