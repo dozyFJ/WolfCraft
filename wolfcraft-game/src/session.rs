@@ -1080,6 +1080,116 @@ impl GameSession {
         }
     }
 
+    /// Builds an iskrit showcase in front of the player: a stone floor with signed stands —
+    /// torch → dust → lamp, a button, a switch, an iskrit block, the 15-block reach (15 dust
+    /// lights the lamp, 16 does not) and dust climbing a staircase. Returns a chat message.
+    pub fn build_iskrit_demo(&mut self) -> Result<String, String> {
+        use wolfcraft_engine::block::Block as B;
+        let g = self.chunks.grid();
+        let feet = g.world_to_cell(self.player.body.pos);
+        // Local axes: forward along the cell axis closest to the view, right beside it.
+        let centre = g.cell_center(feet);
+        let ax = |di: i32, dj: i32| g.offset(feet, di, dj, 0).map(|c| (g.cell_center(c) - centre).normalize()).unwrap_or(DVec3::ZERO);
+        let (ei, ej) = (ax(1, 0), ax(0, 1));
+        let h = self.player.heading;
+        let fwd = if h.dot(ei).abs() >= h.dot(ej).abs() { (h.dot(ei).signum() as i32, 0) } else { (0, h.dot(ej).signum() as i32) };
+        let right_dir = self.player.right();
+        let perp = if fwd.0 != 0 { (0, 1) } else { (1, 0) };
+        let rs = right_dir.dot(ei * perp.0 as f64 + ej * perp.1 as f64).signum() as i32;
+        let rgt = (perp.0 * rs, perp.1 * rs);
+        // (x right, y up, z forward) → cell, starting 3 blocks ahead and 2 to the left.
+        let at = |x: i32, y: i32, z: i32| {
+            let (x, z) = (x - 2, z + 3);
+            g.offset(feet, fwd.0 * z + rgt.0 * x, fwd.1 * z + rgt.1 * x, y)
+        };
+        let mut placed: Vec<wolfcraft_engine::cubesphere::Cell> = Vec::new();
+        let mut set = |s: &mut Self, x: i32, y: i32, z: i32, b: B| -> Result<(), String> {
+            let c = at(x, y, z).ok_or("Слишком близко к краю грани планеты, отойдите чуть в сторону")?;
+            if !s.chunks.set_block(c, b) {
+                return Err("Мир вокруг ещё не загрузился, попробуйте через пару секунд".into());
+            }
+            placed.push(c);
+            Ok(())
+        };
+        // Floor and clear air above it.
+        for x in -1..=27 {
+            for z in -2..=20 {
+                set(self, x, -1, z, B::SmoothStone)?;
+                for y in 0..=4 {
+                    set(self, x, y, z, B::Air)?;
+                }
+            }
+        }
+        let mut signs: Vec<((i32, i32, i32), &str)> = Vec::new();
+        // Stand 1: a torch powers a line of dust, the dust lights a lamp.
+        set(self, 0, 0, 1, B::IskritTorch)?;
+        for z in 2..=5 {
+            set(self, 0, 0, z, B::IskritWire)?;
+        }
+        set(self, 0, 0, 6, B::IskritLamp)?;
+        signs.push(((0, 0, -1), "Искритовый факел всегда даёт сигнал. Провод несёт его к лампе"));
+        // Stand 2: a button gives a short pulse.
+        set(self, 4, 0, 1, B::Button)?;
+        for z in 2..=5 {
+            set(self, 4, 0, z, B::IskritWire)?;
+        }
+        set(self, 4, 0, 6, B::IskritLamp)?;
+        signs.push(((4, 0, -1), "Нажмите кнопку: лампа горит секунду"));
+        // Stand 3: a switch turns the line on and off.
+        set(self, 8, 0, 1, B::SwitchOff)?;
+        for z in 2..=5 {
+            set(self, 8, 0, z, B::IskritWire)?;
+        }
+        set(self, 8, 0, 6, B::IskritLamp)?;
+        signs.push(((8, 0, -1), "Рубильник: нажмите, чтобы включить и выключить"));
+        // Stand 4: an iskrit block powers what touches it.
+        set(self, 12, 0, 1, B::IskritBlock)?;
+        set(self, 12, 0, 2, B::IskritLamp)?;
+        set(self, 13, 0, 1, B::IskritWire)?;
+        set(self, 14, 0, 1, B::IskritWire)?;
+        set(self, 14, 0, 2, B::IskritLamp)?;
+        signs.push(((12, 0, -1), "Блок искрита питает всё, чего касается"));
+        // Stand 5: the reach. 15 dust still lights the lamp, 16 do not.
+        set(self, 18, 0, 1, B::IskritTorch)?;
+        for z in 2..=16 {
+            set(self, 18, 0, z, B::IskritWire)?;
+        }
+        set(self, 18, 0, 17, B::IskritLamp)?;
+        set(self, 20, 0, 1, B::IskritTorch)?;
+        for z in 2..=17 {
+            set(self, 20, 0, z, B::IskritWire)?;
+        }
+        set(self, 20, 0, 18, B::IskritLamp)?;
+        signs.push(((18, 0, -1), "Сигнал слабеет: 15 блоков провода хватает (слева), 16 уже нет (справа)"));
+        // Stand 6: dust climbs a staircase.
+        set(self, 24, 0, 1, B::IskritTorch)?;
+        set(self, 24, 0, 2, B::IskritWire)?;
+        set(self, 24, 0, 3, B::Stone)?;
+        set(self, 24, 1, 3, B::IskritWire)?;
+        set(self, 24, 0, 4, B::Stone)?;
+        set(self, 24, 1, 4, B::Stone)?;
+        set(self, 24, 2, 4, B::IskritWire)?;
+        set(self, 24, 0, 5, B::Stone)?;
+        set(self, 24, 1, 5, B::Stone)?;
+        set(self, 24, 2, 5, B::IskritLamp)?;
+        signs.push(((24, 0, -1), "Провод поднимается по ступенькам на блок вверх"));
+        // Signs with the explanations, in front of every stand.
+        for ((x, y, z), text) in signs {
+            set(self, x, y, z, B::Sign)?;
+            if let Some(c) = at(x, y, z) {
+                self.block_commands.insert(c, text.to_string());
+            }
+        }
+        self.save_block_commands();
+        // Work out every network once.
+        for c in placed {
+            if matches!(self.chunks.get_block(c), Some(B::IskritWire | B::IskritTorch | B::IskritBlock | B::IskritLamp)) {
+                wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
+            }
+        }
+        Ok("Выставка искрита построена перед вами: 6 стендов с табличками. Подойдите к табличке, чтобы прочитать".into())
+    }
+
     pub fn cycle_camera(&mut self) {
         self.camera_mode = self.camera_mode.next();
     }
@@ -1149,6 +1259,33 @@ mod tests {
             assert!(t.elapsed().as_secs() < 90, "chunks never finished: {done}/{total}, inflight {}, chunk {:?}", s.chunks.stats.gen_inflight, s.player_chunk());
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    #[test]
+    fn iskrit_demo_lights_the_right_lamps() {
+        let mut s = load("iskrit_demo", 77, true);
+        settle(&mut s);
+        let msg = s.build_iskrit_demo().expect("demo builds");
+        assert!(msg.contains("6 стендов"));
+        // Count lamps: torch, block (×2), 15-dust line and staircase lamps are lit; the
+        // button, the switch and the 16-dust line are not.
+        let feet = s.chunks.grid().world_to_cell(s.player.body.pos);
+        let (mut on, mut off) = (0, 0);
+        for di in -32..=32 {
+            for dj in -32..=32 {
+                for dk in -2..=4 {
+                    if let Some(c) = s.chunks.grid().offset(feet, di, dj, dk) {
+                        match s.chunks.get_block(c) {
+                            Some(Block::IskritLampOn) => on += 1,
+                            Some(Block::IskritLamp) => off += 1,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!((on, off), (5, 3), "lit and unlit lamps");
+        assert!(s.block_commands.values().any(|t| t.contains("15 блоков")), "signs carry the explanations");
     }
 
     /// Cube planet end to end: spawn, stand, then walk over a cube edge onto the next face.

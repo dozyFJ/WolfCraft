@@ -27,6 +27,7 @@ pub const HELP: &[&str] = &[
     "/heal  /feed  /kill  /fly   ·   /difficulty <мирная|лёгкая|нормальная|сложная>",
     "/pos  /biome  /seed  /save  /say <текст>",
     "/season [весна|лето|осень|зима] — узнать или сменить время года",
+    "/demo — построить перед собой выставку искрита (провода, кнопки, лампы)",
     "/ад — перейти в Ад,  /мир — вернуться (или через адский портал: 4 обсидиана + светокамень)",
 ];
 
@@ -232,6 +233,10 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
             let up = s.player.up();
             vec![sys(format!("XYZ {:.1} {:.1} {:.1} · широта {:.2}° долгота {:.2}° · высота {:.1}", p.x, p.y, p.z, up.y.asin().to_degrees(), up.z.atan2(up.x).to_degrees(), s.planet.grid.radial(p) - s.planet.radius))]
         }
+        "demo" | "демо" => match s.build_iskrit_demo() {
+            Ok(m) => vec![sys(m)],
+            Err(e) => vec![err(e)],
+        },
         "season" | "сезон" => {
             use wolfcraft_engine::player::{DAY_LENGTH, SEASON_DAYS};
             let year = DAY_LENGTH * SEASON_DAYS * 4.0;
