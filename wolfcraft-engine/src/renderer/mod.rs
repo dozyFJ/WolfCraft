@@ -34,6 +34,9 @@ struct Globals {
 /// Mip levels of the block atlas (full, ½, ¼).
 const MIP_LEVELS: u32 = 3;
 
+/// Linear light (4096 steps) → sRGB byte.
+static LIN_TO_SRGB: std::sync::LazyLock<[u8; 4096]> = std::sync::LazyLock::new(|| std::array::from_fn(|i| ((i as f32 / 4095.0).powf(1.0 / 2.2) * 255.0 + 0.5) as u8));
+
 /// sRGB byte → linear light.
 static SRGB_TO_LIN: std::sync::LazyLock<[f32; 256]> = std::sync::LazyLock::new(|| std::array::from_fn(|i| (i as f32 / 255.0).powf(2.2)));
 
@@ -89,7 +92,7 @@ impl GpuAtlas {
                     let a = s[3] / 4.0;
                     let px = if s[3] > 0.0 { [s[0] / s[3], s[1] / s[3], s[2] / s[3], a] } else { [0.0; 4] };
                     next.push(px);
-                    let enc = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0 + 0.5) as u8;
+                    let enc = |v: f32| LIN_TO_SRGB[(v.clamp(0.0, 1.0) * 4095.0 + 0.5) as usize];
                     bytes.extend_from_slice(&[enc(px[0]), enc(px[1]), enc(px[2]), (a * 255.0 + 0.5) as u8]);
                 }
             }
@@ -170,6 +173,29 @@ impl GpuAtlas {
 
     pub fn kind(&self) -> AtlasKind {
         self.kind
+    }
+
+    /// 1×1 "all high" height map: flat relief, bound while relief is off.
+    pub fn flat_height(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        let size = wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("relief-flat"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &[255u8],
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(1), rows_per_image: Some(1) },
+            size,
+        );
+        let view = texture.create_view(&Default::default());
+        Self { texture, view, kind: AtlasKind::Blocks, generation: 0 }
     }
 
     /// One-channel linear texture from the red channel of `atlas` (relief heights).
@@ -338,6 +364,9 @@ pub struct WorldRenderer {
     pub blocks_atlas: GpuAtlas,
     /// Height maps of the block textures (relief shaders).
     relief_atlas: GpuAtlas,
+    /// The relief height maps are on the GPU (until relief is first switched on a flat 1×1
+    /// stand-in is bound: nothing is built or uploaded for an effect that is off).
+    relief_real: bool,
     entities_atlas: GpuAtlas,
     items_atlas: GpuAtlas,
     tile_rects: [[f32; 4]; MAX_TILES],
@@ -379,7 +408,8 @@ impl WorldRenderer {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, color_format: wgpu::TextureFormat, atlases: &AtlasManager, width: u32, height: u32) -> Self {
         let blocks = atlases.get(AtlasKind::Blocks);
         let blocks_atlas = GpuAtlas::new(device, queue, blocks);
-        let relief_atlas = GpuAtlas::new_height(device, queue, atlases.relief());
+        let relief_real = atlases.has_relief();
+        let relief_atlas = if relief_real { GpuAtlas::new_height(device, queue, atlases.relief()) } else { GpuAtlas::flat_height(device, queue) };
         let entities_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Entities));
         let items_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Items));
         set_model_textures(atlases);
@@ -638,6 +668,7 @@ impl WorldRenderer {
             sampler,
             blocks_atlas,
             relief_atlas,
+            relief_real,
             entities_atlas,
             items_atlas,
             tile_rects,
@@ -742,13 +773,25 @@ impl WorldRenderer {
         set_model_textures(atlases);
         let blocks = atlases.get(AtlasKind::Blocks);
         self.blocks_atlas = GpuAtlas::new(device, queue, blocks);
-        self.relief_atlas = GpuAtlas::new_height(device, queue, atlases.relief());
+        self.relief_real = atlases.has_relief();
+        self.relief_atlas = if self.relief_real { GpuAtlas::new_height(device, queue, atlases.relief()) } else { GpuAtlas::flat_height(device, queue) };
         self.entities_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Entities));
         self.items_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Items));
         for (i, rect) in self.tile_rects.iter_mut().enumerate().take(blocks.len().min(MAX_TILES)) {
             let uv = blocks.uv(i);
             *rect = [uv.min[0], uv.min[1], uv.max[0] - uv.min[0], uv.max[1] - uv.min[1]];
         }
+        self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
+        self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
+    }
+
+    /// Builds and uploads the relief height maps the first time relief is on.
+    pub fn ensure_relief(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, atlases: &AtlasManager) {
+        if self.relief_real {
+            return;
+        }
+        self.relief_real = true;
+        self.relief_atlas = GpuAtlas::new_height(device, queue, atlases.relief());
         self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
         self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
     }

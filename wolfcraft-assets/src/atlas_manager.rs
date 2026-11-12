@@ -184,9 +184,11 @@ impl TextureAtlas {
 pub struct AtlasManager {
     atlases: Vec<TextureAtlas>,
     /// Height maps of the block textures (same layout as the blocks atlas) for the relief
-    /// shaders.
-    relief: TextureAtlas,
+    /// shaders. Built on first use: with relief off it is never needed.
+    relief: std::sync::OnceLock<TextureAtlas>,
     water_frame: u32,
+    /// Finished water animation frames (built once, then only copied in).
+    water_frames: Vec<Option<Image>>,
     /// Upscale factor of the built-in base (1 = 16×).
     scale: u32,
     /// Cartoon pack: water frames go through the toon filter too.
@@ -208,24 +210,29 @@ impl AtlasManager {
         let mut atlases = Vec::new();
         for kind in AtlasKind::ALL {
             let mut sprites = procedural::sprites(kind);
+            // Item and particle icons are 16-px pixel art: more than 32 px per sprite only costs
+            // memory and load time (the hand model reads them at 16×16 anyway).
+            let kscale = if matches!(kind, AtlasKind::Items | AtlasKind::Particles) { scale.min(2) } else { scale };
             // Block, item and particle art gets the HD treatment; GUI icons and skins stay as they are.
             if matches!(kind, AtlasKind::Blocks | AtlasKind::Items | AtlasKind::Particles) {
-                for (name, img) in sprites.iter_mut() {
-                    // HD packs: blocks with an HD painter are drawn at full resolution
-                    // (real detail); the rest is a smooth upscale of the 16× art.
+                // Every sprite on its own core: the filters are the slow part of loading.
+                use rayon::prelude::*;
+                sprites.par_iter_mut().for_each(|(name, img)| {
                     if toon {
                         if kind == AtlasKind::Blocks {
                             crate::packs::vibrant(img);
-                            *img = crate::packs::toon(img, 16 * scale, crate::packs::toon_bevel(name));
+                            *img = crate::packs::toon(img, 16 * kscale, crate::packs::toon_bevel(name));
                         } else {
                             crate::packs::vibrant(img);
                             crate::packs::vibrant(img);
-                            *img = crate::packs::upscale(img, scale);
+                            *img = crate::packs::upscale(img, kscale);
                         }
-                        continue;
+                        return;
                     }
-                    let hd = if scale > 1 && kind == AtlasKind::Blocks { procedural::hd::block(name, 16 * scale) } else { None };
-                    let native = scale == 1 || hd.is_some();
+                    // HD packs: blocks with an HD painter are drawn at full resolution
+                    // (real detail); the rest is a smooth upscale of the 16× art.
+                    let hd = if kscale > 1 && kind == AtlasKind::Blocks { procedural::hd::block(name, 16 * kscale) } else { None };
+                    let native = kscale == 1 || hd.is_some();
                     match hd {
                         Some(mut big) => {
                             crate::packs::vibrant(&mut big);
@@ -233,8 +240,8 @@ impl AtlasManager {
                         }
                         None => {
                             crate::packs::vibrant(img);
-                            if scale > 1 {
-                                *img = crate::packs::upscale(img, scale);
+                            if kscale > 1 {
+                                *img = crate::packs::upscale(img, kscale);
                             }
                         }
                     }
@@ -242,7 +249,7 @@ impl AtlasManager {
                     if native && kind == AtlasKind::Blocks && name != "water" && name != "lava" {
                         crate::packs::emboss(img, if img.width <= 16 { 0.45 } else { 1.6 });
                     }
-                }
+                });
             }
             if let Some(pack) = user_pack {
                 crate::packs::apply_user_pack(pack, kind, &mut sprites);
@@ -263,15 +270,22 @@ impl AtlasManager {
             }
             atlases.push(TextureAtlas::build(kind, sprites)?);
         }
-        let blocks = &atlases[AtlasKind::Blocks as usize];
-        let heights: Vec<(String, Image)> = blocks.sprites.iter().map(|(n, img)| (n.clone(), crate::packs::height_map(img))).collect();
-        let relief = TextureAtlas::build(AtlasKind::Blocks, heights)?;
-        Ok(Self { atlases, relief, water_frame: 0, scale, toon })
+        Ok(Self { atlases, relief: std::sync::OnceLock::new(), water_frame: 0, water_frames: vec![None; 16], scale, toon })
     }
 
     /// Height maps of the block textures, packed exactly like the blocks atlas.
     pub fn relief(&self) -> &TextureAtlas {
-        &self.relief
+        self.relief.get_or_init(|| {
+            use rayon::prelude::*;
+            let blocks = &self.atlases[AtlasKind::Blocks as usize];
+            let heights: Vec<(String, Image)> = blocks.sprites.par_iter().map(|(n, img)| (n.clone(), crate::packs::height_map(img))).collect();
+            TextureAtlas::build(AtlasKind::Blocks, heights).unwrap_or_else(|_| TextureAtlas::build(AtlasKind::Blocks, Vec::new()).expect("empty atlas"))
+        })
+    }
+
+    /// True once the relief height maps exist (built by the first `relief()` call).
+    pub fn has_relief(&self) -> bool {
+        self.relief.get().is_some()
     }
 
     pub fn get(&self, kind: AtlasKind) -> &TextureAtlas {
@@ -295,22 +309,26 @@ impl AtlasManager {
             return false;
         }
         self.water_frame = frame;
-        let scale = self.scale;
-        let toon = self.toon;
-        let blocks = self.get_mut(AtlasKind::Blocks);
+        let (scale, toon) = (self.scale, self.toon);
         let id = procedural::tiles::WATER as usize;
-        let size = blocks.sprites[id].1.width;
-        if size != 16 * scale {
+        if self.get(AtlasKind::Blocks).sprites[id].1.width != 16 * scale {
             return false; // overridden by a pack with another size: keep it static
         }
-        let mut img = procedural::water_frame(frame);
-        if toon {
-            let img = crate::packs::toon(&img, 16 * scale, 0.0);
-            return blocks.update_sprite(id, img).is_ok();
+        // Each frame is painted and filtered once, then reused.
+        let slot = &mut self.water_frames[frame as usize];
+        if slot.is_none() {
+            let mut img = procedural::water_frame(frame);
+            crate::packs::vibrant(&mut img);
+            *slot = Some(if toon {
+                crate::packs::toon(&img, 16 * scale, 0.0)
+            } else if scale > 1 {
+                crate::packs::upscale(&img, scale)
+            } else {
+                img
+            });
         }
-        crate::packs::vibrant(&mut img);
-        let img = if scale > 1 { crate::packs::upscale(&img, scale) } else { img };
-        blocks.update_sprite(id, img).is_ok()
+        let img = self.water_frames[frame as usize].clone().expect("frame just built");
+        self.get_mut(AtlasKind::Blocks).update_sprite(id, img).is_ok()
     }
 }
 
