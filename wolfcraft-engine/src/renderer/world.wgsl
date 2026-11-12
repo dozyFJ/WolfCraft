@@ -216,7 +216,7 @@ fn grade(c: vec3<f32>) -> vec3<f32> {
     let vivid = max(mix(vec3<f32>(l), c, 1.10), vec3<f32>(0.0));
     if (fx_on(8u)) {
         // Cartoon: very juicy colours, lifted shadows, cool shade and sunny highlights.
-        var o = max(mix(vec3<f32>(l), c, 1.38), vec3<f32>(0.0));
+        var o = max(mix(vec3<f32>(l), c, 1.14), vec3<f32>(0.0));
         o = o * 0.94 + vec3<f32>(0.012, 0.016, 0.03);
         o = o * o * (3.0 - 2.0 * o) * 0.25 + o * 0.75;
         return o * mix(vec3<f32>(0.97, 0.99, 1.04), vec3<f32>(1.04, 1.01, 0.96), clamp(l * 1.6, 0.0, 1.0));
@@ -499,7 +499,7 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
         diffuse = smoothstep(0.05, 0.30, diffuse) * 0.8 + diffuse * 0.2;
         light = max(mix(0.20, 0.70 + 0.30 * diffuse, day), 0.24);
         let bl = dot(base, vec3<f32>(0.2126, 0.7152, 0.0722));
-        base = max(mix(vec3<f32>(bl), base, 1.3), vec3<f32>(0.0));
+        base = max(mix(vec3<f32>(bl), base, 1.1), vec3<f32>(0.0));
         let v = normalize(-in.rel);
         rim = pow(1.0 - max(dot(nn, v), 0.0), 3.0) * mix(0.12, 0.38, day);
         // Plastic sheen, like Roblox characters.

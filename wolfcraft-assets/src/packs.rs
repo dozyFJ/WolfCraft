@@ -144,7 +144,7 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
     let lum = |c: &[f32; 4]| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
     let juicy = |c: [f32; 4]| -> [f32; 4] {
         let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-        let f = |v: f32| ((l + (v - l) * 1.5).max(0.0) * 0.86 + 0.12).min(1.0);
+        let f = |v: f32| ((l + (v - l) * 1.22).max(0.0) * 0.9 + 0.08).min(1.0);
         [f(c[0]), f(c[1]), f(c[2]), c[3]]
     };
     let n = size as i32;

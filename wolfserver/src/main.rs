@@ -1,4 +1,4 @@
-//! Кубикс Сервер — the dedicated server of Cubix Planets (Кубикс: Планеты).
+//! Кубикс Сервер — the dedicated server of Cubix (Кубикс).
 //!
 //! It keeps the world settings and the list of block edits, relays player states and chat
 //! between clients, and serves a local control panel in the browser.

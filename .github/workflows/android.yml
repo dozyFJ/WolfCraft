@@ -47,19 +47,19 @@ jobs:
           ls "$ANDROID_NDK_ROOT/source.properties"
           cargo apk build -p wolfcraft-game --lib --release --target aarch64-linux-android
           find target -name "*.apk" -path "*release*" | head
-          cp "$(find target -name '*.apk' -path '*release*' | head -1)" CubixPlanets.apk
-          ls -lh CubixPlanets.apk
+          cp "$(find target -name '*.apk' -path '*release*' | head -1)" Cubix.apk
+          ls -lh Cubix.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CubixPlanets-apk
-          path: CubixPlanets.apk
+          name: Cubix-apk
+          path: Cubix.apk
 
       - name: Publish "latest" release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest -y --cleanup-tag || true
-          gh release create latest CubixPlanets.apk --prerelease --target "$GITHUB_SHA" \
-            --title "Кубикс: Планеты (сборка #${{ github.run_number }})" \
-            --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай CubixPlanets.apk ниже."
+          gh release create latest Cubix.apk --prerelease --target "$GITHUB_SHA" \
+            --title "Кубикс (сборка #${{ github.run_number }})" \
+            --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай Cubix.apk ниже."

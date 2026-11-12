@@ -403,7 +403,7 @@ impl App {
 
     fn create_gfx(&mut self, event_loop: &ActiveEventLoop) -> Result<Gfx, String> {
         let attrs = Window::default_attributes()
-            .with_title("Кубикс: Планеты")
+            .with_title("Кубикс")
             .with_inner_size(LogicalSize::new(1280.0, 720.0))
             .with_min_inner_size(LogicalSize::new(900.0, 560.0));
         let window = Arc::new(event_loop.create_window(attrs).map_err(|e| format!("Не удалось создать окно: {e}"))?);
@@ -2466,7 +2466,7 @@ impl ApplicationHandler for App {
             }
             Err(e) => {
                 log::error!("startup failed: {e}");
-                platform::message_box("Кубикс: Планеты — ошибка запуска", &format!("{e}\n\nПодробности в logs/latest.log"));
+                platform::message_box("Кубикс — ошибка запуска", &format!("{e}\n\nПодробности в logs/latest.log"));
                 event_loop.exit();
             }
         }
