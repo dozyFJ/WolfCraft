@@ -917,11 +917,11 @@ impl GameSession {
                         let col = if b == Block::IskritTorch { [1.0, 0.35, 0.75] } else if self.mobs.rand() < 0.5 { [1.0, 0.62, 0.15] } else { [1.0, 0.85, 0.35] };
                         let v = lup * (0.4 + self.mobs.rand() * 0.5) + jitter(&mut self.mobs, 0.3);
                         let o = jitter(&mut self.mobs, 0.08);
-                        self.mobs.fx_glow(p + lup * 0.42 + o, v, col, 0.035, 0.9, FxKind::Rise);
+                        self.mobs.fx_glow(p + lup * 0.36 + o, v, col, 0.035, 0.9, FxKind::Rise);
                     } else if r < rate * 3.3 && b == Block::Torch {
                         let v = lup * 0.5 + jitter(&mut self.mobs, 0.15);
                         // Light grey puffs (dark ones read as black squares against the walls).
-                        self.mobs.fx(p + lup * 0.55, v, [0.78, 0.78, 0.80], 0.05, 1.2, FxKind::Rise);
+                        self.mobs.fx(p + lup * 0.45, v, [0.78, 0.78, 0.80], 0.05, 1.2, FxKind::Rise);
                     }
                 }
                 Block::Lava => {

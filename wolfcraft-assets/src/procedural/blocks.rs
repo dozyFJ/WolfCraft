@@ -1308,11 +1308,12 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(SPRUCE_PLANKS, "spruce_planks", planks(Rgb(0.44, 0.31, 0.19), 162));
     l.add(ACACIA_PLANKS, "acacia_planks", planks(Rgb(0.74, 0.42, 0.24), 163));
     l.add(TORCH, "torch", p(|q| {
-        for y in 6..16u32 {
+        // A short stick (10/16 of a block, like the classic torch) with a flame on top.
+        for y in 9..16u32 {
             q.put(7, y, Rgb(0.50, 0.36, 0.20), 1.0);
             q.put(8, y, Rgb(0.40, 0.28, 0.15), 1.0);
         }
-        for (x, y, c) in [(7u32, 4u32, Rgb(1.0, 0.85, 0.30)), (8, 4, Rgb(1.0, 0.75, 0.25)), (7, 5, Rgb(1.0, 0.60, 0.15)), (8, 5, Rgb(0.95, 0.50, 0.10)), (7, 3, Rgb(1.0, 0.95, 0.60)), (8, 3, Rgb(1.0, 0.90, 0.50))] {
+        for (x, y, c) in [(7u32, 7u32, Rgb(1.0, 0.85, 0.30)), (8, 7, Rgb(1.0, 0.75, 0.25)), (7, 8, Rgb(1.0, 0.60, 0.15)), (8, 8, Rgb(0.95, 0.50, 0.10)), (7, 6, Rgb(1.0, 0.95, 0.60)), (8, 6, Rgb(1.0, 0.90, 0.50))] {
             q.put(x, y, c, 1.0);
         }
     }));
@@ -1480,13 +1481,13 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(ISKRIT_TORCH, "iskrit_torch", p(|q| {
         // Wooden stick with a glowing iskrit head and a soft halo round it.
         q.clear();
-        for y in 7..16u32 {
+        for y in 9..16u32 {
             q.put(7, y, Rgb(0.50, 0.34, 0.18), 1.0);
             q.put(8, y, Rgb(0.38, 0.25, 0.13), 1.0);
         }
-        for y in 2..7u32 {
+        for y in 4..10u32 {
             for x in 5..11u32 {
-                let (fx, fy) = (x as f32 - 7.5, y as f32 - 4.5);
+                let (fx, fy) = (x as f32 - 7.5, y as f32 - 7.0);
                 let d = (fx * fx + fy * fy).sqrt();
                 if d > 2.8 {
                     continue;
