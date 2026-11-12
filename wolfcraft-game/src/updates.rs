@@ -1,6 +1,6 @@
 //! Open the private repository's releases with the user's browser session.
 //! Native Android code is updated through a signed APK; resource packs use the existing ZIP downloader.
-const RELEASE_URL: &str = "https://github.com/dozyFJ/WolfCraft/releases/latest";
+const RELEASE_URL: &str = "https://github.com/dozyFJ/WolfCraft/releases/tag/latest";
 
 pub fn open_release() {
     #[cfg(not(target_os = "android"))]
