@@ -1,4 +1,4 @@
-//! Кубикс Сервер — the dedicated server of Cubix (Кубикс).
+//! WolfCraft Сервер — the dedicated server of WolfCraft.
 //!
 //! It keeps the world settings and the list of block edits, relays player states and chat
 //! between clients, and serves a local control panel in the browser.
@@ -171,12 +171,12 @@ fn open_browser(url: &str) {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("Кубикс Сервер {}\n  --name <мир>      название мира (по умолчанию «Сервер»)\n  --seed <число>    seed нового мира\n  --port <порт>     порт игры (по умолчанию {DEFAULT_PORT})\n  --creative        творческий режим для нового мира\n  --background      запустить в фоне без окна\n  --no-browser      не открывать панель в браузере", wolfcraft_common::VERSION);
+        println!("WolfCraft Сервер {}\n  --name <мир>      название мира (по умолчанию «Сервер»)\n  --seed <число>    seed нового мира\n  --port <порт>     порт игры (по умолчанию {DEFAULT_PORT})\n  --creative        творческий режим для нового мира\n  --background      запустить в фоне без окна\n  --no-browser      не открывать панель в браузере", wolfcraft_common::VERSION);
         return;
     }
     if args.iter().any(|a| a == "--background") {
         match respawn_hidden(&args) {
-            Ok(()) => println!("Кубикс Сервер запущен в фоне. Панель: http://127.0.0.1:{PANEL_PORT}/"),
+            Ok(()) => println!("WolfCraft Сервер запущен в фоне. Панель: http://127.0.0.1:{PANEL_PORT}/"),
             Err(e) => eprintln!("Не удалось запустить в фоне: {e}"),
         }
         return;
@@ -212,14 +212,14 @@ fn main() {
     let server = match wolfcraft_net::server::start(&cfg.name, world_toml, &dir, port, true) {
         Ok(s) => std::sync::Arc::new(s),
         Err(e) => {
-            eprintln!("Сервер не запущен: {e}. Возможно, Кубикс Сервер уже работает.");
+            eprintln!("Сервер не запущен: {e}. Возможно, WolfCraft Сервер уже работает.");
             return;
         }
     };
     {
         let mut s = server.shared.lock().unwrap();
         let e = s.edits[0].len() + s.edits[1].len();
-        s.log(format!("Кубикс Сервер {} — мир «{}», seed {}, изменённых блоков: {e}", wolfcraft_common::VERSION, cfg.name, cfg.seed as i64));
+        s.log(format!("WolfCraft Сервер {} — мир «{}», seed {}, изменённых блоков: {e}", wolfcraft_common::VERSION, cfg.name, cfg.seed as i64));
         for a in lan_addresses(port) {
             s.log(format!("Адрес для игроков: {a}"));
         }

@@ -450,6 +450,8 @@ impl GameSession {
             }
             if self.player.survival.dead && !self.death_burst_done {
                 self.death_burst_done = true;
+                let at = self.player.body.pos + wolfcraft_engine::physics::up_at(self.player.body.pos) * 0.5;
+                self.leave_bones(at);
                 self.mobs.burst(self.player.body.pos, &wolfcraft_engine::renderer::model::player_palette(), 1.8);
             } else if !self.player.survival.dead {
                 self.death_burst_done = false;
@@ -495,10 +497,12 @@ impl GameSession {
             let feet = self.player.body.pos;
             let can_pick = !self.player.survival.dead;
             let ev = self.arrows.step(&self.chunks, &mut self.mobs, feet, can_pick, dt.min(0.1) as f64);
-            for kind in ev.killed {
-                // Shot from afar: the loot lands at the player's feet (the arrow event has no spot).
+            for (kind, at) in ev.killed {
+                if kind != wolfcraft_engine::mobs::MobKind::Slime {
+                    self.leave_bones(at);
+                }
+                // The loot lands where the creature fell.
                 for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64) {
-                    let at = self.player.body.pos + wolfcraft_engine::physics::up_at(self.player.body.pos) * 0.5;
                     self.drops.pop_from_block(drop, at);
                 }
                 self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
@@ -1153,6 +1157,9 @@ impl GameSession {
             for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64) {
                 self.drops.pop_from_block(drop, at);
             }
+            if kind != wolfcraft_engine::mobs::MobKind::Slime {
+                self.leave_bones(at);
+            }
             self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
         }
         self.attack_cd = cooldown;
@@ -1163,6 +1170,29 @@ impl GameSession {
             }
         }
         true
+    }
+
+    /// A heap of bones where a creature or the player died: on the ground under `at`, in a
+    /// free cell (air or grass), never inside blocks. Mined with a pickaxe for bones.
+    fn leave_bones(&mut self, at: DVec3) {
+        use wolfcraft_engine::block::Block as B;
+        let g = self.chunks.grid();
+        let up = wolfcraft_engine::physics::up_at(at);
+        // From a little above the body down to two blocks under it: the first free cell
+        // standing on something solid.
+        for step in 0..5 {
+            let p = at + up * (0.6 - step as f64 * 0.7);
+            let c = g.world_to_cell(p);
+            let Some(below) = g.neighbor(c, 2, -1) else { continue };
+            let (Some(here), Some(under)) = (self.chunks.get_block(c), self.chunks.get_block(below)) else { continue };
+            let free = here == B::Air || (here.is_replaceable() && !here.is_fluid() && here.crop().is_none());
+            if free && under.is_solid() && under.boxes().is_empty() {
+                if self.chunks.set_block(c, B::Bones) {
+                    self.net_out.push((c, B::Bones));
+                }
+                return;
+            }
+        }
     }
 
     /// Random ticks around the player: sugar cane and cactus grow a block now and then, up

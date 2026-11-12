@@ -393,6 +393,8 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::Cobblestone), 1), (ids::COAL, 1)], (b(Block::Stone), 1), true, "Плавка"));
         v.push(r(&[(b(Block::Sand), 1), (ids::COAL, 1)], (b(Block::Glass), 2), true, "Плавка"));
         v.push(r(&[(b(Block::MushroomRed), 1), (b(Block::MushroomBrown), 1), (ids::APPLE, 1)], (ids::MUSHROOM_STEW, 1), false, "Еда"));
+        // A bone grinds into three portions of bone meal.
+        v.push(r(&[(ids::BONE, 1)], (ids::BONE_MEAL, 3), false, "Предметы"));
         // Tools: pickaxe 3, axe 3, shovel 1, sword 2 material units + sticks.
         let mats: [ItemId; 4] = [b(Block::OakPlanks), b(Block::Cobblestone), ids::IRON_INGOT, ids::DIAMOND];
         let units = [3u8, 3, 1, 2];

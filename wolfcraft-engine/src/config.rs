@@ -329,7 +329,7 @@ pub enum ThemeMode {
 }
 
 /// Current version of the default look (see `Settings::migrate`).
-pub const STYLE_VERSION: u32 = 3;
+pub const STYLE_VERSION: u32 = 4;
 
 /// Global user settings (`settings.toml` in the data directory).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -482,6 +482,11 @@ impl Settings {
         // 3: the camera turns crisply (the old soft glide felt like lag on phones).
         if self.style_version < 3 && (self.camera_smooth - 0.5).abs() < 1e-3 {
             self.camera_smooth = 0.15;
+        }
+        // 4: the reworked cartoon pack is the main one again for everybody (the old textures
+        // stay in settings as "Старый пак").
+        if self.style_version < 4 {
+            self.texture_pack = "builtin:toon".into();
         }
         self.style_version = STYLE_VERSION;
     }

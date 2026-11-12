@@ -90,7 +90,7 @@ pub mod tiles {
     pub const GLOWSTONE: u16 = 81;
     pub const MACHINE_CASING: u16 = 82;
     pub const GENERATOR_FRONT: u16 = 83;
-    pub const CABLE: u16 = 84;
+    pub const BONES: u16 = 84;
     pub const BATTERY_SIDE: u16 = 85;
     pub const BATTERY_TOP: u16 = 86;
     pub const ELECTRIC_LAMP: u16 = 87;
@@ -1127,32 +1127,15 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
         q.finish()
     });
-    l.add(CABLE, "cable", p(|q| {
+    l.add(BONES, "bones", p(|q| {
+        // Ivory bone surface: soft rings and darker pores, like a cut through bone.
         for y in 0..S {
             for x in 0..S {
-                let n = (rnd(x, y, 146) - 0.5) * 0.04;
-                q.put(x, y, Rgb(0.17, 0.18, 0.20).add(n), 1.0);
-            }
-        }
-        // Copper core in rubber, shaded like a round wire.
-        let wire = |t: u32| -> Rgb {
-            match t {
-                0 | 5 => Rgb(0.10, 0.10, 0.12),
-                1 => Rgb(0.98, 0.70, 0.48),
-                2 => Rgb(0.86, 0.52, 0.32),
-                3 => Rgb(0.72, 0.42, 0.25),
-                _ => Rgb(0.55, 0.30, 0.18),
-            }
-        };
-        for i in 0..S {
-            for t in 0..6u32 {
-                q.put(i, 5 + t, wire(t), 1.0);
-                q.put(5 + t, i, wire(t), 1.0);
-            }
-        }
-        for t in 0..6u32 {
-            for k in 0..6u32 {
-                q.put(5 + t, 5 + k, wire(k.min(t).min(5 - t).min(5 - k) + 1).add(0.05), 1.0);
+                let n = (rnd(x, y, 146) - 0.5) * 0.06;
+                let ring = (((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt() * 0.9).sin() * 0.025;
+                let pore = rnd(x, y, 147) < 0.05;
+                let c = if pore { Rgb(0.70, 0.66, 0.56) } else { Rgb(0.93, 0.90, 0.80).add(n + ring) };
+                q.put(x, y, c, 1.0);
             }
         }
     }));

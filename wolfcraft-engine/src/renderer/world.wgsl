@@ -179,7 +179,22 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     let torch = blk * blk * (0.35 + 0.75 * blk);
     let torch_rgb = vec3<f32>(1.0, 0.80, 0.55) * torch;
     // Light adds up, but never brighter than full daylight.
-    let lit = min(sky_rgb + torch_rgb * (1.0 - 0.6 * day * in.light.y), vec3<f32>(1.15));
+    var lit = min(sky_rgb + torch_rgb * (1.0 - 0.6 * day * in.light.y), vec3<f32>(1.15));
+    if (toon) {
+        // Lighting like the big simulator places: a warm sun with cool blue-tinted shade by
+        // day, golden-pink light at sunrise and sunset, and a bright moonlit blue night where
+        // everything stays readable (the moon lights from the side opposite the sun).
+        let sky_k = mix(in.light.y, sqrt(in.light.y), 0.6);
+        let shade_t = 1.0 - diffuse;
+        let day_rgb = (sky_amb + (0.96 - sky_amb) * diffuse) * mix(vec3<f32>(1.04, 1.0, 0.92), vec3<f32>(0.86, 0.93, 1.10), shade_t * 0.8);
+        let moon = smoothstep(0.0, 0.4, max(dot(n, -sun), 0.0)) * 0.6 + 0.4;
+        let night_rgb = vec3<f32>(0.30, 0.38, 0.62) * (0.75 + 0.35 * moon);
+        let gold = vec3<f32>(1.16, 0.90, 0.78);
+        var amb = mix(night_rgb, day_rgb, day) * mix(vec3<f32>(1.0), gold, twilight * 0.6);
+        amb = amb * sky_k;
+        // Torches glow warmer and further at night.
+        lit = min(max(amb, vec3<f32>(0.05)) + torch_rgb * (1.15 - 0.75 * day * in.light.y), vec3<f32>(1.2));
+    }
     var rgb = color.rgb * lit * ao * face_k;
     if (toon && emit == 0u) {
         // Roblox-style low poly: light from the sky dome (cool from above, a warm bounce from

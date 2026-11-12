@@ -236,6 +236,38 @@ impl Interaction {
             }
             return events;
         }
+        // Bone meal: a young crop ripens at once; on grass it sprouts grass and flowers around.
+        if stack.id == items::ids::BONE_MEAL {
+            if let Some(h) = hit {
+                let mut used = false;
+                if let Some(ripe) = h.block.grown() {
+                    used = world.set_block(h.cell, ripe);
+                    if used {
+                        events.push(InteractionEvent::Placed { pos: h.cell, block: ripe });
+                    }
+                } else if matches!(h.block, Block::Grass | Block::DryGrass | Block::SwampGrass) {
+                    let g = *world.grid();
+                    let plants = [Block::TallGrass, Block::TallGrass, Block::FlowerRed, Block::FlowerYellow, Block::TallGrass, Block::FlowerBlue];
+                    let mut n = 0usize;
+                    for (di, dj) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
+                        let Some(c) = g.offset(h.cell, di, dj, 0) else { continue };
+                        let Some(above) = g.neighbor(c, 2, 1) else { continue };
+                        if matches!(world.cell_block(c), Block::Grass | Block::DryGrass | Block::SwampGrass) && world.cell_block(above) == Block::Air {
+                            let plant = plants[(n as i32 + h.cell.i + h.cell.j).rem_euclid(plants.len() as i32) as usize];
+                            if (di + dj + h.cell.i + h.cell.j).rem_euclid(3) != 2 && world.set_block(above, plant) {
+                                events.push(InteractionEvent::Placed { pos: above, block: plant });
+                                used = true;
+                            }
+                            n += 1;
+                        }
+                    }
+                }
+                if used && !player.is_creative() {
+                    player.inventory.consume_selected();
+                }
+            }
+            return events;
+        }
         // Hoe: till dirt or grass with free air above into farmland.
         if (items::ids::HOE_BASE..=items::ids::HOE_LAST).contains(&stack.id) {
             if let Some(h) = hit {

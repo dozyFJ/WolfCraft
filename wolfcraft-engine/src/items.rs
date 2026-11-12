@@ -58,7 +58,9 @@ pub mod ids {
     /// Spawn souls: SOUL_BASE + index in `mobs::ALL_MOBS`.
     pub const SOUL_BASE: ItemId = 326;
     pub const SOUL_LAST: ItemId = 333;
-    pub const LAST: ItemId = 333;
+    pub const BONE: ItemId = 334;
+    pub const BONE_MEAL: ItemId = 335;
+    pub const LAST: ItemId = 335;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -175,6 +177,8 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::POTATO => ItemInfo { place: Some(Block::PotatoYoung), food: Some((1.0, 0.6)), ..plain("Картофель", sp::POTATO) },
         ids::BAKED_POTATO => ItemInfo { food: Some((5.0, 6.0)), ..plain("Печёный картофель", sp::BAKED_POTATO) },
         ids::SLIME => plain("Слизь", sp::SLIME),
+        ids::BONE => plain("Кость", sp::BONE),
+        ids::BONE_MEAL => plain("Костная мука", sp::BONE_MEAL),
         s if (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&s) => {
             const NAMES: [&str; 8] = ["Душа спавна: Упырь", "Душа спавна: Ползун", "Душа спавна: Кабан", "Душа спавна: Овца", "Душа спавна: Корова", "Душа спавна: Курица", "Душа спавна: Волк", "Душа спавна: Слизень"];
             let i = (s - ids::SOUL_BASE) as usize;
@@ -280,6 +284,7 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         Block::Potatoes => vec![ItemStack::new(ids::POTATO, 2 + (roll * 3.0) as u8)],
         Block::PotatoYoung => vec![ItemStack::new(ids::POTATO, 1)],
         Block::Farmland => vec![ItemStack::of_block(Block::Dirt, 1)],
+        Block::Bones => vec![ItemStack::new(ids::BONE, 2 + (roll * 3.0) as u8)],
         // Wild grass now and then hides seeds, a carrot or a potato.
         Block::TallGrass | Block::Fern => {
             if roll < 0.14 {
@@ -401,7 +406,7 @@ pub fn creative_palette() -> Vec<ItemId> {
         .iter()
         .filter(|b| b.crop().is_none())
         // The electric machines are put away for now.
-        .filter(|b| !matches!(b, Block::Generator | Block::Cable | Block::ElectricLamp))
+        .filter(|b| !matches!(b, Block::Generator | Block::ElectricLamp))
         .filter(|b| !matches!(b, Block::Air | Block::Water | Block::Magma | Block::InnerCore | Block::Bedrock | Block::ElectricLampOn | Block::SwitchOn | Block::GlassPaneB | Block::StoneSlabVerticalB | Block::PlankSlabVerticalB | Block::BrickSlabVerticalB) && b.base_item() == **b)
         .map(|b| *b as ItemId)
         .collect();
@@ -459,10 +464,11 @@ pub fn category(id: ItemId) -> &'static str {
             b if !b.boxes().is_empty() || matches!(b, Block::RedGlass | Block::BlueGlass | Block::GreenGlass | Block::YellowGlass) => "Строительство",
             Block::Wool | Block::RedWool | Block::BlueWool | Block::YellowWool | Block::Torch | Block::PolishedGranite | Block::PolishedMarble | Block::SmoothStone | Block::SandstoneBricks | Block::Bookshelf | Block::Lantern => "Строительство",
             Block::Pumpkin | Block::Melon => "Растения",
+            Block::Bones => "Мобы",
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Battery | Block::ElectricFurnace => "Строительство",
-            Block::Generator | Block::Cable | Block::ElectricLamp | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
+            Block::Generator | Block::ElectricLamp | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
             Block::IskritOre | Block::UraniumOre | Block::UraniumBlock => "Руды",
             Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable => "Строительство",
             _ => "Природа",

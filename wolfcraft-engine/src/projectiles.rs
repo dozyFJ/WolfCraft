@@ -26,7 +26,8 @@ pub struct Arrow {
 #[derive(Default, Debug)]
 pub struct ArrowEvents {
     /// Creatures killed by arrows (for loot and xp).
-    pub killed: Vec<MobKind>,
+    /// Creatures killed by arrows (for loot, bones and xp), with where they fell.
+    pub killed: Vec<(MobKind, DVec3)>,
     /// Arrows picked up by the player.
     pub picked: u32,
     /// Something was hit (for a sound or a hit marker).
@@ -76,7 +77,7 @@ impl Arrows {
             if let Some((i, _)) = mobs.raycast(a.pos, dir, len + 0.3) {
                 let from = a.pos - dir * 2.0;
                 if let Some(kind) = mobs.hurt(i, a.damage, from) {
-                    ev.killed.push(kind);
+                    ev.killed.push((kind, a.pos));
                 }
                 ev.hits += 1;
                 continue;

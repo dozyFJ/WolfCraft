@@ -230,6 +230,8 @@ pub struct App {
     /// Open chest / furnace (block cell and kind).
     container: Option<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)>,
     pending_apply: bool,
+    /// Seconds a tap with a tool or weapon still counts as a held "hit" (touch screens).
+    tap_hit: f32,
     /// First-person arm swing progress 0..1 (0 = resting). A swing always plays to the end.
     hand_cycle: f32,
     /// Sprint and sneak blends of the view model (0..1).
@@ -317,6 +319,7 @@ impl App {
             pack_status: String::new(),
             pack_dl: None,
             splash_t: 0.0,
+            tap_hit: 0.0,
             world_map: None,
             map_px: vec![egui::Color32::BLACK; MAP_W * MAP_H],
             map_marks: Vec::new(),
@@ -406,7 +409,7 @@ impl App {
 
     fn create_gfx(&mut self, event_loop: &ActiveEventLoop) -> Result<Gfx, String> {
         let attrs = Window::default_attributes()
-            .with_title("Кубикс")
+            .with_title("WolfCraft")
             .with_inner_size(LogicalSize::new(1280.0, 720.0))
             .with_min_inner_size(LogicalSize::new(900.0, 560.0));
         let window = Arc::new(event_loop.create_window(attrs).map_err(|e| format!("Не удалось создать окно: {e}"))?);
@@ -779,7 +782,9 @@ impl App {
         use wolfcraft_assets::packs::{DEFAULT_PACK, base_scale};
         let id = self.settings.texture_pack.clone();
         let user = self.packs.iter().find(|p| p.id == id).and_then(|p| p.path.clone());
-        let base = if user.is_some() || base_scale(&id) > 1 || id == DEFAULT_PACK { id.clone() } else { DEFAULT_PACK.to_string() };
+        let builtin = wolfcraft_assets::packs::BUILTIN.iter().any(|b| b.0 == id);
+        let _ = base_scale;
+        let base = if user.is_some() || builtin { id.clone() } else { DEFAULT_PACK.to_string() };
         if user.is_none() && base != id {
             self.settings.texture_pack = DEFAULT_PACK.into();
         }
@@ -1016,7 +1021,7 @@ impl App {
             sprint: k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight) || self.touch.sprint,
             sneak: k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || if self.touch.flying { self.touch.down_held } else { self.touch.sneak },
             look: self.smooth_look(((self.input.mouse_dx + tl.0 as f64 * 1.4) * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy + tl.1 as f64 * 1.4) * sens)),
-            break_held: self.input.left || (self.touch.breaking && !bow),
+            break_held: self.input.left || (self.touch.breaking && !bow) || self.tap_hit > 0.0,
             use_pressed: std::mem::take(&mut self.input.right_press),
             use_held: self.input.right || self.touch.place_held || (bow && self.touch.breaking),
             swap_hands: std::mem::take(&mut self.input.swap_press),
@@ -1026,7 +1031,10 @@ impl App {
             aim: if self.settings.tap_aim { self.touch_aim() } else { None },
             touch: self.touch.seen && self.settings.tap_aim,
         };
-        self.touch.tap_point = None;
+        // A tap blow aims at the tapped point for its whole short "hold".
+        if self.tap_hit <= 0.0 {
+            self.touch.tap_point = None;
+        }
         self.input.mouse_dx = 0.0;
         self.input.mouse_dy = 0.0;
         f
@@ -1228,6 +1236,7 @@ impl App {
         match self.screen {
             Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead | Screen::Map => {
                 let input = if self.screen == Screen::Playing && !self.chat.open { self.take_input_frame() } else { InputFrame::default() };
+                self.tap_hit = (self.tap_hit - dt as f32).max(0.0);
                 self.input.mouse_dx = 0.0;
                 self.input.mouse_dy = 0.0;
                 if let Some(s) = &mut self.session {
@@ -1948,7 +1957,7 @@ impl App {
                 if hits > 0 {
                     self.audio.play(crate::audio::Sfx::Hit, 1.0);
                 }
-                let want = self.screen == Screen::Playing && (self.input.left || (self.touch.breaking && !bow) || hits > 0) && !s.player.survival.dead;
+                let want = self.screen == Screen::Playing && (self.input.left || (self.touch.breaking && !bow) || self.tap_hit > 0.0 || hits > 0) && !s.player.survival.dead;
                 let c0 = self.hand_cycle;
                 if self.hand_cycle > 0.0 {
                     self.hand_cycle += dt * swing_speed(tool);
@@ -2479,7 +2488,7 @@ impl ApplicationHandler for App {
             }
             Err(e) => {
                 log::error!("startup failed: {e}");
-                platform::message_box("Кубикс — ошибка запуска", &format!("{e}\n\nПодробности в logs/latest.log"));
+                platform::message_box("WolfCraft — ошибка запуска", &format!("{e}\n\nПодробности в logs/latest.log"));
                 event_loop.exit();
             }
         }
@@ -2565,7 +2574,17 @@ impl ApplicationHandler for App {
                                     self.touch.sneak = false;
                                 }
                             }
-                            TouchAction::Place => self.input.right_press = true,
+                            TouchAction::Place => {
+                                // With a pickaxe, axe, shovel or sword in hand a tap is a blow
+                                // (mines a little, hits a creature, swings the arm); a hoe and
+                                // everything else keep the tap as "use".
+                                let tool = self.session.as_ref().and_then(|s| s.player.inventory.held()).and_then(|h| wolfcraft_engine::items::tool_shape(h.id));
+                                if tool.is_some_and(|t| t.0 < 4) {
+                                    self.tap_hit = 0.2;
+                                } else {
+                                    self.input.right_press = true;
+                                }
+                            }
                             TouchAction::Hotbar(d) => self.input.scroll += d as f32,
                             TouchAction::Camera => self.handle_key(KeyCode::F5, true, false),
                             TouchAction::Chat => self.chat.open(""),

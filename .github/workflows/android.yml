@@ -53,22 +53,22 @@ jobs:
           cargo apk build -p wolfcraft-game --lib --release --target aarch64-linux-android
           ls -l target/release/apk/
           # Only the signed, aligned APK (never the "-unaligned" intermediate).
-          cp target/release/apk/Cubix.apk Cubix.apk
-          ls -lh Cubix.apk
+          cp target/release/apk/WolfCraft.apk WolfCraft.apk
+          ls -lh WolfCraft.apk
           # Refuse to publish a package Android would reject.
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs Cubix.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 Cubix.apk | tail -1
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs WolfCraft.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 WolfCraft.apk | tail -1
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Cubix-apk
-          path: Cubix.apk
+          name: WolfCraft-apk
+          path: WolfCraft.apk
 
       - name: Publish "latest" release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest -y --cleanup-tag || true
-          gh release create latest Cubix.apk --prerelease --target "$GITHUB_SHA" \
-            --title "Кубикс (сборка #${{ github.run_number }})" \
-            --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай Cubix.apk ниже."
+          gh release create latest WolfCraft.apk --prerelease --target "$GITHUB_SHA" \
+            --title "WolfCraft (сборка #${{ github.run_number }})" \
+            --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай WolfCraft.apk ниже."
