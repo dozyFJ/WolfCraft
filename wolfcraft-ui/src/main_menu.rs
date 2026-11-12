@@ -892,9 +892,44 @@ const SETTINGS_TABS: [(u16, &str); 6] = [(icon::HEART, "Профиль"), (icon:
 
 /// Resource packs: built-in ones and the player's own, plus import from a link.
 fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs: &PacksView, res: &mut SettingsResult) {
-    setting_row(ui, "Шейдеры", Some("Лёгкие: качается листва и трава, волны на воде. Ультра: ещё рельеф блоков на солнце"), |ui| {
-        res.changed |= segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкие"), (2, "Ультра")], &mut s.shaders);
+    // Shaders: a preset, then every effect on its own (changing one switches to "Свои").
+    setting_row(ui, "Шейдеры", Some("Лёгкие: рельеф текстур, ветер, вода. Ультра: ещё объёмная глубина швов и камней (параллакс)"), |ui| {
+        let mut preset = s.shaders;
+        if segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкие"), (2, "Ультра"), (3, "Свои")], &mut preset) {
+            if preset < 3 {
+                s.apply_shader_preset(preset);
+            } else {
+                s.shaders = 3;
+            }
+            res.changed = true;
+        }
     });
+    ui.add_space(8.0);
+    let before = (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading);
+    setting_row(ui, "Рельеф текстур", Some("Объём: свет и тень на каждом камне. Глубина: швы и щели уходят внутрь блока. В HD-паках подробнее"), |ui| {
+        res.changed |= segmented(ui, "relief", &[(0u8, "Нет"), (1, "Объём"), (2, "Глубина")], &mut s.relief_mode);
+    });
+    if s.relief_mode > 0 {
+        ui.add_space(6.0);
+        setting_row(ui, "Сила рельефа", None, |ui| {
+            res.changed |= ui.add(egui::Slider::new(&mut s.relief_strength, 0.3..=2.0).fixed_decimals(1)).changed();
+        });
+    }
+    ui.add_space(6.0);
+    setting_row(ui, "Ветер", Some("Качаются листва и трава"), |ui| {
+        res.changed |= toggle_switch(ui, &mut s.fx_wind).changed();
+    });
+    ui.add_space(6.0);
+    setting_row(ui, "Вода", Some("Волны, блики солнца и отражение неба"), |ui| {
+        res.changed |= toggle_switch(ui, &mut s.fx_water).changed();
+    });
+    ui.add_space(6.0);
+    setting_row(ui, "Цветокоррекция", Some("Контраст и сочные цвета"), |ui| {
+        res.changed |= toggle_switch(ui, &mut s.fx_grading).changed();
+    });
+    if (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading) != before {
+        s.shaders = 3;
+    }
     ui.add_space(10.0);
     for pack in packs.list {
         let sel = s.texture_pack == pack.id;

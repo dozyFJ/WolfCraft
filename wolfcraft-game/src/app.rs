@@ -1595,6 +1595,9 @@ impl App {
                 let (season, snow, humidity) = s.environment();
                 let params = FrameParams {
                     shaders: self.settings.shaders,
+                    relief_mode: self.settings.relief_mode,
+                    relief_strength: self.settings.relief_strength,
+                    fx_flags: self.settings.fx_flags(),
                     season,
                     snow,
                     humidity,

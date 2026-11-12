@@ -113,6 +113,54 @@ pub fn vibrant(img: &mut Image) {
     }
 }
 
+/// Height map of a block texture for the relief shaders (stored in the red channel, 0 = deep,
+/// 255 = high): the brightness, softened a little and stretched to the full range per tile,
+/// so mortar, cracks and gaps sink in and stones, bricks and planks stand out. Seamless.
+/// Sprites with transparent pixels (glass, plants) stay flat (all high).
+pub fn height_map(img: &Image) -> Image {
+    let (w, h) = (img.width as i32, img.height as i32);
+    let mut out = Image::new(img.width, img.height);
+    if w < 2 || img.pixels.chunks_exact(4).any(|p| p[3] < 255) {
+        for y in 0..img.height {
+            for x in 0..img.width {
+                out.set(x, y, [255, 255, 255, 255]);
+            }
+        }
+        return out;
+    }
+    let lum = |x: i32, y: i32| {
+        let p = img.get(x.rem_euclid(w) as u32, y.rem_euclid(h) as u32);
+        (0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32) / 255.0
+    };
+    let r = (w / 48).max(1);
+    let mut hm = vec![0.0f32; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = 0.0;
+            let mut n = 0.0;
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    sum += lum(x + dx, y + dy);
+                    n += 1.0;
+                }
+            }
+            hm[(y * w + x) as usize] = sum / n;
+        }
+    }
+    let (lo, hi) = hm.iter().fold((f32::MAX, f32::MIN), |(l, h), v| (l.min(*v), h.max(*v)));
+    let span = (hi - lo).max(0.05);
+    for y in 0..h {
+        for x in 0..w {
+            let v = ((hm[(y * w + x) as usize] - lo) / span).clamp(0.0, 1.0);
+            // A gentle curve: most of the surface stays up, gaps fall off faster.
+            let v = v.powf(0.7);
+            let b = (v * 255.0) as u8;
+            out.set(x as u32, y as u32, [b, b, b, 255]);
+        }
+    }
+    out
+}
+
 /// Gives a flat block texture some depth: the brightness is read as a height map (softened
 /// a little), and each pixel is lit as if the light came from the top-left, so stones bulge
 /// and mortar, cracks and grain sink in. Wraps around the edges, so tiling stays seamless.

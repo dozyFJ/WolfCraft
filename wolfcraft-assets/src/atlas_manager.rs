@@ -134,6 +134,11 @@ impl TextureAtlas {
     pub fn uv(&self, id: usize) -> UvRect {
         self.uvs.get(id).copied().unwrap_or(UvRect { min: [0.0; 2], max: [0.0; 2] })
     }
+    /// Index of a sprite by name.
+    pub fn names_index(&self, name: &str) -> Option<usize> {
+        self.names.get(name).copied()
+    }
+
     pub fn uvs(&self) -> &[UvRect] {
         &self.uvs
     }
@@ -176,6 +181,9 @@ impl TextureAtlas {
 
 pub struct AtlasManager {
     atlases: Vec<TextureAtlas>,
+    /// Height maps of the block textures (same layout as the blocks atlas) for the relief
+    /// shaders.
+    relief: TextureAtlas,
     water_frame: u32,
     /// Upscale factor of the built-in base (1 = 16×).
     scale: u32,
@@ -239,7 +247,15 @@ impl AtlasManager {
             }
             atlases.push(TextureAtlas::build(kind, sprites)?);
         }
-        Ok(Self { atlases, water_frame: 0, scale })
+        let blocks = &atlases[AtlasKind::Blocks as usize];
+        let heights: Vec<(String, Image)> = blocks.sprites.iter().map(|(n, img)| (n.clone(), crate::packs::height_map(img))).collect();
+        let relief = TextureAtlas::build(AtlasKind::Blocks, heights)?;
+        Ok(Self { atlases, relief, water_frame: 0, scale })
+    }
+
+    /// Height maps of the block textures, packed exactly like the blocks atlas.
+    pub fn relief(&self) -> &TextureAtlas {
+        &self.relief
     }
 
     pub fn get(&self, kind: AtlasKind) -> &TextureAtlas {
@@ -280,6 +296,28 @@ impl AtlasManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relief_atlas_matches_the_blocks_atlas() {
+        for pack in ["builtin:16", "builtin:64"] {
+            let m = AtlasManager::load(pack, None, None).unwrap();
+            let (b, r) = (m.get(AtlasKind::Blocks), m.relief());
+            assert_eq!(b.uvs(), r.uvs(), "{pack}: same layout");
+            assert_eq!((b.image().width, b.image().height), (r.image().width, r.image().height));
+            // Cobblestone has deep mortar and high stones.
+            let id = b.names_index("cobblestone").unwrap();
+            let rect = &r.rects[id];
+            let (mut lo, mut hi) = (255u8, 0u8);
+            for y in rect.y..rect.y + rect.h {
+                for x in rect.x..rect.x + rect.w {
+                    let v = r.image().get(x, y)[0];
+                    lo = lo.min(v);
+                    hi = hi.max(v);
+                }
+            }
+            assert!(lo < 60 && hi > 200, "{pack}: cobblestone relief spans the range ({lo}..{hi})");
+        }
+    }
 
     #[test]
     fn all_atlases_build_and_export() {

@@ -25,6 +25,9 @@ struct Globals {
     /// x: season 0..4 (spring, summer, autumn, winter), y: snow cover 0..1, z: biome
     /// humidity 0..1, w: unused.
     env: [f32; 4],
+    /// x: relief mode (0 off, 1 lit relief, 2 parallax depth), y: relief strength, z: effect
+    /// flags (1 wind, 2 water, 4 colour grading), w: unused.
+    fx: [f32; 4],
     tiles: [[f32; 4]; MAX_TILES],
 }
 
@@ -96,6 +99,31 @@ impl GpuAtlas {
 
     pub fn kind(&self) -> AtlasKind {
         self.kind
+    }
+
+    /// One-channel linear texture from the red channel of `atlas` (relief heights).
+    pub fn new_height(device: &wgpu::Device, queue: &wgpu::Queue, atlas: &TextureAtlas) -> Self {
+        let img = atlas.image();
+        let size = wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("relief-atlas"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let data: Vec<u8> = img.pixels.chunks_exact(4).map(|p| p[0]).collect();
+        queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &data,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(img.width), rows_per_image: Some(img.height) },
+            size,
+        );
+        let view = texture.create_view(&Default::default());
+        Self { texture, view, kind: atlas.kind(), generation: atlas.generation() }
     }
 }
 
@@ -181,6 +209,12 @@ pub struct FrameParams {
     pub humidity: f32,
     /// Fog thickness of the biome (1 = normal, more = mistier).
     pub fog_density: f32,
+    /// Texture relief: 0 off, 1 lit relief (normal from the height maps), 2 parallax depth.
+    pub relief_mode: u8,
+    /// Relief strength (1 = normal).
+    pub relief_strength: f32,
+    /// Shader effects: 1 wind in leaves and grass, 2 water waves and glints, 4 colour grading.
+    pub fx_flags: u8,
     /// Shader preset: 0 off, 1 light (swaying leaves and grass, water waves, colour
     /// grading), 2 ultra (also texture relief lit by the sun).
     pub shaders: u8,
@@ -231,6 +265,8 @@ pub struct WorldRenderer {
     globals_hands: wgpu::Buffer,
     sampler: wgpu::Sampler,
     pub blocks_atlas: GpuAtlas,
+    /// Height maps of the block textures (relief shaders).
+    relief_atlas: GpuAtlas,
     entities_atlas: GpuAtlas,
     items_atlas: GpuAtlas,
     tile_rects: [[f32; 4]; MAX_TILES],
@@ -272,6 +308,7 @@ impl WorldRenderer {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, color_format: wgpu::TextureFormat, atlases: &AtlasManager, width: u32, height: u32) -> Self {
         let blocks = atlases.get(AtlasKind::Blocks);
         let blocks_atlas = GpuAtlas::new(device, queue, blocks);
+        let relief_atlas = GpuAtlas::new_height(device, queue, atlases.relief());
         let entities_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Entities));
         let items_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Items));
         set_model_textures(atlases);
@@ -314,6 +351,12 @@ impl WorldRenderer {
                     ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+                    count: None,
+                },
             ],
         });
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
@@ -331,9 +374,9 @@ impl WorldRenderer {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        let bind_group = Self::make_bind_group(device, &layout, &globals, [&blocks_atlas.view, &entities_atlas.view, &items_atlas.view], &sampler);
+        let bind_group = Self::make_bind_group(device, &layout, &globals, [&blocks_atlas.view, &entities_atlas.view, &items_atlas.view, &relief_atlas.view], &sampler);
         let globals_hands = device.create_buffer(&wgpu::BufferDescriptor { label: Some("globals-hands"), size: std::mem::size_of::<Globals>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let bind_group_hands = Self::make_bind_group(device, &layout, &globals_hands, [&blocks_atlas.view, &entities_atlas.view, &items_atlas.view], &sampler);
+        let bind_group_hands = Self::make_bind_group(device, &layout, &globals_hands, [&blocks_atlas.view, &entities_atlas.view, &items_atlas.view, &relief_atlas.view], &sampler);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("world-shader"), source: wgpu::ShaderSource::Wgsl(include_str!("world.wgsl").into()) });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("world-pl"), bind_group_layouts: &[&layout], push_constant_ranges: &[] });
@@ -523,6 +566,7 @@ impl WorldRenderer {
             globals_hands,
             sampler,
             blocks_atlas,
+            relief_atlas,
             entities_atlas,
             items_atlas,
             tile_rects,
@@ -549,7 +593,7 @@ impl WorldRenderer {
         }
     }
 
-    fn make_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, views: [&wgpu::TextureView; 3], sampler: &wgpu::Sampler) -> wgpu::BindGroup {
+    fn make_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, views: [&wgpu::TextureView; 4], sampler: &wgpu::Sampler) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("world-bg"),
             layout,
@@ -559,6 +603,7 @@ impl WorldRenderer {
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(views[1]) },
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(views[2]) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(views[3]) },
             ],
         })
     }
@@ -623,14 +668,15 @@ impl WorldRenderer {
         set_model_textures(atlases);
         let blocks = atlases.get(AtlasKind::Blocks);
         self.blocks_atlas = GpuAtlas::new(device, queue, blocks);
+        self.relief_atlas = GpuAtlas::new_height(device, queue, atlases.relief());
         self.entities_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Entities));
         self.items_atlas = GpuAtlas::new(device, queue, atlases.get(AtlasKind::Items));
         for (i, rect) in self.tile_rects.iter_mut().enumerate().take(blocks.len().min(MAX_TILES)) {
             let uv = blocks.uv(i);
             *rect = [uv.min[0], uv.min[1], uv.max[0] - uv.min[0], uv.max[1] - uv.min[1]];
         }
-        self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view], &self.sampler);
-        self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view], &self.sampler);
+        self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
+        self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
     }
 
     pub fn sync_atlas(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, atlases: &mut AtlasManager) {
@@ -640,8 +686,8 @@ impl WorldRenderer {
                 let uv = atlas.uv(i);
                 *rect = [uv.min[0], uv.min[1], uv.max[0] - uv.min[0], uv.max[1] - uv.min[1]];
             }
-            self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view], &self.sampler);
-            self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view], &self.sampler);
+            self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
+            self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
         }
     }
 
@@ -775,6 +821,7 @@ impl WorldRenderer {
             fog: [fog_color[0].powf(2.2), fog_color[1].powf(2.2), fog_color[2].powf(2.2), p.fog_density.max(0.5) / (p.view_distance_blocks * 1.15).max(16.0)],
             misc: [p.time, p.underwater as u32 as f32, p.crack, p.shaders as f32],
             env: [p.season, p.snow, p.humidity, 0.0],
+            fx: [p.relief_mode as f32, p.relief_strength, p.fx_flags as f32, 0.0],
             tiles: self.tile_rects,
         };
         if p.underwater {
@@ -1099,7 +1146,7 @@ mod tests {
 
     #[test]
     fn globals_layout_matches_wgsl() {
-        assert_eq!(std::mem::size_of::<Globals>(), 64 + 16 * 5 + 16 * MAX_TILES);
+        assert_eq!(std::mem::size_of::<Globals>(), 64 + 16 * 6 + 16 * MAX_TILES);
         assert_eq!(std::mem::size_of::<Vertex>(), 32);
     }
 
