@@ -83,6 +83,7 @@ impl Fluids {
 
     fn step(&mut self, world: &mut impl WorldEdit, cells: HashSet<Cell>, lava: bool, changed: &mut Vec<Cell>) {
         let mut sets: Vec<(Cell, Block)> = Vec::new();
+        let mut solid: Vec<(Cell, Block)> = Vec::new();
         for (n, c) in cells.into_iter().enumerate() {
             if n >= MAX_PER_STEP {
                 // Too much at once: carry the rest over to the next step.
@@ -90,6 +91,14 @@ impl Fluids {
                 continue;
             }
             let cur = world.cell_block(c);
+            // Water that is already in place still cools any lava it touches.
+            if !lava && cur.is_water() {
+                for n in all_neighbors(world, c) {
+                    if let Some(f) = world.cell_block(n).fluid().filter(|f| f.lava) {
+                        solid.push((n, if f.source { Block::Obsidian } else { Block::Cobblestone }));
+                    }
+                }
+            }
             let mine = cur.fluid().filter(|f| f.lava == lava);
             if mine.is_some_and(|f| f.source) {
                 // Sources never change, but they feed their neighbours.
@@ -108,6 +117,12 @@ impl Fluids {
             let new = want.map(|f| f.block()).unwrap_or(Block::Air);
             if new != cur && !(mine.is_none() && want.is_none()) {
                 sets.push((c, new));
+            }
+        }
+        for (c, b) in solid {
+            if world.cell_block(c).is_lava() {
+                world.set_block(c, b);
+                changed.push(c);
             }
         }
         for (c, b) in sets {
@@ -269,6 +284,6 @@ mod tests {
         w.set_block(edge, Block::WaterFlow1);
         f.changed(&w, edge);
         run(&mut w, &mut f, 1.0);
-        assert!(w.cell_block(lava) == Block::Obsidian || w.cell_block(edge) != Block::WaterFlow1);
+        assert_eq!(w.cell_block(lava), Block::Obsidian, "water touching a lava source turns it to obsidian");
     }
 }
