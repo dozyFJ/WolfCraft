@@ -468,6 +468,9 @@ impl GameSession {
         self.tick_furnaces(dt);
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
+            if let InteractionEvent::Broken { pos, block } = e {
+                wolfcraft_engine::power::piston_broken(&mut self.chunks, *pos, *block);
+            }
             if let InteractionEvent::Placed { pos, .. } | InteractionEvent::Broken { pos, .. } = e {
                 self.fluids.changed(&self.chunks, *pos);
                 wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
@@ -1112,8 +1115,8 @@ impl GameSession {
             Ok(())
         };
         // Floor and clear air above it.
-        for x in -1..=27 {
-            for z in -2..=20 {
+        for x in -1..=39 {
+            for z in -2..=24 {
                 set(self, x, -1, z, B::SmoothStone)?;
                 for y in 0..=4 {
                     set(self, x, y, z, B::Air)?;
@@ -1173,6 +1176,26 @@ impl GameSession {
         set(self, 24, 1, 5, B::Stone)?;
         set(self, 24, 2, 5, B::IskritLamp)?;
         signs.push(((24, 0, -1), "Провод поднимается по ступенькам на блок вверх"));
+        // Stand 7: pistons on switches, an ordinary one and a sticky one, each with a block.
+        use wolfcraft_engine::block::Part;
+        let fdir = match fwd { (1, 0) => 0, (-1, 0) => 1, (0, 1) => 2, _ => 3 };
+        for (x, sticky) in [(28, false), (31, true)] {
+            set(self, x, 0, 1, B::SwitchOff)?;
+            set(self, x, 0, 2, Part::Piston { sticky, extended: false, dir: fdir }.block())?;
+            set(self, x, 0, 3, B::OakPlanks)?;
+        }
+        signs.push(((28, 0, -1), "Поршни: включите рубильник. Обычный толкает блок, липкий ещё и тянет назад"));
+        // Stand 8: a repeater renews the signal: torch, 13 dust, repeater, 6 dust, lamp.
+        set(self, 35, 0, 1, B::IskritTorch)?;
+        for z in 2..=14 {
+            set(self, 35, 0, z, B::IskritWire)?;
+        }
+        set(self, 35, 0, 15, Part::Repeater { on: false, dir: fdir }.block())?;
+        for z in 16..=21 {
+            set(self, 35, 0, z, B::IskritWire)?;
+        }
+        set(self, 35, 0, 22, B::IskritLamp)?;
+        signs.push(((35, 0, -1), "Повторитель восстанавливает сигнал до полной силы и пропускает его только вперёд"));
         // Signs with the explanations, in front of every stand.
         for ((x, y, z), text) in signs {
             set(self, x, y, z, B::Sign)?;
@@ -1183,11 +1206,11 @@ impl GameSession {
         self.save_block_commands();
         // Work out every network once.
         for c in placed {
-            if matches!(self.chunks.get_block(c), Some(B::IskritWire | B::IskritTorch | B::IskritBlock | B::IskritLamp)) {
+            if matches!(self.chunks.get_block(c), Some(B::IskritWire | B::IskritTorch | B::IskritBlock | B::IskritLamp)) || self.chunks.get_block(c).is_some_and(|b| b.part().is_some()) {
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
             }
         }
-        Ok("Выставка искрита построена перед вами: 6 стендов с табличками. Подойдите к табличке, чтобы прочитать".into())
+        Ok("Выставка искрита построена перед вами: 8 стендов с табличками. Подойдите к табличке, чтобы прочитать".into())
     }
 
     pub fn cycle_camera(&mut self) {
@@ -1266,13 +1289,13 @@ mod tests {
         let mut s = load("iskrit_demo", 77, true);
         settle(&mut s);
         let msg = s.build_iskrit_demo().expect("demo builds");
-        assert!(msg.contains("6 стендов"));
+        assert!(msg.contains("8 стендов"));
         // Count lamps: torch, block (×2), 15-dust line and staircase lamps are lit; the
         // button, the switch and the 16-dust line are not.
         let feet = s.chunks.grid().world_to_cell(s.player.body.pos);
         let (mut on, mut off) = (0, 0);
-        for di in -32..=32 {
-            for dj in -32..=32 {
+        for di in -45..=45 {
+            for dj in -45..=45 {
                 for dk in -2..=4 {
                     if let Some(c) = s.chunks.grid().offset(feet, di, dj, dk) {
                         match s.chunks.get_block(c) {
@@ -1284,7 +1307,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!((on, off), (5, 3), "lit and unlit lamps");
+        assert_eq!((on, off), (6, 3), "lit and unlit lamps (the repeater line lights its lamp)");
         assert!(s.block_commands.values().any(|t| t.contains("15 блоков")), "signs carry the explanations");
     }
 

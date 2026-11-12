@@ -150,6 +150,55 @@ pub mod tiles {
     pub const DOOR_IRON_TOP: u16 = 139;
     pub const URANIUM_ORE: u16 = 140;
     pub const URANIUM_BLOCK: u16 = 141;
+    pub const PISTON_SIDE: u16 = 142;
+    pub const PISTON_FRONT: u16 = 143;
+    pub const PISTON_BACK: u16 = 144;
+    pub const PISTON_INNER: u16 = 145;
+    pub const STICKY_FRONT: u16 = 146;
+    /// Repeater / comparator tops, one per direction (0 +i, 1 -i, 2 +j, 3 -j), off and on.
+    pub const REPEATER: u16 = 147;
+    pub const REPEATER_ON: u16 = 151;
+    pub const COMPARATOR: u16 = 155;
+    pub const COMPARATOR_ON: u16 = 159;
+}
+
+/// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
+/// (image x = +i, image y = +j), two torches (repeater) or three (comparator), lit when on.
+fn gate_tile(dir: u8, on: bool, comparator: bool) -> Image {
+    p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let g = 0.60 + (rnd(x, y, 230) - 0.5) * 0.06;
+                q.put(x, y, Rgb(g, g, g * 1.02), 1.0);
+            }
+        }
+        let (fx, fy): (i32, i32) = match dir { 0 => (1, 0), 1 => (-1, 0), 2 => (0, 1), _ => (0, -1) };
+        let at = |a: i32, b: i32| -> (u32, u32) {
+            let x = 7.5 + a as f32 * fx as f32 + b as f32 * (-fy) as f32;
+            let y = 7.5 + a as f32 * fy as f32 + b as f32 * fx as f32;
+            (x.round().clamp(0.0, 15.0) as u32, y.round().clamp(0.0, 15.0) as u32)
+        };
+        let dust = if on { Rgb(1.0, 0.32, 0.72) } else { Rgb(0.45, 0.12, 0.30) };
+        for a in -6..=6 {
+            let (x, y) = at(a, 0);
+            q.put(x, y, dust, 1.0);
+        }
+        for k in 1..=3 {
+            for s2 in [-k, k] {
+                let (x, y) = at(6 - k, s2);
+                q.put(x, y, dust, 1.0);
+            }
+        }
+        let torch = if on { Rgb(1.0, 0.55, 0.85) } else { Rgb(0.35, 0.18, 0.12) };
+        let spots: &[(i32, i32)] = if comparator { &[(-4, -3), (-4, 3), (3, 0)] } else { &[(-3, 0), (2, 0)] };
+        for &(a, b) in spots {
+            for (da, db) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let (x, y) = at(a + da, b + db);
+                q.put(x, y, torch, 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, Rgb(0.78, 0.78, 0.80), Rgb(0.36, 0.36, 0.38));
+    })
 }
 
 /// Door leaf, one half of a two-block door. Lower half: a frame, two tall raised panels and
@@ -1423,6 +1472,85 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
         bevel(q, 0, 0, 15, 15, Rgb(0.62, 0.66, 0.60), Rgb(0.22, 0.26, 0.22));
     }));
+    // Pistons: planks face, cobblestone body with a planks band, iron back plate.
+    let plank_c = Rgb(0.66, 0.50, 0.30);
+    l.add(PISTON_SIDE, "piston_side", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let c = if y < 4 { plank_c.add((rnd(x / 3, y, 240) - 0.5) * 0.08) } else { Rgb(0.48, 0.48, 0.48).add((rnd(x / 2, y / 2, 241) - 0.5) * 0.14) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+        for x in 0..S {
+            q.put(x, 4, Rgb(0.30, 0.30, 0.30), 1.0);
+        }
+        for y in 5..12u32 {
+            for x in 6..10u32 {
+                q.put(x, y, Rgb(0.70, 0.62, 0.40), 1.0);
+            }
+        }
+    }));
+    l.add(PISTON_FRONT, "piston_front", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let c = plank_c.add((rnd(x / 3, y, 242) - 0.5) * 0.08 + if y % 4 == 0 { -0.08 } else { 0.0 });
+                q.put(x, y, c, 1.0);
+            }
+        }
+        for y in 6..10u32 {
+            for x in 6..10u32 {
+                q.put(x, y, Rgb(0.62, 0.64, 0.68), 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, plank_c.add(0.12), plank_c.scale(0.6));
+    }));
+    l.add(PISTON_BACK, "piston_back", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                q.put(x, y, Rgb(0.46, 0.46, 0.46).add((rnd(x / 2, y / 2, 243) - 0.5) * 0.14), 1.0);
+            }
+        }
+        for y in 4..12u32 {
+            for x in 4..12u32 {
+                q.put(x, y, Rgb(0.62, 0.64, 0.68).add(if x == 4 || y == 4 { 0.1 } else { 0.0 }), 1.0);
+            }
+        }
+    }));
+    l.add(PISTON_INNER, "piston_inner", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let edge = x < 2 || y < 2 || x > 13 || y > 13;
+                let c = if edge { Rgb(0.48, 0.48, 0.48).add((rnd(x, y, 244) - 0.5) * 0.1) } else { Rgb(0.20, 0.18, 0.16) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+        for y in 6..10u32 {
+            for x in 6..10u32 {
+                q.put(x, y, Rgb(0.70, 0.62, 0.40), 1.0);
+            }
+        }
+    }));
+    l.add(STICKY_FRONT, "sticky_front", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let slime = x > 1 && x < 14 && y > 1 && y < 14;
+                let c = if slime { Rgb(0.42, 0.78, 0.30).add((rnd(x / 2, y / 2, 245) - 0.5) * 0.16) } else { plank_c };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    for d in 0..4u8 {
+        l.add(REPEATER + d as u16, &format!("repeater_{d}"), gate_tile(d, false, false));
+    }
+    for d in 0..4u8 {
+        l.add(REPEATER_ON + d as u16, &format!("repeater_on_{d}"), gate_tile(d, true, false));
+    }
+    for d in 0..4u8 {
+        l.add(COMPARATOR + d as u16, &format!("comparator_{d}"), gate_tile(d, false, true));
+    }
+    for d in 0..4u8 {
+        l.add(COMPARATOR_ON + d as u16, &format!("comparator_on_{d}"), gate_tile(d, true, true));
+    }
     // Pixel-art finish. Natural, noisy materials get clumps instead of per-pixel static, a
     // gentle large-scale variation and a few luminance bands (the hand-painted look); every
     // opaque pixel then gets a touch more contrast and a limited palette.

@@ -236,6 +236,7 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         Block::IskritOre => vec![ItemStack::of_block(Block::IskritWire, 4 + (roll * 2.0) as u8)],
         Block::UraniumOre => vec![ItemStack::new(ids::RAW_URANIUM, 1)],
         b if b.is_door_top() => vec![],
+        b if matches!(b.part(), Some(crate::block::Part::Head { .. })) => vec![],
         Block::ElectricLampOn => vec![ItemStack::of_block(Block::ElectricLamp, 1)],
         Block::SwitchOn => vec![ItemStack::of_block(Block::SwitchOff, 1)],
         b if b.base_item() != b => vec![ItemStack::of_block(b.base_item(), 1)],
@@ -355,6 +356,9 @@ pub fn category(id: ItemId) -> &'static str {
         return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };
     }
     let b = Block::from_u8(id as u8);
+    if b.part().is_some() {
+        return "Техника";
+    }
     match b.info().render {
         RenderKind::Cross if b == Block::IskritTorch => "Техника",
         RenderKind::Cross if b != Block::Torch => "Растения",

@@ -280,6 +280,16 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::IskritWire), 1), (ids::STICK, 1)], (b(Block::IskritTorch), 1), false, "Техника"));
         v.push(r(&[(b(Block::IskritWire), 4), (b(Block::Glowstone), 1)], (b(Block::IskritLamp), 1), true, "Техника"));
         v.push(r(&[(b(Block::Stone), 1)], (b(Block::Button), 1), false, "Техника"));
+        // Iskrit mechanisms.
+        use crate::block::Part;
+        let piston = Part::Piston { sticky: false, extended: false, dir: 2 }.block();
+        let sticky = Part::Piston { sticky: true, extended: false, dir: 2 }.block();
+        let repeater = Part::Repeater { on: false, dir: 0 }.block();
+        let comparator = Part::Comparator { on: false, dir: 0 }.block();
+        v.push(r(&[(b(Block::OakPlanks), 3), (b(Block::Cobblestone), 4), (ids::IRON_INGOT, 1), (b(Block::IskritWire), 1)], (b(piston), 1), true, "Техника"));
+        v.push(r(&[(b(piston), 1), (b(Block::Kelp), 1)], (b(sticky), 1), false, "Техника"));
+        v.push(r(&[(b(Block::Stone), 3), (b(Block::IskritTorch), 2), (b(Block::IskritWire), 1)], (b(repeater), 1), true, "Техника"));
+        v.push(r(&[(b(Block::Stone), 3), (b(Block::IskritTorch), 3), (ids::IRON_INGOT, 1)], (b(comparator), 1), true, "Техника"));
         v.push(r(&[(b(Block::Granite), 4)], (b(Block::PolishedGranite), 4), true, "Строительство"));
         v.push(r(&[(b(Block::Marble), 4)], (b(Block::PolishedMarble), 4), true, "Строительство"));
         v.push(r(&[(b(Block::Stone), 1), (ids::COAL, 1)], (b(Block::SmoothStone), 1), true, "Плавка"));

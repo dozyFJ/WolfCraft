@@ -87,6 +87,17 @@ const fn solid(mut i: BlockInfo) -> BlockInfo {
     i
 }
 
+/// Tiles of a block facing direction `d` (0 +i, 1 -i, 2 +j, 3 -j, 4 up, 5 down): `front` on
+/// that face, `back` on the opposite one, `side` elsewhere. Tile slots are (+j, -j, up, down,
+/// +i, -i), as the mesher reads them.
+const fn ptiles(front: u16, back: u16, side: u16, d: usize) -> [u16; 6] {
+    const SLOT: [usize; 6] = [4, 5, 0, 1, 2, 3];
+    let mut t = [side; 6];
+    t[SLOT[d]] = front;
+    t[SLOT[d ^ 1]] = back;
+    t
+}
+
 macro_rules! blocks {
     ($( $id:literal $var:ident => $info:expr ),* $(,)?) => {
         #[repr(u8)]
@@ -320,6 +331,88 @@ blocks! {
     // Uranium: a glowing, radioactive ore deep underground.
     198 UraniumOre => emissive(ore("Урановая руда", t::URANIUM_ORE, 2)),
     199 UraniumBlock => emissive(needs_pick(info("Блок урана", Opaque, 12.0, Pickaxe, all(t::URANIUM_BLOCK)))),
+    // Iskrit mechanisms (see `power.rs`). Directions: 0 +i, 1 -i, 2 +j, 3 -j, 4 up, 5 down.
+    200 Piston0 => info("Поршень", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 0)),
+    201 Piston1 => info("Поршень", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 1)),
+    202 Piston2 => info("Поршень", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 2)),
+    203 Piston3 => info("Поршень", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 3)),
+    204 Piston4 => info("Поршень", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 4)),
+    205 Piston5 => info("Поршень", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 5)),
+    206 PistonOn0 => info("Поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 0)),
+    207 PistonOn1 => info("Поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 1)),
+    208 PistonOn2 => info("Поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 2)),
+    209 PistonOn3 => info("Поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 3)),
+    210 PistonOn4 => info("Поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 4)),
+    211 PistonOn5 => info("Поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 5)),
+    212 StickyPiston0 => info("Липкий поршень", Opaque, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 0)),
+    213 StickyPiston1 => info("Липкий поршень", Opaque, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 1)),
+    214 StickyPiston2 => info("Липкий поршень", Opaque, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 2)),
+    215 StickyPiston3 => info("Липкий поршень", Opaque, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 3)),
+    216 StickyPiston4 => info("Липкий поршень", Opaque, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 4)),
+    217 StickyPiston5 => info("Липкий поршень", Opaque, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::PISTON_BACK, t::PISTON_SIDE, 5)),
+    218 StickyPistonOn0 => info("Липкий поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 0)),
+    219 StickyPistonOn1 => info("Липкий поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 1)),
+    220 StickyPistonOn2 => info("Липкий поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 2)),
+    221 StickyPistonOn3 => info("Липкий поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 3)),
+    222 StickyPistonOn4 => info("Липкий поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 4)),
+    223 StickyPistonOn5 => info("Липкий поршень (выдвинут)", Opaque, 1.5, Pickaxe, ptiles(t::PISTON_INNER, t::PISTON_BACK, t::PISTON_SIDE, 5)),
+    224 PistonHead0 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 0)),
+    225 PistonHead1 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 1)),
+    226 PistonHead2 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 2)),
+    227 PistonHead3 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 3)),
+    228 PistonHead4 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 4)),
+    229 PistonHead5 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 5)),
+    230 StickyHead0 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 0)),
+    231 StickyHead1 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 1)),
+    232 StickyHead2 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 2)),
+    233 StickyHead3 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 3)),
+    234 StickyHead4 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 4)),
+    235 StickyHead5 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 5)),
+    236 Repeater0 => not_solid(info("Повторитель", Shape, 0.0, Hand, all(t::REPEATER + 0))),
+    237 Repeater1 => not_solid(info("Повторитель", Shape, 0.0, Hand, all(t::REPEATER + 1))),
+    238 Repeater2 => not_solid(info("Повторитель", Shape, 0.0, Hand, all(t::REPEATER + 2))),
+    239 Repeater3 => not_solid(info("Повторитель", Shape, 0.0, Hand, all(t::REPEATER + 3))),
+    240 RepeaterOn0 => emissive(not_solid(info("Повторитель (вкл.)", Shape, 0.0, Hand, all(t::REPEATER_ON + 0)))),
+    241 RepeaterOn1 => emissive(not_solid(info("Повторитель (вкл.)", Shape, 0.0, Hand, all(t::REPEATER_ON + 1)))),
+    242 RepeaterOn2 => emissive(not_solid(info("Повторитель (вкл.)", Shape, 0.0, Hand, all(t::REPEATER_ON + 2)))),
+    243 RepeaterOn3 => emissive(not_solid(info("Повторитель (вкл.)", Shape, 0.0, Hand, all(t::REPEATER_ON + 3)))),
+    244 Comparator0 => not_solid(info("Сравниватель", Shape, 0.0, Hand, all(t::COMPARATOR + 0))),
+    245 Comparator1 => not_solid(info("Сравниватель", Shape, 0.0, Hand, all(t::COMPARATOR + 1))),
+    246 Comparator2 => not_solid(info("Сравниватель", Shape, 0.0, Hand, all(t::COMPARATOR + 2))),
+    247 Comparator3 => not_solid(info("Сравниватель", Shape, 0.0, Hand, all(t::COMPARATOR + 3))),
+    248 ComparatorOn0 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 0)))),
+    249 ComparatorOn1 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 1)))),
+    250 ComparatorOn2 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 2)))),
+    251 ComparatorOn3 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 3)))),
+}
+
+/// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
+/// repeater or a comparator, with its direction (0 +i, 1 -i, 2 +j, 3 -j, 4 up, 5 down;
+/// repeaters and comparators only 0..3).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Part {
+    Piston { sticky: bool, extended: bool, dir: u8 },
+    Head { sticky: bool, dir: u8 },
+    Repeater { on: bool, dir: u8 },
+    Comparator { on: bool, dir: u8 },
+}
+
+impl Part {
+    pub fn dir(self) -> u8 {
+        match self {
+            Part::Piston { dir, .. } | Part::Head { dir, .. } | Part::Repeater { dir, .. } | Part::Comparator { dir, .. } => dir,
+        }
+    }
+    /// The block for this state.
+    pub fn block(self) -> Block {
+        let id = match self {
+            Part::Piston { sticky, extended, dir } => 200 + (sticky as u8) * 12 + (extended as u8) * 6 + dir.min(5),
+            Part::Head { sticky, dir } => 224 + (sticky as u8) * 6 + dir.min(5),
+            Part::Repeater { on, dir } => 236 + (on as u8) * 4 + dir.min(3),
+            Part::Comparator { on, dir } => 244 + (on as u8) * 4 + dir.min(3),
+        };
+        Block::from_u8(id)
+    }
 }
 
 /// Liquid state of a block: lava or water, flow level (1 = thinnest, `max_level` = beside a
@@ -392,6 +485,17 @@ impl Block {
         const DOOR_OPEN: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 0.19, 1.0];
         const WIRE: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.0625];
         const BUTTON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.14];
+        // Repeater / comparator: a thin slab like the dust, a little thicker.
+        const GATE: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.125];
+        // Piston heads per direction: a plate on the far side and a rod back to the base.
+        const HEADS: [[[f32; 6]; 2]; 6] = [
+            [[0.75, 0.0, 0.0, 1.0, 1.0, 1.0], [0.0, 0.375, 0.375, 0.75, 0.625, 0.625]],
+            [[0.0, 0.0, 0.0, 0.25, 1.0, 1.0], [0.25, 0.375, 0.375, 1.0, 0.625, 0.625]],
+            [[0.0, 0.75, 0.0, 1.0, 1.0, 1.0], [0.375, 0.0, 0.375, 0.625, 0.75, 0.625]],
+            [[0.0, 0.0, 0.0, 1.0, 0.25, 1.0], [0.375, 0.25, 0.375, 0.625, 1.0, 0.625]],
+            [[0.0, 0.0, 0.75, 1.0, 1.0, 1.0], [0.375, 0.375, 0.0, 0.625, 0.625, 0.75]],
+            [[0.0, 0.0, 0.0, 1.0, 1.0, 0.25], [0.375, 0.375, 0.25, 0.625, 0.625, 1.0]],
+        ];
         const BUTTON_ON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.06];
         // Stairs: the high half is toward +i, -i, +j or -j.
         const ST0: [[f32; 6]; 2] = [SLAB, [0.5, 0.0, 0.5, 1.0, 1.0, 1.0]];
@@ -418,6 +522,11 @@ impl Block {
             Sign => &SIGN_A,
             SignB => &SIGN_B,
             IskritWire | IskritWireOn => std::slice::from_ref(&WIRE),
+            b if b.part().is_some() => match b.part() {
+                Some(Part::Head { dir, .. }) => &HEADS[dir as usize % 6],
+                Some(Part::Repeater { .. } | Part::Comparator { .. }) => std::slice::from_ref(&GATE),
+                _ => &[],
+            },
             Button => std::slice::from_ref(&BUTTON),
             ButtonOn => std::slice::from_ref(&BUTTON_ON),
             _ => &[],
@@ -435,6 +544,14 @@ impl Block {
             Block::from_u8(base as u8 + k)
         };
         let ab = |a: Block, b: Block| if along_i { a } else { b };
+        // Repeaters and comparators send the signal the way the player looks.
+        if let Some(Part::Repeater { on, .. } | Part::Comparator { on, .. }) = self.part() {
+            let dir = if along_i { if dir_i > 0.0 { 0 } else { 1 } } else if dir_j > 0.0 { 2 } else { 3 };
+            return match self.part() {
+                Some(Part::Repeater { .. }) => Part::Repeater { on, dir }.block(),
+                _ => Part::Comparator { on, dir }.block(),
+            };
+        }
         match self {
             CobbleStairs => stairs(CobbleStairs),
             PlankStairs => stairs(PlankStairs),
@@ -461,6 +578,13 @@ impl Block {
     pub fn base_item(self) -> Block {
         use Block::*;
         match self {
+            b if b.part().is_some() => match b.part() {
+                Some(Part::Piston { sticky, .. }) => Part::Piston { sticky, extended: false, dir: 2 }.block(),
+                Some(Part::Head { sticky, .. }) => Part::Piston { sticky, extended: false, dir: 2 }.block(),
+                Some(Part::Repeater { .. }) => Part::Repeater { on: false, dir: 0 }.block(),
+                Some(Part::Comparator { .. }) => Part::Comparator { on: false, dir: 0 }.block(),
+                None => b,
+            },
             WaterFlow1 | WaterFlow2 | WaterFlow3 | WaterFlow4 | WaterFlow5 | WaterFlow6 | WaterFlow7 | WaterFall => Water,
             LavaFlow1 | LavaFlow2 | LavaFlow3 | LavaFall => Lava,
             DoorOpen | DoorTop | DoorTopOpen => Door,
@@ -507,6 +631,24 @@ impl Block {
             SpruceDoorTopOpen => SpruceDoorTop,
             IronDoorTop => IronDoorTopOpen,
             IronDoorTopOpen => IronDoorTop,
+            _ => return None,
+        })
+    }
+
+    /// Iskrit mechanism this block is, if any.
+    pub fn part(self) -> Option<Part> {
+        let id = self as u8;
+        Some(match id {
+            200..=205 => Part::Piston { sticky: false, extended: false, dir: id - 200 },
+            206..=211 => Part::Piston { sticky: false, extended: true, dir: id - 206 },
+            212..=217 => Part::Piston { sticky: true, extended: false, dir: id - 212 },
+            218..=223 => Part::Piston { sticky: true, extended: true, dir: id - 218 },
+            224..=229 => Part::Head { sticky: false, dir: id - 224 },
+            230..=235 => Part::Head { sticky: true, dir: id - 230 },
+            236..=239 => Part::Repeater { on: false, dir: id - 236 },
+            240..=243 => Part::Repeater { on: true, dir: id - 240 },
+            244..=247 => Part::Comparator { on: false, dir: id - 244 },
+            248..=251 => Part::Comparator { on: true, dir: id - 248 },
             _ => return None,
         })
     }
@@ -633,7 +775,7 @@ mod tests {
         assert!(!Block::TallGrass.is_solid());
         assert!(Block::OakLeaves.is_solid() && !Block::OakLeaves.is_opaque());
         assert!(Block::Ice.is_solid());
-        assert_eq!(Block::from_u8(250), Block::Air);
+        assert_eq!(Block::from_u8(255), Block::Air, "ids past the last block are air");
     }
 
     #[test]

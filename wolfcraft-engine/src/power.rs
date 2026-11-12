@@ -7,7 +7,7 @@
 //!
 //! The network is event-driven: call [`update_around`] after a block was placed or broken.
 
-use crate::block::Block;
+use crate::block::{Block, Part};
 use crate::interaction::WorldEdit;
 use crate::cubesphere::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -156,9 +156,189 @@ fn wire_links(world: &impl WorldEdit, c: Cell) -> Vec<Cell> {
     v
 }
 
+/// Neighbour of `c` in direction `d` (0 +i, 1 -i, 2 +j, 3 -j, 4 up, 5 down).
+pub fn dir_neighbor(world: &impl WorldEdit, c: Cell, d: u8) -> Option<Cell> {
+    world.grid().neighbor(c, (d / 2) as usize, if d % 2 == 0 { 1 } else { -1 })
+}
+
+/// A repeater or comparator at `n` that is on and points into `c`.
+fn gate_into(world: &impl WorldEdit, n: Cell, c: Cell) -> bool {
+    match world.cell_block(n).part() {
+        Some(Part::Repeater { on: true, dir }) | Some(Part::Comparator { on: true, dir }) => dir_neighbor(world, n, dir) == Some(c),
+        _ => false,
+    }
+}
+
+/// Does the block at `n` send a signal into `c`? Sources and charged dust power everything
+/// around them; repeaters and comparators only the block in front of them.
+fn feeds(world: &impl WorldEdit, n: Cell, c: Cell) -> bool {
+    let b = world.cell_block(n);
+    is_iskrit_source(b) || b == Block::IskritWireOn || gate_into(world, n, c)
+}
+
+/// Is `c` powered by any neighbour?
+pub fn powered(world: &impl WorldEdit, c: Cell) -> bool {
+    neighbors(world, c).into_iter().any(|n| feeds(world, n, c))
+}
+
 /// Recomputes the iskrit network around `origin` (an edited cell): charges or discharges the
-/// dust and switches the lamps. Returns how many blocks changed.
+/// dust, switches the lamps, and lets repeaters, comparators and pistons react; every change
+/// of a mechanism carries on to what it touches. Returns how many blocks changed.
 pub fn update_iskrit(world: &mut impl WorldEdit, origin: Cell) -> usize {
+    let mut todo = vec![origin];
+    let mut total = 0;
+    let mut steps = 0;
+    while let Some(o) = todo.pop() {
+        steps += 1;
+        if steps > 96 {
+            break; // a clock or a loop: stop for this edit
+        }
+        let (changed, probe) = update_network(world, o);
+        total += changed;
+        let mut parts: Vec<Cell> = probe.into_iter().filter(|c| matches!(world.cell_block(*c).part(), Some(Part::Repeater { .. } | Part::Comparator { .. } | Part::Piston { .. }))).collect();
+        parts.sort_by_key(|c| (c.f, c.i, c.j, c.k));
+        parts.dedup();
+        for c in parts {
+            let next = eval_part(world, c);
+            if !next.is_empty() {
+                total += 1;
+                todo.extend(next);
+            }
+        }
+    }
+    total
+}
+
+/// Blocks a piston cannot move: liquids, unbreakable blocks, obsidian, extended pistons and
+/// their heads, doors, and blocks that keep extra data (chests, signs, command blocks…).
+fn movable(b: Block) -> bool {
+    use Block::*;
+    if b.is_fluid() || !b.is_breakable() || b.door_toggle().is_some() {
+        return false;
+    }
+    if matches!(b.part(), Some(Part::Piston { extended: true, .. } | Part::Head { .. })) {
+        return false;
+    }
+    !matches!(b, Obsidian | Chest | Sign | SignB | CommandBlock | Terminal | ElectricFurnace | Bedrock)
+}
+
+/// Lets one mechanism react to its inputs. Returns the cells to re-evaluate (empty: no change).
+fn eval_part(world: &mut impl WorldEdit, c: Cell) -> Vec<Cell> {
+    let Some(part) = world.cell_block(c).part() else { return vec![] };
+    let mut out = Vec::new();
+    match part {
+        Part::Repeater { on, dir } => {
+            // Full-strength output in front when anything powers it from behind; one way only.
+            let want = dir_neighbor(world, c, dir ^ 1).is_some_and(|b| feeds(world, b, c));
+            if want != on {
+                world.set_block(c, Part::Repeater { on: want, dir }.block());
+                out.push(c);
+                out.extend(dir_neighbor(world, c, dir));
+            }
+        }
+        Part::Comparator { on, dir } => {
+            // On when the back is powered and neither side is: a gate.
+            let back = dir_neighbor(world, c, dir ^ 1).is_some_and(|b| feeds(world, b, c));
+            let side_axis = if dir < 2 { 2u8 } else { 0 };
+            let side = [side_axis, side_axis + 1].iter().any(|d| dir_neighbor(world, c, *d).is_some_and(|n| feeds(world, n, c)));
+            let want = back && !side;
+            if want != on {
+                world.set_block(c, Part::Comparator { on: want, dir }.block());
+                out.push(c);
+                out.extend(dir_neighbor(world, c, dir));
+            }
+        }
+        Part::Piston { sticky, extended, dir } => {
+            let p = powered(world, c);
+            if p && !extended {
+                if let Some(cells) = extend(world, c, sticky, dir) {
+                    out.extend(cells);
+                }
+            } else if !p && extended {
+                out.extend(retract(world, c, sticky, dir));
+            }
+        }
+        Part::Head { .. } => {}
+    }
+    out
+}
+
+/// Pushes up to 12 blocks in front of the piston one cell on and puts the head out.
+fn extend(world: &mut impl WorldEdit, c: Cell, sticky: bool, dir: u8) -> Option<Vec<Cell>> {
+    let front = dir_neighbor(world, c, dir)?;
+    let mut line = Vec::new();
+    let mut cur = front;
+    loop {
+        let b = world.cell_block(cur);
+        if b == Block::Air || b.is_replaceable() {
+            break;
+        }
+        if !movable(b) || line.len() >= 12 {
+            return None;
+        }
+        line.push(cur);
+        cur = dir_neighbor(world, cur, dir)?;
+    }
+    let mut touched = vec![c, front, cur];
+    let mut dst = cur;
+    for &src in line.iter().rev() {
+        let b = world.cell_block(src);
+        world.set_block(dst, b);
+        touched.push(dst);
+        dst = src;
+    }
+    world.set_block(front, Part::Head { sticky, dir }.block());
+    world.set_block(c, Part::Piston { sticky, extended: true, dir }.block());
+    Some(touched)
+}
+
+/// Pulls the head back; a sticky piston brings the block in front of the head with it.
+fn retract(world: &mut impl WorldEdit, c: Cell, sticky: bool, dir: u8) -> Vec<Cell> {
+    let mut touched = vec![c];
+    if let Some(front) = dir_neighbor(world, c, dir) {
+        if matches!(world.cell_block(front).part(), Some(Part::Head { .. })) {
+            let beyond = dir_neighbor(world, front, dir);
+            let pulled = beyond.map(|b| world.cell_block(b)).filter(|b| sticky && *b != Block::Air && !b.is_replaceable() && movable(*b));
+            match (pulled, beyond) {
+                (Some(b), Some(from)) => {
+                    world.set_block(front, b);
+                    world.set_block(from, Block::Air);
+                    touched.push(from);
+                }
+                _ => {
+                    world.set_block(front, Block::Air);
+                }
+            }
+            touched.push(front);
+        }
+    }
+    world.set_block(c, Part::Piston { sticky, extended: false, dir }.block());
+    touched
+}
+
+/// A piston or its head was broken: the other part goes too (the base returns to rest).
+pub fn piston_broken(world: &mut impl WorldEdit, pos: Cell, block: Block) {
+    match block.part() {
+        Some(Part::Head { sticky, dir }) => {
+            if let Some(base) = dir_neighbor(world, pos, dir ^ 1) {
+                if world.cell_block(base) == (Part::Piston { sticky, extended: true, dir }).block() {
+                    world.set_block(base, Part::Piston { sticky, extended: false, dir }.block());
+                }
+            }
+        }
+        Some(Part::Piston { extended: true, dir, .. }) => {
+            if let Some(front) = dir_neighbor(world, pos, dir) {
+                if matches!(world.cell_block(front).part(), Some(Part::Head { .. })) {
+                    world.set_block(front, Block::Air);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Dust, lamps and the cells around them for one edit. Returns (blocks changed, cells looked at).
+fn update_network(world: &mut impl WorldEdit, origin: Cell) -> (usize, HashSet<Cell>) {
     // Every dust block connected to the edit.
     let mut wires: HashSet<Cell> = HashSet::new();
     let mut queue: VecDeque<Cell> = VecDeque::new();
@@ -184,7 +364,7 @@ pub fn update_iskrit(world: &mut impl WorldEdit, origin: Cell) -> usize {
     let mut strength: HashMap<Cell, u8> = HashMap::new();
     let mut bfs: VecDeque<(Cell, u8)> = VecDeque::new();
     for w in &wires {
-        if neighbors(world, *w).into_iter().any(|n| is_iskrit_source(world.cell_block(n))) {
+        if neighbors(world, *w).into_iter().any(|n| is_iskrit_source(world.cell_block(n)) || gate_into(world, n, *w)) {
             strength.insert(*w, ISKRIT_MAX);
             bfs.push_back((*w, ISKRIT_MAX));
         }
@@ -215,23 +395,20 @@ pub fn update_iskrit(world: &mut impl WorldEdit, origin: Cell) -> usize {
     for w in &wires {
         probe.extend(neighbors(world, *w));
     }
-    for c in probe {
-        if is_iskrit_lamp(world.cell_block(c)) {
-            lamps.insert(c);
+    for c in &probe {
+        if is_iskrit_lamp(world.cell_block(*c)) {
+            lamps.insert(*c);
         }
     }
     for l in lamps {
-        let on = neighbors(world, l).into_iter().any(|n| {
-            let b = world.cell_block(n);
-            is_iskrit_source(b) || b == Block::IskritWireOn
-        });
+        let on = powered(world, l);
         let want = if on { Block::IskritLampOn } else { Block::IskritLamp };
         if world.cell_block(l) != want {
             world.set_block(l, want);
             changed += 1;
         }
     }
-    changed
+    (changed, probe.into_iter().collect())
 }
 
 #[cfg(test)]
@@ -257,6 +434,88 @@ mod tests {
             self.blocks.insert(c, b);
             true
         }
+    }
+
+    fn mock() -> Mock {
+        Mock { grid: Grid::with_cells(64), blocks: HashMap::new() }
+    }
+    fn at(i: i32, j: i32) -> Cell {
+        Cell::new(4, 10 + i, 20 + j, 30)
+    }
+
+    #[test]
+    fn a_piston_pushes_a_row_and_a_sticky_one_pulls_a_block_back() {
+        for sticky in [false, true] {
+            let mut w = mock();
+            // Piston at 0 facing +i, two stone blocks in front, a switch behind it.
+            w.set_block(at(0, 0), Part::Piston { sticky, extended: false, dir: 0 }.block());
+            w.set_block(at(1, 0), Block::Stone);
+            w.set_block(at(2, 0), Block::Cobblestone);
+            w.set_block(at(-1, 0), Block::SwitchOn);
+            update_iskrit(&mut w, at(-1, 0));
+            assert_eq!(w.cell_block(at(0, 0)), Part::Piston { sticky, extended: true, dir: 0 }.block(), "extended");
+            assert_eq!(w.cell_block(at(1, 0)), Part::Head { sticky, dir: 0 }.block());
+            assert_eq!((w.cell_block(at(2, 0)), w.cell_block(at(3, 0))), (Block::Stone, Block::Cobblestone), "the row moved one cell");
+            // Switch off: the head comes back; only the sticky piston brings the stone with it.
+            w.set_block(at(-1, 0), Block::SwitchOff);
+            update_iskrit(&mut w, at(-1, 0));
+            assert_eq!(w.cell_block(at(0, 0)), Part::Piston { sticky, extended: false, dir: 0 }.block(), "retracted");
+            if sticky {
+                assert_eq!(w.cell_block(at(1, 0)), Block::Stone, "pulled back");
+                assert_eq!(w.cell_block(at(2, 0)), Block::Air);
+            } else {
+                assert_eq!(w.cell_block(at(1, 0)), Block::Air);
+                assert_eq!(w.cell_block(at(2, 0)), Block::Stone, "left where it was pushed");
+            }
+        }
+        // Obsidian cannot be pushed: the piston stays in.
+        let mut w = mock();
+        w.set_block(at(0, 0), Part::Piston { sticky: false, extended: false, dir: 0 }.block());
+        w.set_block(at(1, 0), Block::Obsidian);
+        w.set_block(at(-1, 0), Block::SwitchOn);
+        update_iskrit(&mut w, at(-1, 0));
+        assert_eq!(w.cell_block(at(1, 0)), Block::Obsidian);
+    }
+
+    #[test]
+    fn a_repeater_renews_the_signal_and_only_passes_it_forward() {
+        let mut w = mock();
+        // Torch, 14 dust, a repeater (+i), 10 more dust and a lamp: far beyond 15 blocks.
+        w.set_block(at(0, 0), Block::IskritTorch);
+        for i in 1..=14 {
+            w.set_block(at(i, 0), Block::IskritWire);
+        }
+        w.set_block(at(15, 0), Part::Repeater { on: false, dir: 0 }.block());
+        for i in 16..=25 {
+            w.set_block(at(i, 0), Block::IskritWire);
+        }
+        w.set_block(at(26, 0), Block::IskritLamp);
+        update_iskrit(&mut w, at(1, 0));
+        assert_eq!(w.cell_block(at(15, 0)), Part::Repeater { on: true, dir: 0 }.block());
+        assert_eq!(w.cell_block(at(26, 0)), Block::IskritLampOn, "the repeater carries the signal on");
+        // Backwards: a source in front of a repeater does not reach behind it.
+        let mut w = mock();
+        w.set_block(at(0, 0), Block::IskritLamp);
+        w.set_block(at(1, 0), Part::Repeater { on: false, dir: 0 }.block());
+        w.set_block(at(2, 0), Block::IskritBlock);
+        update_iskrit(&mut w, at(2, 0));
+        assert_eq!(w.cell_block(at(1, 0)), Part::Repeater { on: false, dir: 0 }.block());
+        assert_eq!(w.cell_block(at(0, 0)), Block::IskritLamp, "one way only");
+    }
+
+    #[test]
+    fn a_comparator_passes_the_back_signal_unless_a_side_is_powered() {
+        let mut w = mock();
+        // Comparator facing +i: input behind at -i, lamp in front, a side input at +j.
+        w.set_block(at(-1, 0), Block::IskritBlock);
+        w.set_block(at(0, 0), Part::Comparator { on: false, dir: 0 }.block());
+        w.set_block(at(1, 0), Block::IskritLamp);
+        update_iskrit(&mut w, at(-1, 0));
+        assert_eq!(w.cell_block(at(1, 0)), Block::IskritLampOn, "back powered, sides quiet: on");
+        w.set_block(at(0, 1), Block::IskritBlock);
+        update_iskrit(&mut w, at(0, 1));
+        assert_eq!(w.cell_block(at(0, 0)), Part::Comparator { on: false, dir: 0 }.block(), "a powered side blocks it");
+        assert_eq!(w.cell_block(at(1, 0)), Block::IskritLamp);
     }
 
     #[test]

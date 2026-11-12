@@ -222,7 +222,24 @@ impl Interaction {
             let p0 = g.point(target.f, target.i as f64, target.j as f64, target.k as f64);
             let ei = (g.point(target.f, target.i as f64 + 1.0, target.j as f64, target.k as f64) - p0).normalize_or_zero();
             let ej = (g.point(target.f, target.i as f64, target.j as f64 + 1.0, target.k as f64) - p0).normalize_or_zero();
-            block.oriented(player.heading.dot(ei), player.heading.dot(ej))
+            // Pistons face the player (also up and down), everything else turns with the view.
+            if let Some(crate::block::Part::Piston { sticky, .. }) = block.part() {
+                let ek = (g.point(target.f, target.i as f64, target.j as f64, target.k as f64 + 1.0) - p0).normalize_or_zero();
+                let l = player.look_dir();
+                let (li, lj, lk) = (l.dot(ei), l.dot(ej), l.dot(ek));
+                let dir = if lk.abs() >= li.abs() && lk.abs() >= lj.abs() {
+                    if lk > 0.0 { 5 } else { 4 }
+                } else if li.abs() >= lj.abs() {
+                    if li > 0.0 { 1 } else { 0 }
+                } else if lj > 0.0 {
+                    3
+                } else {
+                    2
+                };
+                crate::block::Part::Piston { sticky, extended: false, dir }.block()
+            } else {
+                block.oriented(player.heading.dot(ei), player.heading.dot(ej))
+            }
         };
         if !world.cell_block(target).is_replaceable() {
             return events;
