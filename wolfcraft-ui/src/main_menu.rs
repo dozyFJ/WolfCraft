@@ -416,113 +416,91 @@ fn square_button(ui: &mut Ui, icons: &GuiIcons, ic: u16, active: bool) -> egui::
     resp
 }
 
-/// World-select header: logo and title left; settings, version, sort and search (square icons) right.
-/// The magnifier opens a search field right in the header. Returns true if settings was clicked.
-/// World list tools (settings, sort, search) next to "Назад" in the bottom bar.
-fn world_select_tools(ui: &mut Ui, icons: &GuiIcons, st: &mut WorldSelectState) -> (bool, Option<Rect>) {
-    let mut settings = false;
-    let mut sort_anchor = None;
-    ui.spacing_mut().item_spacing.x = 8.0;
-    if square_button(ui, icons, icon::GEAR, false).clicked() {
-        settings = true;
+/// World-select left sidebar: play modes, then the world actions (create, play, search,
+/// sort), settings and "Назад" — every button an icon with a caption. Sort options and the
+/// search field open right inside the sidebar.
+fn world_select_side(ui: &mut Ui, icons: &GuiIcons, st: &mut WorldSelectState, worlds: &[WorldEntry]) -> MenuAction {
+    let p = palette(ui.ctx());
+    let mut action = MenuAction::None;
+    let w = ui.available_width();
+    ui.spacing_mut().item_spacing.y = 8.0;
+    let section = |ui: &mut Ui, text: &str| {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(text).size(12.0).color(p.text_muted));
+    };
+    section(ui, "РЕЖИМ");
+    for (i, ic, label) in [(0usize, icon::CUBE, "Одиночная игра"), (1, icon::GLOBE, "Игра по сети")] {
+        let kind = if st.mode == i { ButtonKind::Primary } else { ButtonKind::Secondary };
+        if pill_button(ui, icons, Some(ic), label, kind, w, true).clicked() {
+            st.mode = i;
+        }
     }
     if st.mode == 0 {
-        if square_button(ui, icons, if st.search_open { icon::CLOSE } else { icon::SEARCH }, st.search_open).clicked() {
+        section(ui, "МИРЫ");
+        if pill_button(ui, icons, Some(icon::PLUS), "Создать мир", ButtonKind::Primary, w, true).clicked() {
+            action = MenuAction::OpenCreate;
+        }
+        let can = st.selected.as_ref().map(|s| worlds.iter().any(|w| &w.cfg.id == s)).unwrap_or(false);
+        if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Secondary, w, can).clicked() {
+            if let Some(s) = &st.selected {
+                action = MenuAction::PlayWorld(s.clone());
+            }
+        }
+        let kind = if st.search_open { ButtonKind::Primary } else { ButtonKind::Secondary };
+        if pill_button(ui, icons, Some(if st.search_open { icon::CLOSE } else { icon::SEARCH }), "Поиск", kind, w, true).clicked() {
             st.search_open = !st.search_open;
             st.search_focus = st.search_open;
             if !st.search_open {
                 st.search.clear();
             }
         }
-        let sort = square_button(ui, icons, icon::SORT, st.sort_open);
-        if sort.clicked() {
-            st.sort_open = !st.sort_open;
-        }
-        sort_anchor = Some(sort.rect);
         if st.search_open {
-            let w = (ui.available_width() - 360.0).clamp(120.0, 300.0);
-            let r = text_input(ui, icons, &mut st.search, "Поиск миров…", w, Some(icon::SEARCH));
+            let r = text_input(ui, icons, &mut st.search, "Название…", w, None);
             if st.search_focus {
                 st.search_focus = false;
                 r.request_focus();
             }
         }
-    }
-    (settings, sort_anchor)
-}
-
-fn world_sort_menu(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, sort_anchor: Option<Rect>) {
-    let p = palette(ctx);
-    // Sort menu opens above its button.
-    if st.mode == 0 && st.sort_open {
-        if let Some(a) = sort_anchor {
-            let area = egui::Area::new(egui::Id::new("world-sort-menu"))
-                .order(egui::Order::Foreground)
-                .pivot(Align2::LEFT_BOTTOM)
-                .fixed_pos(Pos2::new(a.left(), a.top() - 8.0))
-                .show(ctx, |ui| {
-                    Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::same(8.0)).show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 6.0;
-                        for (i, name) in SORT_NAMES.iter().enumerate() {
-                            let kind = if st.sort == i { ButtonKind::Primary } else { ButtonKind::Ghost };
-                            if pill_button(ui, icons, if st.sort == i { Some(icon::CHECK) } else { None }, name, kind, 184.0, true).clicked() {
-                                st.sort = i;
-                                st.sort_open = false;
-                            }
-                        }
-                    });
-                });
-            // Tap outside closes the menu.
-            let clicked_outside = ctx.input(|i| i.pointer.any_click()) && !area.response.rect.contains(ctx.input(|i| i.pointer.interact_pos()).unwrap_or_default()) && !a.contains(ctx.input(|i| i.pointer.interact_pos()).unwrap_or_default());
-            if clicked_outside {
-                st.sort_open = false;
+        let kind = if st.sort_open { ButtonKind::Primary } else { ButtonKind::Secondary };
+        if pill_button(ui, icons, Some(icon::SORT), "Сортировка", kind, w, true).clicked() {
+            st.sort_open = !st.sort_open;
+        }
+        if st.sort_open {
+            for (i, name) in SORT_NAMES.iter().enumerate() {
+                let kind = if st.sort == i { ButtonKind::Primary } else { ButtonKind::Ghost };
+                if pill_button(ui, icons, if st.sort == i { Some(icon::CHECK) } else { None }, name, kind, w, true).clicked() {
+                    st.sort = i;
+                    st.sort_open = false;
+                }
             }
         }
     }
+    section(ui, "ЕЩЁ");
+    if pill_button(ui, icons, Some(icon::GEAR), "Настройки", ButtonKind::Secondary, w, true).clicked() {
+        action = MenuAction::OpenSettings;
+    }
+    if pill_button(ui, icons, Some(icon::ARROW_LEFT), "Назад", ButtonKind::Ghost, w, true).clicked() {
+        action = MenuAction::Back;
+    }
+    action
 }
 
 pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, worlds: &[WorldEntry], version: &str) -> MenuAction {
     let p = palette(ctx);
     let mut action = MenuAction::None;
     let _ = version;
-    let mut sort_anchor = None;
-    bottom_bar(ctx, |ui| {
-        if pill_button(ui, icons, Some(icon::ARROW_LEFT), "Назад", ButtonKind::Secondary, 140.0, true).clicked() {
-            action = MenuAction::Back;
-        }
-        let (settings, anchor) = world_select_tools(ui, icons, st);
-        sort_anchor = anchor;
-        if settings {
-            action = MenuAction::OpenSettings;
-        }
-        if st.mode == 0 {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if pill_button(ui, icons, Some(icon::PLUS), "Создать мир", ButtonKind::Primary, 180.0, true).clicked() {
-                    action = MenuAction::OpenCreate;
-                }
-                let can = st.selected.as_ref().map(|s| worlds.iter().any(|w| &w.cfg.id == s)).unwrap_or(false);
-                if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Secondary, 150.0, can).clicked() {
-                    if let Some(s) = &st.selected {
-                        action = MenuAction::PlayWorld(s.clone());
-                    }
-                }
-            });
-        }
-    });
-    world_sort_menu(ctx, icons, st, sort_anchor);
-    // Left sidebar: play modes stacked vertically; their content fills the right side.
+    // Left sidebar holds every control; the right side is the list.
     egui::SidePanel::left("play-mode-side")
         .resizable(false)
         .exact_width(230.0)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 14.0)))
         .show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = 10.0;
-            for (i, ic, label) in [(0usize, icon::CUBE, "Одиночная игра"), (1, icon::GLOBE, "Игра по сети")] {
-                let kind = if st.mode == i { ButtonKind::Primary } else { ButtonKind::Secondary };
-                if pill_button(ui, icons, Some(ic), label, kind, ui.available_width(), true).clicked() {
-                    st.mode = i;
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                let a = world_select_side(ui, icons, st, worlds);
+                if !matches!(a, MenuAction::None) {
+                    action = a;
                 }
-            }
+            });
         });
     if st.mode == 1 {
         // Right sidebar: network sections, mirroring the left one.
@@ -556,60 +534,54 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
                 ui.label(egui::RichText::new(if worlds.is_empty() { "Миров пока нет" } else { "Ничего не найдено" }).font(bold_font(20.0)).color(p.text));
                 ui.label(egui::RichText::new(if worlds.is_empty() { "Создайте первую планету — нажмите «Создать мир»" } else { "Измените запрос поиска" }).color(p.text_muted));
             });
+            return;
         }
-        // Grid of world cards: big planet on top, name and tags, play / rename / delete.
-        let avail = ui.available_width();
-        let card_w = 200.0f32;
-        let gap = 12.0;
-        let cols = ((avail + gap) / (card_w + gap)).floor().max(1.0) as usize;
-        let card_w = (avail - gap * (cols as f32 - 1.0)) / cols as f32 - 1.0;
+        // Vertical list: planet preview, name and tags, then play / rename / delete on the right.
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for row in list.chunks(cols) {
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for w in row {
-                        let selected = st.selected.as_deref() == Some(w.cfg.id.as_str());
-                        ui.allocate_ui(Vec2::new(card_w, 10.0), |ui| {
-                            ui.set_width(card_w);
-                            let resp = row_card(ui, selected, |ui| {
-                                ui.set_width(card_w - 26.0);
-                                ui.vertical_centered(|ui| {
-                                    let sz = (card_w - 60.0).min(120.0);
-                                    let (r, _) = ui.allocate_exact_size(Vec2::splat(sz), Sense::hover());
-                                    if let Some(tex) = &w.preview {
-                                        ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-                                    } else {
-                                        ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(8, 12, 22));
-                                    }
-                                    ui.add_space(4.0);
-                                    ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(17.0)).color(p.text));
-                                    ui.label(egui::RichText::new(format!("{} · {}", if w.cfg.mode == GameMode::Creative { "Творческий" } else { "Выживание" }, w.cfg.size.label())).size(12.5).color(if w.cfg.mode == GameMode::Creative { p.secondary } else { p.accent }));
-                                    ui.label(egui::RichText::new(format_timestamp(w.cfg.last_played)).size(11.5).color(p.text_muted));
-                                    ui.add_space(6.0);
-                                    ui.horizontal(|ui| {
-                                        let bw = card_w - 26.0 - 2.0 * 34.0 - 2.0 * ui.spacing().item_spacing.x;
-                                        if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, bw, true).clicked() {
-                                            action = MenuAction::PlayWorld(w.cfg.id.clone());
-                                        }
-                                        if icon_button(ui, icons, icon::EDIT, 34.0, ButtonKind::Ghost).clicked() {
-                                            st.rename = Some((w.cfg.id.clone(), w.cfg.name.clone()));
-                                        }
-                                        if icon_button(ui, icons, icon::TRASH, 34.0, ButtonKind::Danger).clicked() {
-                                            st.confirm_delete = Some(w.cfg.id.clone());
-                                        }
-                                    });
-                                });
+            ui.spacing_mut().item_spacing.y = 10.0;
+            let full = ui.available_width();
+            for w in &list {
+                let selected = st.selected.as_deref() == Some(w.cfg.id.as_str());
+                let resp = row_card(ui, selected, |ui| {
+                    ui.set_width(full - 26.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 12.0;
+                        let (r, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
+                        if let Some(tex) = &w.preview {
+                            ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                        } else {
+                            ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(8, 12, 22));
+                        }
+                        let buttons = 130.0 + 2.0 * 40.0 + 2.0 * 12.0;
+                        let text_w = (ui.available_width() - buttons).max(80.0);
+                        ui.allocate_ui(Vec2::new(text_w, 64.0), |ui| {
+                            ui.set_width(text_w);
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                ui.add(egui::Label::new(egui::RichText::new(&w.cfg.name).font(bold_font(17.0)).color(p.text)).truncate());
+                                ui.label(egui::RichText::new(format!("{} · {}", if w.cfg.mode == GameMode::Creative { "Творческий" } else { "Выживание" }, w.cfg.size.label())).size(12.5).color(if w.cfg.mode == GameMode::Creative { p.secondary } else { p.accent }));
+                                ui.label(egui::RichText::new(format_timestamp(w.cfg.last_played)).size(11.5).color(p.text_muted));
                             });
-                            if resp.clicked() {
-                                st.selected = Some(w.cfg.id.clone());
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if icon_button(ui, icons, icon::TRASH, 40.0, ButtonKind::Danger).clicked() {
+                                st.confirm_delete = Some(w.cfg.id.clone());
                             }
-                            if resp.double_clicked() {
+                            if icon_button(ui, icons, icon::EDIT, 40.0, ButtonKind::Ghost).clicked() {
+                                st.rename = Some((w.cfg.id.clone(), w.cfg.name.clone()));
+                            }
+                            if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 130.0, true).clicked() {
                                 action = MenuAction::PlayWorld(w.cfg.id.clone());
                             }
                         });
-                    }
+                    });
                 });
-                ui.add_space(gap);
+                if resp.clicked() {
+                    st.selected = Some(w.cfg.id.clone());
+                }
+                if resp.double_clicked() {
+                    action = MenuAction::PlayWorld(w.cfg.id.clone());
+                }
             }
         });
     });
