@@ -174,7 +174,10 @@ pub fn dropdown(ui: &mut Ui, icons: &GuiIcons, id: &str, options: &[String], sel
 /// Single-line text field in a rounded frame with an optional leading icon.
 pub fn text_input(ui: &mut Ui, icons: &GuiIcons, text: &mut String, hint: &str, width: f32, icon_id: Option<u16>) -> Response {
     let p = palette(ui.ctx());
-    let id = ui.next_auto_id();
+    // A stable id (from the hint): an automatic one changes when the layout around the field
+    // changes, e.g. when the phone keyboard opens and shrinks the screen, and the field then
+    // loses focus after every letter.
+    let id = ui.make_persistent_id(("text_input", hint));
     let focused = ui.memory(|m| m.has_focus(id.with("edit")));
     let t = ui.ctx().animate_bool_with_time(id.with("focus"), focused, ANIM_TIME);
     let frame = Frame::none().fill(p.surface_hi).rounding(Rounding::ZERO).stroke(Stroke::new(2.0_f32, mix(p.outline, p.accent, t))).inner_margin(Margin::symmetric(12.0, 7.0));

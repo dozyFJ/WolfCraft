@@ -164,16 +164,31 @@ impl Interaction {
                 }
                 return events;
             }
-            // Door: opens and closes, both halves together.
-            if let (Some(new), false) = (h.block.door_toggle(), player.sneaking) {
-                let partner = door_partner(world, h.cell, h.block);
-                if world.set_block(h.cell, new) {
-                    events.push(InteractionEvent::Placed { pos: h.cell, block: new });
+            // Door: opens and closes, both halves together. A double door (the same kind of
+            // door in the same position right beside it) swings with it.
+            if h.block.door_toggle().is_some() && !player.sneaking {
+                let mut leaves = vec![(h.cell, h.block)];
+                let g = *world.grid();
+                for (axis, sign) in [(0, -1), (0, 1), (1, -1), (1, 1)] {
+                    if let Some(n) = g.neighbor(h.cell, axis, sign) {
+                        if world.cell_block(n) == h.block {
+                            leaves.push((n, h.block));
+                            break;
+                        }
+                    }
                 }
-                if let Some((other, ob)) = partner {
-                    if let Some(on) = ob.door_toggle() {
-                        if world.set_block(other, on) {
-                            events.push(InteractionEvent::Placed { pos: other, block: on });
+                for (cell, b) in leaves {
+                    let partner = door_partner(world, cell, b);
+                    if let Some(new) = b.door_toggle() {
+                        if world.set_block(cell, new) {
+                            events.push(InteractionEvent::Placed { pos: cell, block: new });
+                        }
+                    }
+                    if let Some((other, ob)) = partner {
+                        if let Some(on) = ob.door_toggle() {
+                            if world.set_block(other, on) {
+                                events.push(InteractionEvent::Placed { pos: other, block: on });
+                            }
                         }
                     }
                 }
@@ -419,6 +434,22 @@ mod tests {
         it.use_item(&mut w, &mut p, Some(top));
         assert_eq!(w.block(c(0, 51, 0)), lo.door_toggle().unwrap());
         assert_eq!(w.block(c(0, 52, 0)), hi.door_toggle().unwrap());
+        // A second door right beside the first: both swing together (double door).
+        let (lo, _) = (w.block(c(0, 51, 0)), ());
+        p.inventory.add(ItemStack::of_block(Block::Door, 1));
+        let h2 = hit(&w, c(1, 50, 0), UP);
+        it.use_item(&mut w, &mut p, Some(h2));
+        // Put it in the same state as the first one.
+        if w.block(c(1, 51, 0)) != lo {
+            w.blocks.insert(c(1, 51, 0), lo);
+            w.blocks.insert(c(1, 52, 0), lo.door_top().unwrap());
+        }
+        let first = w.block(c(0, 51, 0));
+        let h3 = hit(&w, c(0, 51, 0), UP);
+        it.use_item(&mut w, &mut p, Some(h3));
+        assert_eq!(w.block(c(0, 51, 0)), first.door_toggle().unwrap());
+        assert_eq!(w.block(c(1, 51, 0)), first.door_toggle().unwrap(), "the other leaf swings too");
+        assert_eq!(w.block(c(1, 52, 0)), first.door_toggle().unwrap().door_top().unwrap());
         // No room above: no door.
         w.blocks.insert(c(3, 52, 0), Block::Stone);
         p.inventory.add(ItemStack::of_block(Block::Door, 1));

@@ -463,6 +463,56 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn running_and_jumping_into_walls_corners_doors_and_panes_never_gets_inside() {
+        let mut w = Ball::new(60.0);
+        let b0 = settle(&w, DVec3::new(0.0, 66.0, 0.0));
+        let base = w.grid.world_to_cell(b0.pos);
+        let c = |di: i32, dj: i32, dk: i32| Cell::new(base.f, base.i + di, base.j + dj, base.k + dk);
+        // A room 9x9 with 3-high stone walls, a door, a glass pane and a fence post inside.
+        for d in -4..=4 {
+            for dk in 0..3 {
+                for (a, b) in [(d, -4), (d, 4), (-4, d), (4, d)] {
+                    w.edits.insert(c(a, b, dk), Block::Stone);
+                }
+            }
+        }
+        for dk in 0..2 {
+            w.edits.insert(c(2, 0, dk), Block::Door);
+            w.edits.insert(c(-2, 1, dk), Block::GlassPaneA);
+        }
+        w.edits.insert(c(0, -2, 0), Block::Fence);
+        let inside = |b: &Body| {
+            let up = up_at(b.pos);
+            SPHERE_HEIGHTS.iter().any(|h| {
+                let p = b.pos + up * *h;
+                let cell = w.grid.world_to_cell(p);
+                let bl = w.cell_block(cell);
+                // The sphere centre inside a solid block's box = the body went through it.
+                bl.is_solid() && block_obbs(&w.grid, cell, bl).iter().any(|o| sphere_obb(p, 0.02, o).is_some())
+            })
+        };
+        let mut rng = 12345u64;
+        let mut rnd = || {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (rng >> 33) as f64 / (1u64 << 31) as f64
+        };
+        let ax = w.grid.cell_obb(base).axes;
+        for run in 0..60 {
+            let mut b = Body::new(b0.pos);
+            b.on_ground = true;
+            let a = rnd() * std::f64::consts::TAU;
+            let wish = (ax[0] * a.cos() + ax[1] * a.sin()).normalize();
+            let speed = [4.3, 5.6, 10.0, 20.0][run % 4];
+            for f in 0..300 {
+                let dt = if f % 37 == 0 { 0.1 } else { 1.0 / 60.0 }; // lag spikes
+                let jump = f % 23 == 0;
+                step(&w, &mut b, &MoveInput { wish, speed, jump, ..Default::default() }, dt);
+                assert!(!inside(&b), "run {run} (speed {speed}, angle {a:.2}) frame {f}: body inside a block");
+            }
+        }
+    }
+
+    #[test]
     fn solid_walls_block_horizontal_motion_and_one_block_steps_are_climbed() {
         let mut w = Ball::new(60.0);
         let b0 = settle(&w, DVec3::new(0.0, 66.0, 0.0));

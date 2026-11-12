@@ -234,8 +234,19 @@ impl Player {
         let input = MoveInput { wish, speed, jump: c.jump, up: c.jump, down: c.sneak };
         let altitude_before = crate::cubesphere::radial(self.body.pos);
         let was_grounded = self.body.on_ground;
+        let before = self.body.pos;
         let impact = physics::step(world, &mut self.body, &input, dt);
         let _ = altitude_before;
+        // Sneaking keeps you on the edge, as on Bedrock: a step that would leave you with
+        // nothing under your feet is undone (you can lean out about a third of a block and
+        // place blocks under the edge to build a bridge).
+        if self.sneaking && !c.jump && !self.body.in_water && !self.body.flying && has_support(world, before) && !has_support(world, self.body.pos) {
+            let up = physics::up_at(before);
+            // Keep the vertical part (a ceiling, a slab), drop the step sideways.
+            self.body.pos = before;
+            self.body.vel = up * self.body.vel.dot(up).max(0.0);
+            self.body.on_ground = true;
+        }
 
         if self.body.flying {
             self.body.on_ground = false;
@@ -477,6 +488,17 @@ pub fn sun_direction(world_time: f64) -> DVec3 {
 
 /// Flight speed multiplier at distance `r` from the planet centre: 1 near the ground,
 /// growing with altitude up to 60× far out in space.
+/// Is there something solid under the body's footprint at `feet` (four corners of a square
+/// as wide as the body, a little below the feet)?
+fn has_support(world: &impl Voxels, feet: DVec3) -> bool {
+    let up = physics::up_at(feet);
+    let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+    let t1 = (helper - up * helper.dot(up)).normalize();
+    let t2 = up.cross(t1);
+    let r = physics::BODY_RADIUS * 0.95;
+    [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0), (0.0, 0.0)].iter().any(|(a, b)| world.block_at_world(feet + t1 * (r * a) + t2 * (r * b) - up * 0.15).is_solid())
+}
+
 pub fn space_boost(grid: &crate::cubesphere::Grid, r: f64) -> f64 {
     let surface = if grid.cube { grid.n as f64 / 2.0 } else { grid.n as f64 * std::f64::consts::FRAC_2_PI };
     let h = r - surface - 64.0;
@@ -605,6 +627,38 @@ mod tests {
         assert!((q.heading - p.heading).length() < 1e-9);
         assert!(Player::from_bytes(&bytes[..30]).is_none());
         assert!(Player::from_bytes(b"junk").is_none());
+    }
+
+    #[test]
+    fn sneaking_does_not_fall_off_an_edge_walking_does() {
+        let mut w = BallWorld::new(60.0);
+        let mut p = Player::new(DVec3::new(0.0, 66.0, 0.0), GameMode::Survival);
+        for _ in 0..600 {
+            p.update(&w, &Controls::default(), Difficulty::Normal, 1.0 / 60.0);
+        }
+        let base = w.grid.world_to_cell(p.body.pos);
+        // A pillar: stand on one block raised 3 above the ground, walk off it.
+        for dk in 0..3 {
+            w.edits.insert(crate::cubesphere::Cell::new(base.f, base.i, base.j, base.k + dk), Block::Stone);
+        }
+        let top = w.grid.cell_center(crate::cubesphere::Cell::new(base.f, base.i, base.j, base.k + 3));
+        let start = top - crate::physics::up_at(top) * 0.5;
+        for sneak in [true, false] {
+            let mut q = Player::new(start, GameMode::Survival);
+            for _ in 0..60 {
+                q.update(&w, &Controls::default(), Difficulty::Normal, 1.0 / 60.0);
+            }
+            let h0 = w.grid.radial(q.body.pos);
+            for _ in 0..120 {
+                q.update(&w, &Controls { forward: 1.0, sneak, ..Default::default() }, Difficulty::Normal, 1.0 / 60.0);
+            }
+            let dropped = h0 - w.grid.radial(q.body.pos);
+            if sneak {
+                assert!(dropped < 0.2, "sneaking fell off the edge ({dropped})");
+            } else {
+                assert!(dropped > 1.5, "walking should fall off ({dropped})");
+            }
+        }
     }
 
     #[test]

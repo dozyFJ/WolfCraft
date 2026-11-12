@@ -65,6 +65,22 @@ fn slot_widget(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, stack: Op
     resp
 }
 
+/// Order of items in the creative grid.
+fn sort_key(id: ItemId) -> (usize, u8, String) {
+    let cat = CREATIVE_TABS.iter().position(|c| *c == items::category(id)).unwrap_or(99);
+    let group = if id >= items::ITEM_BASE {
+        if items::info(id).tool.is_some() || items::armor_slot(id).is_some() { 5 } else { 4 }
+    } else {
+        let b = wolfcraft_engine::block::Block::from_u8(id as u8);
+        match b.info().render {
+            wolfcraft_engine::block::RenderKind::Cross => 3,
+            _ if !b.boxes().is_empty() => 2,
+            _ => 1,
+        }
+    };
+    (cat, group, items::info(id).name.to_lowercase())
+}
+
 fn matches_search(id: ItemId, search: &str) -> bool {
     search.trim().is_empty() || items::info(id).name.to_lowercase().contains(&search.trim().to_lowercase())
 }
@@ -140,15 +156,14 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         // Cells as big as the screen allows: three rows of items plus the hotbar must fit the
         // height (with the tabs, title and the phone's gesture bar), ten cells the width.
         let (sw, h) = (ctx.screen_rect().width(), ctx.screen_rect().height());
-        let tabs_k = 10.5 / 13.0; // tab size relative to a cell
         let top = crate::ui_components::SCREEN_BAR;
-        let by_height = (h - 100.0 - top) / (4.0 + tabs_k + 4.0 * GAP / 40.0);
-        let by_width = (sw - 60.0 - 8.0 * GAP - 14.0) / 10.0;
+        let by_height = (h - 100.0 - top) / (4.0 + 4.0 * GAP / 40.0);
+        let by_width = (sw - 60.0 - 8.0 * GAP - 14.0 - 10.0) / (10.0 + 0.92);
         let cell = by_height.min(by_width).clamp(40.0, 84.0).floor();
-        let rows = (((h - 100.0 - top - cell * (1.0 + tabs_k)) / (cell + GAP)).floor() as usize).clamp(2, 7);
-        // Hotbar (9) + gap + bin; the tab row (10 tabs + close) is laid out to the same width.
-        let width = 10.0 * cell + 8.0 * GAP + 14.0;
-        let grid_w = width;
+        let rows = (((h - 100.0 - top - cell) / (cell + GAP)).floor() as usize).clamp(2, 7);
+        // Category sidebar + the grid (hotbar of 9 + gap + bin is as wide).
+        let grid_w = 10.0 * cell + 8.0 * GAP + 14.0;
+        let width = grid_w + (cell * 0.92).floor() + 16.0;
         let dismissed = crate::ui_components::game_screen(ctx, "inventory", "Творческий режим", width.min(ctx.screen_rect().width() - 40.0), |ui| {
             creative_layout(ui, icons, &p, state, inv, cell, rows, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
@@ -374,43 +389,51 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool) {
 #[allow(clippy::too_many_arguments)]
 fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let palette_all = items::creative_palette();
-    // ---- Tabs ----
-    let n = CREATIVE_TABS.len() as f32 + 1.0; // tabs + close button
-    let tab = ((grid_w - (n - 1.0) * 4.0) / n).floor();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        for (i, name) in CREATIVE_TABS.iter().enumerate() {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
-            let sel = state.tab == i;
-            let fill = if sel { p.surface_hover } else if resp.hovered() { p.surface_hi.lerp_to_gamma(p.surface_hover, 0.5) } else { p.surface_hi };
-            ui.painter().rect_filled(rect, Rounding::ZERO, fill);
-            ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if sel { p.accent } else { p.outline }));
-            let inner = rect.shrink(tab * 0.18);
-            match i {
-                0 => icons.paint(ui.painter(), inner, icon::STAR, if sel { p.accent } else { p.text }),
-                BACKPACK_TAB => icons.paint(ui.painter(), inner, icon::BACKPACK, if sel { p.accent } else { p.text }),
-                _ => {
-                    if let Some(id) = palette_all.iter().copied().find(|id| items::category(*id) == *name) {
-                        icons.paint_item(ui.painter(), inner, id);
+    // ---- Categories: a vertical sidebar on the left (scrolls if the screen is short) ----
+    let tab = (cell * 0.92).floor();
+    let content_h = 30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + 10.0 + cell;
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        ui.allocate_ui(Vec2::new(tab + 6.0, content_h), |ui| {
+            egui::ScrollArea::vertical().id_salt("creative-tabs").max_height(content_h).auto_shrink([true, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                for (i, name) in CREATIVE_TABS.iter().enumerate() {
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
+                    let sel = state.tab == i;
+                    let fill = if sel { p.surface_hover } else if resp.hovered() { p.surface_hi.lerp_to_gamma(p.surface_hover, 0.5) } else { p.surface_hi };
+                    ui.painter().rect_filled(rect, Rounding::ZERO, fill);
+                    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if sel { p.accent } else { p.outline }));
+                    if sel {
+                        // Selected category: an accent bar on its outer edge.
+                        ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), Rounding::ZERO, p.accent);
                     }
+                    let inner = rect.shrink(tab * 0.18);
+                    match i {
+                        0 => icons.paint(ui.painter(), inner, icon::STAR, if sel { p.accent } else { p.text }),
+                        BACKPACK_TAB => icons.paint(ui.painter(), inner, icon::BACKPACK, if sel { p.accent } else { p.text }),
+                        _ => {
+                            if let Some(id) = palette_all.iter().copied().find(|id| items::category(*id) == *name) {
+                                icons.paint_item(ui.painter(), inner, id);
+                            }
+                        }
+                    }
+                    if resp.clicked() {
+                        state.tab = i;
+                    }
+                    resp.on_hover_text(*name);
                 }
-            }
-            if resp.clicked() {
-                state.tab = i;
-            }
-            resp.on_hover_text(*name);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
-            ui.painter().rect_filled(rect, Rounding::ZERO, if resp.hovered() { p.danger.gamma_multiply(0.3) } else { p.surface_hi });
-            ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-            icons.paint(ui.painter(), rect.shrink(tab * 0.25), icon::CLOSE, p.text);
-            if resp.clicked() {
-                result.close = true;
-            }
+            });
+        });
+        ui.vertical(|ui| {
+            creative_main(ui, icons, p, state, inv, cell, rows, grid_w, palette_all, slot_rects, trash_rect, result);
         });
     });
-    ui.add_space(6.0);
+}
+
+/// Right part of the creative inventory: category title and search, the item grid, the hotbar.
+#[allow(clippy::too_many_arguments)]
+fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, grid_w: f32, palette_all: Vec<ItemId>, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
+    let _ = &result;
     // ---- Tab title + search ----
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(CREATIVE_TABS[state.tab]).font(bold_font(16.0)).color(p.text));
@@ -436,8 +459,10 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
         return;
     } else {
         let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| in_tab(*id, state.tab) && matches_search(*id, &state.search)).collect();
-        // Newest blocks and items first, so they are easy to find.
-        list.sort_by_key(|id| !items::is_new(*id));
+        // Sorted: by category (in "Все"), then full blocks, shaped blocks (stairs, slabs,
+        // doors…), plants, items and tools, alphabetically inside each group so related
+        // things sit together (all oak, all diamond…).
+        list.sort_by_cached_key(|id| sort_key(*id));
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
         // Swipe scrolls the list (a slot only reacts to a tap, so the finger drag goes to the
