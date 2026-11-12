@@ -110,7 +110,7 @@ fn read_world_script(dir: &std::path::Path) -> String {
 }
 
 /// Draws the script's GUI (ScreenGui-like) over the game; returns the ids of pressed buttons.
-fn draw_lua_gui(ctx: &egui::Context, els: &[crate::lua::GuiElement]) -> Vec<String> {
+fn draw_lua_gui(ctx: &egui::Context, icons:&wolfcraft_ui::GuiIcons, els: &[crate::lua::GuiElement]) -> Vec<String> {
     use crate::lua::GuiKind;
     let mut pressed = Vec::new();
     let sr = ctx.screen_rect();
@@ -131,14 +131,15 @@ fn draw_lua_gui(ctx: &egui::Context, els: &[crate::lua::GuiElement]) -> Vec<Stri
             if e.kind == GuiKind::Button && resp.is_pointer_button_down_on() {
                 fill = fill.map(|c| c.gamma_multiply(0.8));
             }
-            if let Some(f) = fill {
-                painter.rect_filled(rect, egui::Rounding::same(8.0), if e.kind == GuiKind::Frame { f.gamma_multiply(0.85) } else { f });
-            }
-            if e.kind == GuiKind::Button {
-                painter.rect_stroke(rect, egui::Rounding::same(8.0), egui::Stroke::new(2.0, egui::Color32::from_white_alpha(120)));
+            let tint=fill.unwrap_or(egui::Color32::WHITE).gamma_multiply(e.opacity);
+            if e.kind==GuiKind::Image {
+                if let Some(sprite)=e.sprite {icons.paint(painter,rect,sprite,tint);}
+            } else if e.kind!=GuiKind::Label {
+                let sprite=e.sprite.unwrap_or(wolfcraft_assets::gui::PANEL_DARK);
+                icons.paint_panel(painter,rect,sprite,tint);
             }
             if !e.text.is_empty() {
-                painter.text(rect.center(), egui::Align2::CENTER_CENTER, &e.text, font, c32(e.text_color));
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, &e.text, font, c32(e.text_color).gamma_multiply(e.opacity));
             }
             if resp.clicked() {
                 pressed.push(e.id.clone());
@@ -269,7 +270,7 @@ pub struct App {
     host: Option<wolfcraft_net::server::ServerHandle>,
     net_players: Vec<wolfcraft_net::PlayerState>,
     /// Every edit the server told us about, per dimension (`[overworld, hell]`).
-    net_edits: [std::collections::HashMap<[i32; 4], u8>; 2],
+    net_edits: [std::collections::HashMap<[i32; 4], u16>; 2],
     net_send_t: f32,
     net_hell: bool,
     last_step: i64,
@@ -608,14 +609,14 @@ impl App {
                     for (c, b) in list {
                         self.net_edits[hell as usize].insert(c, b);
                         if hell == s.hell {
-                            s.remote_edits.push((to_cell(c), Block::from_u8(b)));
+                            s.remote_edits.push((to_cell(c), Block::from_id(b)));
                         }
                     }
                 }
                 wolfcraft_net::S2C::Edit { cell, block, hell } => {
                     self.net_edits[hell as usize].insert(cell, block);
                     if hell == s.hell {
-                        s.remote_edits.push((to_cell(cell), Block::from_u8(block)));
+                        s.remote_edits.push((to_cell(cell), Block::from_id(block)));
                     }
                 }
                 wolfcraft_net::S2C::Players(list) => self.net_players = list.into_iter().filter(|p| p.id != net.id).collect(),
@@ -633,7 +634,7 @@ impl App {
         // After a dimension change every known edit of the new dimension applies again.
         if s.hell != self.net_hell {
             self.net_hell = s.hell;
-            s.remote_edits = self.net_edits[s.hell as usize].iter().map(|(c, b)| (to_cell(*c), Block::from_u8(*b))).collect();
+            s.remote_edits = self.net_edits[s.hell as usize].iter().map(|(c, b)| (to_cell(*c), Block::from_id(*b))).collect();
         }
         self.net_send_t += dt;
         if self.net_send_t >= 0.05 {
@@ -1366,7 +1367,7 @@ impl App {
                     // Changes the game made by itself (buttons springing back) go to the server too.
                     for (pos, block) in s.net_out.drain(..) {
                         if let Some(net) = &mut self.net {
-                            net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u8, hell: s.hell });
+                            net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u16, hell: s.hell });
                         }
                     }
                     self.audio.volume = self.settings.volume;
@@ -1388,6 +1389,7 @@ impl App {
                     self.last_health = s.player.survival.health;
                     for e in events {
                         match e {
+                            InteractionEvent::FrameUse{..}|InteractionEvent::ActivateBoss{..}=>{},
                             InteractionEvent::OpenCrafting => {
                                 self.inv_ui = InventoryUiState::default();
                                 self.screen = Screen::Inventory;
@@ -1412,7 +1414,7 @@ impl App {
                                 self.hand_place = 0.6;
                                 self.audio.play(crate::audio::Sfx::Dig(crate::audio::Mat::Dirt), 1.0);
                                 if let Some(net) = &mut self.net {
-                                    net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u8, hell: s.hell });
+                                    net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u16, hell: s.hell });
                                 }
                             }
                             InteractionEvent::Placed { pos, block } => {
@@ -1423,7 +1425,7 @@ impl App {
                                     self.screen = Screen::Inventory;
                                 }
                                 if let Some(net) = &mut self.net {
-                                    net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u8, hell: s.hell });
+                                    net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u16, hell: s.hell });
                                 }
                                 self.hand_place = 1.0;
                                 self.audio.play(crate::audio::Sfx::Place(crate::audio::Mat::of(block)), 1.0);
@@ -1715,10 +1717,20 @@ impl App {
                         };
                         if screen != Screen::Map {
                             hud::draw(ctx, &icons, &hud);
+                            if let Some(mob)=s.mobs.mobs.iter().find(|m|m.boss.is_some()&&m.hp>0.0) {
+                                let role=mob.boss.as_ref().unwrap();
+                                egui::Area::new(egui::Id::new("guardian_health")).anchor(egui::Align2::CENTER_TOP,egui::vec2(0.,10.)).interactable(false).show(ctx,|ui|{
+                                    let width=(ctx.screen_rect().width()*0.46).clamp(160.,420.);
+                                    ui.set_width(width);
+                                    let c=role.kind.color();let color=egui::Color32::from_rgb((c[0]*255.) as u8,(c[1]*255.) as u8,(c[2]*255.) as u8);
+                                    ui.add(egui::ProgressBar::new((mob.hp/role.kind.max_hp()).clamp(0.,1.)).desired_width(width).fill(color).text(format!("{} · фаза {}",role.kind.name(),role.kind.phase(mob.hp))));
+                                    if role.casting>0. {ui.label(egui::RichText::new("Удар по отмеченной области — отойдите!").color(egui::Color32::YELLOW));}
+                                });
+                            }
                         }
                         // The world script's own GUI (Luau, like Roblox ScreenGui).
                         if screen == Screen::Playing && !lua_gui.is_empty() {
-                            lua_clicks.extend(draw_lua_gui(ctx, &lua_gui));
+                            lua_clicks.extend(draw_lua_gui(ctx, &icons, &lua_gui));
                         }
                         if screen == Screen::Playing {
                             if let Some(line) = chat_ui::draw(ctx, &icons, chat, time.elapsed() as f64) {
@@ -1799,12 +1811,13 @@ impl App {
                                     close_inventory |= dismissed || run;
                                 } else if let Some((pos, block)) = *container {
                                     use wolfcraft_engine::block::Block as B;
-                                    let furnace = block == B::ElectricFurnace;
+                                    let furnace = block.base_kind() == B::ElectricFurnace;
                                     let forge = block == B::MachineCasing;
                                     let magic = block == B::EnchantTable;
                                     let (prog, working) = s.furnace_status(pos);
                                     let status_text = if working { "Горит: вход · топливо · результат" } else { "Положите руду и топливо (уголь, дрова)" };
                                     let accepts = |slot: usize, st: &wolfcraft_engine::items::ItemStack| {
+                                        if wolfcraft_engine::construction::is_portable(block)&&st.info().place.is_some_and(wolfcraft_engine::construction::is_portable){return false;}
                                         if furnace {
                                             (slot == 0 && wolfcraft_engine::interaction::smelt_result(st.id).is_some()) || (slot == 1 && wolfcraft_engine::interaction::fuel_time(st.id) > 0.0)
                                         } else if forge {
@@ -1816,7 +1829,8 @@ impl App {
                                         }
                                     };
                                     let view = wolfcraft_ui::container_ui::ContainerView {
-                                        title: if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else { "Сундук" },
+                                        skin:wolfcraft_ui::gui_renderer::block_panel(block),
+                                        title: if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else if wolfcraft_engine::construction::entry(block as u16).is_some() { block.info().name } else { "Сундук" },
                                         columns: if furnace || forge { 3 } else if magic { 2 } else { 9 },
                                         accepts: &accepts,
                                         status: if furnace {
@@ -2017,6 +2031,8 @@ impl App {
                 // Character model is visible in third-person views only.
                 let mut model_verts = wolfcraft_engine::renderer::model::build_mob_models(&s.mobs.mobs, cam.eye, cam.forward, (self.settings.render_distance * 16) as f64 * 1.15);
                 model_verts.extend(wolfcraft_engine::renderer::model::build_dropped_models(&s.drops.list, cam.eye, self.time.elapsed(), 48.0));
+                let frames:Vec<_>=s.storage_bank.frames.iter().filter(|((hell,c),_)|*hell==s.hell&&(s.chunks.grid().cell_center(*c)-cam.eye).length_squared()<48.0*48.0).filter_map(|((_,c),item)|s.chunks.get_block(*c).map(|b|(*c,b,*item))).collect();
+                model_verts.extend(wolfcraft_engine::renderer::model::build_frame_models(&s.chunks.grid(),&frames,cam.eye));
                 // Sign texts, written on the boards themselves.
                 {
                     let grid = s.chunks.grid();
@@ -2049,6 +2065,7 @@ impl App {
                         armor: worn_armor(&s.player.inventory),
                     };
                     model_verts.extend(build_player_model(&pose, cam.eye));
+                    if s.player.inventory.armor[1].is_some_and(|w|w.id==wolfcraft_engine::items::ids::WINGS) {model_verts.extend(wolfcraft_engine::renderer::model::build_wings(&pose,cam.eye,s.player.gliding));}
                 }
                 // Other players of the server (same dimension only).
                 for rp in self.net_players.iter().filter(|rp| rp.hell == s.hell) {
@@ -2284,7 +2301,7 @@ impl App {
                     // The selected block, textured, in the right fist.
                     let held = s.player.inventory.held().and_then(|st| st.info().place).map(|b| {
                         let pose = HandsPose { holding: true, tool: None, icon: None, ..hand_pose };
-                        let mut vs = build_held_block(&pose, b.info().tiles, b.info().emissive, b.info().render == wolfcraft_engine::block::RenderKind::Cross);
+                        let mut vs = if (b as u16) >= 1024 { wolfcraft_engine::renderer::model::build_held_construction(&pose,b) } else { build_held_block(&pose, b.info().tiles, b.info().emissive, b.info().render == wolfcraft_engine::block::RenderKind::Cross) };
                         for v in vs.iter_mut() {
                             v.pos = xf(v.pos);
                         }
@@ -2810,9 +2827,9 @@ fn block_top_colors(atlases: &AtlasManager) -> Vec<[u8; 3]> {
     use wolfcraft_engine::block::Block;
     let atlas = atlases.get(wolfcraft_assets::AtlasKind::Blocks);
     let img = atlas.image();
-    (0..=255u8)
+    (0..=wolfcraft_engine::construction::LAST_ID)
         .map(|id| {
-            let b = Block::from_u8(id);
+            let b = Block::from_id(id);
             let tile = b.info().tiles[2] as usize;
             if tile >= atlas.len() {
                 return [0, 0, 0];
@@ -3198,7 +3215,7 @@ fn block_outline(g: &wolfcraft_engine::cubesphere::Grid, c: wolfcraft_engine::cu
 fn worn_armor(inv: &wolfcraft_engine::inventory::Inventory) -> [Option<u8>; 4] {
     let mut out = [None; 4];
     for (i, slot) in inv.armor.iter().enumerate() {
-        out[i] = slot.map(|s| ((s.id.saturating_sub(wolfcraft_engine::items::ids::ARMOR_BASE)) / 4) as u8);
+        out[i] = slot.filter(|s| (wolfcraft_engine::items::ids::ARMOR_BASE..=wolfcraft_engine::items::ids::ARMOR_LAST).contains(&s.id)).map(|s| ((s.id - wolfcraft_engine::items::ids::ARMOR_BASE) / 4) as u8);
     }
     out
 }

@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 pub const DEFAULT_PORT: u16 = 25570;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -36,13 +36,13 @@ pub struct PlayerState {
 }
 
 /// One block change: cell `(face, i, j, k)` and the new block id.
-pub type Edit = ([i32; 4], u8);
+pub type Edit = ([i32; 4], u16);
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum C2S {
     Hello { protocol: u32, nick: String, skin: u8 },
     State(PlayerState),
-    Edit { cell: [i32; 4], block: u8, hell: bool },
+    Edit { cell: [i32; 4], block: u16, hell: bool },
     Chat(String),
 }
 
@@ -55,7 +55,7 @@ pub enum S2C {
     /// All earlier edits have been sent.
     Ready,
     Players(Vec<PlayerState>),
-    Edit { cell: [i32; 4], block: u8, hell: bool },
+    Edit { cell: [i32; 4], block: u16, hell: bool },
     Chat { from: String, text: String },
     Kick(String),
 }
@@ -158,6 +158,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn building_edits_do_not_truncate_wide_ids() {
+        let edit=C2S::Edit {cell:[0,1,2,3],block:2319,hell:false};
+        let mut data=Vec::new();write_msg(&mut data,&edit).unwrap();
+        let mut reader=std::io::BufReader::new(data.as_slice());
+        let actual:C2S=read_msg(&mut reader).unwrap().unwrap();assert_eq!(actual,edit);
+    }
+
+    #[test]
     fn messages_round_trip_as_single_lines() {
         let m = S2C::Edits { hell: true, list: vec![([1, -5, 7, 1030], 4)] };
         let mut buf = Vec::new();
@@ -176,3 +184,4 @@ mod tests {
         assert_eq!(with_port(" 192.168.0.10:1234 "), "192.168.0.10:1234");
     }
 }
+

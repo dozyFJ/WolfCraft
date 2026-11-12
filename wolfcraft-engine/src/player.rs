@@ -99,6 +99,9 @@ pub struct Player {
     pub inventory: Inventory,
     /// Holding the shield up (RMB): walks slowly.
     pub blocking: bool,
+    pub gliding: bool,
+    revive_guard: f32,
+    glide_wear: f64,
     pub survival: Survival,
     pub spawn: DVec3,
     pub sneaking: bool,
@@ -130,6 +133,9 @@ impl Player {
             mode,
             inventory: Inventory::default(),
             blocking: false,
+            gliding: false,
+            revive_guard: 0.0,
+            glide_wear: 0.0,
             survival: Survival::default(),
             spawn,
             sneaking: false,
@@ -195,12 +201,26 @@ impl Player {
     }
 
     pub fn damage(&mut self, amount: f32, difficulty: Difficulty) {
-        if self.is_creative() {
+        if self.is_creative() || self.revive_guard > 0.0 {
             return;
         }
         // Стойкость: −20 % per level.
         let k = 1.0 - 0.2 * self.effect_level(crate::magic::Effect::Resistance) as f32;
         self.survival.damage(amount * k.max(0.2), difficulty);
+        self.try_revive();
+    }
+
+    /// A rare heart must be held in either hand; it is consumed exactly once.
+    pub fn try_revive(&mut self) -> bool {
+        use crate::items::ids;
+        if !self.survival.dead || self.is_creative() {return false;}
+        let slot=if self.inventory.offhand.is_some_and(|s|s.id==ids::REVIVAL_HEART) {&mut self.inventory.offhand}
+            else {&mut self.inventory.slots[self.inventory.selected]};
+        let Some(stack)=slot.as_mut().filter(|s|s.id==ids::REVIVAL_HEART) else{return false};
+        stack.count=stack.count.saturating_sub(1);if stack.count==0 {*slot=None;}
+        self.survival.dead=false;self.survival.health=8.0;self.survival.hurt_flash=0.0;
+        self.revive_guard=3.0;self.body.vel=DVec3::ZERO;self.fall_peak=0.0;
+        true
     }
 
     /// Level of a running effect (0 = none).
@@ -248,6 +268,9 @@ impl Player {
     }
 
     pub fn respawn(&mut self) {
+        self.gliding = false;
+        self.revive_guard = 0.0;
+        self.glide_wear = 0.0;
         self.body = Body::new(self.spawn);
         self.survival = Survival::default();
         self.pitch = 0.0;
@@ -257,6 +280,8 @@ impl Player {
 
     /// One frame of movement and survival simulation.
     pub fn update(&mut self, world: &impl Voxels, c: &Controls, difficulty: Difficulty, dt: f64) {
+        self.revive_guard=(self.revive_guard-dt as f32).max(0.0);
+        self.try_revive();
         if self.survival.dead {
             return;
         }
@@ -288,7 +313,19 @@ impl Player {
         };
         // Creative flight speeds up with height: in space you cover distances quickly.
         let speed = if self.body.flying { speed * space_boost(world.grid(), world.grid().radial(self.body.pos)) } else { speed };
-        let input = MoveInput { wish, speed, jump: c.jump, up: c.jump, down: c.sneak };
+        self.gliding=!self.is_creative()&&!self.body.on_ground&&!self.body.in_water&&c.jump
+            && self.inventory.armor[1].is_some_and(|s|s.id==crate::items::ids::WINGS&&s.damage<512);
+        let speed=if self.gliding {12.0}else{speed};
+        if self.gliding {
+            wish=self.heading;
+            let up=self.up();let down=self.body.vel.dot(up);if down < -2.0 {self.body.vel+=up*(-2.0-down);}
+            self.glide_wear+=dt;
+            if self.glide_wear>=1.0 {
+                self.glide_wear-=1.0;
+                if let Some(w)=&mut self.inventory.armor[1] {w.damage=w.damage.saturating_add(1);if w.damage>=512 {self.inventory.armor[1]=None;}}
+            }
+        }
+        let input = MoveInput { wish, speed, jump: c.jump&&!self.gliding, up: c.jump, down: c.sneak };
         let altitude_before = crate::cubesphere::radial(self.body.pos);
         let was_grounded = self.body.on_ground;
         let before = self.body.pos;
@@ -337,6 +374,7 @@ impl Player {
             return;
         }
         self.tick_survival(c, difficulty, dt as f32);
+        self.try_revive();
     }
 
     fn animate(&mut self, dt: f32) {
@@ -360,6 +398,7 @@ impl Player {
         let moving = c.forward != 0.0 || c.strafe != 0.0;
         let scale = difficulty.hunger_scale();
         let up_vel = self.body.vel.dot(self.up());
+        let protected=self.revive_guard>0.;
         let s = &mut self.survival;
         s.hurt_flash = (s.hurt_flash - dt).max(0.0);
         if moving && self.body.on_ground {
@@ -397,7 +436,7 @@ impl Player {
                     _ => 5.0,
                 };
                 if s.health > floor {
-                    s.damage(1.0 / difficulty.damage_scale().max(0.01), difficulty);
+                    if !protected {s.damage(1.0 / difficulty.damage_scale().max(0.01), difficulty);}
                 }
             }
         } else {
@@ -410,7 +449,7 @@ impl Player {
                 s.drown_timer += dt;
                 if s.drown_timer >= 1.0 {
                     s.drown_timer = 0.0;
-                    s.damage(2.0, difficulty);
+                    if !protected {s.damage(2.0, difficulty);}
                 }
             }
         } else {
@@ -423,7 +462,7 @@ impl Player {
             s.lava_timer += dt;
             if s.lava_timer >= 0.5 {
                 s.lava_timer = 0.0;
-                s.damage(2.0, difficulty);
+                if !protected {s.damage(2.0, difficulty);}
             }
         } else {
             s.lava_timer = 0.0;
@@ -695,6 +734,17 @@ mod tests {
     }
 
     #[test]
+    fn wings_planing_requires_equipment_and_jump_and_spends_wear() {
+        let world=Ball(40.);let mut p=Player::new(DVec3::Y*90.,GameMode::Survival);
+        p.inventory.armor[1]=Some(crate::items::ItemStack::new(crate::items::ids::WINGS,1));
+        p.body.vel=-DVec3::Y*15.;
+        for _ in 0..90 {p.update(&world,&Controls{jump:true,..Default::default()},Difficulty::Normal,1./60.);}
+        assert!(p.gliding);assert!(p.body.vel.dot(p.up()) > -4.);assert!(p.inventory.armor[1].unwrap().damage>=1);
+        p.update(&world,&Controls::default(),Difficulty::Normal,1./60.);assert!(!p.gliding);
+        p.inventory.armor[1]=None;p.update(&world,&Controls{jump:true,..Default::default()},Difficulty::Normal,1./60.);assert!(!p.gliding);
+    }
+
+    #[test]
     fn save_roundtrip_keeps_everything() {
         let mut p = Player::new(DVec3::new(10.5, 46.25, -3.0), GameMode::Creative);
         p.body.flying = true;
@@ -815,5 +865,32 @@ mod calendar_tests {
         for idx in 0..12 {
             assert_eq!(m(month_start(t, idx) + 1.0), (idx, 1));
         }
+    }
+}
+
+
+#[cfg(test)]
+mod rare_reward_tests {
+    use super::*;
+    use crate::items::{ids,ItemStack};
+    #[test] fn held_heart_saves_once_and_grants_brief_protection(){
+        let mut p=Player::new(DVec3::Y*100.,GameMode::Survival);
+        p.inventory.offhand=Some(ItemStack::new(ids::REVIVAL_HEART,1));
+        p.damage(100.,Difficulty::Normal);
+        assert!(!p.survival.dead);assert_eq!(p.survival.health,8.);assert!(p.inventory.offhand.is_none());
+        p.damage(100.,Difficulty::Normal);assert_eq!(p.survival.health,8.);
+        p.revive_guard=0.;p.damage(100.,Difficulty::Normal);assert!(p.survival.dead);
+    }
+    #[test] fn heart_in_backpack_does_not_activate(){
+        let mut p=Player::new(DVec3::Y*100.,GameMode::Survival);
+        p.inventory.slots[12]=Some(ItemStack::new(ids::REVIVAL_HEART,1));
+        p.damage(100.,Difficulty::Normal);assert!(p.survival.dead);assert!(p.inventory.slots[12].is_some());
+    }
+    #[test] fn rare_equipment_keeps_wear_and_hand_on_reload(){
+        let mut p=Player::new(DVec3::Y*100.,GameMode::Survival);
+        let mut wings=ItemStack::new(ids::WINGS,1);wings.damage=211;
+        p.inventory.armor[1]=Some(wings);p.inventory.offhand=Some(ItemStack::new(ids::REVIVAL_HEART,1));
+        let q=Player::from_bytes(&p.to_bytes()).unwrap();assert_eq!(q.inventory,p.inventory);
+        assert_eq!(crate::items::armor_slot(ids::WINGS),Some(1));assert_eq!(crate::items::armor_points(ids::WINGS),0);
     }
 }

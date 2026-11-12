@@ -126,7 +126,7 @@ impl MeshData {
 pub struct MeshInput {
     pub key: ChunkKey,
     pub grid: Grid,
-    pub blocks: Box<[u8; PADDED_VOL]>,
+    pub blocks: Box<[u16; PADDED_VOL]>,
     pub sky_open: bool,
     /// Light sources that can reach this chunk: padded coordinates (may lie outside the
     /// padded box, in neighbouring chunks) and light level.
@@ -147,11 +147,11 @@ impl MeshInput {
     }
     #[inline]
     pub fn set(&mut self, x: i32, y: i32, z: i32, b: Block) {
-        self.blocks[Self::idx(x, y, z)] = b as u8;
+        self.blocks[Self::idx(x, y, z)] = b as u16;
     }
     #[inline]
     pub fn get(&self, x: i32, y: i32, z: i32) -> Block {
-        Block::from_u8(self.blocks[Self::idx(x, y, z)])
+        Block::from_id(self.blocks[Self::idx(x, y, z)])
     }
     #[inline]
     fn getv(&self, p: [i32; 3]) -> Block {
@@ -374,6 +374,10 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let b = inp.get(x, y, z);
+                if let Some((entry, rotation)) = crate::construction::entry(b as u16) {
+                    mesh_construction(inp, out, bl, x, y, z, entry, rotation);
+                    continue;
+                }
                 let mut boxes = b.boxes();
                 if boxes.is_empty() {
                     continue;
@@ -440,6 +444,39 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
                 }
             }
         }
+    }
+}
+
+fn mesh_construction(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32;3])->u32, x:i32,y:i32,z:i32, entry:&crate::construction::Entry, rotation:u8) {
+    use crate::construction::{self, Form};
+    let mut joined=0;
+    if entry.form==Form::Sofa {
+        // Left/right along the rotated sofa's local i axis.
+        let (dx,dz)=match rotation {0=>(0,1),1=>(1,0),2=>(0,-1),_=>(-1,0)};
+        for (sign,bit) in [(-1,1),(1,2)] {
+            if construction::entry(inp.get(x+dx*sign,y,z+dz*sign) as u16)
+                .is_some_and(|(e,r)|e.form==Form::Sofa&&e.material==entry.material&&r==rotation) { joined|=bit; }
+        }
+    }
+    let model=construction::geometry::model(entry.form,rotation,joined);
+    let sky=sky_at(inp,[x,y,z]).max(sky_at(inp,[x,y+1,z])) as f32/15.;
+    let lit=bl([x,y,z]).max(bl([x,y+1,z]))<<20;
+    for face in &model.faces {
+        let (tile,alpha,emissive)=construction::surface(entry,face.surface);
+        let a=glam::Vec3::from_array(face.points[1])-glam::Vec3::from_array(face.points[0]);
+        let b=glam::Vec3::from_array(face.points[2])-glam::Vec3::from_array(face.points[0]);
+        let normal=a.cross(b);if normal.length_squared()<1e-10 {continue;}
+        // Padded axes are j,k,i, including the shader's six normal directions.
+        let normal=[normal.y,normal.z,normal.x];
+        let axis=(0..3).max_by(|a,b|normal[*a].abs().total_cmp(&normal[*b].abs())).unwrap();
+        let f=axis*2+usize::from(normal[axis]<0.);
+        let (verts,idx)=if alpha {(&mut out.water,&mut out.water_idx)}else{(&mut out.opaque,&mut out.opaque_idx)};
+        let base=verts.len() as u32;
+        for (p,uv) in face.points.iter().zip([[0.,0.],[1.,0.],[1.,1.],[0.,1.]]) {
+            verts.push(Vertex {pos:inp.to_local(x as f32+p[1],y as f32+p[2],z as f32+p[0]),uv,flags:tile as u32|((emissive as u32)<<16)|((f as u32)<<17)|((alpha as u32)<<27)|lit,light:[if emissive{1.}else{0.9},if emissive{1.}else{sky}]});
+        }
+        idx.extend_from_slice(&[base,base+1,base+2,base,base+2,base+3]);
+        if !alpha { idx.extend_from_slice(&[base,base+2,base+1,base,base+3,base+2]); }
     }
 }
 
@@ -619,6 +656,16 @@ mod tests {
     }
 
     #[test]
+    fn curved_glass_uses_alpha_pass_without_water_waves() {
+        let glass=crate::construction::block(crate::construction::Form::Arc90Large,8,0).unwrap();
+        let mesh=mesh_chunk(&input_with(&[(5,5,5,glass)]));
+        assert!(mesh.opaque.is_empty());assert!(!mesh.water.is_empty());
+        assert!(mesh.water.iter().all(|v|v.flags&(1<<27)!=0));
+        let table=crate::construction::block(crate::construction::Form::GlassTable,0,0).unwrap();
+        let mesh=mesh_chunk(&input_with(&[(5,5,5,table)]));assert!(!mesh.opaque.is_empty()&&!mesh.water.is_empty());
+    }
+
+    #[test]
     fn single_block_has_six_faces() {
         let m = mesh_chunk(&input_with(&[(5, 5, 5, Block::Stone)]));
         assert_eq!(m.opaque.len(), 24);
@@ -773,3 +820,4 @@ mod tests {
         assert_eq!(both.quad_count(), 6 + 12, "cube keeps 6 faces, slab adds 6 double-sided");
     }
 }
+

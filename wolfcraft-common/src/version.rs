@@ -4,7 +4,8 @@
 /// step in `WorldConfig::load`.
 ///  1 — first release.
 ///  2 — `format_version` field, `dimension.txt`, `commands.txt`, `hell/` regions.
-pub const SAVE_FORMAT: u32 = 2;
+///  3 — 16-bit block IDs; WCR2 regions. WCR1 regions are still read and converted on write.
+pub const SAVE_FORMAT: u32 = 3;
 
 /// Version of the modding API (WolfForge). Mods declare the version they were written for.
 pub const MOD_API_VERSION: u32 = 1;

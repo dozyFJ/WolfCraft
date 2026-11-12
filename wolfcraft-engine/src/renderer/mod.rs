@@ -609,7 +609,7 @@ impl WorldRenderer {
         let model_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("model-vb"), size: (model_cap * std::mem::size_of::<ModelVertex>()) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
 
         let hands_cap = 256;
-        let held_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("held-vb"), size: (72 * std::mem::size_of::<Vertex>()) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let held_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("held-vb"), size: (8192 * std::mem::size_of::<Vertex>()) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let zero_inst = device.create_buffer(&wgpu::BufferDescriptor { label: Some("zero-inst"), size: 16, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         queue.write_buffer(&zero_inst, 0, bytemuck::cast_slice(&[0.0f32; 4]));
         let hands_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("hands-vb"), size: (hands_cap * std::mem::size_of::<ModelVertex>()) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
@@ -886,7 +886,7 @@ impl WorldRenderer {
     /// world with their own depth, so they never sink into nearby blocks.
     /// Sets the held block (from `model::build_held_block`); empty = nothing in hand.
     pub fn set_held(&mut self, queue: &wgpu::Queue, verts: &[Vertex]) {
-        let n = verts.len().min(72);
+        let n = verts.len().min(8192);
         if n > 0 {
             queue.write_buffer(&self.held_buf, 0, bytemuck::cast_slice(&verts[..n]));
         }
@@ -1323,3 +1323,4 @@ mod hand_preview {
         std::fs::write(out, s).unwrap();
     }
 }
+

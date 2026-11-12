@@ -56,7 +56,12 @@ pub mod items {
     pub const POTION_BASE: u16 = 83;
     /// Tipped arrows: poison, slowness, harm.
     pub const TIPPED_BASE: u16 = 92;
-    pub const COUNT: u16 = 95;
+    pub const REVIVAL_HEART:u16=95;
+    pub const WINGS:u16=96;
+    pub const RITUAL_SEAL:u16=97;
+    pub const RESONANCE_RUNE:u16=98;
+    pub const VOLCANIC_CORE:u16=99;
+    pub const COUNT: u16 = 100;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -579,6 +584,16 @@ pub(crate) fn build() -> Vec<(String, Image)> {
                 q.put(x, y, Rgb(0.92, 0.92, 0.90), 1.0);
             }
         }));
+    }
+    l.add(REVIVAL_HEART,"revival_heart",p(|q|{
+        for y in 2..14 {for x in 2..14 {let dx=(x as i32-8).abs();let dy=(y as i32-7).abs();if dx+dy<7 {q.put(x,y,if dx+dy>4 {Rgb(0.96,0.71,0.22)}else{Rgb(0.27,0.88,0.69)},1.0);}}}
+    }));
+    l.add(WINGS,"wind_wings",p(|q|{
+        for y in 2..14u32 {let w=(14-y).min(7);for x in 0..w {let c=Rgb(0.35,0.72,0.88).add(if (x+y)%3==0{0.12}else{0.0});q.put(x,y,c,1.);q.put(15-x,y,c,1.);}}
+        for y in 5..12 {q.put(7,y,Rgb(0.72,0.62,0.40),1.);q.put(8,y,Rgb(0.72,0.62,0.40),1.);}
+    }));
+    for (id,name,color) in [(RITUAL_SEAL,"ritual_seal",Rgb(0.86,0.65,0.34)),(RESONANCE_RUNE,"resonance_rune",Rgb(0.58,0.32,0.92)),(VOLCANIC_CORE,"volcanic_core",Rgb(0.98,0.35,0.12))] {
+        l.add(id,name,p(|q|{for y in 2..14u32 {for x in 2..14u32 {let d=(x as i32-8).abs()+(y as i32-8).abs();if d<7 {q.put(x,y,color.scale(if d>4{0.65}else{1.0}),1.);}}}for n in 5..11 {q.put(8,n,Rgb(0.95,0.94,0.75),1.);}q.put(7,6,Rgb(0.95,0.94,0.75),1.);}));
     }
     for (_, img) in l.0.iter_mut() {
         outline(img);

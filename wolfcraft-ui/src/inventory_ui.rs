@@ -21,7 +21,7 @@ const ARMOR: usize = 95;
 
 /// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
 // "Техника" is put away for now (its items are still under "Все" and in the search).
-const CREATIVE_TABS: [&str; 12] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "Инвентарь"];
+const CREATIVE_TABS: [&str; 17] = ["Все", "Конструктор", "Мебель", "Стекло", "Двери", "Декор", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "Инвентарь"];
 const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 
 
@@ -29,6 +29,9 @@ const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 pub struct InventoryUiState {
     pub tab: usize,
     pub search: String,
+    pub build_form: usize,
+    pub build_material: usize,
+    pub build_open: bool,
     pub grid: CraftGrid,
     /// Slot being dragged (inventory or grid id).
     drag_slot: Option<usize>,
@@ -85,10 +88,10 @@ fn slot_widget(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, stack: Op
 /// Order of items in the creative grid.
 fn sort_key(id: ItemId) -> (usize, u8, String) {
     let cat = CREATIVE_TABS.iter().position(|c| *c == items::category(id)).unwrap_or(99);
-    let group = if id >= items::ITEM_BASE {
+    let group = if (items::ITEM_BASE..1024).contains(&id) {
         if items::info(id).tool.is_some() || items::armor_slot(id).is_some() { 5 } else { 4 }
     } else {
-        let b = wolfcraft_engine::block::Block::from_u8(id as u8);
+        let b = wolfcraft_engine::block::Block::from_id(id);
         match b.info().render {
             wolfcraft_engine::block::RenderKind::Cross => 3,
             _ if !b.boxes().is_empty() => 2,
@@ -194,6 +197,10 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     let width = left_w + 8.0;
     let title = if near_table { "Верстак" } else { "Инвентарь" };
     let dismissed = crate::ui_components::game_screen(ctx, "inventory", title, width.min(ctx.screen_rect().width() - 40.0), |ui| {
+        let (banner,_)=ui.allocate_exact_size(Vec2::new(width.min(ui.available_width()),28.),Sense::hover());
+        icons.paint_panel(ui.painter(),banner,if near_table{wolfcraft_assets::gui::PANEL_WOOD}else{wolfcraft_assets::gui::PANEL_DARK},Color32::WHITE);
+        ui.painter().text(banner.center(),Align2::CENTER_CENTER,title,FontId::proportional(15.),Color32::WHITE);
+        ui.add_space(6.);
         state.tab = 0;
         result.crafted = survival_layout(ui, icons, &p, state, inv, near_table, left_w, &mut slot_rects);
     });
@@ -319,6 +326,50 @@ fn draw_slot(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUi
     }
 }
 
+/// A form/material selector shared by the creative palette and the survival workbench.
+fn construction_panel(ui: &mut Ui, icons: &GuiIcons, state: &mut InventoryUiState, inv: &mut Inventory, creative: bool) -> Option<String> {
+    use wolfcraft_engine::construction as c;
+    use crate::ui_components::{pill_button, ButtonKind};
+    state.build_form=state.build_form.min(c::FORMS.len()-1);
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Форма");
+        egui::ComboBox::from_id_salt("build-form").selected_text(c::FORMS[state.build_form].1).width(220.0).show_ui(ui, |ui| {
+            for (i,(_,name)) in c::FORMS.iter().enumerate() {ui.selectable_value(&mut state.build_form,i,*name);}
+        });
+        let form=c::FORMS[state.build_form].0;
+        let valid:Vec<usize>=c::ENTRIES.iter().filter(|e|e.form==form).map(|e|e.material).collect();
+        if !valid.contains(&state.build_material) { state.build_material=valid[0]; }
+        ui.label("Материал");
+        egui::ComboBox::from_id_salt("build-material").selected_text(c::MATERIALS[state.build_material].name).width(170.0).show_ui(ui, |ui| {
+            for m in valid {ui.selectable_value(&mut state.build_material,m,c::MATERIALS[m].name);}
+        });
+    });
+    let form=c::FORMS[state.build_form].0;
+    let entry=c::ENTRIES.iter().find(|e|e.form==form&&e.material==state.build_material)?;
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        let (rect,_)=ui.allocate_exact_size(Vec2::splat(110.0),Sense::hover());
+        icons.paint_item(ui.painter(),rect.shrink(6.0),entry.id);
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new(entry.name).font(bold_font(16.0)));
+            ui.label("Поворот при установке — по направлению взгляда");
+            if matches!(form,c::Form::Sofa|c::Form::Counter|c::Form::KitchenBase) { ui.label("Ставьте секции рядом, чтобы собрать мебель нужной длины"); }
+        });
+    });
+    let recipe=c::recipe(entry.id)?;
+    if !creative {
+        ui.label("Нужно на верстаке:");
+        for (id,count) in &recipe.ingredients {ui.label(format!("{} ×{}  (есть {})",items::info(*id).name,count,inv.count(*id)));}
+    }
+    let can=creative||inv.can_craft(&recipe,true);
+    if pill_button(ui,icons,Some(icon::PLUS),if creative{"Взять в руку"}else{"Изготовить"},ButtonKind::Primary,180.0,can).clicked() {
+        if creative {inv.slots[inv.selected]=Some(ItemStack::new(entry.id,64));}
+        else if !inv.craft(&recipe,true) {return None;}
+        return Some(format!("{} готов",entry.name));
+    }
+    None
+}
+
 /// Survival inventory: character (with the second-hand slot) and crafting on top,
 /// the whole backpack below, the hotbar at the bottom.
 #[allow(clippy::too_many_arguments)]
@@ -326,6 +377,15 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     let mut crafted = None;
     ui.set_width(width);
     if near_table {
+        ui.horizontal(|ui| {
+            use crate::ui_components::{pill_button, ButtonKind};
+            if pill_button(ui, icons, None, "Рецепты", if state.build_open {ButtonKind::Secondary}else{ButtonKind::Primary}, 120.0, true).clicked() { state.build_open=false; }
+            if pill_button(ui, icons, Some(icon::HAMMER), "Конструктор", if state.build_open {ButtonKind::Primary}else{ButtonKind::Secondary}, 160.0, true).clicked() { state.build_open=true; }
+        });
+        ui.add_space(8.0);
+        if state.build_open {
+            crafted = construction_panel(ui, icons, state, inv, false);
+        } else {
         // The crafting table has its own screen: a recipe book on the left (tap a recipe to
         // lay it out), the big 3×3 grid on the right; no character panel.
         ui.horizontal_top(|ui| {
@@ -340,6 +400,7 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 crafted = crafting_grid(ui, icons, p, state, inv, near_table, slot_rects);
             });
         });
+        }
     } else {
     ui.horizontal_top(|ui| {
         // ---- Character ----
@@ -573,6 +634,7 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                     let inner = rect.shrink(tab * 0.18);
                     match i {
                         0 => icons.paint(ui.painter(), inner, icon::STAR, if sel { p.accent } else { p.text }),
+                        _ if *name == "Конструктор" => icons.paint(ui.painter(), inner, icon::HAMMER, if sel { p.accent } else { p.text }),
                         BACKPACK_TAB => icons.paint(ui.painter(), inner, icon::BACKPACK, if sel { p.accent } else { p.text }),
                         _ => {
                             if let Some(id) = palette_all.iter().copied().find(|id| items::category(*id) == *name) {
@@ -620,6 +682,10 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             }
         });
         return;
+    } else if CREATIVE_TABS[state.tab] == "Конструктор" {
+        egui::ScrollArea::vertical().id_salt("creative-constructor").max_height(grid_h).show(ui, |ui| {
+            if let Some(message) = construction_panel(ui, icons, state, inv, true) { result.crafted = Some(message); }
+        });
     } else {
         let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| (in_tab(*id, state.tab) || !state.search.trim().is_empty()) && matches_search(*id, &state.search)).collect();
         // Sorted: by category (in "Все"), then full blocks, shaped blocks (stairs, slabs,
@@ -635,8 +701,8 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             .auto_shrink([false, false])
             .drag_to_scroll(true)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-            .show(&mut ui2, |ui| {
-            for chunk in list.chunks(cols) {
+            .show_rows(&mut ui2, cell + GAP, list.len().div_ceil(cols), |ui, visible| {
+            for chunk in list.chunks(cols).skip(visible.start).take(visible.end-visible.start) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::splat(GAP);
                     for id in chunk {
@@ -784,6 +850,20 @@ mod tests {
     }
 
     #[test]
+    fn construction_selector_can_give_any_visible_material_shape() {
+        use wolfcraft_engine::construction as c;
+        let ctx=egui::Context::default();crate::theme_manager::install(&ctx);crate::theme_manager::apply(&ctx,wolfcraft_engine::config::ThemeMode::Dark);
+        let atlas=wolfcraft_assets::AtlasManager::new(None).unwrap();let icons=GuiIcons::new(&ctx,&atlas);
+        let mut inv=Inventory::default();let mut state=InventoryUiState::default();
+        state.build_form=c::FORMS.iter().position(|(f,_)|*f==c::Form::Arc45Large).unwrap();
+        state.build_material=8;
+        let raw=egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(800.,540.))),..Default::default()};
+        let _=ctx.run(raw,|ctx|{egui::CentralPanel::default().show(ctx,|ui|{construction_panel(ui,&icons,&mut state,&mut inv,true);});});
+        assert_eq!(state.build_material,8);
+        assert!(c::block(c::FORMS[state.build_form].0,state.build_material,0).is_some());
+    }
+
+    #[test]
     fn both_modes_render() {
         let (ctx, icons) = ctx_with_icons();
         let mut st = InventoryUiState::default();
@@ -818,3 +898,4 @@ mod tests {
         assert!(matches_search(Block::Lamp as ItemId, "  "));
     }
 }
+

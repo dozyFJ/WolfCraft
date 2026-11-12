@@ -128,6 +128,8 @@ pub struct GameSession {
     portal_t: f32,
     pending_portal: Option<wolfcraft_engine::cubesphere::Cell>,
     pub block_commands: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, String>,
+    pub storage_bank: wolfcraft_engine::storage_bank::StorageBank,
+    pub boss_book: wolfcraft_engine::bosses::BossBook,
     pub containers: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, Vec<Option<wolfcraft_engine::items::ItemStack>>>,
     /// Smelting progress in seconds per furnace.
     furnace_t: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, f32>,
@@ -205,6 +207,8 @@ impl GameSession {
             ench_seed: 1,
             prev_use_held: false,
             containers: Default::default(),
+            storage_bank: Default::default(),
+            boss_book: Default::default(),
             block_commands: Default::default(),
             hell: false,
             nickname: "Игрок".to_string(),
@@ -238,6 +242,8 @@ impl GameSession {
         };
         // Studio baseplates stay empty: no creatures appear.
         s.mobs.spawning = s.cfg.world_type != wolfcraft_engine::config::WorldType::Baseplate;
+        s.storage_bank=wolfcraft_engine::storage_bank::StorageBank::load(&s.dir.join("storage_bank.bin"));
+        s.boss_book=wolfcraft_engine::bosses::BossBook::load(&s.dir.join("bosses.txt"));
         s.load_containers();
         s.load_block_commands();
         s.load_dimension();
@@ -262,6 +268,7 @@ impl GameSession {
         self.clock += dt;
         self.chunks.update(self.player_chunk(), view, 6);
         let mut events = Vec::new();
+        let mut used_stack=None;
         if frozen {
             return events;
         }
@@ -443,6 +450,7 @@ impl GameSession {
             events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held, dt, self.cfg.seed));
             // A tap on a creature in the crosshair hits it (touch screens: a short tap is "use").
             if input.use_pressed && !self.try_attack(0.25) {
+                used_stack=self.player.inventory.held();
                 events.extend(self.interaction.use_item(&mut self.chunks, &mut self.player, hit));
             }
             if input.pick_pressed {
@@ -569,6 +577,17 @@ impl GameSession {
             }
         }
         // Broken blocks drop their items into the world; broken chests spill their contents.
+        self.handle_building_events(&mut events, used_stack);
+        // Boss kills pay once per altar, even when delivered by a projectile.
+        for death in std::mem::take(&mut self.mobs.boss_deaths) {
+            if self.boss_book.finish(death.kind,death.home) {
+                for reward in death.kind.rewards() {if let Some(rest)=self.player.inventory.add(reward){self.drops.pop_shiny(rest,death.at);}}
+                self.player.survival.add_xp(100);
+                self.item_name=Some((format!("{} побеждён — редкая награда получена",death.kind.name()),4.0));
+                let _=self.boss_book.save(&self.dir.join("bosses.txt"));
+            }
+        }
+        for mob in &self.mobs.mobs {if let Some(role)=&mob.boss {if let Some(record)=self.boss_book.records.get_mut(&(role.kind,role.home)){if !record.defeated{record.hp=mob.hp.max(1.0);}}}}
         // Ore loot jumps out higher and sparkles.
         let ores: Vec<_> = events.iter().filter_map(|e| match e {
             InteractionEvent::Broken { pos, block } if wolfcraft_engine::items::ore_glow(*block).is_some() => Some(*pos),
@@ -709,12 +728,67 @@ impl GameSession {
         events
     }
 
+    fn handle_building_events(&mut self, events:&mut Vec<InteractionEvent>, used_stack:Option<wolfcraft_engine::items::ItemStack>) {
+        use wolfcraft_engine::{construction as c, items::{ItemStack,ids}, block::Block};
+        let broken:Vec<_>=events.iter().filter_map(|e|if let InteractionEvent::Broken{pos,block}=e{Some((*pos,*block))}else{None}).collect();
+        for (pos,block) in broken {
+            if let Some(item)=self.storage_bank.frames.remove(&(self.hell,pos)){events.push(InteractionEvent::Dropped{pos,stack:item});}
+            if c::is_portable(block) {
+                if let Some(slots)=self.containers.remove(&pos) {
+                    if slots.iter().any(Option::is_some) {
+                        match self.storage_bank.pack(slots) {
+                            Ok(tag)=>{let mut tagged=false;for e in events.iter_mut(){if let InteractionEvent::Dropped{pos:p,stack}=e{if *p==pos&&stack.id==block.base_item() as u16{stack.damage=tag;tagged=true;}}}if !tagged{let mut stack=ItemStack::of_block(block.base_item(),1);stack.damage=tag;events.push(InteractionEvent::Dropped{pos,stack});}},
+                            Err(slots)=>for stack in slots.into_iter().flatten(){events.push(InteractionEvent::Dropped{pos,stack});}
+                        }
+                    }
+                }
+            }
+        }
+        let copy=events.clone();
+        for event in copy {match event {
+            InteractionEvent::Placed{pos,block} if c::is_portable(block)=>{if let Some(item)=used_stack.filter(|s|s.damage>0&&s.info().place.is_some_and(c::is_portable)){if let Some(slots)=self.storage_bank.unpack(item.damage){self.containers.insert(pos,slots);}}},
+            InteractionEvent::FrameUse{pos}=>{
+                let old=self.storage_bank.frames.remove(&(self.hell,pos));
+                if let Some(mut item)=self.player.inventory.held() {
+                    item.count=1;
+                    if !self.player.is_creative(){let index=self.player.inventory.selected;if let Some(stack)=&mut self.player.inventory.slots[index]{stack.count-=1;if stack.count==0{self.player.inventory.slots[index]=None;}}}
+                    self.storage_bank.frames.insert((self.hell,pos),item);
+                }
+                if let Some(item)=old{if let Some(rest)=self.player.inventory.add(item){self.drops.pop_from_block(rest,self.chunks.grid().cell_center(pos));}}
+            },
+            InteractionEvent::ActivateBoss{pos,kind}=>{
+                if self.cfg.difficulty==wolfcraft_engine::config::Difficulty::Peaceful {self.item_name=Some(("Для боя отключите мирную сложность".into(),3.));continue;}
+                if self.hell {self.item_name=Some(("Алтари действуют только на родной планете".into(),3.));continue;}
+                if self.mobs.mobs.iter().any(|m|m.boss.is_some()){self.item_name=Some(("Сначала завершите текущий бой".into(),3.));continue;}
+                let hp=match self.boss_book.begin(kind,pos){Ok(hp)=>hp,Err(text)=>{self.item_name=Some((text.into(),3.));continue;}};
+                if !self.player.is_creative()&&self.player.inventory.count(ids::RITUAL_SEAL)==0{self.item_name=Some(("Для вызова нужна Печать древних из подземелья".into(),4.));continue;}
+                if !self.player.is_creative(){self.player.inventory.take(ids::RITUAL_SEAL,1);}
+                let anchor=self.chunks.grid().cell_center(pos);let up=wolfcraft_engine::physics::up_at(anchor);let at=anchor+up*1.2;
+                let mut mob=wolfcraft_engine::mobs::Mob::new(wolfcraft_engine::mobs::MobKind::Ghoul,at,self.player.heading);
+                mob.hp=hp;mob.boss=Some(wolfcraft_engine::bosses::BossRole::new(kind,pos,at));self.mobs.mobs.push(mob);
+                self.item_name=Some((format!("{} пробуждается",kind.name()),3.));
+            }, _=>{}
+        }}
+        let _=Block::Air;
+    }
+
     /// Slots for a container block, created on first use: the furnace has input, fuel and
     /// output, the forge item, material and result, chests and barrels 27.
     pub fn container_slots(&mut self, pos: wolfcraft_engine::cubesphere::Cell, block: wolfcraft_engine::block::Block) -> &mut Vec<Option<wolfcraft_engine::items::ItemStack>> {
         use wolfcraft_engine::block::Block as B;
+        if wolfcraft_engine::construction::is_shared(block) {return &mut self.storage_bank.shared;}
+        let block=block.base_kind();
         let n = if matches!(block, B::ElectricFurnace | B::MachineCasing) { 3 } else if block == B::EnchantTable { 2 } else { 27 };
-        let v = self.containers.entry(pos).or_insert_with(|| vec![None; n]);
+        let v = self.containers.entry(pos).or_insert_with(|| {
+            let mut slots=vec![None;n];
+            // Player-placed chests use construction IDs; legacy chest IDs identify generated loot.
+            if block==B::Chest {
+                use wolfcraft_engine::items::{ids,ItemStack};
+                slots[0]=Some(ItemStack::new(ids::RITUAL_SEAL,1));
+                slots[1]=Some(ItemStack::of_block(B::IronOre,3));
+                slots[2]=Some(ItemStack::of_block(B::Torch,8));
+            } slots
+        });
         // Furnaces from before the fuel slot: [input, output] → [input, fuel, output].
         if block == B::ElectricFurnace && v.len() == 2 {
             let out = v.pop().flatten();
@@ -737,7 +811,7 @@ impl GameSession {
         use wolfcraft_engine::items::ItemStack;
         let cells: Vec<_> = self.containers.keys().copied().collect();
         for c in cells {
-            match self.chunks.get_block(c) {
+            match self.chunks.get_block(c).map(|b|b.base_kind()) {
                 Some(B::ElectricFurnace) => {
                     self.container_slots(c, B::ElectricFurnace);
                     let v = &self.containers[&c];
@@ -825,6 +899,8 @@ impl GameSession {
 
     /// Swaps planet + chunk streaming for the other dimension (the player is not moved).
     fn enter_dimension(&mut self, hell: bool) {
+        self.save_containers();
+        self.containers.clear();
         let planet = Arc::new(if hell { Planet::new_hell(&self.cfg) } else { Planet::new(&self.cfg) });
         let dir = if hell { self.dir.join("hell") } else { self.dir.clone() };
         let Ok(storage) = wolfcraft_engine::storage::Storage::open(&dir) else {
@@ -835,6 +911,7 @@ impl GameSession {
         self.chunks = ChunkManager::new(planet, Arc::new(storage));
         self.mobs = wolfcraft_engine::mobs::MobManager::new(self.cfg.seed);
         self.hell = hell;
+        self.load_containers();
         self.dimension_changed = true;
     }
 
@@ -898,7 +975,7 @@ impl GameSession {
     }
 
     fn containers_path(&self) -> PathBuf {
-        self.dir.join("containers.txt")
+        self.dir.join(if self.hell {"containers_hell.txt"}else{"containers.txt"})
     }
 
     fn load_containers(&mut self) {
@@ -933,6 +1010,8 @@ impl GameSession {
 
     /// Writes player.dat, edited chunks and world.toml.
     pub fn save(&mut self) {
+        if let Err(e)=self.storage_bank.save(&self.dir.join("storage_bank.bin")){log::error!("storage bank: {e}");}
+        if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}
         self.save_containers();
         self.save_block_commands();
         let dim = if self.hell {
@@ -2284,3 +2363,4 @@ pub fn tipped_effect(id: wolfcraft_engine::items::ItemId) -> Option<wolfcraft_en
     use wolfcraft_engine::magic::Effect;
     (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id).then(|| [Effect::Poison, Effect::Slowness, Effect::Harm][(id - ids::TIPPED_BASE) as usize])
 }
+

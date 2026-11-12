@@ -22,7 +22,7 @@ pub struct State {
     pub world_toml: String,
     pub dir: PathBuf,
     /// Latest block per cell: `[overworld, hell]`.
-    pub edits: [HashMap<[i32; 4], u8>; 2],
+    pub edits: [HashMap<[i32; 4], u16>; 2],
     pub players: HashMap<u32, Player>,
     next_id: u32,
     pub log: VecDeque<String>,
@@ -78,7 +78,7 @@ impl State {
         self.drop_player(id, "выгнан");
     }
 
-    fn append_edit(&self, hell: bool, cell: [i32; 4], block: u8) {
+    fn append_edit(&self, hell: bool, cell: [i32; 4], block: u16) {
         let line = format!("{} {} {} {} {} {}\n", hell as u8, cell[0], cell[1], cell[2], cell[3], block);
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("edits.log")) {
             let _ = f.write_all(line.as_bytes());
@@ -87,13 +87,13 @@ impl State {
 }
 
 /// Parses `edits.log` (later lines win).
-pub fn load_edits(dir: &Path) -> [HashMap<[i32; 4], u8>; 2] {
+pub fn load_edits(dir: &Path) -> [HashMap<[i32; 4], u16>; 2] {
     let mut out = [HashMap::new(), HashMap::new()];
     if let Ok(text) = std::fs::read_to_string(dir.join("edits.log")) {
         for line in text.lines() {
             let n: Vec<i64> = line.split_whitespace().filter_map(|x| x.parse().ok()).collect();
             if n.len() == 6 {
-                out[(n[0] != 0) as usize].insert([n[1] as i32, n[2] as i32, n[3] as i32, n[4] as i32], n[5] as u8);
+                out[(n[0] != 0) as usize].insert([n[1] as i32, n[2] as i32, n[3] as i32, n[4] as i32], n[5] as u16);
             }
         }
     }
@@ -383,3 +383,4 @@ mod tests {
         assert_eq!(load_edits(&dir)[0].get(&[2, 10, 11, 1030]), Some(&7));
     }
 }
+

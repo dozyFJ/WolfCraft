@@ -60,7 +60,7 @@ pub fn parse_block(name: &str) -> Option<Block> {
         _ => name,
     };
     let id = items::find_item(alias)?;
-    (id < items::ITEM_BASE).then(|| Block::from_u8(id as u8)).filter(|b| *b != Block::Air || id == 0)
+    (id < items::ITEM_BASE || id >= 1024).then(|| Block::from_id(id)).filter(|b| *b != Block::Air || id == 0)
 }
 
 impl WorldEdit {
@@ -438,3 +438,4 @@ pub fn brush(s: &mut GameSession, op: BrushOp, radius: i32, cube: bool, block: B
     }
     apply(s, cells).0
 }
+

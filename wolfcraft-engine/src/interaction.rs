@@ -28,6 +28,8 @@ pub enum InteractionEvent {
     Placed { pos: Cell, block: Block },
     Ate { hunger: f32 },
     OpenCrafting,
+    FrameUse {pos:Cell},
+    ActivateBoss {pos:Cell,kind:crate::bosses::BossKind},
     /// Right click on a chest or electric furnace.
     OpenContainer { pos: Cell, block: Block },
     /// A broken block dropped an item into the world (only with `Interaction::spill`).
@@ -172,7 +174,11 @@ impl Interaction {
     pub fn use_item(&mut self, world: &mut impl WorldEdit, player: &mut Player, hit: Option<Hit>) -> Vec<InteractionEvent> {
         let mut events = Vec::new();
         if let Some(h) = hit {
-            if h.block == Block::CraftingTable && !player.sneaking {
+            if !player.sneaking {
+                if crate::construction::entry(h.block as u16).is_some_and(|(e,_)|e.form==crate::construction::Form::ItemFrame) {events.push(InteractionEvent::FrameUse{pos:h.cell});return events;}
+                if let Some(kind)=crate::construction::altar(h.block){events.push(InteractionEvent::ActivateBoss{pos:h.cell,kind});return events;}
+            }
+            if h.block.base_kind() == Block::CraftingTable && !player.sneaking {
                 events.push(InteractionEvent::OpenCrafting);
                 return events;
             }
@@ -222,8 +228,9 @@ impl Interaction {
                 return events;
             }
             // Chest and electric furnace open their own window (sneak to place blocks instead).
-            if matches!(h.block, Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::EnchantTable | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) && !player.sneaking {
-                events.push(InteractionEvent::OpenContainer { pos: h.cell, block: h.block });
+            let furniture_container = crate::construction::is_container(h.block);
+            if (furniture_container || matches!(h.block.base_kind(), Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::EnchantTable | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB)) && !player.sneaking {
+                events.push(InteractionEvent::OpenContainer { pos: h.cell, block: h.block.base_kind() });
                 return events;
             }
         }
@@ -778,3 +785,4 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
         _ => return None,
     })
 }
+

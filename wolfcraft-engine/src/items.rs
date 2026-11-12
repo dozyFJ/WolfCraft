@@ -1,6 +1,6 @@
 //! Items, stacks, drops and mining rules.
 //!
-//! Item ids 0..255 are blocks (same number as `Block as u8`); ids from 256 are plain items.
+//! Legacy blocks keep IDs 0..255; plain items keep 256..350; construction blocks use 1024+.
 
 use crate::block::{Block, RenderKind, ToolKind};
 use crate::planet::{hash3, to01};
@@ -71,7 +71,12 @@ pub mod ids {
     /// Tipped arrows: poison, slowness, harm.
     pub const TIPPED_BASE: ItemId = 348;
     pub const TIPPED_LAST: ItemId = 350;
-    pub const LAST: ItemId = 350;
+    pub const REVIVAL_HEART: ItemId = 351;
+    pub const WINGS: ItemId = 352;
+    pub const RITUAL_SEAL: ItemId = 353;
+    pub const RESONANCE_RUNE: ItemId = 354;
+    pub const VOLCANIC_CORE: ItemId = 355;
+    pub const LAST: ItemId = 355;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -128,6 +133,7 @@ pub fn armor_points(id: ItemId) -> u8 {
 
 /// Armor slot (0 helmet … 3 boots) of an armor item.
 pub fn armor_slot(id: ItemId) -> Option<usize> {
+    if id == ids::WINGS { return Some(1); }
     (ids::ARMOR_BASE..=ids::ARMOR_LAST).contains(&id).then(|| ((id - ids::ARMOR_BASE) % 4) as usize)
 }
 
@@ -139,12 +145,17 @@ fn plain(name: &'static str, icon: u16) -> ItemInfo {
 
 pub fn info(id: ItemId) -> ItemInfo {
     use wolfcraft_assets::items as sp;
-    if id < ITEM_BASE {
-        let b = Block::from_u8(id as u8);
+    if id < ITEM_BASE || id >= 1024 {
+        let b = Block::from_id(id);
         let i = b.info();
-        return ItemInfo { name: i.name, max_stack: 64, icon: Icon::Block(i.tiles[0]), place: Some(b), tool: None, attack: 1.0, food: None, durability: 0 };
+        return ItemInfo { name: i.name, max_stack: if crate::construction::is_portable(b) {1}else{64}, icon: Icon::Block(i.tiles[0]), place: Some(b), tool: None, attack: 1.0, food: None, durability: 0 };
     }
     match id {
+        ids::REVIVAL_HEART => ItemInfo {max_stack:1,..plain("Сердце возрождения",sp::REVIVAL_HEART)},
+        ids::WINGS => ItemInfo {max_stack:1,durability:512,..plain("Крылья ветра",sp::WINGS)},
+        ids::RITUAL_SEAL => plain("Печать древних",sp::RITUAL_SEAL),
+        ids::RESONANCE_RUNE => plain("Руна резонанса",sp::RESONANCE_RUNE),
+        ids::VOLCANIC_CORE => plain("Пепельное ядро",sp::VOLCANIC_CORE),
         ids::STICK => plain("Палка", sp::STICK),
         ids::APPLE => ItemInfo { food: Some((4.0, 2.4)), ..plain("Яблоко", sp::APPLE) },
         ids::COAL => plain("Уголь", sp::COAL),
@@ -240,7 +251,7 @@ pub fn tool_shape(id: ItemId) -> Option<(u8, u8)> {
 }
 
 pub fn is_valid(id: ItemId) -> bool {
-    id < ITEM_BASE && Block::from_u8(id as u8) as u16 == id || (ITEM_BASE..=ids::LAST).contains(&id)
+    (id < ITEM_BASE || id >= 1024) && Block::from_id(id) as u16 == id || (ITEM_BASE..=ids::LAST).contains(&id)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -440,7 +451,7 @@ pub fn break_time(held: Option<ItemInfo>, block: Block, creative: bool) -> Optio
 /// Added in the latest update (marked "NEW" and listed first in the creative inventory):
 /// blocks from the biome/building set on, the bow and its materials.
 pub fn is_new(id: ItemId) -> bool {
-    (98..ITEM_BASE).contains(&id) || (ids::BOW..=ids::LAST).contains(&id)
+    id >= 1024 || (98..ITEM_BASE).contains(&id) || (ids::BOW..=ids::LAST).contains(&id)
 }
 
 /// All blocks that make sense in the creative palette.
@@ -476,7 +487,8 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
-    if id >= ITEM_BASE {
+    if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
+    if (ITEM_BASE..1024).contains(&id) {
         if armor_slot(id).is_some() {
             return "Доспехи";
         }
@@ -500,7 +512,7 @@ pub fn category(id: ItemId) -> &'static str {
         }
         return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };
     }
-    let b = Block::from_u8(id as u8);
+    let b = Block::from_id(id);
     if b.part().is_some() {
         return "Техника";
     }
@@ -588,3 +600,4 @@ mod tests {
         assert_eq!(drops(Block::Grass, true, p, 1)[0].id, Block::Dirt as ItemId);
     }
 }
+
