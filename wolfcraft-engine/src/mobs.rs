@@ -75,6 +75,7 @@ impl MobKind {
 #[derive(Clone, Debug)]
 pub struct Mob {
     pub kind: MobKind,
+    pub boss: Option<crate::bosses::BossRole>,
     pub body: Body,
     pub hp: f32,
     /// Unit vector tangent to the sphere.
@@ -95,16 +96,17 @@ pub struct Mob {
 
 impl Mob {
     pub fn new(kind: MobKind, pos: DVec3, heading: DVec3) -> Self {
-        Self { kind, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0 }
+        Self { kind, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0 }
     }
     /// Centre of the body, for aiming.
     pub fn centre(&self) -> DVec3 {
-        self.body.pos + up_at(self.body.pos) * 0.9
+        self.body.pos + up_at(self.body.pos) * if self.boss.is_some(){1.6}else{0.9}
     }
 }
 
 pub struct MobManager {
     pub mobs: Vec<Mob>,
+    pub boss_deaths: Vec<crate::bosses::BossDeath>,
     /// New creatures appear (off in Studio baseplate worlds).
     pub spawning: bool,
     spawn_timer: f32,
@@ -127,7 +129,7 @@ fn tangent(v: DVec3, up: DVec3) -> DVec3 {
 
 impl MobManager {
     pub fn new(seed: u64) -> Self {
-        Self { mobs: Vec::new(), spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
+        Self { mobs: Vec::new(), boss_deaths: Vec::new(), spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
     }
 
     pub fn rand(&mut self) -> f64 {
@@ -320,12 +322,37 @@ impl MobManager {
             }
         }
         let mut dealt = 0.0;
+        let mut boss_fx: Vec<(DVec3,[f32;3],f64,f32)> = Vec::new();
         let mut rolls: Vec<f64> = (0..self.mobs.len() * 2).map(|_| self.rand()).collect();
         for (i, m) in self.mobs.iter_mut().enumerate() {
+            if m.hp<=0. {continue;}
             let up = up_at(m.body.pos);
             let to_player = player - m.body.pos;
             let flat = tangent(to_player, up);
             let dist = to_player.length();
+            if let Some(boss)=&mut m.boss {
+                let phase=boss.kind.phase(m.hp);let at_home=(m.body.pos-boss.anchor).length();
+                if at_home>25. {m.body.pos=boss.anchor;m.body.vel=DVec3::ZERO;}
+                boss.cooldown=(boss.cooldown-dt as f32).max(0.0);
+                let mut wish=if targetable&&dist<36. {flat.normalize_or_zero()}else{tangent(boss.anchor-m.body.pos,up).normalize_or_zero()};
+                if boss.casting>0. {
+                    boss.casting-=dt as f32;wish=DVec3::ZERO;
+                    if boss.casting<=0. {
+                        let radius=if boss.kind==crate::bosses::BossKind::Stone{6.0}else{3.0};
+                        if targetable&&(player-boss.target).length()<radius+0.8&&Self::line_clear(world,m.body.pos+up*1.6,player+up) {dealt+=if phase==3{10.0}else{6.0};}
+                        boss_fx.push((boss.target,boss.kind.color(),radius,0.5));
+                        boss.cooldown=if phase==3{2.4}else{4.5};
+                    }
+                }else if boss.cooldown<=0.0&&targetable&&dist<22. {
+                    boss.target=if boss.kind==crate::bosses::BossKind::Stone{m.body.pos}else{player};
+                    boss.casting=if phase==3{0.9}else{1.5};
+                    boss_fx.push((boss.target,boss.kind.color(),if boss.kind==crate::bosses::BossKind::Stone{6.0}else{3.0},boss.casting));
+                }
+                if wish.length_squared()>0.1 {m.heading=wish;}
+                step(world,&mut m.body,&MoveInput{wish,speed:if phase==3{3.2}else{2.2},jump:false,up:false,down:false},dt);
+                m.anim+=dt as f32*4.;m.amount=wish.length() as f32;m.hurt=(m.hurt-dt as f32).max(0.);
+                continue;
+            }
             m.hurt = (m.hurt - dt as f32).max(0.0);
             // Poison eats away health but leaves the last bit; slowness wears off.
             if m.poison > 0.0 {
@@ -409,6 +436,10 @@ impl MobManager {
                 m.heading = tangent(DVec3::Y, up).normalize_or_zero();
             }
         }
+        for (at,color,radius,life) in boss_fx {
+            let up=up_at(at);let helper=if up.y.abs()<0.9{DVec3::Y}else{DVec3::X};let a=tangent(helper,up).normalize();let b=up.cross(a);
+            for n in 0..24 {let t=n as f64*std::f64::consts::TAU/24.;let dir=a*t.cos()+b*t.sin();self.fx_glow(at+dir*radius+up*0.12,up*0.05,color,0.14,life,FxKind::Rise);}
+        }
         rolls.clear();
         // Dead creatures fall apart into coloured cubes.
         let dead: Vec<(DVec3, MobKind)> = self.mobs.iter().filter(|m| m.hp <= 0.0).map(|m| (m.body.pos, m.kind)).collect();
@@ -429,7 +460,7 @@ impl MobManager {
             if t < 0.0 || t > reach {
                 continue;
             }
-            if (to - dir * t).length() < 0.75 && best.is_none_or(|(_, bt)| t < bt) {
+            if (to - dir * t).length() < (if m.boss.is_some(){1.5}else{0.75}) && best.is_none_or(|(_, bt)| t < bt) {
                 best = Some((i, t));
             }
         }
@@ -439,13 +470,16 @@ impl MobManager {
     /// Damages a mob with knockback away from `from`. Returns the mob if it died.
     pub fn hurt(&mut self, i: usize, amount: f32, from: DVec3) -> Option<MobKind> {
         let m = self.mobs.get_mut(i)?;
+        let amount=if m.boss.as_ref().is_some_and(|b|b.kind==crate::bosses::BossKind::Stone&&b.kind.phase(m.hp)==1){amount*0.7}else{amount};
+        let was_alive=m.hp>0.;
         m.hp -= amount;
         m.hurt = 0.35;
         let up = up_at(m.body.pos);
         let away = tangent(m.body.pos - from, up).normalize_or_zero();
-        m.body.vel += away * 7.0 + up * 4.0;
+        m.body.vel += away * if m.boss.is_some(){1.0}else{7.0} + up * if m.boss.is_some(){0.5}else{4.0};
         m.body.on_ground = false;
-        (m.hp <= 0.0).then_some(m.kind)
+        if was_alive&&m.hp<=0. {if let Some(boss)=&m.boss {self.boss_deaths.push(crate::bosses::BossDeath{kind:boss.kind,home:boss.home,at:m.body.pos});}}
+        (was_alive&&m.hp <= 0.0).then_some(m.kind)
     }
 }
 
@@ -544,3 +578,4 @@ impl MobKind {
         }
     }
 }
+

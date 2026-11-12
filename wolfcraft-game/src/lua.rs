@@ -31,6 +31,7 @@ pub enum GuiKind {
     Frame,
     Label,
     Button,
+    Image,
 }
 
 /// One element of the script's GUI.
@@ -39,6 +40,8 @@ pub struct GuiElement {
     pub id: String,
     pub kind: GuiKind,
     pub text: String,
+    pub sprite: Option<u16>,
+    pub opacity:f32,
     /// Centre and size as shares of the screen.
     pub x: f32,
     pub y: f32,
@@ -108,6 +111,7 @@ end
 gui = {}
 function gui.frame(t) __gui_add("frame", t) end
 function gui.label(t) __gui_add("label", t) end
+function gui.image(t) __gui_add("image", t) end
 function gui.button(t)
     clicks[t.id] = t.on_click
     __gui_add("button", t)
@@ -162,6 +166,7 @@ impl LuaHost {
             let kind = match kind.as_str() {
                 "frame" => GuiKind::Frame,
                 "button" => GuiKind::Button,
+                "image" => GuiKind::Image,
                 _ => GuiKind::Label,
             };
             let mut s = sh.lock().unwrap();
@@ -169,12 +174,14 @@ impl LuaHost {
             let order = s.next;
             let el = GuiElement {
                 id: id.clone(),
+                sprite:t.get::<Option<u16>>("sprite")?.filter(|id|*id<wolfcraft_assets::gui::COUNT),
+                opacity:t.get::<Option<f32>>("opacity")?.filter(|v|v.is_finite()).unwrap_or(1.).clamp(0.,1.),
                 text: t.get::<Option<String>>("text")?.unwrap_or_default(),
                 x: t.get::<Option<f32>>("x")?.unwrap_or(0.5),
                 y: t.get::<Option<f32>>("y")?.unwrap_or(0.5),
                 w: t.get::<Option<f32>>("w")?.unwrap_or(if kind == GuiKind::Label { 0.0 } else { 0.2 }),
                 h: t.get::<Option<f32>>("h")?.unwrap_or(if kind == GuiKind::Label { 0.0 } else { 0.08 }),
-                color: rgb(t.get("color")?).or(if kind == GuiKind::Button { Some([38, 198, 218]) } else if kind == GuiKind::Frame { Some([20, 24, 32]) } else { None }),
+                color: rgb(t.get("color")?),
                 text_color: rgb(t.get("text_color")?).unwrap_or([255, 255, 255]),
                 size: t.get::<Option<f32>>("size")?.unwrap_or(18.0),
                 visible: t.get::<Option<bool>>("visible")?.unwrap_or(true),
@@ -188,6 +195,18 @@ impl LuaHost {
         lua.load(PRELUDE).set_name("prelude").exec().map_err(|e| e.to_string())?;
         // gui.text / show / remove / clear need the table made by the prelude.
         let gui: Table = g.get("gui").map_err(|e| e.to_string())?;
+        let sprites=lua.create_table().map_err(|e|e.to_string())?;
+        for (name,id) in [("wood",wolfcraft_assets::gui::PANEL_WOOD),("metal",wolfcraft_assets::gui::PANEL_METAL),("resonance",wolfcraft_assets::gui::PANEL_RESONANCE),("magic",wolfcraft_assets::gui::PANEL_MAGIC),("dark",wolfcraft_assets::gui::PANEL_DARK),("play",wolfcraft_assets::gui::PLAY),("heart",wolfcraft_assets::gui::HEART)] {sprites.set(name,id).map_err(|e|e.to_string())?;}
+        gui.set("sprites",sprites).map_err(|e|e.to_string())?;
+        let sh=shared.clone();
+        gui.set("set",lua.create_function(move |_,(id,t):(String,Table)|{
+            if let Some(e)=sh.lock().unwrap().gui.iter_mut().find(|e|e.id==id) {
+                for (name,target) in [("x",&mut e.x),("y",&mut e.y),("w",&mut e.w),("h",&mut e.h),("size",&mut e.size),("opacity",&mut e.opacity)] {
+                    if let Some(v)=t.get::<Option<f32>>(name)?.filter(|v|v.is_finite()) {*target=match name{"x"|"y"=>v.clamp(-2.,3.),"opacity"=>v.clamp(0.,1.),"size"=>v.clamp(1.,128.),_=>v.clamp(0.,4.)};}
+                }
+                if let Some(sprite)=t.get::<Option<u16>>("sprite")?.filter(|id|*id<wolfcraft_assets::gui::COUNT){e.sprite=Some(sprite);}
+            }Ok(())
+        }).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
         let sh = shared.clone();
         gui.set("text", lua.create_function(move |_, (id, text): (String, String)| {
             if let Some(e) = sh.lock().unwrap().gui.iter_mut().find(|e| e.id == id) {
@@ -467,5 +486,25 @@ mod tests {
         assert!(lua.take_output().iter().any(|(k, _)| *k == ChatKind::Error));
         // Old command-list scripts are translated.
         assert!(from_command_list("/time set день\n# x").contains("command(\"/time set день\")"));
+    }
+}
+
+
+#[cfg(test)]
+mod atlas_gui_tests {
+    use super::*;
+    #[test] fn lua_changes_state_while_renderer_keeps_atlas_sprites(){
+        let host=LuaHost::new().unwrap();
+        host.lua.load(r#"
+            gui.image{id="badge",sprite=gui.sprites.heart,x=0.2,y=0.2,w=0.1,h=0.1}
+            gui.frame{id="panel",sprite=gui.sprites.wood}
+            gui.set("panel",{x=0.75,y=0.4,opacity=0.3,w=0.4})
+            gui.show("badge",false)
+        "#).exec().unwrap();
+        let elements=host.gui();let panel=elements.iter().find(|e|e.id=="panel").unwrap();
+        assert_eq!(panel.sprite,Some(wolfcraft_assets::gui::PANEL_WOOD));assert_eq!(panel.x,0.75);assert_eq!(panel.opacity,0.3);
+        assert!(!elements.iter().find(|e|e.id=="badge").unwrap().visible);
+        host.lua.load("gui.set('panel',{opacity=5,w=-1,sprite=65000})").exec().unwrap();
+        let panel=host.gui().into_iter().find(|e|e.id=="panel").unwrap();assert_eq!(panel.opacity,1.);assert_eq!(panel.w,0.);assert_eq!(panel.sprite,Some(wolfcraft_assets::gui::PANEL_WOOD));
     }
 }

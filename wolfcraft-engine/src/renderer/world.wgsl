@@ -283,7 +283,7 @@ fn fs_opaque(in: VsOut) -> @location(0) vec4<f32> {
     let dpy = dpdy(in.rel);
     let duvx = dpdx(in.uv);
     let duvy = dpdy(in.uv);
-    if (c0.a < 0.5) {
+    if (c0.a < 0.5 && (in.flags & (1u << 27u)) == 0u) {
         discard;
     }
     var c = c0;
@@ -363,7 +363,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     var n = geom_normal(in.rel);
     var rgb = shade(in, c, n);
     var a = c.a;
-    if (fx_on(2u) && g.misc.y < 0.5) {
+    if (fx_on(2u) && g.misc.y < 0.5 && (in.flags & (1u << 27u)) == 0u) {
         // Shaders: small moving waves, a sun glint and more sky reflected at grazing angles.
         let w = in.world;
         let t = g.misc.x;
@@ -538,3 +538,4 @@ fn fs_sky(in: ModelOut) -> @location(0) vec4<f32> {
     // Sky objects are unlit display-space colours.
     return vec4<f32>(clamp(in.color, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
+

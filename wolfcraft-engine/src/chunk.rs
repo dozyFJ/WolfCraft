@@ -10,7 +10,7 @@ pub const CHUNK_VOL: usize = 4096;
 /// Dense block storage; `None` means all air (saves memory for sky chunks).
 #[derive(Clone)]
 pub struct Chunk {
-    blocks: Option<Box<[u8; CHUNK_VOL]>>,
+    blocks: Option<Box<[u16; CHUNK_VOL]>>,
     /// Changed by the player since generation, so it must be saved.
     pub modified: bool,
     /// The chunk centre lies above the terrain: a cheap sky-exposure hint for the mesher.
@@ -30,11 +30,11 @@ impl Chunk {
             return Self::empty();
         }
         let emitters = if b.light_emission() > 0 { (0..CHUNK_VOL as u16).map(|i| (i, b.light_emission())).collect() } else { Vec::new() };
-        Self { blocks: Some(Box::new([b as u8; CHUNK_VOL])), modified: false, sky_open: false, emitters }
+        Self { blocks: Some(Box::new([b as u16; CHUNK_VOL])), modified: false, sky_open: false, emitters }
     }
 
-    pub fn from_raw(data: Box<[u8; CHUNK_VOL]>) -> Self {
-        let emitters = data.iter().enumerate().filter_map(|(i, &b)| Some((i as u16, Block::from_u8(b).light_emission())).filter(|e| e.1 > 0)).collect();
+    pub fn from_raw(data: Box<[u16; CHUNK_VOL]>) -> Self {
+        let emitters = data.iter().enumerate().filter_map(|(i, &b)| Some((i as u16, Block::from_id(b).light_emission())).filter(|e| e.1 > 0)).collect();
         let mut c = Self { blocks: Some(data), modified: false, sky_open: false, emitters };
         c.shrink_if_empty();
         c
@@ -43,7 +43,7 @@ impl Chunk {
     #[inline]
     pub fn get_index(&self, i: usize) -> Block {
         match &self.blocks {
-            Some(b) => Block::from_u8(b[i]),
+            Some(b) => Block::from_id(b[i]),
             None => Block::Air,
         }
     }
@@ -63,11 +63,11 @@ impl Chunk {
             }
         }
         match &mut self.blocks {
-            Some(d) => d[i] = b as u8,
+            Some(d) => d[i] = b as u16,
             None => {
                 if b != Block::Air {
-                    let mut d = Box::new([0u8; CHUNK_VOL]);
-                    d[i] = b as u8;
+                    let mut d = Box::new([0u16; CHUNK_VOL]);
+                    d[i] = b as u16;
                     self.blocks = Some(d);
                 }
             }
@@ -88,7 +88,7 @@ impl Chunk {
         self.blocks.is_none()
     }
 
-    pub fn raw(&self) -> Option<&[u8; CHUNK_VOL]> {
+    pub fn raw(&self) -> Option<&[u16; CHUNK_VOL]> {
         self.blocks.as_deref()
     }
 
@@ -104,7 +104,7 @@ impl Chunk {
     /// True when every block is opaque (nothing inside can be seen).
     pub fn is_full_opaque(&self) -> bool {
         match &self.blocks {
-            Some(d) => d.iter().all(|&b| Block::from_u8(b).is_opaque()),
+            Some(d) => d.iter().all(|&b| Block::from_id(b).is_opaque()),
             None => false,
         }
     }
@@ -134,3 +134,4 @@ mod tests {
         assert!(Chunk::filled(Block::Air).is_empty());
     }
 }
+

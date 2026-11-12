@@ -46,7 +46,7 @@ pub fn generate_chunk(planet: &Planet, key: ChunkKey) -> Chunk {
         chunk.sky_open = true;
         return chunk;
     }
-    let mut raw = Box::new([0u8; CHUNK_VOL]);
+    let mut raw = Box::new([0u16; CHUNK_VOL]);
     let r_lo = k0 as f64;
     let r_hi = (k0 + CHUNK_SIZE) as f64;
     let band = r_hi >= planet.radius - 80.0 && r_lo <= planet.max_surface && r_hi >= planet.layers.deep_crust_top;
@@ -57,15 +57,15 @@ pub fn generate_chunk(planet: &Planet, key: ChunkKey) -> Chunk {
             let col = if band && !planet.hell { Some(planet.column(dir)) } else { None };
             for lk in 0..CHUNK_SIZE {
                 let cell = Cell::new(key.f, i, j, k0 + lk);
-                raw[local_idx(li, lj, lk)] = planet.cell_block(cell, dir, col.as_ref()) as u8;
+                raw[local_idx(li, lj, lk)] = planet.cell_block(cell, dir, col.as_ref()) as u16;
             }
             if let Some(col) = &col {
                 for (k, b) in flora(planet, key.f, i, j, col) {
                     if k >= k0 && k < k0 + CHUNK_SIZE {
                         let idx = local_idx(li, lj, k - k0);
-                        let cur = Block::from_u8(raw[idx]);
+                        let cur = Block::from_id(raw[idx]);
                         if matches!(cur, Block::Air | Block::Water) {
-                            raw[idx] = b as u8;
+                            raw[idx] = b as u16;
                         }
                     }
                 }
@@ -533,3 +533,4 @@ mod tests {
         assert!(crossed >= 1, "no tree straddling a seam found to test");
     }
 }
+

@@ -3898,7 +3898,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wolfcraft-assets"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "image",
  "log",
@@ -3909,7 +3909,7 @@ dependencies = [
 
 [[package]]
 name = "wolfcraft-common"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "log",
  "pollster",
@@ -3922,7 +3922,7 @@ dependencies = [
 
 [[package]]
 name = "wolfcraft-engine"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "bytemuck",
  "glam",
@@ -3940,7 +3940,7 @@ dependencies = [
 
 [[package]]
 name = "wolfcraft-game"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "android_logger",
  "egui",
@@ -3964,7 +3964,7 @@ dependencies = [
 
 [[package]]
 name = "wolfcraft-launcher"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "egui",
  "log",
@@ -3982,7 +3982,7 @@ dependencies = [
 
 [[package]]
 name = "wolfcraft-net"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "if-addrs",
  "log",
@@ -3992,7 +3992,7 @@ dependencies = [
 
 [[package]]
 name = "wolfcraft-ui"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -4007,7 +4007,7 @@ dependencies = [
 
 [[package]]
 name = "wolfserver"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "toml",

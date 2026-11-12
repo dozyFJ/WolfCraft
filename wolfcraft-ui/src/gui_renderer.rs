@@ -58,6 +58,17 @@ impl GuiIcons {
         }
     }
 
+    /// Nine-slice atlas panel: preserve the border instead of stretching its corners.
+    pub fn paint_panel(&self,painter:&egui::Painter,rect:Rect,icon:u16,tint:Color32){
+        let Some(uv)=self.gui_uv.get(icon as usize)else{return};
+        let b=6.0f32.min(rect.width()*0.5).min(rect.height()*0.5);
+        let xs=[rect.left(),rect.left()+b,rect.right()-b,rect.right()];
+        let ys=[rect.top(),rect.top()+b,rect.bottom()-b,rect.bottom()];
+        let us=[uv.left(),uv.left()+uv.width()*3./32.,uv.right()-uv.width()*3./32.,uv.right()];
+        let vs=[uv.top(),uv.top()+uv.height()*3./32.,uv.bottom()-uv.height()*3./32.,uv.bottom()];
+        for y in 0..3 {for x in 0..3 {painter.image(self.gui.id(),Rect::from_min_max(egui::pos2(xs[x],ys[y]),egui::pos2(xs[x+1],ys[y+1])),Rect::from_min_max(egui::pos2(us[x],vs[y]),egui::pos2(us[x+1],vs[y+1])),tint);}}
+    }
+
     /// Draws only the left `fraction` (0..1) of an icon, e.g. a half heart.
     pub fn paint_partial(&self, painter: &egui::Painter, rect: Rect, icon: u16, tint: Color32, fraction: f32) {
         let f = fraction.clamp(0.0, 1.0);
@@ -94,10 +105,14 @@ impl GuiIcons {
     /// Draws an item or block icon from the proper atlas (pixel-perfect, nearest filtering).
     pub fn paint_item(&self, painter: &egui::Painter, rect: Rect, item: ItemId) {
         // Full blocks are drawn as a small 3D cube; plants and items stay flat sprites.
-        if item < ITEM_BASE {
-            let bi = Block::from_u8(item as u8).info();
+        if let Some((entry, rotation)) = wolfcraft_engine::construction::entry(item) {
+            self.paint_construction(painter, rect, entry, rotation);
+            return;
+        }
+        if item < ITEM_BASE || item >= 1024 {
+            let bi = Block::from_id(item).info();
             if !matches!(bi.render, RenderKind::Cross | RenderKind::Invisible) {
-                let block = Block::from_u8(item as u8);
+                let block = Block::from_id(item);
                 let boxes = block.boxes();
                 if boxes.is_empty() {
                     self.paint_cube(painter, rect, bi.tiles[2], bi.tiles[4], bi.tiles[0]);
@@ -189,6 +204,26 @@ impl GuiIcons {
             painter.add(egui::Shape::mesh(mesh));
             painter.add(egui::Shape::closed_line(vec![pt(i0, j0, k1), pt(i1, j0, k1), pt(i1, j0, k0), pt(i1, j1, k0), pt(i0, j1, k0), pt(i0, j1, k1)], ink));
         }
+    }
+
+    /// Real curved and multi-part construction icons, rather than their collision boxes.
+    pub fn paint_construction(&self, painter: &egui::Painter, rect: Rect, entry: &wolfcraft_engine::construction::Entry, rotation: u8) {
+        use wolfcraft_engine::construction;
+        let model=construction::geometry::model(entry.form,rotation,0);
+        let s=rect.width().min(rect.height());let c=rect.center();
+        let project=|p:[f32;3]|egui::pos2(c.x+(p[0]-p[1])*s*0.42,c.y+(p[0]+p[1]-1.)*s*0.22+(0.5-p[2])*s*0.46);
+        let mut faces:Vec<_>=model.faces.iter().collect();
+        let depth=|f: &construction::geometry::Quad|f.points.iter().map(|p|p[0]+p[1]+p[2]).sum::<f32>();
+        faces.sort_by(|a,b|depth(a).total_cmp(&depth(b)));
+        let mut mesh=egui::Mesh::with_texture(self.blocks.id());
+        for face in faces {
+            let (tile,_,_)=construction::surface(entry,face.surface);
+            let Some(uv)=self.block_uv.get(tile as usize) else{continue};
+            let base=mesh.vertices.len() as u32;
+            for (p,t) in face.points.iter().zip([uv.left_top(),uv.right_top(),uv.right_bottom(),uv.left_bottom()]) {mesh.vertices.push(epaint::Vertex{pos:project(*p),uv:t,color:Color32::WHITE});}
+            mesh.add_triangle(base,base+1,base+2);mesh.add_triangle(base,base+2,base+3);
+        }
+        painter.add(egui::Shape::mesh(mesh));
     }
 
     /// Draws a sprite from the blocks atlas by id (used for textured block previews).
@@ -350,4 +385,16 @@ impl GuiRenderer {
 /// Convenience: a square rect of `size` centred in `rect`.
 pub fn centered_square(rect: Rect, size: f32) -> Rect {
     Rect::from_center_size(rect.center(), Vec2::splat(size))
+}
+
+
+/// Material and purpose select the block's UI skin, without matching translated names.
+pub fn block_panel(block:Block)->u16 {
+    use wolfcraft_assets::gui as g;use wolfcraft_engine::construction::{self,Form};
+    if let Some((e,_))=construction::entry(block as u16){match e.form{
+        Form::SharedChest=>return g::PANEL_RESONANCE,Form::PortableCrate=>return g::PANEL_PORTABLE,
+        Form::KitchenBase|Form::Counter|Form::Sink=>return g::PANEL_KITCHEN,
+        _=>{}
+    }if e.material<3{return g::PANEL_WOOD;}if e.material==6||e.material==7{return g::PANEL_METAL;}}
+    match block.base_kind(){Block::ElectricFurnace|Block::MachineCasing|Block::Terminal|Block::CommandBlock=>g::PANEL_METAL,Block::EnchantTable=>g::PANEL_MAGIC,Block::Chest|Block::CraftingTable|Block::Battery=>g::PANEL_WOOD,_=>g::PANEL_STONE}
 }

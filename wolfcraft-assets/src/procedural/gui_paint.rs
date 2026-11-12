@@ -47,7 +47,15 @@ pub mod gui {
     pub const SELECT: u16 = 37;
     pub const STOP: u16 = 38;
     pub const FILL: u16 = 39;
-    pub const COUNT: u16 = 40;
+    pub const PANEL_WOOD:u16=40;
+    pub const PANEL_METAL:u16=41;
+    pub const PANEL_RESONANCE:u16=42;
+    pub const PANEL_MAGIC:u16=43;
+    pub const PANEL_KITCHEN:u16=44;
+    pub const PANEL_PORTABLE:u16=45;
+    pub const PANEL_STONE:u16=46;
+    pub const PANEL_DARK:u16=47;
+    pub const COUNT: u16 = 48;
 }
 
 const WHITE: Rgb = Rgb(1.0, 1.0, 1.0);
@@ -377,5 +385,22 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         q.shape(WHITE, &polygon(vec![(0.26, 0.46), (0.74, 0.46), (0.50, 0.70)]));
         q.shape(WHITE, &circle(0.86, 0.80, 0.08));
     }));
+    for (id,name,base,edge) in [
+        (PANEL_WOOD,"panel_wood",[72,46,30],[174,119,65]),
+        (PANEL_METAL,"panel_metal",[42,52,62],[132,158,172]),
+        (PANEL_RESONANCE,"panel_resonance",[28,22,49],[89,214,206]),
+        (PANEL_MAGIC,"panel_magic",[47,27,62],[185,112,223]),
+        (PANEL_KITCHEN,"panel_kitchen",[50,68,69],[183,216,207]),
+        (PANEL_PORTABLE,"panel_portable",[49,39,72],[154,124,206]),
+        (PANEL_STONE,"panel_stone",[52,56,61],[146,151,159]),
+        (PANEL_DARK,"panel_dark",[23,28,35],[67,83,99]),
+    ] {let mut img=Image::new(32,32);for y in 0..32 {for x in 0..32 {
+        let border=x<3||y<3||x>=29||y>=29;
+        let seam=if id==PANEL_WOOD {(y%8)==0}else if id==PANEL_STONE {(y%12)==0||((x+if y<12{0}else{8})%16==0)}else{false};
+        let stud=(x==4||x==27)&&(y==4||y==27);
+        let c=if border||stud {edge}else if seam{base.map(|v|v/2)}else{base};
+        img.set(x,y,[c[0],c[1],c[2],255]);
+    }}l.add(id,name,img);}
     l.0
 }
+

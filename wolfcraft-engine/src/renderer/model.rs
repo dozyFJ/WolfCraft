@@ -550,6 +550,20 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3
             [c[0] + (1.0 - c[0]) * k, c[1] * (1.0 - k), c[2] * (1.0 - k)]
         };
         let z = Vec3::ZERO;
+        if let Some(role)=&m.boss {
+            let c=tint(role.kind.color());
+            let glow=match role.kind {crate::bosses::BossKind::Root=>[0.7,1.,0.35],crate::bosses::BossKind::Ember=>[1.,0.8,0.15],_=>[0.3,0.95,1.]};
+            add_box(&mut v,&f,Vec3::new(-0.6,0.7,-0.4),Vec3::new(0.6,2.3,0.4),z,0.,c);
+            add_box(&mut v,&f,Vec3::new(-0.45,2.3,-0.35),Vec3::new(0.45,3.0,0.35),z,0.,c);
+            for side in [-1.0,1.0] {
+                add_box(&mut v,&f,Vec3::new(side*0.32-0.22,0.,-0.25),Vec3::new(side*0.32+0.22,0.8,0.25),Vec3::new(side*0.32,0.8,0.),swing*side,c);
+                add_box(&mut v,&f,Vec3::new(side*0.88-0.22,0.9,-0.28),Vec3::new(side*0.88+0.22,2.25,0.28),Vec3::new(side*0.88,2.25,0.),-swing*side,c);
+                add_box(&mut v,&f,Vec3::new(side*0.20-0.10,2.62,0.35),Vec3::new(side*0.20+0.10,2.75,0.38),z,0.,glow);
+                if role.kind==crate::bosses::BossKind::Root {for h in 0..3 {add_box(&mut v,&f,Vec3::new(side*(0.4+h as f32*0.18)-0.14,2.8+h as f32*0.15,-0.1),Vec3::new(side*(0.4+h as f32*0.18)+0.14,3.05+h as f32*0.15,0.15),z,0.,c);}}
+            }
+            add_box(&mut v,&f,Vec3::new(-0.18,1.3,0.4),Vec3::new(0.18,1.8,0.44),z,0.,glow);
+            continue;
+        }
         match m.kind {
             MobKind::Ghoul => {
                 // Cartoon ghoul: a shambling figure with the player's build, green skin, torn
@@ -1217,6 +1231,30 @@ fn camera_frame(pose: &HandsPose) -> Frame {
 /// Textured mini block held in the right fist (camera-relative world-pipeline vertices).
 /// `tiles`: atlas sprite per face (+X, -X, +Y, -Y, +Z, -Z), as in `BlockInfo::tiles`.
 /// `cross`: a plant or torch: two crossed sprites standing in the fist instead of a cube.
+pub fn build_held_construction(pose: &HandsPose, block: crate::block::Block) -> Vec<crate::mesher::Vertex> {
+    let Some((entry, rotation)) = crate::construction::entry(block as u16) else { return Vec::new() };
+    let model = crate::construction::geometry::model(entry.form, rotation, 0);
+    let frame=camera_frame(pose);let arm=arm_place(pose,1.0);
+    let fist=tilt_point(arm.pos+Vec3::new(0.,0.,0.29),arm.pos,arm.tilt);
+    let center=fist+Vec3::new(0.05,0.06,0.06);
+    let (ys,yc)=0.72f32.sin_cos();let (ps,pc)=(-0.32f32).sin_cos();
+    let point=|p:[f32;3]| {
+        let v=Vec3::new(p[0]-0.5,p[2]-0.5,p[1]-0.5)*0.30;
+        let v=Vec3::new(v.x*yc+v.z*ys,v.y,-v.x*ys+v.z*yc);
+        let v=center+Vec3::new(v.x,v.y*pc-v.z*ps,v.y*ps+v.z*pc);
+        frame.to_world(arm.pos+twist_dir(v-arm.pos,arm.yaw,arm.roll,1.)).as_vec3().to_array()
+    };
+    let mut out=Vec::with_capacity(model.faces.len()*12);
+    for face in &model.faces {
+        let (tile,alpha,emissive)=crate::construction::surface(entry,face.surface);
+        let verts:Vec<_>=face.points.iter().zip([[0.,0.],[1.,0.],[1.,1.],[0.,1.]]).map(|(p,uv)|crate::mesher::Vertex {
+            pos:point(*p),uv,flags:tile as u32|((emissive as u32)<<16)|(2<<17)|((alpha as u32)<<27),light:[1.,1.]
+        }).collect();
+        for i in [0,1,2,0,2,3,0,2,1,0,3,2] {out.push(verts[i]);}
+    }
+    out
+}
+
 pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool, cross: bool) -> Vec<crate::mesher::Vertex> {
     let frame = camera_frame(pose);
     let a = arm_place(pose, 1.0);
@@ -1848,3 +1886,30 @@ mod strike_tests {
     }
 }
 
+
+
+/// Two feathered wings attached to the back; folding uses the same equipment state as gliding.
+pub fn build_wings(pose:&PlayerPose,camera:DVec3,spread:bool)->Vec<ModelVertex>{
+    let mut out=Vec::new();let f=Frame{origin:pose.feet-camera,right:pose.heading.cross(pose.up).normalize_or_zero(),up:pose.up,fwd:pose.heading};
+    let reach=if spread{1.45}else{0.45};
+    for side in [-1.0f32,1.0] {for feather in 0..6 {
+        let t=feather as f32/6.;let x=side*(0.2+reach*t);
+        add_box(&mut out,&f,Vec3::new(x-0.13,0.55+t*0.5,-0.24-t*0.1),Vec3::new(x+0.13,1.45-t*0.15,-0.17-t*0.1),Vec3::ZERO,0.,[0.75+t*0.15,0.86+t*0.1,0.94]);
+    }}out
+}
+
+/// Item-frame contents remain flat against the board and share its four rotations.
+pub fn build_frame_models(grid:&crate::cubesphere::Grid,frames:&[(crate::cubesphere::Cell,crate::block::Block,crate::items::ItemStack)],camera:DVec3)->Vec<ModelVertex>{
+    let mut out=Vec::new();
+    for &(cell,block,stack) in frames {
+        let Some((entry,rotation))=crate::construction::entry(block as u16)else{continue};
+        if entry.form!=crate::construction::Form::ItemFrame{continue;}
+        let (tile,tex)=match crate::items::info(stack.id).icon {crate::items::Icon::Item(tile)=>(tile,2.0),crate::items::Icon::Block(tile)=>(tile,4.0)};
+        let mut points=[[0.18,0.025,0.18],[0.82,0.025,0.18],[0.82,0.025,0.82],[0.18,0.025,0.82]];
+        for p in &mut points {for _ in 0..rotation {*p=[1.0-p[1],p[0],p[2]];}}
+        let points=points.map(|p|grid.point(cell.f,cell.i as f64+p[0],cell.j as f64+p[1],cell.k as f64+p[2])-camera);
+        let normal=(points[1]-points[0]).cross(points[2]-points[0]).normalize_or_zero().as_vec3().to_array();
+        let uv=[[0.,1.],[1.,1.],[1.,0.],[0.,0.]];
+        for i in [0usize,1,2,0,2,3,0,2,1,0,3,2] {out.push(ModelVertex{pos:points[i].as_vec3().to_array(),normal,color:[tile as f32,0.,0.],uv:uv[i],tex});}
+    }out
+}

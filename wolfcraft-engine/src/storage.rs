@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const MAGIC: &[u8; 4] = b"WCR1";
+const MAGIC: &[u8; 4] = b"WCR2";
 /// (face, region i, region j, region k)
 type RegionKey = (u8, i32, i32, i32);
 
@@ -31,7 +31,7 @@ fn region_of(key: ChunkKey) -> (RegionKey, u16) {
     (r, idx as u16)
 }
 
-pub fn rle_encode(data: &[u8]) -> Vec<u8> {
+pub fn rle_encode(data: &[u16]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < data.len() {
@@ -41,24 +41,25 @@ pub fn rle_encode(data: &[u8]) -> Vec<u8> {
             n += 1;
         }
         out.extend_from_slice(&(n as u16).to_le_bytes());
-        out.push(v);
+        out.extend_from_slice(&v.to_le_bytes());
         i += n;
     }
     out
 }
 
-pub fn rle_decode(data: &[u8], expected: usize) -> Option<Vec<u8>> {
+pub fn rle_decode(data: &[u8], expected: usize) -> Option<Vec<u16>> {
     let mut out = Vec::with_capacity(expected);
     let mut i = 0;
-    while i + 3 <= data.len() {
+    while i + 4 <= data.len() {
         let n = u16::from_le_bytes([data[i], data[i + 1]]) as usize;
-        out.extend(std::iter::repeat(data[i + 2]).take(n));
-        i += 3;
+        if n == 0 || n > expected.saturating_sub(out.len()) { return None; }
+        out.extend(std::iter::repeat_n(u16::from_le_bytes([data[i + 2], data[i + 3]]), n));
+        i += 4;
         if out.len() > expected {
             return None;
         }
     }
-    (out.len() == expected).then_some(out)
+    (out.len() == expected && i == data.len()).then_some(out)
 }
 
 impl Storage {
@@ -81,7 +82,7 @@ impl Storage {
     fn read_region(&self, r: RegionKey) -> Region {
         let Ok(bytes) = std::fs::read(self.region_path(r)) else { return Region::default() };
         let mut region = Region::default();
-        if bytes.len() < 8 || &bytes[0..4] != MAGIC {
+        if bytes.len() < 8 || (&bytes[0..4] != MAGIC && &bytes[0..4] != b"WCR1") {
             log::warn!("region {r:?}: bad header, ignoring file");
             return region;
         }
@@ -99,7 +100,20 @@ impl Storage {
                 log::warn!("region {r:?}: truncated chunk");
                 break;
             }
-            region.chunks.insert(idx, bytes[off..off + len].to_vec());
+            let comp = &bytes[off..off + len];
+            let data = if &bytes[0..4] == b"WCR1" && !comp.is_empty() {
+                let mut raw = Vec::with_capacity(CHUNK_VOL);
+                let mut i = 0;
+                while i + 3 <= comp.len() {
+                    let n = u16::from_le_bytes([comp[i], comp[i + 1]]) as usize;
+                    if n == 0 || n > CHUNK_VOL.saturating_sub(raw.len()) { break; }
+                    raw.extend(std::iter::repeat_n(comp[i + 2] as u16, n));
+                    i += 3;
+                }
+                if raw.len() != CHUNK_VOL || i != comp.len() { log::warn!("invalid legacy chunk {idx}"); off += len; continue; }
+                rle_encode(&raw)
+            } else { comp.to_vec() };
+            region.chunks.insert(idx, data);
             off += len;
         }
         region
@@ -115,7 +129,7 @@ impl Storage {
             return Some(Chunk::empty());
         }
         let raw = rle_decode(comp, CHUNK_VOL)?;
-        let arr: Box<[u8; CHUNK_VOL]> = raw.into_boxed_slice().try_into().ok()?;
+        let arr: Box<[u16; CHUNK_VOL]> = raw.into_boxed_slice().try_into().ok()?;
         let mut c = Chunk::from_raw(arr);
         c.modified = false;
         c.sky_open = false;
@@ -175,10 +189,37 @@ mod tests {
     use crate::block::Block;
 
     #[test]
+    fn old_region_migrates_and_keeps_wide_furniture_ids() {
+        use crate::construction::{self, Form};
+        let dir=std::env::temp_dir().join(format!("wc_wide_migration_{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&dir);
+        let key=ChunkKey::new(0,0,0,0);
+        let storage=Storage::open(&dir).unwrap();
+        let mut old=b"WCR1".to_vec();old.extend(1u32.to_le_bytes());old.extend(0u16.to_le_bytes());old.extend(3u32.to_le_bytes());old.extend(4096u16.to_le_bytes());old.push(Block::Stone as u8);
+        std::fs::write(storage.region_path((0,0,0,0)),old).unwrap();
+        let mut chunk=storage.load_chunk(key).unwrap();
+        assert_eq!(chunk.get(0,0,0),Block::Stone);
+        let chair=construction::block(Form::Chair,0,3).unwrap();
+        chunk.set(1,2,3,chair);storage.store_chunk(key,&chunk);storage.flush().unwrap();drop(storage);
+        let storage=Storage::open(&dir).unwrap();
+        let chunk=storage.load_chunk(key).unwrap();
+        assert_eq!(chunk.get(1,2,3),chair);
+        assert_eq!(chunk.get(0,0,0),Block::Stone);
+        assert_eq!(&std::fs::read(storage.region_path((0,0,0,0))).unwrap()[..4],b"WCR2");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn wide_rle_rejects_trailing_bytes_and_zero_runs() {
+        let mut enc=rle_encode(&[2319,2319,1,0]);assert_eq!(rle_decode(&enc,4),Some(vec![2319,2319,1,0]));
+        enc.push(0);assert!(rle_decode(&enc,4).is_none());
+        assert!(rle_decode(&[0,0,1,0],1).is_none());
+    }
+
+    #[test]
     fn rle_roundtrip() {
-        let mut data = vec![0u8; 4096];
+        let mut data = vec![0u16; 4096];
         for (i, d) in data.iter_mut().enumerate() {
-            *d = ((i / 37) % 5) as u8;
+            *d = ((i / 37) % 5) as u16;
         }
         let enc = rle_encode(&data);
         assert!(enc.len() < data.len());
@@ -218,3 +259,4 @@ mod tests {
         assert_ne!(region_of(ChunkKey::new(1, 0, 0, 0)).0, region_of(ChunkKey::new(2, 0, 0, 0)).0);
     }
 }
+

@@ -105,41 +105,40 @@ const TIPS: [&str; 9] = [
 ];
 
 /// Studio splash: logo, name, a loading bar and rotating tips. Returns true when tapped.
-pub fn splash_screen(ctx: &egui::Context, icons: &GuiIcons, progress: f32, version: &str) -> bool {
-    let mut tapped = false;
-    egui::CentralPanel::default().frame(Frame::none().fill(Color32::from_rgb(10, 12, 18))).show(ctx, |ui| {
-        let rect = ui.max_rect();
-        let resp = ui.allocate_rect(rect, Sense::click());
-        tapped = resp.clicked();
-        let painter = ui.painter();
-        let t = ui.input(|i| i.time) as f32;
-        ui.ctx().request_repaint();
-        let fade = (t * 2.0).min(1.0);
-        let c = rect.center() - Vec2::new(0.0, 40.0);
-        // Logo: the cube, with a soft glow pulsing behind it.
-        let glow = 0.5 + 0.5 * (t * 2.2).sin();
-        for (i, r) in [120.0, 95.0, 72.0].iter().enumerate() {
-            painter.circle_filled(c - Vec2::new(0.0, 56.0), *r, Color32::from_rgba_unmultiplied(38, 198, 218, (6.0 + glow * 6.0 + i as f32 * 4.0) as u8));
-        }
-        icons.paint(painter, Rect::from_center_size(c - Vec2::new(0.0, 56.0), Vec2::splat(110.0)), icon::LOGO, Color32::WHITE.gamma_multiply(fade));
-        painter.text(c + Vec2::new(0.0, 36.0), Align2::CENTER_CENTER, "WOLFCRAFT", bold_font(46.0), Color32::from_rgb(240, 240, 232).gamma_multiply(fade));
-        painter.text(c + Vec2::new(0.0, 76.0), Align2::CENTER_CENTER, "S T U D I O S", FontId::proportional(14.0), Color32::from_rgb(38, 198, 218).gamma_multiply(fade));
-        // Loading bar.
-        let w = (rect.width() * 0.45).clamp(240.0, 520.0);
-        let bar = Rect::from_center_size(Pos2::new(rect.center().x, c.y + 130.0), Vec2::new(w, 14.0));
-        painter.rect_filled(bar, Rounding::ZERO, Color32::from_rgb(28, 32, 42));
-        painter.rect_stroke(bar.expand(3.0), Rounding::ZERO, Stroke::new(2.0_f32, Color32::from_rgb(70, 78, 96)));
-        let fill = Rect::from_min_size(bar.min, Vec2::new(bar.width() * progress.clamp(0.0, 1.0), bar.height()));
-        painter.rect_filled(fill, Rounding::ZERO, Color32::from_rgb(38, 198, 218));
-        // Shine running along the filled part.
-        let sx = fill.left() + (t * 180.0) % fill.width().max(1.0);
-        painter.rect_filled(Rect::from_min_max(Pos2::new(sx, bar.top()), Pos2::new((sx + 24.0).min(fill.right()), bar.bottom())), Rounding::ZERO, Color32::from_white_alpha(50));
-        // Tip under the bar, changing every few seconds.
-        let tip = TIPS[((t / 3.5) as usize) % TIPS.len()];
-        painter.text(Pos2::new(rect.center().x, bar.bottom() + 26.0), Align2::CENTER_TOP, format!("Совет: {tip}"), FontId::proportional(14.0), Color32::from_gray(170));
-        painter.text(Pos2::new(rect.right() - 12.0, rect.bottom() - 10.0), Align2::RIGHT_BOTTOM, format!("v{version}"), FontId::proportional(12.0), Color32::from_gray(90));
+fn loading_panel(ctx:&egui::Context,icons:&GuiIcons,title:&str,subtitle:&str,fraction:f32,tip:&str,version:&str,interactive:bool)->bool {
+    let p=palette(ctx);let mut clicked=false;
+    egui::CentralPanel::default().frame(Frame::none().fill(p.bg)).show(ctx,|ui|{
+        let rect=ui.max_rect();let scale=(rect.height()/540.).clamp(0.55,1.0);
+        if interactive {clicked=ui.interact(rect,egui::Id::new("splash-skip"),Sense::click()).clicked();}
+        let width=(rect.width()-32.).clamp(120.,620.);let height=(rect.height()-36.).clamp(150.,340.);
+        let col=Rect::from_center_size(rect.center(),Vec2::new(width,height));
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col),|ui|{
+            egui::ScrollArea::vertical().id_salt("loading-panel-content").auto_shrink([false,false]).show(ui,|ui|{
+                ui.vertical_centered(|ui|{
+                    let (r,_)=ui.allocate_exact_size(Vec2::splat(80.*scale),Sense::hover());icons.paint(ui.painter(),r,icon::LOGO,Color32::WHITE);
+                    ui.add_space(10.*scale);
+                    ui.add(egui::Label::new(egui::RichText::new(title).font(bold_font(34.*scale)).color(p.text)).wrap());
+                    ui.add_space(8.*scale);
+                    ui.add(egui::Label::new(egui::RichText::new(subtitle).size(14.).color(p.text_muted)).wrap());
+                    ui.add_space(16.*scale);
+                    let bar_w=(width-28.).max(80.);
+                    let (bar,_)=ui.allocate_exact_size(Vec2::new(bar_w,10.),Sense::hover());
+                    ui.painter().rect_filled(bar,2.,p.surface_hi);
+                    let fill=Rect::from_min_size(bar.min,Vec2::new(bar.width()*fraction.clamp(0.,1.),bar.height()));ui.painter().rect_filled(fill,2.,p.accent);
+                    ui.label(egui::RichText::new(format!("{:.0}%",fraction.clamp(0.,1.)*100.)).color(p.accent));
+                    ui.add_space(10.*scale);
+                    ui.add(egui::Label::new(egui::RichText::new(tip).size(13.).color(p.text_muted)).wrap());
+                });
+            });
+        });
+        ui.painter().text(Pos2::new(rect.right()-12.,rect.bottom()-8.),Align2::RIGHT_BOTTOM,format!("v{version}"),FontId::proportional(11.),p.text_muted);
     });
-    tapped
+    ctx.request_repaint_after(std::time::Duration::from_millis(33));clicked
+}
+
+pub fn splash_screen(ctx:&egui::Context,icons:&GuiIcons,progress:f32,version:&str)->bool {
+    let tip=TIPS[((ctx.input(|i|i.time)/5.0) as usize)%TIPS.len()];
+    loading_panel(ctx,icons,"WolfCraft","Подготовка игры",progress,tip,version,true)
 }
 
 /// Space backdrop with a big planet rising from the bottom edge (the planet of the last played world).
@@ -1151,69 +1150,10 @@ pub struct LoadingView<'a> {
 /// World loading, in the style of the studio splash: the same dark backdrop, an outlined
 /// ring in the middle that fills with small outlined circles as the world gets ready, the
 /// percentage in its centre, and the splash's loading bar with the current step below.
-pub fn loading_screen(ctx: &egui::Context, icons: &GuiIcons, v: &LoadingView) {
-    let _ = icons;
-    let accent = Color32::from_rgb(38, 198, 218);
-    egui::CentralPanel::default().frame(Frame::none().fill(Color32::from_rgb(10, 12, 18))).show(ctx, |ui| {
-        let rect = ui.max_rect();
-        let painter = ui.painter().clone();
-        ui.ctx().request_repaint();
-        let t = ui.input(|i| i.time) as f32;
-        let frac = v.fraction.clamp(0.0, 1.0);
-        let radius = (rect.height() * 0.24).clamp(70.0, 150.0);
-        let c = Pos2::new(rect.center().x, rect.center().y - radius * 0.25);
-        // Soft glow behind the ring, like the splash logo.
-        let glow = 0.5 + 0.5 * (t * 2.2).sin();
-        for (i, r) in [1.35f32, 1.18, 1.05].iter().enumerate() {
-            painter.circle_filled(c, radius * r, Color32::from_rgba_unmultiplied(38, 198, 218, (4.0 + glow * 5.0 + i as f32 * 3.0) as u8));
-        }
-        painter.circle_filled(c, radius, Color32::from_rgb(14, 17, 25));
-        painter.circle_stroke(c, radius, Stroke::new(3.0_f32, accent));
-        // Two rings of small outlined circles; they fill one by one with the progress.
-        let rings: [(f32, usize, f32); 2] = [(0.80, 28, 0.075), (0.58, 18, 0.07)];
-        let total: usize = rings.iter().map(|r| r.1).sum();
-        let lit = frac * total as f32;
-        let mut n = 0usize;
-        for (rr, count, dot) in rings {
-            for i in 0..count {
-                // Clockwise from the top.
-                let a = -std::f32::consts::FRAC_PI_2 + i as f32 / count as f32 * std::f32::consts::TAU;
-                let p = c + Vec2::new(a.cos(), a.sin()) * radius * rr;
-                let d = radius * dot;
-                let fill = (lit - n as f32).clamp(0.0, 1.0);
-                if fill >= 1.0 {
-                    painter.circle_filled(p, d, accent);
-                } else if fill > 0.0 {
-                    // The circle being filled: grows and pulses.
-                    let pulse = 0.75 + 0.25 * (t * 8.0).sin();
-                    painter.circle_filled(p, d * fill.max(0.3) * pulse, accent.gamma_multiply(0.85));
-                }
-                painter.circle_stroke(p, d, Stroke::new(1.5_f32, if fill >= 1.0 { Color32::from_rgb(170, 240, 248) } else { Color32::from_rgb(70, 78, 96) }));
-                n += 1;
-            }
-        }
-        // Percentage in the centre.
-        let pct = format!("{:.0}%", frac * 100.0);
-        painter.text(c, Align2::CENTER_CENTER, &pct, bold_font(radius * 0.32), Color32::from_rgb(240, 240, 232));
-        // World name, then the splash loading bar with a running shine.
-        let y = c.y + radius + 26.0;
-        painter.text(Pos2::new(rect.center().x, y), Align2::CENTER_TOP, v.title, bold_font(18.0), Color32::from_rgb(240, 240, 232));
-        let w = (rect.width() * 0.45).clamp(240.0, 520.0);
-        let bar = Rect::from_center_size(Pos2::new(rect.center().x, y + 44.0), Vec2::new(w, 12.0));
-        painter.rect_filled(bar, Rounding::ZERO, Color32::from_rgb(28, 32, 42));
-        painter.rect_stroke(bar.expand(3.0), Rounding::ZERO, Stroke::new(2.0_f32, Color32::from_rgb(70, 78, 96)));
-        let fill = Rect::from_min_size(bar.min, Vec2::new(bar.width() * frac, bar.height()));
-        painter.rect_filled(fill, Rounding::ZERO, accent);
-        if fill.width() > 1.0 {
-            let sx = fill.left() + (t * 180.0) % fill.width();
-            painter.rect_filled(Rect::from_min_max(Pos2::new(sx, bar.top()), Pos2::new((sx + 24.0).min(fill.right()), bar.bottom())), Rounding::ZERO, Color32::from_white_alpha(50));
-        }
-        // Current step under the bar.
-        let step = v.stages.get(v.current).map(|s| s.as_str()).unwrap_or("Готово");
-        let line = if v.detail.is_empty() { step.to_string() } else { format!("{step} · {}", v.detail) };
-        painter.text(Pos2::new(rect.center().x, bar.bottom() + 18.0), Align2::CENTER_TOP, line, FontId::proportional(14.0), Color32::from_gray(170));
-        let _ = v.grid;
-    });
+pub fn loading_screen(ctx:&egui::Context,icons:&GuiIcons,v:&LoadingView) {
+    let step=v.stages.get(v.current).map(String::as_str).unwrap_or("Готово");
+    let subtitle=if v.detail.is_empty(){step.to_string()}else{format!("{step} · {}",v.detail)};
+    loading_panel(ctx,icons,v.title,&subtitle,v.fraction,"Мир загружается. Сохранения остаются на устройстве.",wolfcraft_common::VERSION,false);
 }
 
 // ---------------------------------------------------------------------------------------------

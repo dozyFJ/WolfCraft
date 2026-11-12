@@ -171,6 +171,16 @@ pub mod tiles {
     pub const POTATO_RIPE: u16 = 170;
     pub const ENCHANT_TOP: u16 = 171;
     pub const ENCHANT_SIDE: u16 = 172;
+    pub const BUILD_GLASS: u16 = 173;
+    pub const BUILD_GLASS_RED: u16 = 174;
+    pub const BUILD_GLASS_BLUE: u16 = 175;
+    pub const BUILD_GLASS_GREEN: u16 = 176;
+    pub const BUILD_FABRIC: u16 = 177;
+    pub const BUILD_MIRROR: u16 = 178;
+    pub const BUILD_CERAMIC: u16 = 179;
+    pub const BUILD_PICTURE_FOREST: u16 = 180;
+    pub const BUILD_PICTURE_SKY: u16 = 181;
+    pub const BUILD_PICTURE_ISKRIT: u16 = 182;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -1799,6 +1809,51 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         "grass_top", "dirt", "stone", "sand", "snow", "granite", "limestone", "salt_block", "peat", "ash", "red_sand", "mud", "clay", "marble",
         "netherrack", "dry_grass_top", "swamp_grass_top", "podzol_top", "moss", "wool", "wool_red", "wool_blue", "wool_yellow", "terracotta", "packed_ice", "slate", "smooth_stone",
     ];
+    l.add(BUILD_GLASS, "building_glass", p(|q| {
+        for y in 0..S { for x in 0..S {
+            let grain = if BUILD_GLASS == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
+            q.put(x, y, Rgb(0.68, 0.84, 0.91).add(grain), 0.35);
+        } }
+    }));
+    l.add(BUILD_GLASS_RED, "building_glass_red", p(|q| {
+        for y in 0..S { for x in 0..S {
+            let grain = if BUILD_GLASS_RED == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
+            q.put(x, y, Rgb(0.88, 0.24, 0.3).add(grain), 0.4);
+        } }
+    }));
+    l.add(BUILD_GLASS_BLUE, "building_glass_blue", p(|q| {
+        for y in 0..S { for x in 0..S {
+            let grain = if BUILD_GLASS_BLUE == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
+            q.put(x, y, Rgb(0.18, 0.48, 0.9).add(grain), 0.4);
+        } }
+    }));
+    l.add(BUILD_GLASS_GREEN, "building_glass_green", p(|q| {
+        for y in 0..S { for x in 0..S {
+            let grain = if BUILD_GLASS_GREEN == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
+            q.put(x, y, Rgb(0.25, 0.75, 0.48).add(grain), 0.4);
+        } }
+    }));
+    l.add(BUILD_FABRIC, "building_fabric", p(|q| {
+        for y in 0..S { for x in 0..S {
+            let grain = if BUILD_FABRIC == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
+            q.put(x, y, Rgb(0.25, 0.53, 0.65).add(grain), 1.0);
+        } }
+    }));
+    l.add(BUILD_MIRROR, "building_mirror", p(|q| {
+        for y in 0..S { for x in 0..S {
+            let grain = if BUILD_MIRROR == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
+            q.put(x, y, Rgb(0.72, 0.82, 0.88).add(grain), 1.0);
+        } }
+    }));
+    l.add(BUILD_CERAMIC, "building_ceramic", p(|q| {
+        for y in 0..S { for x in 0..S {
+            let grain = if BUILD_CERAMIC == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
+            q.put(x, y, Rgb(0.87, 0.86, 0.79).add(grain), 1.0);
+        } }
+    }));
+    l.add(BUILD_PICTURE_FOREST, "building_picture_forest", p(|q| {for y in 0..S {for x in 0..S {q.put(x,y,if y>11 {Rgb(0.23,0.43,0.19)}else if (x==4||x==11)&&y>5 {Rgb(0.37,0.25,0.15)}else if ((x as i32-4).abs()+(y as i32-5).abs()<5)||((x as i32-11).abs()+(y as i32-6).abs()<4) {Rgb(0.18,0.48,0.27)}else {Rgb(0.51,0.72,0.83)},1.0);}}}));
+    l.add(BUILD_PICTURE_SKY, "building_picture_sky", p(|q| {for y in 0..S {for x in 0..S {q.put(x,y,if (x as i32-11).pow(2)+(y as i32-4).pow(2)<9 {Rgb(1.0,0.84,0.35)}else if y>10+x/4 {Rgb(0.32,0.32,0.58)}else {Rgb(0.30+y as f32*0.025,0.40,0.68)},1.0);}}}));
+    l.add(BUILD_PICTURE_ISKRIT, "building_picture_iskrit", p(|q| {for y in 0..S {for x in 0..S {q.put(x,y,if (x+y)%5==0||x==8 {Rgb(0.95,0.61,0.17)}else {Rgb(0.19,0.14,0.33)},1.0);}}}));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

@@ -348,6 +348,21 @@ fn entry_face(grid: &Grid, prev: Cell, hit: Cell) -> (usize, i32) {
     (2, 1)
 }
 
+/// Exact ray intersection with a collision box, in the cell's local i/j/k frame.
+fn ray_obb(origin:DVec3, dir:DVec3, o:&Obb) -> Option<(f64,(usize,i32))> {
+    let rel=origin-o.center;
+    let mut near=0.0f64;let mut far=f64::INFINITY;let mut normal=(2,1);
+    for a in 0..3 {
+        let p=rel.dot(o.axes[a]);let d=dir.dot(o.axes[a]);
+        if d.abs()<1e-12 {if p.abs()>o.half[a] {return None;}continue;}
+        let t0=(-o.half[a]-p)/d;let t1=(o.half[a]-p)/d;
+        let lo=t0.min(t1);let hi=t0.max(t1);
+        if lo>near {near=lo;normal=(a,if d>0.{-1}else{1});}
+        far=far.min(hi);if near>far {return None;}
+    }
+    (far>=0.).then_some((near,normal))
+}
+
 /// Marches along the ray in small steps and returns the first non-air, non-fluid block.
 pub fn raycast(world: &impl Voxels, origin: DVec3, dir: DVec3, max_dist: f64) -> Option<Hit> {
     let dir = dir.normalize_or_zero();
@@ -366,7 +381,13 @@ pub fn raycast(world: &impl Voxels, origin: DVec3, dir: DVec3, max_dist: f64) ->
         }
         let b = world.cell_block(c);
         if b.info().render != RenderKind::Invisible && !b.is_fluid() {
-            return Some(Hit { cell: c, normal: entry_face(g, prev, c), dist: t, block: b });
+            if !b.boxes().is_empty() {
+                let nearest = block_obbs_in(world, c, b).iter().filter_map(|o| ray_obb(origin, dir, o)).filter(|(d,_)| *d <= max_dist)
+                    .min_by(|a,b| a.0.total_cmp(&b.0));
+                if let Some((dist, normal)) = nearest { return Some(Hit { cell:c, normal, dist, block:b }); }
+            } else {
+                return Some(Hit { cell: c, normal: entry_face(g, prev, c), dist: t, block: b });
+            }
         }
         prev = c;
     }
@@ -377,6 +398,14 @@ pub fn raycast(world: &impl Voxels, origin: DVec3, dir: DVec3, max_dist: f64) ->
 pub(crate) mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn arc_raycast_passes_through_the_empty_inside() {
+        let model=crate::construction::geometry::model(crate::construction::Form::Arc90Large,0,0);
+        let boxes:Vec<_>=model.boxes.iter().map(|b|Obb {center:DVec3::new((b[0]+b[3]) as f64/2.,(b[1]+b[4]) as f64/2.,0.5), axes:[DVec3::X,DVec3::Y,DVec3::Z],half:[(b[3]-b[0]) as f64/2.,(b[4]-b[1]) as f64/2.,0.5]}).collect();
+        assert!(boxes.iter().all(|b|ray_obb(DVec3::new(0.1,0.1,2.),DVec3::NEG_Z,b).is_none()));
+        assert!(boxes.iter().any(|b|ray_obb(DVec3::new(0.98,0.05,2.),DVec3::NEG_Z,b).is_some()));
+    }
 
     /// A solid ball of stone with optional edits.
     pub(crate) struct Ball {
@@ -676,3 +705,4 @@ pub(crate) mod tests {
         assert_eq!(block_obb(&g, cell, Block::Stone).half, full.half);
     }
 }
+

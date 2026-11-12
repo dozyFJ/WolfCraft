@@ -31,6 +31,7 @@ pub enum StructureKind {
     Monolith,
     Mine,
     Dungeon,
+    Volcano,
 }
 
 impl StructureKind {
@@ -45,6 +46,7 @@ impl StructureKind {
             StructureKind::Monolith => "Монолит",
             StructureKind::Mine => "Заброшенная шахта",
             StructureKind::Dungeon => "Подземелье",
+            StructureKind::Volcano => "Вулкан",
         }
     }
 }
@@ -461,6 +463,7 @@ fn build_monolith(b: &mut Builder) {
         b.bx(u, u, 1, 2, v, v, Block::Obsidian, Mode::Set);
         b.set(u, 3, v, Block::Lamp);
     }
+    b.set(0,1,-4,crate::construction::block(crate::construction::Form::RootAltar,0,0).unwrap());
 }
 
 fn build_mine(b: &mut Builder) {
@@ -504,7 +507,7 @@ fn build_dungeon(b: &mut Builder) {
     }
     b.set(-4, 1, 0, Block::Chest);
     b.set(4, 1, 0, Block::Chest);
-    b.set(0, 1, 0, Block::Obsidian);
+    b.set(0, 1, 0, crate::construction::block(crate::construction::Form::StoneAltar,3,0).unwrap());
     // Corridor out of the +u side.
     b.bx(5, 14, 1, 3, -1, 1, Block::Air, Mode::Set);
     b.bx(5, 14, 0, 0, -1, 1, Block::Cobblestone, Mode::Set);
@@ -514,6 +517,7 @@ fn build_dungeon(b: &mut Builder) {
 /// `[lo, hi]` of face `f`.
 pub fn placements_near(planet: &Planet, f: u8, lo: IVec3, hi: IVec3) -> Vec<Placement> {
     let mut out = Vec::new();
+    if planet.hell {return out;}
     let n = planet.grid.n;
     let s0 = (lo.x.div_euclid(CELL).max(0), lo.y.div_euclid(CELL).max(0));
     let s1 = (hi.x.div_euclid(CELL).min((n - 1) / CELL), hi.y.div_euclid(CELL).min((n - 1) / CELL));
@@ -550,6 +554,10 @@ fn candidate(planet: &Planet, f: u8, cell: (i32, i32), h: u64) -> Option<Placeme
             }
             let kind = if to01(splitmix(hh ^ 5)) < 0.5 { StructureKind::Mine } else { StructureKind::Dungeon };
             return Some(Placement { kind, face: f, anchor: IVec3::new(i, j, k), seed: hh, biome: col.biome });
+        }
+        // Native-planet volcanic arenas, independent of the flat-ground settlement filter.
+        if col.elev>3.0 && !col.river && to01(splitmix(hh ^ 0xB055)) < 0.035 {
+            return Some(Placement{kind:StructureKind::Volcano,face:f,anchor:IVec3::new(i,j,k_top),seed:hh,biome:col.biome});
         }
         // Surface structure.
         if roll > 0.75 || col.elev < 2.0 || col.river {
@@ -613,6 +621,7 @@ fn ops_for(p: &Placement) -> Vec<BoxOp> {
         StructureKind::Monolith => build_monolith(&mut b),
         StructureKind::Mine => build_mine(&mut b),
         StructureKind::Dungeon => build_dungeon(&mut b),
+        StructureKind::Volcano => build_volcano(&mut b),
     }
     b.ops
 }
@@ -739,4 +748,19 @@ mod tests {
             assert!(lo.z >= pl.anchor.z - 70, "{:?}", pl.kind);
         }
     }
+}
+
+
+fn build_volcano(b:&mut Builder){
+    for u in -22i32..=22 {for v in -22i32..=22 {
+        let radius=((u*u+v*v) as f64).sqrt();if radius>22. {continue;}
+        let height=((22.-radius)*1.2).max(0.) as i32;
+        b.bx(u,u,-8,height,v,v,Block::Obsidian,Mode::Set);
+        if radius<5.0 {b.bx(u,u,17,29,v,v,Block::Air,Mode::Set);b.set(u,16,v,Block::Lava);}
+    }}
+    // Safe altar ledge and approach above the crater, away from lava.
+    b.bx(-4,4,22,22,-10,-6,Block::StoneBricks,Mode::Set);
+    b.bx(-3,3,23,26,-10,-6,Block::Air,Mode::Set);
+    b.set(0,23,-8,crate::construction::block(crate::construction::Form::EmberAltar,6,0).unwrap());
+    b.set(-3,23,-8,Block::Chest);
 }

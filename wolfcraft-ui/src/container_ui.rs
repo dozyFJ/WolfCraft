@@ -15,6 +15,7 @@ const GAP: f32 = 4.0;
 /// What the window shows besides the slots.
 pub struct ContainerView<'a> {
     pub title: &'a str,
+    pub skin:u16,
     /// Slots per row for the container grid.
     pub columns: usize,
     /// Which container slots accept items from the player (e.g. only the furnace input).
@@ -131,9 +132,15 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
     let cols = view.columns.max(1);
     let width = cols.max(9) as f32 * (CELL + GAP) - GAP;
     let dismissed = crate::ui_components::game_screen(ctx, "container", view.title, width + 4.0, |ui| {
+        // Atlas banner and recess belong to the interacted block.
+        let (banner,_)=ui.allocate_exact_size(Vec2::new(width,30.),Sense::hover());
+        icons.paint_panel(ui.painter(),banner,view.skin,Color32::WHITE);
+        ui.painter().text(banner.center(),Align2::CENTER_CENTER,view.title,FontId::proportional(16.),Color32::WHITE);
+        ui.add_space(8.);
         // Container slots.
         let rows = slots.len().div_ceil(cols);
         let (area, _) = ui.allocate_exact_size(Vec2::new(width, rows as f32 * (CELL + GAP) - GAP), Sense::hover());
+        icons.paint_panel(ui.painter(),area.expand(4.),view.skin,Color32::WHITE);
         let grid_w = cols as f32 * (CELL + GAP) - GAP;
         let x0 = area.left() + (width - grid_w) / 2.0;
         let mut to_player: Option<usize> = None;
@@ -256,3 +263,4 @@ mod tests {
         assert!(slots[2].is_none() && inv.slots[1].is_some());
     }
 }
+

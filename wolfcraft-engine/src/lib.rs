@@ -23,3 +23,8 @@ pub mod player;
 pub mod storage;
 pub mod structures;
 pub mod worldgen;
+
+
+pub mod construction;
+pub mod bosses;
+pub mod storage_bank;
