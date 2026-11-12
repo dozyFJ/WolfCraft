@@ -295,6 +295,104 @@ fn sandstone(x: f32, y: f32, seed: u32) -> Rgb {
     sand(x, y, rgb(222, 205, 150), seed).scale(0.9 + 0.12 * layer)
 }
 
+
+// ---- storage blocks, fabrics, glass and more (second HD batch) ----
+
+/// Metal storage block: four plates with a seam between them, brushed lines, a soft light
+/// from the top, a bevel round the edge and a rivet in each corner.
+fn metal(x: f32, y: f32, base: Rgb, seed: u32) -> Rgb {
+    let edge = x.min(y).min(1.0 - x).min(1.0 - y);
+    if edge < 0.03 {
+        return base.scale(if x < y || y < 0.03 { 1.22 } else { 0.6 });
+    }
+    // Seams through the middle: dark line, light lip below/right of it.
+    let (sx, sy) = ((x - 0.5).abs(), (y - 0.5).abs());
+    if sx < 0.012 || sy < 0.012 {
+        return base.scale(0.62);
+    }
+    if (sx < 0.03 && x > 0.5) || (sy < 0.03 && y > 0.5) {
+        return base.scale(1.15);
+    }
+    let brushed = fbm(x, y * 16.0, 16, 2, seed) - 0.5;
+    let mut c = base.scale((0.95 + 0.07 * brushed) * (1.08 - 0.16 * y));
+    for (cx, cy) in [(0.1, 0.1), (0.9, 0.1), (0.1, 0.9), (0.9, 0.9), (0.4, 0.4), (0.6, 0.6), (0.4, 0.6), (0.6, 0.4)] {
+        let d = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+        if d < 0.03 {
+            c = base.scale(if (x - cx) + (y - cy) < 0.0 { 1.3 } else { 0.68 });
+        }
+    }
+    c
+}
+
+/// Gem storage block: cut facets in a 4x4 grid, each lit from the top-left.
+fn gem(x: f32, y: f32, base: Rgb, seed: u32) -> Rgb {
+    let (gx, gy) = ((x * 4.0).fract(), (y * 4.0).fract());
+    let cell = hash((x * 4.0) as u32, (y * 4.0) as u32, seed);
+    let tone = 0.85 + 0.2 * unit(cell);
+    let facet = if gx < 0.12 || gy < 0.12 { 1.3 } else if gx > 0.88 || gy > 0.88 { 0.65 } else if gx + gy < 1.0 { 1.08 } else { 0.92 };
+    base.scale(tone * facet)
+}
+
+/// Knitted wool: rows of V-shaped stitches with soft fuzz.
+fn wool(x: f32, y: f32, base: Rgb, seed: u32) -> Rgb {
+    let row = (y * 16.0).floor();
+    let fy = (y * 16.0).fract();
+    let shift = if row as i32 % 2 == 0 { 0.0 } else { 0.5 };
+    let fx = (x * 16.0 + shift).fract();
+    let v = 1.0 - ((fx - 0.5).abs() * 2.0 - fy).abs();
+    let fuzz = fbm(x, y, 32, 2, seed) - 0.5;
+    base.scale(0.8 + 0.25 * v.clamp(0.0, 1.0) + 0.12 * fuzz)
+}
+
+/// Clear glass: a light frame and two streaks, see-through inside (alpha 0).
+fn glass(x: f32, y: f32) -> (Rgb, f32) {
+    let edge = x.min(y).min(1.0 - x).min(1.0 - y);
+    if edge < 0.06 {
+        return (rgb(210, 230, 238).scale(if x < y { 1.05 } else { 0.85 }), 1.0);
+    }
+    let d = x - y;
+    if (d - 0.25).abs() < 0.025 || ((d - 0.4).abs() < 0.012 && x > 0.5) {
+        return (rgb(245, 250, 255), 0.85);
+    }
+    (rgb(255, 255, 255), 0.0)
+}
+
+/// Stained glass: tinted panel with a lighter frame and a streak.
+fn stained(x: f32, y: f32, tint: Rgb) -> Rgb {
+    let edge = x.min(y).min(1.0 - x).min(1.0 - y);
+    if edge < 0.06 {
+        return tint.scale(1.35);
+    }
+    let d = x - y;
+    let streak = if (d - 0.25).abs() < 0.03 { 1.4 } else { 1.0 };
+    tint.scale((0.9 + 0.08 * fbm(x, y, 4, 2, 7)) * streak)
+}
+
+fn ribbed(x: f32, y: f32, base: Rgb, ribs: f32, seed: u32) -> Rgb {
+    let r = (x * ribs * std::f32::consts::TAU).cos() * 0.5 + 0.5;
+    base.scale(0.72 + 0.32 * r + 0.1 * (fbm(x, y, 8, 2, seed) - 0.5))
+}
+
+fn bookshelf(x: f32, y: f32, seed: u32) -> Rgb {
+    if !(0.12..0.88).contains(&y) || (0.47..0.53).contains(&y) {
+        return planks(x, y, rgb(166, 124, 76), seed);
+    }
+    let shelf = if y < 0.5 { 0 } else { 1 };
+    let books = 7.0;
+    let b = (x * books).floor();
+    let fx = (x * books).fract();
+    let h = hash(b as u32, shelf, seed);
+    let cols = [rgb(150, 40, 40), rgb(40, 70, 140), rgb(50, 110, 60), rgb(150, 110, 40), rgb(110, 50, 120), rgb(90, 60, 40)];
+    let top = if shelf == 0 { 0.12 + 0.08 * unit(h >> 4) } else { 0.53 + 0.08 * unit(h >> 4) };
+    if y < top {
+        return rgb(40, 28, 20);
+    }
+    let c = cols[(h % 6) as usize];
+    let spine = if fx < 0.12 { 1.25 } else if fx > 0.85 { 0.6 } else { 1.0 };
+    let band = if ((y - top) * 30.0).fract() < 0.12 && unit(h >> 8) < 0.5 { 1.4 } else { 1.0 };
+    c.scale(spine * band)
+}
+
 /// HD painting of a block sprite, or `None` to upscale the 16× art.
 pub fn block(name: &str, size: u32) -> Option<Image> {
     let s = size;
@@ -383,7 +481,89 @@ pub fn block(name: &str, size: u32) -> Option<Image> {
         "limestone" => solid(s, |x, y| stone(x, y, rgb(200, 194, 170), 67)),
         "mud" => solid(s, |x, y| rgb(76, 60, 50).scale(0.75 + 0.4 * fbm(x, y, 4, 5, 68))),
         "podzol_top" => solid(s, |x, y| dirt(x, y, 69).lerp(rgb(92, 64, 30), 0.4 + 0.3 * fbm(x, y, 6, 3, 70))),
-        "basalt_side" => solid(s, |x, y| rgb(72, 72, 78).scale(0.75 + 0.35 * fbm(x * 4.0, y, 2, 4, 71))),
+        "basalt_side" => solid(s, |x, y| {
+            // Tall hexagonal columns seen from the side: vertical bands with dark joints.
+            let band = (x * 4.0).fract();
+            let joint = if band < 0.06 { 0.55 } else { 1.0 };
+            rgb(96, 96, 104).scale(joint * (0.78 + 0.3 * fbm(x * 4.0, y, 2, 4, 71)))
+        }),
+        "basalt_top" => solid(s, |x, y| {
+            let (d1, d2, id) = worley(x, y, 4, 72);
+            rgb(96, 96, 104).scale(if d2 - d1 < 0.05 { 0.5 } else { 0.85 + 0.2 * unit(id) - 0.15 * d1 })
+        }),
+        "gold_block" => solid(s, |x, y| metal(x, y, rgb(240, 200, 60), 90)),
+        "iron_block" => solid(s, |x, y| metal(x, y, rgb(210, 212, 218), 91)),
+        "copper_block" => solid(s, |x, y| metal(x, y, rgb(210, 120, 80), 92)),
+        "bronze_block" => solid(s, |x, y| metal(x, y, rgb(190, 140, 70), 93)),
+        "diamond_block" => solid(s, |x, y| gem(x, y, rgb(110, 230, 222), 94)),
+        "uranium_block" => solid(s, |x, y| gem(x, y, rgb(90, 220, 70), 95)),
+        "coal_block" => solid(s, |x, y| {
+            let (d1, d2, id) = worley(x, y, 6, 96);
+            let gloss = if d1 < 0.12 && unit(id) < 0.4 { 1.8 } else { 1.0 };
+            rgb(34, 34, 38).scale((if d2 - d1 < 0.05 { 0.6 } else { 1.0 + 0.4 * unit(id) }) * gloss)
+        }),
+        "wool" => solid(s, |x, y| wool(x, y, rgb(236, 236, 236), 100)),
+        "wool_red" => solid(s, |x, y| wool(x, y, rgb(190, 50, 46), 101)),
+        "wool_blue" => solid(s, |x, y| wool(x, y, rgb(54, 76, 170), 102)),
+        "wool_yellow" => solid(s, |x, y| wool(x, y, rgb(240, 200, 60), 103)),
+        "glass" => paint(s, glass),
+        "glass_red" => solid(s, |x, y| stained(x, y, rgb(170, 50, 50))),
+        "glass_blue" => solid(s, |x, y| stained(x, y, rgb(60, 90, 180))),
+        "glass_green" => solid(s, |x, y| stained(x, y, rgb(70, 150, 70))),
+        "glass_yellow" => solid(s, |x, y| stained(x, y, rgb(210, 180, 60))),
+        "snow" => solid(s, |x, y| {
+            let sparkle = if hash((x * 64.0) as u32, (y * 64.0) as u32, 104) % 97 == 0 { 1.12 } else { 1.0 };
+            rgb(238, 244, 252).scale((0.92 + 0.08 * fbm(x, y, 4, 4, 105)) * sparkle)
+        }),
+        "terracotta" => solid(s, |x, y| rgb(176, 102, 72).scale(0.88 + 0.16 * fbm(x, y, 4, 4, 106) + 0.04 * (y * 5.0 * std::f32::consts::TAU).sin())),
+        "salt_block" => solid(s, |x, y| {
+            let (d1, d2, id) = worley(x, y, 6, 107);
+            rgb(236, 232, 226).scale(if d2 - d1 < 0.04 { 0.82 } else { 0.92 + 0.1 * unit(id) - 0.08 * d1 })
+        }),
+        "ash" => solid(s, |x, y| rgb(120, 118, 116).scale(0.85 + 0.25 * fbm(x, y, 8, 3, 108) - if fbm(x, y, 32, 1, 109) > 0.72 { 0.2 } else { 0.0 })),
+        "peat" => solid(s, |x, y| rgb(70, 50, 34).scale(0.8 + 0.35 * fbm(x * 2.0, y, 4, 4, 110))),
+        "glowstone" => solid(s, |x, y| {
+            let (d1, d2, id) = worley(x, y, 5, 111);
+            if d2 - d1 < 0.05 { rgb(120, 80, 30) } else { rgb(250, 210, 110).scale(0.75 + 0.3 * unit(id) + 0.25 * (1.0 - d1)) }
+        }),
+        "magma" => solid(s, |x, y| {
+            let (d1, d2, _) = worley(x, y, 5, 112);
+            if d2 - d1 < 0.07 { rgb(255, 140, 30).scale(1.0 - (d2 - d1) * 6.0) } else { rgb(80, 24, 18).scale(0.8 + 0.4 * fbm(x, y, 8, 2, 113) + 0.3 * d1) }
+        }),
+        "bookshelf" => solid(s, |x, y| bookshelf(x, y, 114)),
+        "pumpkin_side" => solid(s, |x, y| ribbed(x, y, rgb(226, 132, 30), 4.0, 115)),
+        "pumpkin_top" => solid(s, |x, y| {
+            let (dx, dy) = (x - 0.5, y - 0.5);
+            if dx * dx + dy * dy < 0.008 { rgb(90, 110, 40) } else { ribbed((dx.atan2(dy) / std::f32::consts::TAU).rem_euclid(1.0), y, rgb(226, 132, 30), 8.0, 116) }
+        }),
+        "melon_side" => solid(s, |x, y| ribbed(x, y, rgb(110, 160, 50), 5.0, 117).lerp(rgb(160, 200, 80), 0.15 * fbm(x, y, 8, 2, 118))),
+        "melon_top" => solid(s, |x, y| ribbed(x, y, rgb(110, 160, 50), 5.0, 119)),
+        "cactus_side" => solid(s, |x, y| {
+            let c = ribbed(x, y, rgb(70, 140, 60), 4.0, 120);
+            let spine = hash((x * 16.0) as u32, (y * 16.0) as u32, 121) % 23 == 0;
+            if spine { rgb(230, 230, 190) } else { c }
+        }),
+        "cactus_top" => solid(s, |x, y| {
+            let edge = x.min(y).min(1.0 - x).min(1.0 - y);
+            rgb(80, 150, 66).scale(if edge < 0.06 { 0.7 } else { 0.9 + 0.15 * fbm(x, y, 8, 2, 122) })
+        }),
+        "polished_granite" => solid(s, |x, y| {
+            let edge = x.min(y).min(1.0 - x).min(1.0 - y);
+            stone(x, y, rgb(170, 116, 92), 123).scale(if edge < 0.03 { 0.75 } else { 1.05 })
+        }),
+        "polished_marble" => solid(s, |x, y| {
+            let edge = x.min(y).min(1.0 - x).min(1.0 - y);
+            let vein = (((x + y) * 3.0 + fbm(x, y, 3, 5, 124) * 2.5) * std::f32::consts::TAU).sin().abs();
+            rgb(240, 238, 232).scale(if edge < 0.03 { 0.8 } else if vein < 0.05 { 0.78 } else { 0.98 })
+        }),
+        "sandstone_bricks" => solid(s, |x, y| {
+            let row = (y * 4.0).floor();
+            let fy = y * 4.0 - row;
+            let off = if row as i32 % 2 == 0 { 0.0 } else { 0.25 };
+            let bx = ((x + off) * 2.0).fract();
+            if fy < 0.08 || bx < 0.04 { rgb(170, 150, 100) } else { sand(x, y, rgb(222, 205, 150), 125).scale(if fy < 0.16 { 1.08 } else { 1.0 }) }
+        }),
+        "iskrit_block" => solid(s, |x, y| gem(x, y, rgb(230, 60, 160), 126)),
         _ => return None,
     })
 }

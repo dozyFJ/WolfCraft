@@ -527,10 +527,19 @@ fn metal_block(base: Rgb, seed: u32) -> Image {
                 q.put(x, y, c, 1.0);
             }
         }
-        bevel(q, 0, 0, 15, 15, base.scale(0.55), base.scale(0.45));
-        bevel(q, 1, 1, 14, 14, base.scale(1.30).add(0.05), base.scale(0.70));
-        // Pressed inner frame.
-        bevel(q, 4, 4, 11, 11, base.scale(0.72), base.scale(1.22));
+        // Four plates with a seam between them and a rivet in each corner (no "button"
+        // frame-in-a-frame).
+        for i in 0..S {
+            q.put(i, 7, base.scale(0.62), 1.0);
+            q.put(7, i, base.scale(0.62), 1.0);
+            q.put(i, 8, base.scale(1.18).add(0.04), 1.0);
+            q.put(8, i, base.scale(1.18).add(0.04), 1.0);
+        }
+        for (x, y) in [(2u32, 2u32), (13, 2), (2, 13), (13, 13)] {
+            q.put(x, y, base.scale(1.35).add(0.06), 1.0);
+            q.put(x + 1, y + 1, base.scale(0.6), 1.0);
+        }
+        bevel(q, 0, 0, 15, 15, base.scale(1.2).add(0.04), base.scale(0.55));
     })
 }
 
@@ -696,9 +705,16 @@ pub(crate) fn build() -> Vec<(String, Image)> {
                 let dx = x as f32 - 7.5;
                 let dy = y as f32 - 7.5;
                 let d = (dx * dx + dy * dy).sqrt();
-                let edge = x == 0 || y == 0 || x == 15 || y == 15;
-                let ring = ((d * 1.3) as u32 % 2) as f32 * 0.06;
-                let c = if edge { Rgb(0.40, 0.30, 0.18) } else { Rgb(0.68 - ring, 0.54 - ring, 0.33 - ring) };
+                // Bark round the edge, clear growth rings inside, a dark pith.
+                let edge = x <= 1 || y <= 1 || x >= 14 || y >= 14;
+                let ring = if (d * 0.9) as u32 % 2 == 1 { 0.14 } else { 0.0 };
+                let c = if edge {
+                    Rgb(0.40, 0.30, 0.18).add((rnd(x, y, 26) - 0.5) * 0.08)
+                } else if d < 1.2 {
+                    Rgb(0.45, 0.33, 0.20)
+                } else {
+                    Rgb(0.74 - ring, 0.58 - ring, 0.36 - ring * 0.8)
+                };
                 q.put(x, y, c, 1.0);
             }
         }
