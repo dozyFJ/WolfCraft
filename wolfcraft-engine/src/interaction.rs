@@ -222,6 +222,46 @@ impl Interaction {
             return events;
         }
         let info = stack.info();
+        // Hoe: till dirt or grass with free air above into farmland.
+        if (items::ids::HOE_BASE..=items::ids::HOE_LAST).contains(&stack.id) {
+            if let Some(h) = hit {
+                let tillable = matches!(h.block, Block::Dirt | Block::Grass | Block::SnowyGrass | Block::DryGrass | Block::SwampGrass | Block::Podzol | Block::MossBlock);
+                let above = world.grid().neighbor(h.cell, 2, 1);
+                let free = above.is_some_and(|a| world.cell_block(a).is_replaceable() && !world.cell_block(a).is_fluid());
+                if tillable && free {
+                    if let Some(a) = above {
+                        if world.cell_block(a) != Block::Air {
+                            world.set_block(a, Block::Air);
+                        }
+                    }
+                    if world.set_block(h.cell, Block::Farmland) {
+                        if !player.is_creative() {
+                            player.inventory.wear_selected();
+                        }
+                        events.push(InteractionEvent::Placed { pos: h.cell, block: Block::Farmland });
+                    }
+                }
+            }
+            return events;
+        }
+        // Seeds, carrots and potatoes are planted on top of farmland (elsewhere carrots and
+        // potatoes are simply eaten).
+        if let Some(crop) = info.place.filter(|b| b.crop().is_some()) {
+            if let Some(h) = hit.filter(|h| h.block == Block::Farmland && h.normal == (2, 1)) {
+                if let Some(target) = h.front_cell(world.grid()) {
+                    if world.cell_block(target) == Block::Air && world.set_block(target, crop) {
+                        if !player.is_creative() {
+                            player.inventory.consume_selected();
+                        }
+                        events.push(InteractionEvent::Placed { pos: target, block: crop });
+                    }
+                }
+                return events;
+            }
+            if info.food.is_none() {
+                return events;
+            }
+        }
         if let Some((hunger, sat)) = info.food {
             if player.survival.hunger < 20.0 && !player.is_creative() {
                 player.inventory.consume_selected();
@@ -359,6 +399,41 @@ mod tests {
         w.blocks.insert(c(1, 50, 0), Block::Dirt);
         let p = Player::new(wp(0.5, 80.0, 0.5), GameMode::Survival);
         (w, p)
+    }
+
+    #[test]
+    fn a_hoe_tills_soil_and_seeds_grow_only_on_farmland() {
+        let (mut w, mut p) = setup();
+        let mut it = Interaction::default();
+        // Seeds on plain dirt: nothing.
+        p.inventory.slots[0] = Some(ItemStack::new(ids::WHEAT_SEEDS, 3));
+        p.inventory.selected = 0;
+        let h = hit(&w, c(1, 50, 0), UP);
+        it.use_item(&mut w, &mut p, Some(h));
+        assert_eq!(w.block(c(1, 51, 0)), Block::Air, "no farmland, no planting");
+        // Till with a hoe, then plant.
+        p.inventory.slots[1] = Some(ItemStack::new(ids::HOE_BASE, 1));
+        p.inventory.selected = 1;
+        let h = hit(&w, c(1, 50, 0), UP);
+        it.use_item(&mut w, &mut p, Some(h));
+        assert_eq!(w.block(c(1, 50, 0)), Block::Farmland);
+        assert_eq!(p.inventory.slots[1].unwrap().damage, 1, "the hoe wears");
+        p.inventory.selected = 0;
+        let h = hit(&w, c(1, 50, 0), UP);
+        it.use_item(&mut w, &mut p, Some(h));
+        assert_eq!(w.block(c(1, 51, 0)), Block::WheatYoung, "planted");
+        assert_eq!(p.inventory.count(ids::WHEAT_SEEDS), 2);
+        // A carrot away from farmland is eaten instead.
+        p.survival.hunger = 10.0;
+        p.inventory.slots[2] = Some(ItemStack::new(ids::CARROT, 1));
+        p.inventory.selected = 2;
+        let h = hit(&w, c(0, 50, 0), UP);
+        it.use_item(&mut w, &mut p, Some(h));
+        assert!(p.survival.hunger > 10.0, "ate the carrot");
+        // Ripe wheat gives wheat and seeds.
+        let d = items::drops(Block::Wheat, true, glam::IVec3::ZERO, 1);
+        assert!(d.iter().any(|s| s.id == ids::WHEAT) && d.iter().any(|s| s.id == ids::WHEAT_SEEDS));
+        assert_eq!(smelt_result(ids::POTATO), Some(ids::BAKED_POTATO));
     }
 
     #[test]
@@ -539,6 +614,7 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
         ids::RAW_TIN => ids::TIN_INGOT,
         ids::RAW_SILVER => ids::SILVER_INGOT,
         ids::RAW_URANIUM => ids::URANIUM_INGOT,
+        ids::POTATO => ids::BAKED_POTATO,
         ids::RAW_MEAT => ids::COOKED_MEAT,
         x if x == Block::Cobblestone as items::ItemId => Block::Stone as items::ItemId,
         x if x == Block::Sand as items::ItemId => Block::Glass as items::ItemId,

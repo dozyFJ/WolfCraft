@@ -46,7 +46,15 @@ pub mod ids {
     pub const LEATHER: ItemId = 313;
     pub const RAW_URANIUM: ItemId = 314;
     pub const URANIUM_INGOT: ItemId = 315;
-    pub const LAST: ItemId = 315;
+    /// Hoes: HOE_BASE + material (wood, stone, iron, diamond).
+    pub const HOE_BASE: ItemId = 316;
+    pub const HOE_LAST: ItemId = 319;
+    pub const WHEAT_SEEDS: ItemId = 320;
+    pub const WHEAT: ItemId = 321;
+    pub const CARROT: ItemId = 322;
+    pub const POTATO: ItemId = 323;
+    pub const BAKED_POTATO: ItemId = 324;
+    pub const LAST: ItemId = 324;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -152,6 +160,16 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::LEATHER => plain("Кожа", sp::LEATHER),
         ids::RAW_URANIUM => plain("Сырой уран", sp::RAW_URANIUM),
         ids::URANIUM_INGOT => plain("Урановый слиток", sp::URANIUM_INGOT),
+        h if (ids::HOE_BASE..=ids::HOE_LAST).contains(&h) => {
+            let m = (h - ids::HOE_BASE) as usize;
+            let name = ["Деревянная мотыга", "Каменная мотыга", "Железная мотыга", "Алмазная мотыга"][m];
+            ItemInfo { max_stack: 1, durability: DURABILITY[m], ..plain(name, sp::HOE_BASE + m as u16) }
+        }
+        ids::WHEAT_SEEDS => ItemInfo { place: Some(Block::WheatYoung), ..plain("Семена пшеницы", sp::WHEAT_SEEDS) },
+        ids::WHEAT => plain("Пшеница", sp::WHEAT),
+        ids::CARROT => ItemInfo { place: Some(Block::CarrotYoung), food: Some((3.0, 3.6)), ..plain("Морковь", sp::CARROT) },
+        ids::POTATO => ItemInfo { place: Some(Block::PotatoYoung), food: Some((1.0, 0.6)), ..plain("Картофель", sp::POTATO) },
+        ids::BAKED_POTATO => ItemInfo { food: Some((5.0, 6.0)), ..plain("Печёный картофель", sp::BAKED_POTATO) },
         t if (ids::TOOLS_BASE..=ids::TOOLS_LAST).contains(&t) => {
             let n = (t - ids::TOOLS_BASE) as usize;
             let (mat, kind) = (n / 4, n % 4);
@@ -173,6 +191,10 @@ pub fn info(id: ItemId) -> ItemInfo {
 
 /// Shape of a tool for the hand model: (kind 0 pickaxe, 1 axe, 2 shovel, 3 sword; material 0..3).
 pub fn tool_shape(id: ItemId) -> Option<(u8, u8)> {
+    // Hoes are kind 4 (drawn and swung like the other tools).
+    if (ids::HOE_BASE..=ids::HOE_LAST).contains(&id) {
+        return Some((4, (id - ids::HOE_BASE) as u8));
+    }
     (ids::TOOLS_BASE..=ids::TOOLS_LAST).contains(&id).then(|| {
         let n = id - ids::TOOLS_BASE;
         ((n % 4) as u8, (n / 4) as u8)
@@ -240,11 +262,30 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         Block::ElectricLampOn => vec![ItemStack::of_block(Block::ElectricLamp, 1)],
         Block::SwitchOn => vec![ItemStack::of_block(Block::SwitchOff, 1)],
         b if b.base_item() != b => vec![ItemStack::of_block(b.base_item(), 1)],
-        Block::Glass | Block::Ice | Block::PackedIce | Block::TallGrass | Block::Seagrass | Block::Kelp => vec![],
+        // Farming: ripe crops give the harvest and seeds back, young ones only a seed.
+        Block::Wheat => vec![ItemStack::new(ids::WHEAT, 1), ItemStack::new(ids::WHEAT_SEEDS, 1 + (roll * 3.0) as u8)],
+        Block::WheatYoung => vec![ItemStack::new(ids::WHEAT_SEEDS, 1)],
+        Block::Carrots => vec![ItemStack::new(ids::CARROT, 2 + (roll * 3.0) as u8)],
+        Block::CarrotYoung => vec![ItemStack::new(ids::CARROT, 1)],
+        Block::Potatoes => vec![ItemStack::new(ids::POTATO, 2 + (roll * 3.0) as u8)],
+        Block::PotatoYoung => vec![ItemStack::new(ids::POTATO, 1)],
+        Block::Farmland => vec![ItemStack::of_block(Block::Dirt, 1)],
+        // Wild grass now and then hides seeds, a carrot or a potato.
+        Block::TallGrass | Block::Fern => {
+            if roll < 0.14 {
+                vec![ItemStack::new(ids::WHEAT_SEEDS, 1)]
+            } else if roll < 0.17 {
+                vec![ItemStack::new(ids::CARROT, 1)]
+            } else if roll < 0.20 {
+                vec![ItemStack::new(ids::POTATO, 1)]
+            } else {
+                vec![]
+            }
+        }
+        Block::Glass | Block::Ice | Block::PackedIce | Block::Seagrass | Block::Kelp => vec![],
         Block::Snow => vec![ItemStack::of_block(Block::Snow, 1)],
         Block::Gravel if roll < 0.12 => vec![ItemStack::new(ids::FLINT, 1)],
         Block::Podzol | Block::MossBlock => vec![ItemStack::of_block(Block::Dirt, 1)],
-        Block::Fern => vec![],
         Block::Basalt => vec![ItemStack::of_block(Block::Basalt, 1)],
         b => vec![ItemStack::of_block(b, 1)],
     }
@@ -255,6 +296,8 @@ pub fn mob_drops(kind: crate::mobs::MobKind, salt: u64) -> Vec<ItemStack> {
     use crate::mobs::MobKind;
     let roll = to01(hash3(salt, 7, 11, 13));
     match kind {
+        // Boars dig up roots: sometimes one carries a carrot or a potato.
+        MobKind::Boar if roll > 0.75 => vec![ItemStack::new(ids::RAW_MEAT, 1), ItemStack::new(ids::LEATHER, 1), ItemStack::new(if roll > 0.88 { ids::CARROT } else { ids::POTATO }, 1)],
         MobKind::Boar => vec![ItemStack::new(ids::RAW_MEAT, 1 + (roll * 2.0) as u8), ItemStack::new(ids::LEATHER, 1)],
         MobKind::Sheep => vec![ItemStack::new(ids::RAW_MEAT, 1), ItemStack::of_block(Block::Wool, 1)],
         // Ghouls live on radiation: now and then one carries a lump of uranium.
@@ -320,6 +363,7 @@ pub fn is_new(id: ItemId) -> bool {
 pub fn creative_palette() -> Vec<ItemId> {
     let mut v: Vec<ItemId> = Block::ALL
         .iter()
+        .filter(|b| b.crop().is_none())
         .filter(|b| !matches!(b, Block::Air | Block::Water | Block::Magma | Block::InnerCore | Block::Bedrock | Block::ElectricLampOn | Block::SwitchOn | Block::GlassPaneB | Block::StoneSlabVerticalB | Block::PlankSlabVerticalB | Block::BrickSlabVerticalB) && b.base_item() == **b)
         .map(|b| *b as ItemId)
         .collect();
@@ -349,6 +393,12 @@ pub fn category(id: ItemId) -> &'static str {
     if id >= ITEM_BASE {
         if armor_slot(id).is_some() {
             return "Доспехи";
+        }
+        if (ids::HOE_BASE..=ids::HOE_LAST).contains(&id) {
+            return "Инструменты";
+        }
+        if matches!(id, ids::WHEAT_SEEDS | ids::WHEAT | ids::CARROT | ids::POTATO) {
+            return "Растения";
         }
         if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
             return "Вооружение";

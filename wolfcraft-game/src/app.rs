@@ -196,6 +196,8 @@ pub struct App {
     hand_place: f32,
     /// Fraction of a crumble particle owed while mining (see the mining effects).
     mine_dust: f32,
+    /// Ink of sign texts, drawn on the signs in the world.
+    sign_texts: crate::signs::SignTexts,
     /// Item-switch dip of the view model: 1 right after changing the slot, fading to 0.
     hand_switch: f32,
     last_hotbar: usize,
@@ -312,6 +314,7 @@ impl App {
             hand_block: 0.0,
             hand_place: 0.0,
             mine_dust: 0.0,
+            sign_texts: Default::default(),
             hand_switch: 0.0,
             last_hotbar: 0,
             audio: crate::audio::Audio::new(),
@@ -1404,7 +1407,8 @@ impl App {
                             hint: if screen == Screen::Playing { hint } else { None },
                             mining: s.interaction.mining_fraction(),
                             bow_charge: s.bow_charge,
-                            sign_text: s.hit.filter(|h| matches!(h.block, wolfcraft_engine::block::Block::Sign | wolfcraft_engine::block::Block::SignB)).and_then(|h| s.block_commands.get(&h.cell)).filter(|t| !t.trim().is_empty()).cloned(),
+                            // Sign texts are drawn on the signs in the world now, not as a plate.
+                            sign_text: None,
                             item_name: s.item_name.clone(),
                             show_fps: settings.show_fps,
                             debug: debug_info.as_ref(),
@@ -1661,6 +1665,19 @@ impl App {
                 // Character model is visible in third-person views only.
                 let mut model_verts = wolfcraft_engine::renderer::model::build_mob_models(&s.mobs.mobs, cam.eye, cam.forward, (self.settings.render_distance * 16) as f64 * 1.15);
                 model_verts.extend(wolfcraft_engine::renderer::model::build_dropped_models(&s.drops.list, cam.eye, self.time.elapsed(), 48.0));
+                // Sign texts, written on the boards themselves.
+                {
+                    let grid = s.chunks.grid();
+                    let near: Vec<_> = s
+                        .block_commands
+                        .iter()
+                        .filter(|(c, _)| (grid.cell_center(**c) - cam.eye).length() < crate::signs::TEXT_DISTANCE)
+                        .filter_map(|(c, t)| s.chunks.get_block(*c).filter(|b| matches!(b, wolfcraft_engine::block::Block::Sign | wolfcraft_engine::block::Block::SignB)).map(|b| (*c, b, t.clone())))
+                        .collect();
+                    if !near.is_empty() {
+                        model_verts.extend(self.sign_texts.build(&gfx.gui.ctx, &grid, &near, cam.eye));
+                    }
+                }
                 let arrows: Vec<(glam::DVec3, glam::DVec3)> = s.arrows.list.iter().map(|a| (a.pos, a.dir)).collect();
                 model_verts.extend(wolfcraft_engine::renderer::model::build_arrow_models(&arrows, cam.eye));
                 if s.camera_mode != crate::session::CameraMode::First && !s.player.survival.dead {

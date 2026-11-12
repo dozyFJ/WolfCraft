@@ -362,12 +362,13 @@ blocks! {
     227 PistonHead3 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 3)),
     228 PistonHead4 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 4)),
     229 PistonHead5 => info("Головка поршня", Shape, 1.5, Pickaxe, ptiles(t::PISTON_FRONT, t::PISTON_FRONT, t::PISTON_SIDE, 5)),
-    230 StickyHead0 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 0)),
-    231 StickyHead1 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 1)),
-    232 StickyHead2 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 2)),
-    233 StickyHead3 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 3)),
-    234 StickyHead4 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 4)),
-    235 StickyHead5 => info("Головка липкого поршня", Shape, 1.5, Pickaxe, ptiles(t::STICKY_FRONT, t::STICKY_FRONT, t::PISTON_SIDE, 5)),
+    // Ids 230..=235 were the sticky piston heads (one head now serves both pistons).
+    230 Farmland => info("Грядка", Opaque, 0.6, Shovel, column(t::DIRT, t::FARMLAND, t::DIRT)),
+    231 WheatYoung => not_solid(info("Пшеница (растёт)", Cross, 0.0, Hand, all(t::WHEAT_YOUNG))),
+    232 Wheat => not_solid(info("Пшеница", Cross, 0.0, Hand, all(t::WHEAT_RIPE))),
+    233 CarrotYoung => not_solid(info("Морковь (растёт)", Cross, 0.0, Hand, all(t::CARROT_YOUNG))),
+    234 Carrots => not_solid(info("Морковь", Cross, 0.0, Hand, all(t::CARROT_RIPE))),
+    235 PotatoYoung => not_solid(info("Картофель (растёт)", Cross, 0.0, Hand, all(t::POTATO_YOUNG))),
     236 Repeater0 => not_solid(info("Повторитель", Shape, 0.0, Hand, all(t::REPEATER + 0))),
     237 Repeater1 => not_solid(info("Повторитель", Shape, 0.0, Hand, all(t::REPEATER + 1))),
     238 Repeater2 => not_solid(info("Повторитель", Shape, 0.0, Hand, all(t::REPEATER + 2))),
@@ -387,6 +388,7 @@ blocks! {
     252 Baseplate => needs_pick(info("Основа", Opaque, 7.5, Pickaxe, all(t::BASEPLATE))),
     253 PressurePlate => not_solid(info("Нажимная плита", Shape, 0.5, Pickaxe, all(t::SMOOTH_STONE))),
     254 PressurePlateOn => not_solid(info("Нажимная плита (нажата)", Shape, 0.5, Pickaxe, all(t::SMOOTH_STONE))),
+    255 Potatoes => not_solid(info("Картофель", Cross, 0.0, Hand, all(t::POTATO_RIPE))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -410,7 +412,8 @@ impl Part {
     pub fn block(self) -> Block {
         let id = match self {
             Part::Piston { sticky, extended, dir } => 200 + (sticky as u8) * 12 + (extended as u8) * 6 + dir.min(5),
-            Part::Head { sticky, dir } => 224 + (sticky as u8) * 6 + dir.min(5),
+            // One head for both kinds of piston: stickiness lives in the base behind it.
+            Part::Head { dir, .. } => 224 + dir.min(5),
             Part::Repeater { on, dir } => 236 + (on as u8) * 4 + dir.min(3),
             Part::Comparator { on, dir } => 244 + (on as u8) * 4 + dir.min(3),
         };
@@ -638,6 +641,25 @@ impl Block {
     }
 
     /// Door states: (closed, open) pairs toggle on use.
+    /// A crop and whether it is ripe.
+    pub fn crop(self) -> Option<(Block, bool)> {
+        use Block::*;
+        Some(match self {
+            WheatYoung => (Wheat, false),
+            Wheat => (Wheat, true),
+            CarrotYoung => (Carrots, false),
+            Carrots => (Carrots, true),
+            PotatoYoung => (Potatoes, false),
+            Potatoes => (Potatoes, true),
+            _ => return None,
+        })
+    }
+
+    /// The next growth stage of a young crop.
+    pub fn grown(self) -> Option<Block> {
+        self.crop().filter(|c| !c.1).map(|c| c.0)
+    }
+
     pub fn door_toggle(self) -> Option<Block> {
         use Block::*;
         Some(match self {
@@ -670,7 +692,6 @@ impl Block {
             212..=217 => Part::Piston { sticky: true, extended: false, dir: id - 212 },
             218..=223 => Part::Piston { sticky: true, extended: true, dir: id - 218 },
             224..=229 => Part::Head { sticky: false, dir: id - 224 },
-            230..=235 => Part::Head { sticky: true, dir: id - 230 },
             236..=239 => Part::Repeater { on: false, dir: id - 236 },
             240..=243 => Part::Repeater { on: true, dir: id - 240 },
             244..=247 => Part::Comparator { on: false, dir: id - 244 },
@@ -822,7 +843,12 @@ mod tests {
         assert!(!Block::TallGrass.is_solid());
         assert!(Block::OakLeaves.is_solid() && !Block::OakLeaves.is_opaque());
         assert!(Block::Ice.is_solid());
-        assert_eq!(Block::from_u8(255), Block::Air, "ids past the last block are air");
+        // Every id is a block of its own (all 256 are in use), declared in id order.
+        for id in 0..=255u8 {
+            assert_eq!(Block::from_u8(id) as u8, id, "id {id}");
+        }
+        assert_eq!(Block::WheatYoung.grown(), Some(Block::Wheat));
+        assert_eq!(Block::Wheat.grown(), None);
     }
 
     #[test]

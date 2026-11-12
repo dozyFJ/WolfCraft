@@ -916,7 +916,8 @@ fn arm_place(pose: &HandsPose, side: f32) -> ArmPlace {
         let mut a = ArmPlace { pos: p, tilt: 0.2 + btilt, yaw: byaw, roll: broll };
         if swinging {
             let keys = match pose.tool {
-                Some((kind, _)) => TOOL_ANIMS[(kind as usize).min(TOOL_ANIMS.len() - 1)],
+                // Hoes (kind 4) chop down like a pickaxe.
+                Some((kind, _)) => TOOL_ANIMS[if kind == 4 { 0 } else { (kind as usize).min(TOOL_ANIMS.len() - 1) }],
                 None => FIST_ANIM,
             };
             let s = sample_anim(keys, swing);
@@ -1110,7 +1111,7 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
 
 /// Tool held upright in the fist; boxes share the forearm tilt.
 fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle: f32, kind: u8, mat: u8) {
-    let sprite = wolfcraft_assets::items::TOOLS_BASE as usize + mat as usize * 4 + kind as usize;
+    let sprite = if kind == 4 { wolfcraft_assets::items::HOE_BASE as usize + mat as usize } else { wolfcraft_assets::items::TOOLS_BASE as usize + mat as usize * 4 + kind as usize };
     if let Some(px) = textures().and_then(|t| t.item_pixels.get(sprite).cloned()).filter(|p| p.len() == 256) {
         // 3D item: every opaque icon pixel is a little box. The icon's handle (bottom-left)
         // sits in the fist; its right edge points left and a bit away, so the tip leans

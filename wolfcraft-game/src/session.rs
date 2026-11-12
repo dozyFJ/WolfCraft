@@ -1072,6 +1072,10 @@ impl GameSession {
             let (di, dj, dk) = (r(self, 32), r(self, 32), r(self, 8));
             let Some(c) = g.offset(base, di, dj, dk) else { continue };
             let Some(b) = self.chunks.get_block(c) else { continue };
+            if b.crop().is_some() {
+                self.tick_crop(c, b);
+                continue;
+            }
             if !matches!(b, B::SugarCane | B::Cactus) {
                 continue;
             }
@@ -1091,6 +1095,30 @@ impl GameSession {
             if h < 3 && self.chunks.set_block(top, b) {
                 self.net_out.push((top, b));
             }
+        }
+    }
+
+    /// A random tick on a crop: it needs farmland below (else it falls off as an item); a
+    /// young crop ripens, twice as likely with water within four blocks of its farmland.
+    fn tick_crop(&mut self, c: wolfcraft_engine::cubesphere::Cell, b: wolfcraft_engine::block::Block) {
+        use wolfcraft_engine::block::Block as B;
+        let g = self.chunks.grid();
+        let Some(soil) = g.neighbor(c, 2, -1) else { return };
+        if self.chunks.get_block(soil) != Some(B::Farmland) {
+            if self.chunks.set_block(c, B::Air) {
+                self.net_out.push((c, B::Air));
+                let centre = g.cell_center(c);
+                for d in wolfcraft_engine::items::drops(b, true, glam::IVec3::new(c.i, c.j, c.k), self.cfg.seed) {
+                    self.drops.pop_from_block(d, centre);
+                }
+            }
+            return;
+        }
+        let Some(next) = b.grown() else { return };
+        let wet = (-4..=4).any(|di| (-4..=4).any(|dj| g.offset(soil, di, dj, 0).and_then(|n| self.chunks.get_block(n)).is_some_and(|x| x.is_water())));
+        let chance = if wet { 0.5 } else { 0.22 };
+        if self.mobs.rand() < chance && self.chunks.set_block(c, next) {
+            self.net_out.push((c, next));
         }
     }
 

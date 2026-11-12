@@ -270,6 +270,8 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::FLINT, 1), (ids::STICK, 1)], (ids::ARROW, 4), false, "Вооружение"));
         v.push(r(&[(ids::STRING, 4)], (b(Block::Wool), 1), false, "Строительство"));
         v.push(r(&[(b(Block::Stone), 2)], (b(Block::PressurePlate), 1), false, "Техника"));
+        // Farming: bread from wheat, hoes like the other tools.
+        v.push(r(&[(ids::WHEAT, 3)], (ids::BREAD, 1), true, "Еда"));
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerRed), 1)], (b(Block::RedWool), 1), false, "Строительство"));
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerBlue), 1)], (b(Block::BlueWool), 1), false, "Строительство"));
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerYellow), 1)], (b(Block::YellowWool), 1), false, "Строительство"));
@@ -392,7 +394,6 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::Cobblestone), 1), (ids::COAL, 1)], (b(Block::Stone), 1), true, "Плавка"));
         v.push(r(&[(b(Block::Sand), 1), (ids::COAL, 1)], (b(Block::Glass), 2), true, "Плавка"));
         v.push(r(&[(b(Block::MushroomRed), 1), (b(Block::MushroomBrown), 1), (ids::APPLE, 1)], (ids::MUSHROOM_STEW, 1), false, "Еда"));
-        v.push(r(&[(ids::APPLE, 2), (b(Block::Sand), 1)], (ids::BREAD, 2), false, "Еда"));
         // Tools: pickaxe 3, axe 3, shovel 1, sword 2 material units + sticks.
         let mats: [ItemId; 4] = [b(Block::OakPlanks), b(Block::Cobblestone), ids::IRON_INGOT, ids::DIAMOND];
         let units = [3u8, 3, 1, 2];
@@ -405,6 +406,11 @@ pub fn recipes() -> &'static [Recipe] {
                 rec.shape = Some(pattern(shapes[ki], *mat));
                 v.push(rec);
             }
+        }
+        for (mi, mat) in mats.iter().enumerate() {
+            let mut rec = r(&[(*mat, 2), (ids::STICK, 2)], (ids::HOE_BASE + mi as u16, 1), true, "Инструменты");
+            rec.shape = Some(pattern(["MM.", ".S.", ".S."], *mat));
+            v.push(rec);
         }
         v
     })

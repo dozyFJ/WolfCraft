@@ -161,6 +161,14 @@ pub mod tiles {
     pub const COMPARATOR: u16 = 155;
     pub const COMPARATOR_ON: u16 = 159;
     pub const BASEPLATE: u16 = 163;
+    /// Farming: tilled soil and two stages of every crop (young, ripe).
+    pub const FARMLAND: u16 = 164;
+    pub const WHEAT_YOUNG: u16 = 165;
+    pub const WHEAT_RIPE: u16 = 166;
+    pub const CARROT_YOUNG: u16 = 167;
+    pub const CARROT_RIPE: u16 = 168;
+    pub const POTATO_YOUNG: u16 = 169;
+    pub const POTATO_RIPE: u16 = 170;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -1633,6 +1641,56 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    // ---- Farming ----
+    l.add(FARMLAND, "farmland", p(|q| {
+        // Dark, moist tilled soil in furrows.
+        for y in 0..S {
+            for x in 0..S {
+                let furrow = y % 4 == 0;
+                let n = (rnd(x, y, 260) - 0.5) * 0.06 + (rnd(x / 3, y / 2, 261) - 0.5) * 0.05;
+                let c = if furrow { Rgb(0.24, 0.15, 0.08) } else { Rgb(0.40, 0.26, 0.14).add(n - if y % 4 == 3 { 0.05 } else { 0.0 }) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    // Crops are crossed sprites: stems from the bottom edge, the crop near the top.
+    let crop = |seed: u32, stalk: Rgb, ripe: bool, fruit: Option<Rgb>, ear: Option<Rgb>| {
+        p(move |q| {
+            q.clear();
+            let height = if ripe { 13 } else { 6 };
+            for s in 0..5u32 {
+                let x = 2 + s * 3;
+                let h = height - (rnd(s, 0, seed) * 3.0) as u32;
+                for y in (S - h)..S {
+                    let lean = if y < S - h / 2 && s % 2 == 0 { 1 } else { 0 };
+                    let xx = (x + lean).min(S - 1);
+                    q.put(xx, y, stalk.scale(0.85 + rnd(xx, y, seed + 1) * 0.3), 1.0);
+                    if !ripe && y == S - h {
+                        q.put((xx + 1).min(S - 1), y, stalk.add(0.08), 1.0);
+                    }
+                }
+                if let Some(e) = ear {
+                    for y in (S - h)..(S - h + 4).min(S) {
+                        q.put(x, y, e.add(if y % 2 == 0 { 0.06 } else { -0.04 }), 1.0);
+                        q.put((x + 1).min(S - 1), y, e.scale(0.85), 1.0);
+                    }
+                }
+                if let Some(f) = fruit {
+                    // Tops of carrots / potatoes peeking out of the soil.
+                    for dx in 0..2u32 {
+                        q.put((x + dx).min(S - 1), S - 1, f, 1.0);
+                        q.put((x + dx).min(S - 1), S - 2, f.scale(0.9), 1.0);
+                    }
+                }
+            }
+        })
+    };
+    l.add(WHEAT_YOUNG, "wheat_young", crop(262, Rgb(0.36, 0.66, 0.22), false, None, None));
+    l.add(WHEAT_RIPE, "wheat_ripe", crop(263, Rgb(0.74, 0.64, 0.30), true, None, Some(Rgb(0.90, 0.72, 0.28))));
+    l.add(CARROT_YOUNG, "carrot_young", crop(264, Rgb(0.30, 0.66, 0.20), false, None, None));
+    l.add(CARROT_RIPE, "carrot_ripe", crop(265, Rgb(0.28, 0.62, 0.18), true, Some(Rgb(0.98, 0.55, 0.12)), None));
+    l.add(POTATO_YOUNG, "potato_young", crop(266, Rgb(0.34, 0.62, 0.24), false, None, None));
+    l.add(POTATO_RIPE, "potato_ripe", crop(267, Rgb(0.30, 0.58, 0.22), true, Some(Rgb(0.78, 0.64, 0.38)), None));
     // Pixel-art finish. Natural, noisy materials get clumps instead of per-pixel static, a
     // gentle large-scale variation and a few luminance bands (the hand-painted look); every
     // opaque pixel then gets a touch more contrast and a limited palette.
