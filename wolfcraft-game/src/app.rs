@@ -92,8 +92,60 @@ struct LoadState {
     progress_at: Instant,
 }
 
-/// World script written in the studio (chat commands, one per line), next to world.toml.
+/// Old world script (chat commands, one per line), next to world.toml: read once and turned into Luau.
 const STUDIO_SCRIPT: &str = "studio.txt";
+/// World script in Luau, written in the studio, run when the world starts.
+const SCRIPT_FILE: &str = "script.lua";
+
+/// The world's Luau script (an old command list is translated on the way).
+fn read_world_script(dir: &std::path::Path) -> String {
+    if let Ok(s) = std::fs::read_to_string(dir.join(SCRIPT_FILE)) {
+        return s;
+    }
+    match std::fs::read_to_string(dir.join(STUDIO_SCRIPT)) {
+        Ok(old) if !old.trim().is_empty() => crate::lua::from_command_list(&old),
+        _ => String::new(),
+    }
+}
+
+/// Draws the script's GUI (ScreenGui-like) over the game; returns the ids of pressed buttons.
+fn draw_lua_gui(ctx: &egui::Context, els: &[crate::lua::GuiElement]) -> Vec<String> {
+    use crate::lua::GuiKind;
+    let mut pressed = Vec::new();
+    let sr = ctx.screen_rect();
+    let c32 = |c: [u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
+    for (i, e) in els.iter().filter(|e| e.visible).enumerate() {
+        let centre = egui::pos2(sr.left() + e.x * sr.width(), sr.top() + e.y * sr.height());
+        let font = egui::FontId::proportional(e.size);
+        let size = if e.w > 0.0 && e.h > 0.0 {
+            egui::vec2(e.w * sr.width(), e.h * sr.height())
+        } else {
+            ctx.fonts(|f| f.layout_no_wrap(e.text.clone(), font.clone(), egui::Color32::WHITE)).size() + egui::vec2(16.0, 8.0)
+        };
+        let rect = egui::Rect::from_center_size(centre, size);
+        egui::Area::new(egui::Id::new(("lua-gui", i, &e.id))).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+            let resp = ui.allocate_rect(egui::Rect::from_min_size(rect.min, size), if e.kind == GuiKind::Button { egui::Sense::click() } else { egui::Sense::hover() });
+            let painter = ui.painter();
+            let mut fill = e.color.map(c32);
+            if e.kind == GuiKind::Button && resp.is_pointer_button_down_on() {
+                fill = fill.map(|c| c.gamma_multiply(0.8));
+            }
+            if let Some(f) = fill {
+                painter.rect_filled(rect, egui::Rounding::same(8.0), if e.kind == GuiKind::Frame { f.gamma_multiply(0.85) } else { f });
+            }
+            if e.kind == GuiKind::Button {
+                painter.rect_stroke(rect, egui::Rounding::same(8.0), egui::Stroke::new(2.0, egui::Color32::from_white_alpha(120)));
+            }
+            if !e.text.is_empty() {
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, &e.text, font, c32(e.text_color));
+            }
+            if resp.clicked() {
+                pressed.push(e.id.clone());
+            }
+        });
+    }
+    pressed
+}
 
 /// Phone folder for the player's resource packs (the app's own shared-storage folder).
 const ANDROID_PACKS_DIR: &str = "/storage/emulated/0/Android/data/com.wolfcraft.mobile/files/resourcepacks";
@@ -167,6 +219,8 @@ pub struct App {
     /// Studio (world editor) panels while a world is open in the studio, and that world's id.
     studio: Option<wolfcraft_ui::studio_ui::StudioState>,
     studio_world: Option<String>,
+    /// The world's Luau script while it runs (GUI, events, timers).
+    lua: Option<crate::lua::LuaHost>,
     /// The world list was read for the launcher since it was last shown.
     main_worlds_fresh: bool,
     /// Listens for servers on the local network while the world list is open.
@@ -297,6 +351,7 @@ impl App {
             portrait: None,
             studio: None,
             studio_world: None,
+            lua: None,
             main_worlds_fresh: false,
             discovery: None,
             container: None,
@@ -605,14 +660,14 @@ impl App {
     /// Saves the studio's world script next to the world.
     fn save_studio_script(&self) {
         if let (Some(st), Some(id)) = (&self.studio, &self.studio_world) {
-            if let Err(e) = std::fs::write(self.worlds_dir.join(id).join(STUDIO_SCRIPT), &st.script) {
+            if let Err(e) = std::fs::write(self.worlds_dir.join(id).join(SCRIPT_FILE), &st.script) {
                 log::error!("studio script: {e}");
             }
         }
     }
 
     fn studio_action(&mut self, a: wolfcraft_ui::studio_ui::StudioAction, submitted: &mut Vec<String>, actions: &mut Vec<MenuAction>) {
-        use wolfcraft_ui::studio_ui::{StudioAction, script_commands};
+        use wolfcraft_ui::studio_ui::StudioAction;
         let now = self.time.elapsed() as f64;
         let status = |me: &mut Self, text: &str| {
             if let Some(st) = &mut me.studio {
@@ -626,11 +681,11 @@ impl App {
                 actions.push(MenuAction::SaveAndQuit);
             }
             StudioAction::RunScript => {
+                // A fresh Luau state each run: the old GUI, handlers and timers go away.
                 let script = self.studio.as_ref().map(|s| s.script.clone()).unwrap_or_default();
-                let cmds = script_commands(&script);
-                let n = cmds.len();
-                submitted.extend(cmds);
-                status(self, &format!("Скрипт выполнен: {n} команд"));
+                let _ = &submitted;
+                let errors = self.start_lua(&script);
+                status(self, if errors { "Скрипт: есть ошибки (см. чат)" } else { "Скрипт запущен" });
             }
             StudioAction::Save => {
                 self.save_studio_script();
@@ -655,7 +710,34 @@ impl App {
         }
     }
 
+    /// Starts the world's Luau script (replacing a running one). Returns true on errors.
+    fn start_lua(&mut self, source: &str) -> bool {
+        self.lua = None;
+        if source.trim().is_empty() {
+            return false;
+        }
+        let Some(s) = &mut self.session else { return false };
+        let now = self.time.elapsed() as f64;
+        match crate::lua::LuaHost::new() {
+            Ok(mut l) => {
+                l.run(s, source);
+                let out = l.take_output();
+                let errors = out.iter().any(|(k, _)| *k == wolfcraft_ui::chat_ui::ChatKind::Error);
+                for (k, t) in out {
+                    self.chat.push(k, t, now);
+                }
+                self.lua = Some(l);
+                errors
+            }
+            Err(e) => {
+                self.chat.push(wolfcraft_ui::chat_ui::ChatKind::Error, format!("Lua: {e}"), now);
+                true
+            }
+        }
+    }
+
     fn leave_world(&mut self) {
+        self.lua = None;
         self.studio = None;
         self.studio_world = None;
         self.touch.studio = false;
@@ -1151,6 +1233,23 @@ impl App {
                     s.fx_amount = self.settings.particles;
                     let events = s.update(&input, dt, view, frozen);
                     self.profile.chunks_ms = t.ms();
+                    // The world script: timers and "tick", plus block events.
+                    if let Some(l) = &mut self.lua {
+                        if !frozen {
+                            l.tick(s, dt as f32);
+                        }
+                        for e in &events {
+                            match e {
+                                InteractionEvent::Broken { block, .. } => l.event(s, "block_broken", block.info().name),
+                                InteractionEvent::Placed { block, .. } => l.event(s, "block_placed", block.info().name),
+                                _ => {}
+                            }
+                        }
+                        let now = self.time.elapsed() as f64;
+                        for (k, t) in l.take_output() {
+                            self.chat.push(k, t, now);
+                        }
+                    }
                     // Changes the game made by itself (buttons springing back) go to the server too.
                     for (pos, block) in s.net_out.drain(..) {
                         if let Some(net) = &mut self.net {
@@ -1277,6 +1376,8 @@ impl App {
         let mut pack_download: Option<String> = None;
         let mut close_inventory = false;
         let mut submitted: Vec<String> = Vec::new();
+        let lua_gui: Vec<crate::lua::GuiElement> = self.lua.as_ref().map(|l| l.gui()).unwrap_or_default();
+        let mut lua_clicks: Vec<String> = Vec::new();
         let mut studio_actions: Vec<wolfcraft_ui::studio_ui::StudioAction> = Vec::new();
         let mut studio_cover: Vec<egui::Rect> = Vec::new();
         let icons = gfx.gui.icons.clone();
@@ -1423,6 +1524,10 @@ impl App {
                         };
                         if screen != Screen::Map {
                             hud::draw(ctx, &icons, &hud);
+                        }
+                        // The world script's own GUI (Luau, like Roblox ScreenGui).
+                        if screen == Screen::Playing && !lua_gui.is_empty() {
+                            lua_clicks.extend(draw_lua_gui(ctx, &lua_gui));
                         }
                         if screen == Screen::Playing {
                             if let Some(line) = chat_ui::draw(ctx, &icons, chat, time.elapsed() as f64) {
@@ -1620,6 +1725,23 @@ impl App {
                 for (kind, text) in crate::commands::run(s, &line) {
                     self.chat.push(kind, text, now);
                 }
+                // The world script hears plain chat messages.
+                if let (Some(l), false) = (&mut self.lua, line.starts_with('/')) {
+                    l.event(s, "chat", &line);
+                    for (k, t) in l.take_output() {
+                        self.chat.push(k, t, now);
+                    }
+                }
+            }
+        }
+        // Buttons of the script's GUI.
+        if let (Some(l), Some(s)) = (&mut self.lua, &mut self.session) {
+            let now = self.time.elapsed() as f64;
+            for id in lua_clicks {
+                l.click(s, &id);
+            }
+            for (k, t) in l.take_output() {
+                self.chat.push(k, t, now);
             }
         }
 
@@ -2003,16 +2125,10 @@ impl App {
                     s.player.mode = wolfcraft_engine::config::GameMode::Creative;
                     s.player.body.flying = true;
                 }
-                // The world's script (written in the studio) runs every time the world starts.
+                // The world's Luau script (written in the studio) runs every time the world starts.
                 if self.net.is_none() {
-                    if let Ok(script) = std::fs::read_to_string(self.worlds_dir.join(&s.cfg.id).join(STUDIO_SCRIPT)) {
-                        let now = self.time.elapsed() as f64;
-                        for line in wolfcraft_ui::studio_ui::script_commands(&script) {
-                            for (kind, text) in crate::commands::run(s, &line) {
-                                self.chat.push(kind, text, now);
-                            }
-                        }
-                    }
+                    let script = read_world_script(&self.worlds_dir.join(&s.cfg.id));
+                    self.start_lua(&script);
                 }
             }
         }
@@ -2095,7 +2211,7 @@ impl App {
                 cfg.size = wolfcraft_engine::config::PlanetSize::Small;
                 cfg.studio_project = true;
                 cfg.id = wolfcraft_engine::config::unique_world_id(&self.worlds_dir, &cfg.name); // the loader picks the same id
-                self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, ..Default::default() });
+                self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, script_open: true, script: crate::lua::TEMPLATE.to_string(), ..Default::default() });
                 self.studio_world = Some(cfg.id.clone());
                 self.start_load(cfg, true);
             }
@@ -2103,7 +2219,7 @@ impl App {
                 self.net = None;
                 if let Some(w) = self.worlds.iter().find(|w| w.cfg.id == id) {
                     let cfg = w.cfg.clone();
-                    let script = std::fs::read_to_string(self.worlds_dir.join(&id).join(STUDIO_SCRIPT)).unwrap_or_default();
+                    let script = read_world_script(&self.worlds_dir.join(&id));
                     self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, script, ..Default::default() });
                     self.studio_world = Some(id);
                     self.start_load(cfg, false);

@@ -150,7 +150,7 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, project
         let rect = Rect::from_min_size(Pos2::new(screen.right() - 8.0 - w, top), Vec2::new(w, h));
         covered.push(rect);
         panel(ctx, "studio-script", rect, &p, |ui| {
-            header(ui, &p, "Скрипт мира", "команды по строке, при входе в мир");
+            header(ui, &p, "Скрипт мира (Luau)", "как в Роблокс Студии · запускается при входе в мир");
             let editor_h = ui.available_height() - 46.0;
             egui::ScrollArea::vertical().id_salt("studio-script-scroll").max_height(editor_h).auto_shrink([false, false]).show(ui, |ui| {
                 ui.add_sized(
@@ -158,7 +158,7 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, project
                     egui::TextEdit::multiline(&mut st.script)
                         .font(FontId::monospace(14.0))
                         .code_editor()
-                        .hint_text("# пример\n/time set день\n/give факел 16\n/say Добро пожаловать!")
+                        .hint_text("-- Luau\nprint(\"Привет!\")\ngui.button{ id = \"b\", text = \"Жми\", on_click = function() chat(\"Нажали!\") end }")
                         .desired_rows(8),
                 );
             });
@@ -167,8 +167,8 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, project
                 if crate::ui_components::pill_button(ui, icons, Some(icon::PLAY), "Запустить", crate::ui_components::ButtonKind::Primary, 140.0, true).clicked() {
                     actions.push(StudioAction::RunScript);
                 }
-                let n = script_commands(&st.script).len();
-                ui.label(egui::RichText::new(format!("команд: {n}")).size(13.0).color(p.text_muted));
+                let n = st.script.lines().filter(|l| !l.trim().is_empty()).count();
+                ui.label(egui::RichText::new(format!("строк: {n} · Luau")).size(13.0).color(p.text_muted));
             });
         });
     }

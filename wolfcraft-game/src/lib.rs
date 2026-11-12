@@ -4,6 +4,7 @@ mod app;
 mod audio;
 mod commands;
 mod loader;
+mod lua;
 mod preview;
 mod session;
 mod signs;
