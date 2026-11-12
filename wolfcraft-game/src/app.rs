@@ -2320,7 +2320,7 @@ impl App {
                 // An empty baseplate world, creative and peaceful, opened in the Studio.
                 self.net = None;
                 let n = self.worlds.iter().filter(|w| w.cfg.studio_project).count() + 1;
-                let mut cfg = WorldConfig::new(&format!("Проект {n}"), splitmix(self.random_seed ^ platform::unix_now()) % 1_000_000_000);
+                let mut cfg = WorldConfig::new(&format!("Сервер {n}"), splitmix(self.random_seed ^ platform::unix_now()) % 1_000_000_000);
                 cfg.world_type = wolfcraft_engine::config::WorldType::Baseplate;
                 cfg.mode = wolfcraft_engine::config::GameMode::Creative;
                 cfg.difficulty = wolfcraft_engine::config::Difficulty::Peaceful;

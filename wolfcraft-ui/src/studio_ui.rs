@@ -87,7 +87,7 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, project
                     actions.push(StudioAction::DayNight);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if tool(ui, icons, &p, icon::GLOBE, "Опубликовать", false).on_hover_text("Сохранить и запустить сервер с этим миром").clicked() {
+                    if tool(ui, icons, &p, icon::GLOBE, "Запустить", false).on_hover_text("Сохранить и запустить этот сервер: друзья смогут зайти").clicked() {
                         actions.push(StudioAction::Publish);
                     }
                     if tool(ui, icons, &p, icon::DOWNLOAD, "Сохранить", false).clicked() {

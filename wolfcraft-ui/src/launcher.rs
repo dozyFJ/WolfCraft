@@ -436,19 +436,19 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
             ui.add_space(8.0);
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new("Кубикс Студия").font(bold_font(22.0)).color(p.text));
-                ui.label(egui::RichText::new("Независимая студия: делаем воксельную планету для телефона").size(13.5).color(p.text_muted));
+                ui.label(egui::RichText::new("Создавайте свои игровые серверы: карта, скрипты на Luau, свои правила").size(13.5).color(p.text_muted));
                 ui.label(egui::RichText::new(format!("Версия игры {version}")).size(13.0).color(p.accent));
             });
         });
     });
-    section(ui, p, "Мои проекты", "");
-    ui.label(egui::RichText::new("Проекты студии отдельно от игровых миров. Новый проект — пустой мир с серой плитой-основой: стройте из ассетов игры, пишите скрипт мира и запускайте его как сервер").size(13.0).color(p.text_muted));
-    if pill_button(ui, icons, Some(icon::PLUS), "Новый проект (основа)", ButtonKind::Primary, ui.available_width(), true).clicked() {
+    section(ui, p, "Мои серверы", "");
+    ui.label(egui::RichText::new("Каждый сервер — это ваша игра (как плейс в Роблоксе). Новый сервер начинается с серой плиты-основы: стройте из блоков игры, пишите скрипт на Luau и запускайте — друзья заходят и играют").size(13.0).color(p.text_muted));
+    if pill_button(ui, icons, Some(icon::PLUS), "Новый сервер (основа)", ButtonKind::Primary, ui.available_width(), true).clicked() {
         *action = MenuAction::NewStudioProject;
     }
     let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project).collect();
     if projects.is_empty() {
-        ui.label(egui::RichText::new("Пока нет проектов").size(13.0).color(p.text_muted));
+        ui.label(egui::RichText::new("Пока нет серверов").size(13.0).color(p.text_muted));
     }
     for w in projects {
         Frame::none().fill(p.surface).rounding(Rounding::same(12.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(10.0)).show(ui, |ui| {
@@ -461,13 +461,15 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
                     ui.painter().rect_filled(r, Rounding::same(8.0), p.bg);
                 }
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(15.0)).color(p.text));
+                    // Older studio worlds were named "Проект N": they are servers now.
+                    let name = w.cfg.name.strip_prefix("Проект").map(|rest| format!("Сервер{rest}")).unwrap_or_else(|| w.cfg.name.clone());
+                    ui.label(egui::RichText::new(name).font(bold_font(15.0)).color(p.text));
                     ui.label(egui::RichText::new(format!("Сид {}", w.cfg.seed as i64)).size(12.0).color(p.text_muted));
                     ui.horizontal(|ui| {
-                        if pill_button(ui, icons, Some(icon::HAMMER), "Студия", ButtonKind::Primary, 120.0, true).clicked() {
+                        if pill_button(ui, icons, Some(icon::HAMMER), "Изменить", ButtonKind::Primary, 120.0, true).clicked() {
                             *action = MenuAction::OpenStudio(w.cfg.id.clone());
                         }
-                        if pill_button(ui, icons, Some(icon::GLOBE), "Сервер", ButtonKind::Secondary, 120.0, true).clicked() {
+                        if pill_button(ui, icons, Some(icon::GLOBE), "Запустить", ButtonKind::Secondary, 120.0, true).clicked() {
                             *action = MenuAction::HostServer(Some(w.cfg.id.clone()));
                         }
                     });
