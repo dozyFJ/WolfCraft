@@ -933,7 +933,7 @@ fn arm_place(pose: &HandsPose, side: f32) -> ArmPlace {
             // a little, the forearm levels out.
             let c = c.clamp(0.0, 1.0);
             let e = c * c * (3.0 - 2.0 * c);
-            p = p.lerp(Vec3::new(0.05, -0.17, 0.34) + off * 0.4, e);
+            p = p.lerp(Vec3::new(0.14, -0.22, 0.44) + off * 0.4, e);
             a.tilt = lerp(a.tilt, -0.05, e);
             a.yaw = lerp(a.yaw, 0.35, e);
             a.roll = lerp(a.roll, -0.25, e);
@@ -1161,46 +1161,77 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
     }
 }
 
+/// Thin rod between `a` and `b` (a square prism `t` thick), tilted with the forearm like
+/// `add_box`: bow limbs, the string and the arrow follow their real slope instead of a
+/// staircase of cubes.
+#[allow(clippy::too_many_arguments)]
+fn add_rod(out: &mut Vec<ModelVertex>, f: &Frame, a: Vec3, b: Vec3, t: f32, pivot: Vec3, angle: f32, color: [f32; 3]) {
+    let d = b - a;
+    let len = d.length();
+    if len < 1e-5 {
+        return;
+    }
+    let dir = d / len;
+    let helper = if dir.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+    let p1 = dir.cross(helper).normalize() * (t * 0.5);
+    let p2 = dir.cross(p1).normalize() * (t * 0.5);
+    let (s, c) = angle.sin_cos();
+    let rot = |p: Vec3| {
+        let q = p - pivot;
+        pivot + Vec3::new(q.x, q.y * c - q.z * s, q.y * s + q.z * c)
+    };
+    let rot_n = |n: Vec3| Vec3::new(n.x, n.y * c - n.z * s, n.y * s + n.z * c);
+    // Four long sides and two end caps.
+    let corner = |end: Vec3, i: usize| end + match i { 0 => p1 + p2, 1 => -p1 + p2, 2 => -p1 - p2, _ => p1 - p2 };
+    let mut quad = |q: [Vec3; 4], n: Vec3| {
+        // Make the quad counter-clockwise seen from outside, then mirror it like `add_box`.
+        let q = if (q[1] - q[0]).cross(q[2] - q[0]).dot(n) >= 0.0 { q } else { [q[0], q[3], q[2], q[1]] };
+        let nw = f.dir(rot_n(n)).normalize_or_zero().to_array();
+        let w: Vec<[f32; 3]> = q.iter().map(|p| f.to_world(rot(*p)).as_vec3().to_array()).collect();
+        for idx in [0usize, 2, 1, 0, 3, 2] {
+            out.push(ModelVertex { pos: w[idx], normal: nw, color, uv: [0.0; 2], tex: 0.0 });
+        }
+    };
+    for i in 0..4 {
+        let j = (i + 1) % 4;
+        let n = ((corner(a, i) + corner(a, j)) * 0.5 - a).normalize();
+        quad([corner(a, i), corner(a, j), corner(b, j), corner(b, i)], n);
+    }
+    quad([corner(a, 0), corner(a, 1), corner(a, 2), corner(a, 3)], -dir);
+    quad([corner(b, 0), corner(b, 1), corner(b, 2), corner(b, 3)], dir);
+}
+
 /// Bow held upright in the fist, seen from the side: the wooden arc bulges away from the
 /// camera, the string runs back towards it. `c` (0..1) is the draw: the string is pulled back,
 /// the limbs bend more and an arrow lies on the string.
 fn add_bow(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle: f32, c: f32) {
     const WOOD: [f32; 3] = [0.55, 0.36, 0.18];
-    const WOOD_DARK: [f32; 3] = [0.40, 0.25, 0.12];
+    const GRIP: [f32; 3] = [0.36, 0.22, 0.11];
     const STRING: [f32; 3] = [0.92, 0.92, 0.88];
-    let mut cube = |p: Vec3, s: f32, col: [f32; 3]| add_box(v, frame, p - Vec3::splat(s * 0.5), p + Vec3::splat(s * 0.5), pivot, angle, col);
-    let half = 0.30; // half the bow's height
-    let bend = 0.10 + 0.05 * c;
-    let grip = f + Vec3::new(0.0, 0.10, 0.05);
+    let half = 0.22; // half the bow's height
+    let bend = 0.07 + 0.04 * c;
+    let grip = f + Vec3::new(0.0, 0.08, 0.04);
     // Limb point at t (-1 bottom .. 1 top): the tips curve back towards the string.
     let limb = |t: f32| grip + Vec3::new(0.0, t * half, -t * t * bend);
-    let steps = 24;
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32 * 2.0 - 1.0;
-        let col = if t.abs() < 0.15 { WOOD_DARK } else { WOOD };
-        cube(limb(t), if t.abs() < 0.15 { 0.045 } else { 0.032 }, col);
+    let steps = 8;
+    for i in 0..steps {
+        let (t0, t1) = (i as f32 / steps as f32 * 2.0 - 1.0, (i + 1) as f32 / steps as f32 * 2.0 - 1.0);
+        let mid = (t0 + t1) * 0.5;
+        let thick = if mid.abs() < 0.3 { 0.036 } else { 0.026 - mid.abs() * 0.006 };
+        add_rod(v, frame, limb(t0), limb(t1), thick, pivot, angle, if mid.abs() < 0.3 { GRIP } else { WOOD });
     }
     // String: tips to the nock, which the draw pulls back.
     let (top, bottom) = (limb(1.0), limb(-1.0));
-    let nock = Vec3::new(grip.x, grip.y, top.z - 0.20 * c);
-    for (a, b) in [(top, nock), (nock, bottom)] {
-        let n = ((a - b).length() / 0.008).ceil() as usize;
-        for i in 0..=n {
-            cube(a.lerp(b, i as f32 / n as f32), 0.013, STRING);
-        }
-    }
+    let nock = Vec3::new(grip.x, grip.y, top.z - 0.15 * c);
+    add_rod(v, frame, top, nock, 0.007, pivot, angle, STRING);
+    add_rod(v, frame, nock, bottom, 0.007, pivot, angle, STRING);
     if c > 0.05 {
         // Arrow on the string, pointing away from the camera past the grip.
-        let len = 0.62;
-        let tail = nock;
-        let head = tail + Vec3::new(0.0, 0.0, len);
-        let n = 40;
-        for i in 0..=n {
-            cube(tail.lerp(head, i as f32 / n as f32), 0.018, [0.62, 0.45, 0.25]);
-        }
-        cube(head + Vec3::new(0.0, 0.0, 0.02), 0.034, [0.72, 0.74, 0.78]);
-        for dy in [-0.02f32, 0.02] {
-            cube(tail + Vec3::new(0.0, dy, 0.04), 0.022, [0.95, 0.95, 0.93]);
+        let head = nock + Vec3::new(0.0, 0.0, 0.46);
+        add_rod(v, frame, nock, head, 0.012, pivot, angle, [0.62, 0.45, 0.25]);
+        add_rod(v, frame, head, head + Vec3::new(0.0, 0.0, 0.04), 0.026, pivot, angle, [0.72, 0.74, 0.78]);
+        for dy in [-0.016f32, 0.016] {
+            add_rod(v, frame, nock + Vec3::new(0.0, dy, 0.01), nock + Vec3::new(0.0, dy, 0.07), 0.01, pivot, angle, [0.95, 0.95, 0.93]);
         }
     }
 }

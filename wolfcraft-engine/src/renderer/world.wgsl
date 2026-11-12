@@ -469,7 +469,8 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
             discard;
         }
         base = item.rgb;
-    } else if (in.tex > 0.5) {
+    } else if (in.tex > 0.5 && in.tex < 1.5) {
+        // Only tex 1 is a skin: glowing particles (tex 3) keep their own colour.
         base = skin.rgb;
     }
     let up = normalize(in.world);
