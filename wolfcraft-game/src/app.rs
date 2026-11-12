@@ -230,6 +230,8 @@ pub struct App {
     pending_apply: bool,
     /// Seconds a tap with a tool or weapon still counts as a held "hit" (touch screens).
     tap_hit: f32,
+    /// Seconds until the studio brush may dab again (while held).
+    brush_cd: f32,
     /// First-person arm swing progress 0..1 (0 = resting). A swing always plays to the end.
     hand_cycle: f32,
     /// Sprint and sneak blends of the view model (0..1).
@@ -318,6 +320,7 @@ impl App {
             pack_dl: None,
             splash_t: 0.0,
             tap_hit: 0.0,
+            brush_cd: 0.0,
             world_map: None,
             map_px: vec![egui::Color32::BLACK; MAP_W * MAP_H],
             map_marks: Vec::new(),
@@ -660,6 +663,37 @@ impl App {
         }
     }
 
+    /// What the studio shows about the place this frame.
+    fn studio_view(&self) -> Option<wolfcraft_ui::studio_ui::StudioView> {
+        let s = self.session.as_ref()?;
+        use wolfcraft_engine::player as pl;
+        let (m, day) = pl::month(s.player.world_time);
+        let held_block = s.player.inventory.held().filter(|h| h.id < wolfcraft_engine::items::ITEM_BASE && h.info().place.is_some()).map(|h| (h.id, h.info().name.to_string()));
+        let mut players = vec![(s.nickname.clone(), s.player.body.pos.to_array(), s.player.survival.health)];
+        for rp in &self.net_players {
+            players.push((rp.nick.clone(), rp.pos, 20.0));
+        }
+        let cell = |c: Option<wolfcraft_engine::cubesphere::Cell>| c.map(|c| [c.i, c.j, c.k]);
+        Some(wolfcraft_ui::studio_ui::StudioView {
+            project: s.cfg.name.clone(),
+            seed: s.cfg.seed as i64,
+            creative: s.is_creative(),
+            clock: s.clock(),
+            date: format!("{day} {}", pl::MONTH_GENITIVE[m]),
+            hour: (pl::day_fraction(s.player.world_time) * 24.0) as f32,
+            spawning: s.mobs.spawning,
+            players,
+            mobs: s.mobs.mobs.iter().map(|mb| (mb.kind.name().to_string(), mb.hp, mb.kind.max_hp(), mb.body.pos.to_array())).collect(),
+            drops: s.drops.list.len(),
+            output: self.chat.lines.iter().rev().take(80).rev().map(|l| (l.kind, l.text.clone())).collect(),
+            held_block,
+            selection: (cell(s.we.pos1), cell(s.we.pos2)),
+            script_running: self.lua.is_some(),
+            compact: cfg!(target_os = "android") || self.touch.seen,
+            now: 0.0,
+        })
+    }
+
     /// Saves the studio's world script next to the world.
     fn save_studio_script(&self) {
         if let (Some(st), Some(id)) = (&self.studio, &self.studio_world) {
@@ -709,6 +743,52 @@ impl App {
             StudioAction::DayNight => {
                 let day = self.session.as_ref().is_some_and(|s| s.daylight() > 0.5);
                 submitted.push(if day { "/time set ночь".into() } else { "/time set день".into() });
+            }
+            StudioAction::StopScript => {
+                self.lua = None;
+                status(self, "Скрипт остановлен");
+            }
+            StudioAction::Command(c) => submitted.push(c),
+            StudioAction::SetHour(h) => {
+                if let Some(s) = &mut self.session {
+                    let len = wolfcraft_engine::player::DAY_LENGTH;
+                    let t = s.player.world_time;
+                    s.player.world_time = (t / len).floor() * len + (h as f64 / 24.0) * len;
+                }
+            }
+            StudioAction::SetCreative(c) => submitted.push(if c { "/gamemode creative".into() } else { "/gamemode survival".into() }),
+            StudioAction::SetSpawning(on) => {
+                if let Some(s) = &mut self.session {
+                    s.mobs.spawning = on;
+                }
+            }
+            StudioAction::RemoveMob(i) => {
+                if let Some(s) = &mut self.session {
+                    if i < s.mobs.mobs.len() {
+                        s.mobs.mobs.remove(i);
+                    }
+                }
+            }
+            StudioAction::GoTo(p) => {
+                if let Some(s) = &mut self.session {
+                    let at = glam::DVec3::from_array(p);
+                    s.player.body.pos = at + wolfcraft_engine::physics::up_at(at) * 1.5;
+                    s.player.body.vel = glam::DVec3::ZERO;
+                }
+            }
+            StudioAction::Playtest(on) => {
+                if let Some(st) = &mut self.studio {
+                    st.playtest = on;
+                    st.brush_on = false;
+                }
+                if on {
+                    // Play the place as players will: its script runs fresh.
+                    let script = self.studio.as_ref().map(|s| s.script.clone()).unwrap_or_default();
+                    self.start_lua(&script);
+                } else {
+                    self.lua = None;
+                    status(self, "Игра остановлена");
+                }
             }
         }
     }
@@ -1232,8 +1312,16 @@ impl App {
         let mut deaths = false;
         match self.screen {
             Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead | Screen::Map => {
-                let input = if self.screen == Screen::Playing && !self.chat.open { self.take_input_frame() } else { InputFrame::default() };
+                let mut input = if self.screen == Screen::Playing && !self.chat.open { self.take_input_frame() } else { InputFrame::default() };
                 self.tap_hit = (self.tap_hit - dt as f32).max(0.0);
+                // Studio brush: taps and holds on the world sculpt instead of placing/breaking.
+                let brush = self.studio.as_ref().filter(|st| st.brush_on && !st.playtest).map(|st| (st.brush_op, st.brush_r, st.brush_cube));
+                let brush_fire = brush.is_some() && (input.use_pressed || input.break_held || input.use_held);
+                if brush.is_some() {
+                    input.use_pressed = false;
+                    input.use_held = false;
+                    input.break_held = false;
+                }
                 self.input.mouse_dx = 0.0;
                 self.input.mouse_dy = 0.0;
                 if let Some(s) = &mut self.session {
@@ -1242,6 +1330,18 @@ impl App {
                     s.fx_amount = self.settings.particles;
                     let events = s.update(&input, dt, view, frozen);
                     self.profile.chunks_ms = t.ms();
+                    if let Some((op, r, cube)) = brush {
+                        crate::worldedit::stroke(s, brush_fire);
+                        self.brush_cd = (self.brush_cd - dt as f32).max(0.0);
+                        if brush_fire && self.brush_cd <= 0.0 {
+                            self.brush_cd = 0.12;
+                            let block = s.player.inventory.held().and_then(|h| h.info().place).unwrap_or(wolfcraft_engine::block::Block::Stone);
+                            let op = crate::worldedit::BrushOp::ALL[op.min(5)];
+                            if crate::worldedit::brush(s, op, r, cube, block) > 0 {
+                                self.audio.play(crate::audio::Sfx::Place(crate::audio::Mat::of(block)), 0.6);
+                            }
+                        }
+                    }
                     // The world script: timers and "tick", plus block events.
                     if let Some(l) = &mut self.lua {
                         if !frozen {
@@ -1516,6 +1616,7 @@ impl App {
         let t_render = ScopeTimer::start();
         let Some(output) = gfx.gpu.acquire() else { return };
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
+        let studio_view = if self.studio.is_some() { self.studio_view() } else { None };
         let frame = {
             let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, studio, studio_world, .. } = self;
             let touch_size = gfx.gpu.size();
@@ -1619,8 +1720,9 @@ impl App {
                             }
                         }
                         if let (Some(st), Screen::Playing) = (studio.as_mut(), screen) {
-                            let project = s.cfg.name.clone();
-                            let (a, cover) = wolfcraft_ui::studio_ui::draw(ctx, &icons, st, &project, &mut s.player.inventory, time.elapsed() as f64);
+                            let mut view = studio_view.clone().unwrap_or_default();
+                            view.now = time.elapsed() as f64;
+                            let (a, cover) = wolfcraft_ui::studio_ui::draw(ctx, &icons, st, &view, &mut s.player.inventory);
                             studio_actions = a;
                             studio_cover = cover;
                         }
