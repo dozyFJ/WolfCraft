@@ -1958,6 +1958,22 @@ impl App {
                 self.touch.blocked.clear();
                 self.host_server(world)
             }
+            MenuAction::NewStudioProject => {
+                // An empty baseplate world, creative and peaceful, opened in the Studio.
+                self.net = None;
+                let n = self.worlds.iter().filter(|w| w.cfg.studio_project).count() + 1;
+                let mut cfg = WorldConfig::new(&format!("Проект {n}"), splitmix(self.random_seed ^ platform::unix_now()) % 1_000_000_000);
+                cfg.world_type = wolfcraft_engine::config::WorldType::Baseplate;
+                cfg.mode = wolfcraft_engine::config::GameMode::Creative;
+                cfg.difficulty = wolfcraft_engine::config::Difficulty::Peaceful;
+                cfg.structures = false;
+                cfg.size = wolfcraft_engine::config::PlanetSize::Small;
+                cfg.studio_project = true;
+                cfg.id = wolfcraft_engine::config::unique_world_id(&self.worlds_dir, &cfg.name); // the loader picks the same id
+                self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, ..Default::default() });
+                self.studio_world = Some(cfg.id.clone());
+                self.start_load(cfg, true);
+            }
             MenuAction::OpenStudio(id) => {
                 self.net = None;
                 if let Some(w) = self.worlds.iter().find(|w| w.cfg.id == id) {

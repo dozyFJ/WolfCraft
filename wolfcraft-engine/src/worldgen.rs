@@ -25,6 +25,27 @@ pub fn generate_chunk(planet: &Planet, key: ChunkKey) -> Chunk {
         return Chunk::empty();
     }
 
+    // Studio baseplate: one layer of grid plate on bedrock at sea level, air everywhere else.
+    if planet.world_type == crate::config::WorldType::Baseplate && !planet.hell {
+        let top = planet.radius.round() as i32;
+        if top - 1 < k0 || top - 1 >= k0 + CHUNK_SIZE {
+            if !(k0..k0 + CHUNK_SIZE).contains(&top) {
+                return Chunk::empty();
+            }
+        }
+        let mut chunk = Chunk::empty();
+        for lj in 0..CHUNK_SIZE {
+            for li in 0..CHUNK_SIZE {
+                for (k, b) in [(top, Block::Baseplate), (top - 1, Block::Bedrock)] {
+                    if (k0..k0 + CHUNK_SIZE).contains(&k) {
+                        chunk.set(li, lj, k - k0, b);
+                    }
+                }
+            }
+        }
+        chunk.sky_open = true;
+        return chunk;
+    }
     let mut raw = Box::new([0u8; CHUNK_VOL]);
     let r_lo = k0 as f64;
     let r_hi = (k0 + CHUNK_SIZE) as f64;

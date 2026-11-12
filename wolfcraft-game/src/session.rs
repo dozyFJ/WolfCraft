@@ -212,6 +212,8 @@ impl GameSession {
             fx_was_ground: true,
             env_col: None,
         };
+        // Studio baseplates stay empty: no creatures appear.
+        s.mobs.spawning = s.cfg.world_type != wolfcraft_engine::config::WorldType::Baseplate;
         s.load_containers();
         s.load_block_commands();
         s.load_dimension();
@@ -1282,6 +1284,42 @@ mod tests {
             assert!(t.elapsed().as_secs() < 90, "chunks never finished: {done}/{total}, inflight {}, chunk {:?}", s.chunks.stats.gen_inflight, s.player_chunk());
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    #[test]
+    fn studio_baseplate_world_is_an_empty_plate() {
+        use wolfcraft_engine::config::WorldType;
+        let dir = std::env::temp_dir().join("wc_session_baseplate");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut cfg = WorldConfig::new("Проект", 9);
+        cfg.size = PlanetSize::Small;
+        cfg.world_type = WorldType::Baseplate;
+        cfg.mode = GameMode::Creative;
+        cfg.structures = false;
+        cfg.studio_project = true;
+        let sh = start(LoadRequest { cfg, worlds_dir: dir, is_new: true });
+        while !sh.is_done() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let mut s = GameSession::new(sh.take_result().unwrap().unwrap());
+        settle(&mut s);
+        for _ in 0..240 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        }
+        let feet = s.chunks.grid().world_to_cell(s.player.body.pos);
+        let below = s.chunks.grid().neighbor(feet, 2, -1).and_then(|c| s.chunks.get_block(c));
+        assert_eq!(below, Some(Block::Baseplate), "standing on the baseplate");
+        // Nothing else around: no trees, water or terrain above the plate.
+        for di in -10..=10 {
+            for dj in -10..=10 {
+                for dk in 0..6 {
+                    if let Some(c) = s.chunks.grid().offset(feet, di, dj, dk) {
+                        assert_eq!(s.chunks.get_block(c), Some(Block::Air));
+                    }
+                }
+            }
+        }
+        assert!(s.mobs.mobs.is_empty(), "no creatures on a studio baseplate");
     }
 
     #[test]

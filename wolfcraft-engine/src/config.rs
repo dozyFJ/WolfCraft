@@ -54,6 +54,9 @@ pub enum WorldType {
     Flat,
     Supercontinent,
     Islands,
+    /// Studio: an empty world, only a grey baseplate with a grid (no terrain, trees, water,
+    /// structures or creatures).
+    Baseplate,
 }
 
 impl WorldType {
@@ -64,6 +67,7 @@ impl WorldType {
             WorldType::Flat => "Плоский",
             WorldType::Supercontinent => "Суперконтинент",
             WorldType::Islands => "Острова",
+            WorldType::Baseplate => "Основа (студия)",
         }
     }
 }
@@ -179,6 +183,9 @@ pub struct WorldConfig {
     /// Planet shape (missing = sphere, the only shape of older worlds).
     #[serde(default)]
     pub shape: PlanetShape,
+    /// A Studio project (listed in the Studio, not among the game worlds).
+    #[serde(default)]
+    pub studio_project: bool,
 }
 
 fn first_save_format() -> u32 {
@@ -205,6 +212,7 @@ impl WorldConfig {
             generator_version: GENERATOR_VERSION,
             format_version: wolfcraft_common::version::SAVE_FORMAT,
             shape: PlanetShape::Sphere,
+            studio_project: false,
         }
     }
 

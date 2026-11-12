@@ -236,7 +236,7 @@ impl Planet {
     fn make_continents(&self, count: ContinentCount) -> Vec<(DVec3, f64)> {
         let mut rng = Rng(splitmix(self.seed ^ 0xC0FFEE));
         let (n, land_frac) = match self.world_type {
-            WorldType::Flat => return vec![],
+            WorldType::Flat | WorldType::Baseplate => return vec![],
             WorldType::Standard => {
                 let (lo, hi) = count.range();
                 (rng.range(lo, hi), 0.38)
@@ -273,7 +273,7 @@ impl Planet {
         if self.hell {
             return self.hell_column(d);
         }
-        let flat = self.world_type == WorldType::Flat;
+        let flat = matches!(self.world_type, WorldType::Flat | WorldType::Baseplate);
         let wp = d * self.radius;
         let amp = self.amp;
 
@@ -476,6 +476,10 @@ impl Planet {
     }
 
     pub fn block_at(&self, c: Cell) -> Block {
+        if self.world_type == WorldType::Baseplate && !self.hell {
+            let top = self.radius.round() as i32;
+            return if c.k == top { Block::Baseplate } else if c.k == top - 1 { Block::Bedrock } else { Block::Air };
+        }
         self.voxel(c).0
     }
 

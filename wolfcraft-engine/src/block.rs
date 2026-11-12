@@ -384,6 +384,7 @@ blocks! {
     249 ComparatorOn1 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 1)))),
     250 ComparatorOn2 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 2)))),
     251 ComparatorOn3 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 3)))),
+    252 Baseplate => needs_pick(info("Основа", Opaque, 7.5, Pickaxe, all(t::BASEPLATE))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a

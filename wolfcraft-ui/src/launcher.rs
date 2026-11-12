@@ -442,8 +442,15 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
         });
     });
     section(ui, p, "Мои проекты", "");
-    ui.label(egui::RichText::new("Откройте мир в студии: стройте из ассетов игры, пишите скрипт мира и запускайте его как сервер").size(13.0).color(p.text_muted));
-    for w in worlds {
+    ui.label(egui::RichText::new("Проекты студии отдельно от игровых миров. Новый проект — пустой мир с серой плитой-основой: стройте из ассетов игры, пишите скрипт мира и запускайте его как сервер").size(13.0).color(p.text_muted));
+    if pill_button(ui, icons, Some(icon::PLUS), "Новый проект (основа)", ButtonKind::Primary, ui.available_width(), true).clicked() {
+        *action = MenuAction::NewStudioProject;
+    }
+    let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project).collect();
+    if projects.is_empty() {
+        ui.label(egui::RichText::new("Пока нет проектов").size(13.0).color(p.text_muted));
+    }
+    for w in projects {
         Frame::none().fill(p.surface).rounding(Rounding::same(12.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(10.0)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -467,9 +474,6 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
                 });
             });
         });
-    }
-    if pill_button(ui, icons, Some(icon::PLUS), "Новый проект", ButtonKind::Secondary, ui.available_width(), true).clicked() {
-        *action = MenuAction::OpenCreate;
     }
     section(ui, p, "О игре", "");
     for (t, d) in [

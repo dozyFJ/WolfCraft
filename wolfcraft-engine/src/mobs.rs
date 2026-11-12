@@ -81,6 +81,8 @@ impl Mob {
 
 pub struct MobManager {
     pub mobs: Vec<Mob>,
+    /// New creatures appear (off in Studio baseplate worlds).
+    pub spawning: bool,
     spawn_timer: f32,
     /// Cubes flying off dead creatures.
     pub debris: Vec<Debris>,
@@ -101,7 +103,7 @@ fn tangent(v: DVec3, up: DVec3) -> DVec3 {
 
 impl MobManager {
     pub fn new(seed: u64) -> Self {
-        Self { mobs: Vec::new(), debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
+        Self { mobs: Vec::new(), spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
     }
 
     pub fn rand(&mut self) -> f64 {
@@ -281,7 +283,9 @@ impl MobManager {
         self.spawn_timer -= dt as f32;
         if self.spawn_timer <= 0.0 {
             self.spawn_timer = 2.0;
-            self.try_spawn(world, player, day);
+            if self.spawning {
+                self.try_spawn(world, player, day);
+            }
         }
         let mut dealt = 0.0;
         let mut rolls: Vec<f64> = (0..self.mobs.len() * 2).map(|_| self.rand()).collect();

@@ -160,6 +160,7 @@ pub mod tiles {
     pub const REPEATER_ON: u16 = 151;
     pub const COMPARATOR: u16 = 155;
     pub const COMPARATOR_ON: u16 = 159;
+    pub const BASEPLATE: u16 = 163;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -1551,6 +1552,17 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     for d in 0..4u8 {
         l.add(COMPARATOR_ON + d as u16, &format!("comparator_on_{d}"), gate_tile(d, true, true));
     }
+    // Studio baseplate: light grey plate with a darker grid line on two edges (tiles into a
+    // one-block grid).
+    l.add(BASEPLATE, "baseplate", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let line = x == 0 || y == 0;
+                let g = if line { 0.50 } else { 0.70 + (rnd(x, y, 250) - 0.5) * 0.02 };
+                q.put(x, y, Rgb(g, g, g * 1.02), 1.0);
+            }
+        }
+    }));
     // Pixel-art finish. Natural, noisy materials get clumps instead of per-pixel static, a
     // gentle large-scale variation and a few luminance bands (the hand-painted look); every
     // opaque pixel then gets a touch more contrast and a limited palette.

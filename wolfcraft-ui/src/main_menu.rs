@@ -33,6 +33,8 @@ pub enum MenuAction {
     SetSkin(u8),
     /// Open this world in the studio (editor).
     OpenStudio(String),
+    /// Studio: a new empty project (a baseplate world) opened right away.
+    NewStudioProject,
     /// World list opened straight on "Игра по сети → Рядом".
     OpenNetwork,
 }
@@ -385,7 +387,8 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
 
 pub fn sorted_filtered<'a>(worlds: &'a [WorldEntry], search: &str, sort: usize) -> Vec<&'a WorldEntry> {
     let q = search.trim().to_lowercase();
-    let mut v: Vec<&WorldEntry> = worlds.iter().filter(|w| q.is_empty() || w.cfg.name.to_lowercase().contains(&q)).collect();
+    // Studio projects live in the Studio, not among the game worlds.
+    let mut v: Vec<&WorldEntry> = worlds.iter().filter(|w| !w.cfg.studio_project && (q.is_empty() || w.cfg.name.to_lowercase().contains(&q))).collect();
     match sort {
         1 => v.sort_by(|a, b| a.cfg.name.to_lowercase().cmp(&b.cfg.name.to_lowercase())),
         2 => v.sort_by(|a, b| b.cfg.created.cmp(&a.cfg.created)),
