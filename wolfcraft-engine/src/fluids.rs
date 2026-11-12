@@ -12,7 +12,7 @@ use glam::DVec3;
 use std::collections::HashSet;
 
 /// Cells updated per step at most (keeps a burst of flooding from stalling a frame).
-const MAX_PER_STEP: usize = 1500;
+const MAX_PER_STEP: usize = 400;
 
 #[derive(Default)]
 pub struct Fluids {

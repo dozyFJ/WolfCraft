@@ -519,6 +519,10 @@ impl GameSession {
         if self.fluids.busy() {
             self.fluids.update(&mut self.chunks, dt);
         }
+        // A block that appeared inside the player (water turning lava to obsidian around
+        // them, a piston pushing a block in): lift them out instead of letting the physics
+        // push them down through the floor.
+        self.unstuck();
         if !self.player.body.flying {
             let push = wolfcraft_engine::fluids::Fluids::current_at(&self.chunks, self.player.body.pos + self.player.up() * 0.3);
             self.player.body.vel += push * dt as f64;
@@ -992,6 +996,89 @@ impl GameSession {
         true
     }
 
+    /// True when the centre of one of the body's spheres is inside a solid block's box.
+    fn body_stuck(&self, feet: DVec3) -> bool {
+        let up = wolfcraft_engine::physics::up_at(feet);
+        let g = self.chunks.grid();
+        [0.3, 0.9, 1.5].iter().any(|h| {
+            let p = feet + up * *h;
+            let c = g.world_to_cell(p);
+            let Some(b) = self.chunks.get_block(c) else { return false };
+            b.is_solid() && wolfcraft_engine::physics::block_obbs(&g, c, b).iter().any(|o| {
+                let d = p - o.center;
+                (0..3).all(|a| d.dot(o.axes[a]).abs() < o.half[a] - 0.05)
+            })
+        })
+    }
+
+    /// True when the whole body fits at `feet`: none of its spheres touches a solid block.
+    fn body_clear(&self, feet: DVec3) -> bool {
+        let up = wolfcraft_engine::physics::up_at(feet);
+        let g = self.chunks.grid();
+        [0.3, 0.9, 1.5].iter().all(|h| {
+            let base = g.world_to_cell(feet + up * *h);
+            (-1..=1).all(|dk| {
+                (-1..=1).all(|dj| {
+                    (-1..=1).all(|di| {
+                        g.offset(base, di, dj, dk).is_none_or(|c| !self.chunks.get_block(c).is_some_and(|b| b.is_solid()) || !wolfcraft_engine::physics::body_overlaps_cell(&g, feet, c))
+                    })
+                })
+            })
+        })
+    }
+
+    /// Moves the player to the nearest place where the body fits (up to 10 blocks up, or a
+    /// block to a side).
+    fn unstuck(&mut self) {
+        if self.player.body.flying || self.player.survival.dead || !self.body_stuck(self.player.body.pos) {
+            return;
+        }
+        let up = self.player.up();
+        let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let t1 = (helper - up * helper.dot(up)).normalize();
+        let t2 = up.cross(t1);
+        // Nearest free place: the middle of the cell at each height first (a narrow shaft),
+        // then straight up, then one block to a side.
+        let g = self.chunks.grid();
+        let feet_cell = g.world_to_cell(self.player.body.pos);
+        for step in 0..=10 {
+            if let Some(c) = g.offset(feet_cell, 0, 0, step) {
+                let p = g.cell_center(c) - wolfcraft_engine::physics::up_at(g.cell_center(c)) * 0.45;
+                if self.body_clear(p) {
+                    self.player.body.pos = p;
+                    self.player.body.vel = DVec3::ZERO;
+                    return;
+                }
+            }
+            for side in [DVec3::ZERO, t1, -t1, t2, -t2] {
+                if step == 0 && side == DVec3::ZERO {
+                    continue;
+                }
+                let p = self.player.body.pos + up * step as f64 + side;
+                if self.body_clear(p) {
+                    self.player.body.pos = p;
+                    self.player.body.vel = DVec3::ZERO;
+                    return;
+                }
+            }
+        }
+        // Buried deeper: the first free cell further up the column, else the surface.
+        for step in 11..=48 {
+            if let Some(c) = g.offset(feet_cell, 0, 0, step) {
+                let p = g.cell_center(c) - wolfcraft_engine::physics::up_at(g.cell_center(c)) * 0.45;
+                if self.body_clear(p) {
+                    self.player.body.pos = p;
+                    self.player.body.vel = DVec3::ZERO;
+                    return;
+                }
+            }
+        }
+        if let Some(p) = self.planet.stand_position(up) {
+            self.player.body.pos = p;
+            self.player.body.vel = DVec3::ZERO;
+        }
+    }
+
     /// Season (0..4: spring, summer, autumn, winter), snow cover 0..1 here, humidity 0..1.
     /// Snow lies only where it is cold enough: never in deserts, always on glaciers.
     pub fn environment(&self) -> (f32, f32, f32) {
@@ -1283,6 +1370,121 @@ mod tests {
             }
             assert!(t.elapsed().as_secs() < 90, "chunks never finished: {done}/{total}, inflight {}, chunk {:?}", s.chunks.stats.gen_inflight, s.player_chunk());
             std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// A bot plays for a few game minutes in three worlds (survival, creative, studio
+    /// baseplate): walks, sprints, sneaks, jumps, looks around, breaks and places blocks,
+    /// pours water and lava, builds the iskrit showcase and flips its switches, places
+    /// pistons, changes seasons and the time of day. Checks: no panic, the player never ends
+    /// up inside a solid block, frame time. Run: `cargo test -p wolfcraft-game soak -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn soak_bot_plays_without_crashing() {
+        use wolfcraft_engine::block::Part;
+        use wolfcraft_engine::config::WorldType;
+        use wolfcraft_engine::items::ItemStack;
+        let mut report = Vec::new();
+        for (name, world_type, creative) in [("soak_survival", WorldType::Standard, false), ("soak_creative", WorldType::Standard, true), ("soak_studio", WorldType::Baseplate, true)] {
+            let dir = std::env::temp_dir().join(format!("wc_session_{name}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            let mut cfg = WorldConfig::new(name, 31337);
+            cfg.size = PlanetSize::Small;
+            cfg.world_type = world_type;
+            cfg.mode = if creative { GameMode::Creative } else { GameMode::Survival };
+            let sh = start(LoadRequest { cfg, worlds_dir: dir, is_new: true });
+            while !sh.is_done() {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let mut s = GameSession::new(sh.take_result().unwrap().unwrap());
+            settle(&mut s);
+            if creative {
+                let _ = crate::commands::run(&mut s, "/demo");
+            }
+            // Hotbar: things worth trying.
+            let kit = [
+                ItemStack::of_block(Block::Cobblestone, 64),
+                ItemStack::of_block(Block::Water, 8),
+                ItemStack::of_block(Block::Lava, 8),
+                ItemStack::of_block(Part::Piston { sticky: true, extended: false, dir: 2 }.block(), 8),
+                ItemStack::of_block(Block::IskritTorch, 16),
+                ItemStack::of_block(Block::Door, 8),
+                ItemStack::of_block(Block::GlassPaneA, 16),
+                ItemStack::new(wolfcraft_engine::items::ids::tool(3, 0), 1),
+                ItemStack::new(wolfcraft_engine::items::ids::tool(3, 3), 1),
+            ];
+            for (i, k) in kit.iter().enumerate() {
+                s.player.inventory.slots[i] = Some(*k);
+            }
+            let mut rng = 0x5eedu64;
+            let mut rnd = || {
+                rng ^= rng << 13;
+                rng ^= rng >> 7;
+                rng ^= rng << 17;
+                (rng >> 11) as f64 / (1u64 << 53) as f64
+            };
+            let (mut worst, mut total, mut inside, mut slow) = (0.0f64, 0.0f64, 0usize, 0usize);
+            let mut input = InputFrame::default();
+            let frames = 60 * 60 * 3; // three game minutes per world
+            for f in 0..frames {
+                if f % 45 == 0 {
+                    input = InputFrame {
+                        forward: if rnd() < 0.75 { 1.0 } else { -0.5 },
+                        strafe: (rnd() as f32 - 0.5) * 2.0,
+                        jump: rnd() < 0.2,
+                        sprint: rnd() < 0.4,
+                        sneak: rnd() < 0.15,
+                        look: ((rnd() - 0.5) * 0.15, (rnd() - 0.5) * 0.06),
+                        break_held: rnd() < 0.3,
+                        ..Default::default()
+                    };
+                    s.player.inventory.selected = (rnd() * 9.0) as usize % 9;
+                }
+                let mut frame = input.clone();
+                frame.use_pressed = f % 50 == 25 && rnd() < 0.6;
+                frame.jump_pressed = frame.jump && f % 45 == 0;
+                if f % 1800 == 900 {
+                    let _ = crate::commands::run(&mut s, ["/season осень", "/season зима", "/time set ночь", "/time set день"][(f / 1800) % 4]);
+                }
+                let before = s.player.body.pos;
+                let t = Instant::now();
+                s.update(&frame, 1.0 / 60.0, 4, false);
+                let _ = before;
+                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                if ms > 12.0 {
+                    slow += 1;
+                }
+                worst = worst.max(ms);
+                total += ms;
+                // Never inside a solid block (centre of a body sphere in a block's box).
+                let up = s.player.up();
+                for h in [0.3, 0.9, 1.5] {
+                    let p = s.player.body.pos + up * h;
+                    let c = s.chunks.grid().world_to_cell(p);
+                    if let Some(b) = s.chunks.get_block(c) {
+                        if b.is_solid() && !s.player.body.flying {
+                            let obbs = wolfcraft_engine::physics::block_obbs(&s.chunks.grid(), c, b);
+                            if obbs.iter().any(|o| {
+                                let d = p - o.center;
+                                (0..3).all(|a| d.dot(o.axes[a]).abs() < o.half[a] - 0.05)
+                            }) {
+                                inside += 1;
+                                if inside <= 5 {
+                                    eprintln!("{name} frame {f}: inside {b:?} at sphere {h}, sneaking {}, held {:?}", s.player.sneaking, s.player.inventory.held().map(|h| h.id));
+                                }
+                            }
+                        }
+                    }
+                }
+                if s.player.survival.dead {
+                    s.player.respawn();
+                }
+            }
+            report.push(format!("{name}: {frames} frames, avg {:.2} ms, worst {:.1} ms, over 12 ms: {slow}, frames with the body inside a block: {inside}, mobs {}, particles {}", total / frames as f64, worst, s.mobs.mobs.len(), s.mobs.debris.len()));
+            assert!(inside < frames / 200, "{name}: the body was inside blocks in {inside} frames");
+        }
+        for r in report {
+            eprintln!("{r}");
         }
     }
 

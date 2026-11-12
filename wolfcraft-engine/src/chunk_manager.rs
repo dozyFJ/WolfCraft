@@ -357,9 +357,17 @@ impl ChunkManager {
             });
         }
 
-        // 4. Urgent re-meshes after edits run synchronously.
+        // 4. Re-meshes after edits. The first few run right here, so a block the player
+        // places or breaks shows up this frame; the rest (flowing water, pistons, light
+        // spreading over many chunks) go to the worker threads instead of stalling the frame.
         let urgent = std::mem::take(&mut self.urgent);
-        for key in urgent {
+        for (n, key) in urgent.into_iter().enumerate() {
+            if n >= 3 {
+                if self.chunks.contains_key(&key) {
+                    self.spawn_mesh(key);
+                }
+                continue;
+            }
             if let Some(input) = self.build_input(key) {
                 let st = self.mesh_state.entry(key).or_default();
                 st.requested += 1;
