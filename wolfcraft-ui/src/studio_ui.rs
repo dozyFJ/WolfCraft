@@ -88,6 +88,12 @@ pub struct StudioState {
     /// Kept for the old two-panel layout's settings (assets/script toggles).
     pub assets_open: bool,
     pub script_open: bool,
+    /// Portrait layout: the docked window shown under the world, and how much of the
+    /// screen below the ribbon the world takes (0..1).
+    pub dock_tab: usize,
+    pub dock_frac: f32,
+    /// Bottom of the world view (points), for the touch controls (portrait).
+    pub view_bottom: Option<f32>,
 }
 
 impl Default for StudioState {
@@ -116,6 +122,9 @@ impl Default for StudioState {
             playtest: false,
             assets_open: true,
             script_open: false,
+            dock_tab: 0,
+            dock_frac: 0.5,
+            view_bottom: None,
         }
     }
 }
@@ -210,6 +219,10 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &
         return (actions, covered);
     }
 
+    if screen.height() > screen.width() {
+        return draw_portrait(ctx, icons, st, view, inv, &p, actions, covered);
+    }
+    st.view_bottom = None;
     // ---- Menu row (tabs) and ribbon ----
     let top_bar = Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H));
     covered.push(top_bar);
@@ -352,6 +365,134 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &
         let r = Rect::from_center_size(Pos2::new((mid_l + mid_r) / 2.0, body_top + 18.0 + if st.show_output { st.out_h } else { 0.0 }), g.size() + Vec2::new(20.0, 10.0));
         painter.rect_filled(r, Rounding::same(12.0), Color32::from_rgba_unmultiplied(20, 22, 30, 200));
         painter.galley(r.min + Vec2::new(10.0, 5.0), g, Color32::WHITE);
+    }
+    (actions, covered)
+}
+
+const DOCK_TABS: [(&str, u16); 5] = [("Тулбокс", icon::CUBE), ("Проводник", icon::TREE), ("Свойства", icon::PROPS), ("Вывод", icon::OUTPUT), ("Код", icon::CODE)];
+
+/// Portrait studio (phone held upright): tabs and a sideways-scrolling ribbon on top, the
+/// live world in the middle (with the touch controls), and a dock of windows below with
+/// tabs; the border between world and dock can be dragged.
+#[allow(clippy::too_many_arguments)]
+fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &StudioView, inv: &mut Inventory, p: &Palette, mut actions: Vec<StudioAction>, mut covered: Vec<Rect>) -> (Vec<StudioAction>, Vec<Rect>) {
+    let screen = ctx.screen_rect();
+    let top_bar = Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H));
+    covered.push(top_bar);
+    egui::Area::new(Id::new("studio-top-p")).order(egui::Order::Foreground).fixed_pos(top_bar.min).show(ctx, |ui| {
+        let painter = ui.painter().clone();
+        painter.rect_filled(Rect::from_min_size(top_bar.min, Vec2::new(top_bar.width(), MENU_H)), 0.0, p.bg);
+        painter.rect_filled(Rect::from_min_max(Pos2::new(top_bar.left(), top_bar.top() + MENU_H), top_bar.max), 0.0, p.surface);
+        ui.set_width(top_bar.width());
+        ui.set_height(top_bar.height());
+        // Tabs row with the play button on the right.
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(Rect::from_min_size(top_bar.min + Vec2::new(4.0, 0.0), Vec2::new(top_bar.width() - 8.0, MENU_H))), |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for (t, name) in [(Tab::Home, "Главная"), (Tab::Model, "Модель"), (Tab::Brush, "Кисть"), (Tab::Test, "Тест"), (Tab::View, "Вид")] {
+                    let on = st.tab == t;
+                    let g = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(12.5), if on { p.accent } else { p.text_muted });
+                    let (r, resp) = ui.allocate_exact_size(Vec2::new(g.size().x + 12.0, MENU_H), Sense::click());
+                    if on {
+                        ui.painter().rect_filled(Rect::from_min_max(Pos2::new(r.left(), r.bottom() - 3.0), r.max), 0.0, p.accent);
+                    }
+                    ui.painter().galley(Pos2::new(r.left() + 6.0, r.center().y - g.size().y / 2.0), g, p.text);
+                    if resp.clicked() {
+                        st.tab = t;
+                        if t == Tab::Brush {
+                            st.brush_on = true;
+                        }
+                    }
+                }
+            });
+        });
+        // Ribbon: scrolls sideways; save/server/exit at its end, ▶ first.
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(Rect::from_min_size(top_bar.min + Vec2::new(4.0, MENU_H + 3.0), Vec2::new(top_bar.width() - 8.0, RIBBON_H - 6.0))), |ui| {
+            egui::ScrollArea::horizontal().id_salt("studio-ribbon-p").drag_to_scroll(true).show(ui, |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    if play_button(ui, p).clicked() {
+                        actions.push(StudioAction::Playtest(true));
+                    }
+                    sep(ui, p);
+                    ribbon(ui, icons, p, st, view, &mut actions);
+                    sep(ui, p);
+                    if tool(ui, icons, p, icon::DOWNLOAD, "Сохранить", false).clicked() {
+                        actions.push(StudioAction::Save);
+                    }
+                    if tool(ui, icons, p, icon::GLOBE, "Сервер", false).clicked() {
+                        actions.push(StudioAction::Publish);
+                    }
+                    if tool(ui, icons, p, icon::EXIT, "Выйти", false).clicked() {
+                        actions.push(StudioAction::Exit);
+                    }
+                });
+            });
+        });
+    });
+
+    // The ribbon's "Скрипт" opens the code tab of the dock here.
+    if st.center == Center::Script {
+        st.center = Center::World;
+        st.dock_tab = 4;
+    }
+    // World and dock.
+    let avail = screen.bottom() - top_bar.bottom();
+    st.dock_frac = st.dock_frac.clamp(0.25, 0.8);
+    let split_y = top_bar.bottom() + avail * st.dock_frac;
+    st.view_bottom = Some(split_y);
+    let dock = Rect::from_min_max(Pos2::new(screen.left(), split_y), screen.max);
+    covered.push(dock);
+    if let Some(dy) = splitter(ctx, "studio-split-dock", Rect::from_min_max(Pos2::new(screen.left(), split_y - 7.0), Pos2::new(screen.right(), split_y + 7.0)), false, p) {
+        st.dock_frac += dy / avail.max(1.0);
+    }
+    egui::Area::new(Id::new("studio-dock")).order(egui::Order::Foreground).fixed_pos(dock.min).show(ctx, |ui| {
+        Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).show(ui, |ui| {
+            ui.set_width(dock.width());
+            ui.set_height(dock.height());
+            ui.set_max_height(dock.height());
+            // Window tabs.
+            let (bar, _) = ui.allocate_exact_size(Vec2::new(dock.width(), 34.0), Sense::hover());
+            ui.painter().rect_filled(bar, 0.0, p.bg);
+            let tw = bar.width() / DOCK_TABS.len() as f32;
+            for (i, (name, ic)) in DOCK_TABS.iter().enumerate() {
+                let r = Rect::from_min_size(Pos2::new(bar.left() + tw * i as f32, bar.top()), Vec2::new(tw, bar.height()));
+                let resp = ui.interact(r, Id::new(("dock-tab", i)), Sense::click());
+                let on = st.dock_tab == i;
+                if on {
+                    ui.painter().rect_filled(r, 0.0, p.surface);
+                    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(r.left(), r.bottom() - 3.0), r.max), 0.0, p.accent);
+                }
+                let col = if on { p.accent } else { p.text_muted };
+                icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 11.0), Vec2::splat(14.0)), *ic, col);
+                ui.painter().text(Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_CENTER, *name, FontId::proportional(10.0), col);
+                if resp.clicked() {
+                    st.dock_tab = i;
+                }
+            }
+            Frame::none().inner_margin(Margin::same(6.0)).show(ui, |ui| {
+                let h = dock.height() - 34.0 - 12.0;
+                ui.set_width(dock.width() - 12.0);
+                ui.set_height(h);
+                ui.set_max_height(h);
+                ui.vertical(|ui| match st.dock_tab {
+                    0 => toolbox(ui, icons, p, st, inv),
+                    1 => explorer(ui, p, st, view),
+                    2 => properties(ui, icons, p, st, view, &mut actions),
+                    3 => output(ui, p, view),
+                    _ => code_window(ui, icons, p, st, view, &mut actions),
+                });
+            });
+        });
+    });
+    // Selecting in the Проводник shows its Свойства next time; brush hint over the world.
+    if st.brush_on {
+        let txt = format!("Кисть: {} · {} · {}", BRUSH_OPS[st.brush_op.min(5)], st.brush_r, if st.brush_cube { "куб" } else { "шар" });
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("studio-brush-hint")));
+        let g = painter.layout_no_wrap(txt, FontId::proportional(12.5), Color32::WHITE);
+        let r = Rect::from_center_size(Pos2::new(screen.center().x, top_bar.bottom() + 16.0), g.size() + Vec2::new(18.0, 8.0));
+        painter.rect_filled(r, Rounding::same(11.0), Color32::from_rgba_unmultiplied(20, 22, 30, 200));
+        painter.galley(r.min + Vec2::new(9.0, 4.0), g, Color32::WHITE);
     }
     (actions, covered)
 }
@@ -840,7 +981,8 @@ mod tests {
         let view = StudioView { project: "Мой сервер".into(), compact: true, mobs: vec![("Овца".into(), 8.0, 8.0, [1.0, 2.0, 3.0])], players: vec![("Я".into(), [0.0; 3], 20.0)], ..Default::default() };
         let mut out = String::new();
         for _ in 0..3 {
-            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 360.0))), ..Default::default() };
+            let (w, h) = if std::env::var("PORTRAIT").is_ok() { (360.0, 780.0) } else { (800.0, 360.0) };
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(w, h))), ..Default::default() };
             let o = ctx.run(input, |c| {
                 draw(c, &icons, &mut st, &view, &mut inv);
             });

@@ -290,6 +290,9 @@ pub fn toon_bevel(name: &str) -> f32 {
     const NATURAL: [&str; 16] = ["grass", "dirt", "sand", "snow", "leaves", "gravel", "clay", "mud", "moss", "podzol", "mycel", "ice", "farmland", "path", "netherrack", "peat"];
     if matches!(name, "water" | "lava") || name.contains("water") || name.contains("lava") {
         0.0
+    } else if name == "baseplate" {
+        // The studio's base plate: a light pixel rim, no ink grid over the whole floor.
+        0.5
     } else if name.contains("bricks") || name.contains("sandstone") {
         1.0
     } else if NATURAL.iter().any(|n| name.contains(n)) {
