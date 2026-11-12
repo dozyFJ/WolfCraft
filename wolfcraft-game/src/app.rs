@@ -1286,6 +1286,18 @@ impl App {
                                 self.inv_ui = InventoryUiState::default();
                                 self.screen = Screen::Inventory;
                             }
+                            InteractionEvent::Placed { pos, block } if block == wolfcraft_engine::block::Block::Farmland => {
+                                // Hoe: the turned soil flies up in clods with bits of grass.
+                                let g = s.chunks.grid();
+                                let c = g.cell_center(pos) + wolfcraft_engine::physics::up_at(g.cell_center(pos)) * 0.5;
+                                let n = (12.0 * self.settings.particles) as usize;
+                                s.mobs.chips(c, &[[0.40, 0.26, 0.14], [0.30, 0.19, 0.10], [0.36, 0.62, 0.22]], n, 2.6);
+                                self.hand_place = 0.6;
+                                self.audio.play(crate::audio::Sfx::Break, 0.7);
+                                if let Some(net) = &mut self.net {
+                                    net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u8, hell: s.hell });
+                                }
+                            }
                             InteractionEvent::Placed { pos, block } => {
                                 // A new sign asks for its text right away.
                                 if matches!(block, wolfcraft_engine::block::Block::Sign | wolfcraft_engine::block::Block::SignB) {
@@ -1306,6 +1318,37 @@ impl App {
                                 let centre = corners.iter().fold(glam::DVec3::ZERO, |a, c| a + *c) / 8.0;
                                 if let Some(cols) = self.tile_colors.get(block.info().tiles[0] as usize) {
                                     s.mobs.chips(centre, cols, n, 3.2);
+                                }
+                                // The last blow, by material: wood splinters, a cloud of dust from
+                                // loose ground, a shower of leaves from foliage.
+                                {
+                                    use wolfcraft_engine::block::ToolKind;
+                                    use wolfcraft_engine::mobs::FxKind;
+                                    let up = wolfcraft_engine::physics::up_at(centre);
+                                    let k = self.settings.particles.max(0.0);
+                                    let cols = self.tile_colors.get(block.info().tiles[0] as usize).cloned().unwrap_or_default();
+                                    let name = block.info().name;
+                                    if name.contains("листв") || name.contains("хвоя") {
+                                        for i in 0..(14.0 * k) as usize {
+                                            let o = glam::DVec3::new((i as f64 * 1.3).sin(), (i as f64 * 2.1).cos(), (i as f64 * 0.7).sin()) * 0.45;
+                                            s.mobs.fx(centre + o, up * 0.3, cols.get(i % cols.len().max(1)).copied().unwrap_or([0.3, 0.6, 0.2]), 0.07, 2.9, FxKind::Leaf);
+                                        }
+                                    } else if block.info().tool == ToolKind::Shovel && !cols.is_empty() {
+                                        let dust = cols[0].map(|c| c * 0.7 + 0.25);
+                                        for i in 0..(8.0 * k) as usize {
+                                            let a = i as f64 * std::f64::consts::TAU / 8.0;
+                                            let side = glam::DVec3::new(a.cos(), (a * 0.7).sin(), a.sin());
+                                            let side = (side - up * side.dot(up)).normalize_or_zero();
+                                            s.mobs.fx(centre + side * 0.3, side * 1.0 + up * 0.4, dust, 0.24, 1.1, FxKind::Rise);
+                                        }
+                                    } else if block.info().tool == ToolKind::Axe && !cols.is_empty() {
+                                        for i in 0..(12.0 * k) as usize {
+                                            let a = i as f64 * 2.399;
+                                            let side = glam::DVec3::new(a.cos(), (a * 1.3).sin(), a.sin());
+                                            let side = (side - up * side.dot(up)).normalize_or_zero();
+                                            s.mobs.fx(centre, side * 3.0 + up * 3.0, cols[i % cols.len()], 0.04 + (i % 3) as f32 * 0.02, 1.2, FxKind::Fall);
+                                        }
+                                    }
                                 }
                                 // An ore bursts into glowing gem shards and a ring of sparkles.
                                 if let (Some(gem), false) = (wolfcraft_engine::items::ore_glow(block), s.is_creative()) {
@@ -1904,6 +1947,18 @@ impl App {
                 let m = strike_moment(tool.is_some());
                 let c1 = self.hand_cycle;
                 let landed = (c1 > c0 && c0 < m && c1 >= m) || (c1 < c0 && c0 < m);
+                // A sword leaves a white arc in the air on every swing.
+                if landed && tool.is_some_and(|t| t.0 == 3) && self.settings.particles > 0.0 {
+                    let fwd = cam.forward;
+                    let up = wolfcraft_engine::physics::up_at(cam.eye);
+                    let right = fwd.cross(up).normalize_or_zero();
+                    for i in 0..11 {
+                        let a = (i as f64 / 10.0) * 2.0 - 1.0; // right → left
+                        let p = cam.eye + fwd * 1.35 + right * (-a * 0.75) + up * (a * 0.32 - 0.12);
+                        let k = 1.0 - (a.abs() * 0.5) as f32;
+                        s.mobs.fx_glow(p, right * (a * 0.6) + fwd * 0.4, [1.0, 1.0, 1.0], 0.035 * k + 0.01, 0.25, wolfcraft_engine::mobs::FxKind::Rise);
+                    }
+                }
                 // Mining effects at the exact point the ray touches the block face.
                 let mining = s.interaction.mining_fraction() > 0.0;
                 if let (true, Some(h)) = (mining, s.hit) {
@@ -1932,6 +1987,32 @@ impl App {
                             let dust = cols[0].map(|c| c * 0.6 + 0.35);
                             for k in 0..(2.0 * pk) as usize {
                                 s.mobs.fx(point + back * 0.1, back * 0.5 + up * (0.3 + k as f64 * 0.2), dust, 0.16, 0.7, FxKind::Rise);
+                            }
+                        }
+                        // Tool by tool: splinters from an axe on wood, a dust cloud from a shovel,
+                        // falling leaves from foliage.
+                        if held_tool == Some(ToolKind::Axe) && block_tool == ToolKind::Axe && !cols.is_empty() {
+                            for i in 0..(6.0 * pk) as usize {
+                                let side = cam.forward.cross(up).normalize_or_zero();
+                                let a = i as f64 * 1.7 + self.time.elapsed() as f64 * 3.0;
+                                let vel = back * 3.2 + side * a.cos() * 2.2 + up * (2.0 + a.sin().abs() * 2.0);
+                                s.mobs.fx(point, vel, cols[i % cols.len()].map(|c| (c * 1.15).min(1.0)), 0.035 + (i % 2) as f32 * 0.03, 1.0, FxKind::Fall);
+                            }
+                        }
+                        if held_tool == Some(ToolKind::Shovel) && block_tool == ToolKind::Shovel && !cols.is_empty() {
+                            let dust = cols[0].map(|c| c * 0.7 + 0.25);
+                            for i in 0..(4.0 * pk) as usize {
+                                let side = cam.forward.cross(up).normalize_or_zero();
+                                let o = side * ((i as f64 - 1.5) * 0.18);
+                                s.mobs.fx(point + o, back * 0.6 + up * 0.5 + o, dust, 0.2 + (i % 2) as f32 * 0.06, 1.0, FxKind::Rise);
+                            }
+                        }
+                        if h.block.info().name.contains("листв") || h.block.info().name.contains("хвоя") {
+                            for i in 0..(5.0 * pk) as usize {
+                                let side = cam.forward.cross(up).normalize_or_zero();
+                                let p = point + side * ((i as f64 - 2.0) * 0.2) + up * 0.2;
+                                let col = cols.get(i % cols.len().max(1)).copied().unwrap_or([0.3, 0.6, 0.2]);
+                                s.mobs.fx(p, back * 0.4, col, 0.06, 2.9, FxKind::Leaf);
                             }
                         }
                         // Ores: little gem shards fly off with every blow.
