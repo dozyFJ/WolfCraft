@@ -150,7 +150,25 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
     let n = size as i32;
     let mut out = Image::new(size, size);
     if !opaque {
-        // Cut-out sprites: exact shape, crisp pixels, juicy colours.
+        // Cut-out sprites: exact shape, crisp pixels, juicy colours. Natural ones (leaves,
+        // grass) get an almost solid colour, like low-poly foliage; flowers keep their colours.
+        let mut m = [0.0f32; 3];
+        let mut k = 0.0;
+        for y in 0..h {
+            for x in 0..w {
+                let o = get(x, y);
+                if o[3] >= 0.5 {
+                    for c in 0..3 {
+                        m[c] += o[c];
+                    }
+                    k += 1.0;
+                }
+            }
+        }
+        for c in &mut m {
+            *c /= f32::max(k, 1.0);
+        }
+        let keep = if bevel < 0.5 { 0.3 } else { 1.0 };
         for y in 0..n {
             for x in 0..n {
                 let o = get(x * w / n, y * h / n);
@@ -158,6 +176,7 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
                     out.set(x as u32, y as u32, [0, 0, 0, 0]);
                     continue;
                 }
+                let o = [m[0] + (o[0] - m[0]) * keep, m[1] + (o[1] - m[1]) * keep, m[2] + (o[2] - m[2]) * keep, o[3]];
                 let c = juicy(o);
                 let px = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
                 out.set(x as u32, y as u32, [px(c[0]), px(c[1]), px(c[2]), 255]);
@@ -196,8 +215,14 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
             for c in b.iter_mut().take(3) {
                 *c /= wsum;
             }
-            let feature = (lum(&o) - lum(&b)).abs() > 0.11 || (lum(&o) - mean_l).abs() > 0.24;
-            let base = if feature { o } else { [mean[0] + (b[0] - mean[0]) * 0.55, mean[1] + (b[1] - mean[1]) * 0.55, mean[2] + (b[2] - mean[2]) * 0.55, 1.0] };
+            // Roblox low-poly look: nearly solid colour; only strong shapes (ore gems, windows,
+            // mortar, seams) survive, and those a little softened toward the block's colour.
+            let feature = (lum(&o) - lum(&b)).abs() > 0.14 || (lum(&o) - mean_l).abs() > 0.28;
+            let base = if feature {
+                [mean[0] + (o[0] - mean[0]) * 0.85, mean[1] + (o[1] - mean[1]) * 0.85, mean[2] + (o[2] - mean[2]) * 0.85, 1.0]
+            } else {
+                [mean[0] + (b[0] - mean[0]) * 0.3, mean[1] + (b[1] - mean[1]) * 0.3, mean[2] + (b[2] - mean[2]) * 0.3, 1.0]
+            };
             // Posterize around the mean: a few clean colour steps.
             let step = if feature { 0.10 } else { 0.07 };
             let mut c = [0.0f32; 4];

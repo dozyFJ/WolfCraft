@@ -181,12 +181,26 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     // Light adds up, but never brighter than full daylight.
     let lit = min(sky_rgb + torch_rgb * (1.0 - 0.6 * day * in.light.y), vec3<f32>(1.15));
     var rgb = color.rgb * lit * ao * face_k;
+    if (toon && emit == 0u) {
+        // Roblox-style low poly: light from the sky dome (cool from above, a warm bounce from
+        // below) and a soft plastic sheen where the sun glances off a face.
+        let ny = dot(n, up);
+        let hemi = mix(vec3<f32>(1.05, 0.98, 0.92), vec3<f32>(0.96, 1.0, 1.06), ny * 0.5 + 0.5);
+        rgb = rgb * hemi;
+        let v = normalize(-in.rel);
+        let hv = normalize(sun + v);
+        let spec = pow(max(dot(n, hv), 0.0), 28.0) * 0.20 * day * in.light.y * ao;
+        rgb = rgb + vec3<f32>(1.0, 0.97, 0.90) * spec;
+    }
     if (emit == 1u) {
         rgb = color.rgb * (0.85 + 0.15 * in.light.x);
     }
-    // Distance fog.
+    // Distance fog (the cartoon look adds a light aerial haze that starts sooner).
     let d = length(in.rel);
-    let f = clamp(1.0 - exp(-pow(d * g.fog.a, 2.0)), 0.0, 1.0);
+    var f = clamp(1.0 - exp(-pow(d * g.fog.a, 2.0)), 0.0, 1.0);
+    if (fx_on(8u)) {
+        f = max(f, clamp(d * g.fog.a * 0.35, 0.0, 0.35));
+    }
     rgb = mix(rgb, g.fog.rgb, f);
     if (g.misc.y > 0.5) {
         let w = clamp(d / 36.0, 0.0, 0.92);
@@ -488,6 +502,9 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
         base = max(mix(vec3<f32>(bl), base, 1.3), vec3<f32>(0.0));
         let v = normalize(-in.rel);
         rim = pow(1.0 - max(dot(nn, v), 0.0), 3.0) * mix(0.12, 0.38, day);
+        // Plastic sheen, like Roblox characters.
+        let hv = normalize(sun + v);
+        rim = rim + pow(max(dot(nn, hv), 0.0), 24.0) * 0.25 * day;
     }
     if (in.tex > 2.5 && in.tex < 3.5) {
         light = 1.25; // glowing particles: embers, sparks
