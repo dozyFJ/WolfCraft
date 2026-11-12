@@ -438,8 +438,30 @@ impl Player {
 /// Real seconds per full in-game day.
 pub const DAY_LENGTH: f64 = 1200.0;
 
-/// Game days per season (a year is four seasons: spring, summer, autumn, winter).
-pub const SEASON_DAYS: f64 = 6.0;
+/// A year of twelve months, as in real life: winter is December, January and February,
+/// spring March to May, summer June to August, autumn September to November. A new world
+/// starts on the 1st of March.
+pub const MONTH_DAYS: f64 = 3.0;
+/// Game days per season (three months).
+pub const SEASON_DAYS: f64 = MONTH_DAYS * 3.0;
+pub const MONTH_NAMES: [&str; 12] = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+/// "1 марта": the month in a date.
+pub const MONTH_GENITIVE: [&str; 12] = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+
+/// Month at `world_time` (0 = January) and the day in it (1-based).
+pub fn month(world_time: f64) -> (usize, u32) {
+    let m = (world_time / (DAY_LENGTH * MONTH_DAYS)).rem_euclid(12.0);
+    let idx = (m.floor() as usize + 2) % 12;
+    (idx, (m.fract() * MONTH_DAYS).floor() as u32 + 1)
+}
+
+/// World time of the start of month `idx` (0 = January) in the year that `world_time` is in
+/// (the game's year runs March to February).
+pub fn month_start(world_time: f64, idx: usize) -> f64 {
+    let year = DAY_LENGTH * MONTH_DAYS * 12.0;
+    let year_start = (world_time / year).floor() * year;
+    year_start + ((idx + 10) % 12) as f64 * DAY_LENGTH * MONTH_DAYS
+}
 pub const SEASON_NAMES: [&str; 4] = ["Весна", "Лето", "Осень", "Зима"];
 
 /// Season as a continuous value 0..4: 0 spring, 1 summer, 2 autumn, 3 winter (2.5 is mid
@@ -474,7 +496,11 @@ pub fn local_sun(world_time: f64, up: DVec3) -> DVec3 {
     let east = axis.cross(up).normalize();
     let north = up.cross(east);
     let th = day_fraction(world_time) * std::f64::consts::TAU - std::f64::consts::FRAC_PI_2;
-    (east * th.cos() + up * th.sin() + north * 0.25).normalize()
+    // Seasons as in real life: the sun stands higher and the day is longer in June, the
+    // sun is low and the day short in December.
+    let mf = (world_time / (DAY_LENGTH * MONTH_DAYS) + 2.0).rem_euclid(12.0);
+    let decl = 0.14 * ((mf - 5.7) / 12.0 * std::f64::consts::TAU).cos();
+    (east * th.cos() + up * (th.sin() + decl) + north * 0.25).normalize()
 }
 
 /// Direction from the planet centre towards the sun.
@@ -696,5 +722,36 @@ mod tests {
         assert_eq!(s.level_progress(), 0.0);
         s.add_xp(4);
         assert!(s.level_progress() > 0.4);
+    }
+}
+
+#[cfg(test)]
+mod calendar_tests {
+    use super::*;
+
+    #[test]
+    fn twelve_months_follow_the_real_seasons() {
+        let m = |t: f64| month(t);
+        assert_eq!(m(0.0), (2, 1), "a world starts on the 1st of March");
+        assert_eq!(season_label(0.0).0, "Весна");
+        let month_len = DAY_LENGTH * MONTH_DAYS;
+        assert_eq!(m(3.5 * month_len).0, 5, "June");
+        assert_eq!(season_label(3.5 * month_len).0, "Лето");
+        assert_eq!(m(9.5 * month_len).0, 11, "December");
+        assert_eq!(season_label(9.5 * month_len).0, "Зима");
+        assert_eq!(m(10.5 * month_len).0, 0, "January");
+        assert_eq!(season_label(10.5 * month_len).0, "Зима");
+        assert_eq!(season_label(12.0 * month_len).0, "Весна", "next March");
+        // A quarter past the day start (the equinox sunrise): in June the sun is already up,
+        // in December it has not risen yet (long summer days, short winter days).
+        let up = DVec3::Y;
+        let at = |month_idx: f64| local_sun((month_idx * month_len / DAY_LENGTH).floor() * DAY_LENGTH + DAY_LENGTH * 0.25, up).dot(up);
+        assert!(at(3.5) > 0.1, "June: up at 6 o'clock");
+        assert!(at(9.5) < -0.1, "December: still dark at 6 o'clock");
+        // Jumping to a month lands on its 1st day.
+        let t = 4.2 * month_len;
+        for idx in 0..12 {
+            assert_eq!(m(month_start(t, idx) + 1.0), (idx, 1));
+        }
     }
 }

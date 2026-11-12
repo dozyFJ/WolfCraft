@@ -1331,12 +1331,18 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         // Minecraft grip. Our tool icons run from the handle (bottom-right pixel) to the head
         // (top-left). `d` is that diagonal in the view: up, forward and a bit right; the flat
         // side looks back towards the camera at about 45°.
-        let d = Vec3::new(-0.22, 0.92, 0.32).normalize();
+        let d = Vec3::new(0.10, 1.0, -0.02).normalize();
         let to_cam = Vec3::new(-0.55, 0.0, -1.0).normalize();
         let to_cam = (to_cam - d * d.dot(to_cam)).normalize();
         let e = d.cross(to_cam);
-        let u = (e - d).normalize();
-        let w = (e + d).normalize();
+        // The shaft on the icon (from the grip up to the head) in icon axes (x right, y up):
+        // the pixel diagonal for most tools; the pickaxe handle is steeper. It is turned to
+        // run along `d`, so every tool stands straight up in the fist.
+        let (sx, sy) = if kind == 0 { (-0.47f32, 0.88f32) } else { (-std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2) };
+        let l = (sx * sx + sy * sy).sqrt();
+        let (sx, sy) = (sx / l, sy / l);
+        let u = (d * sx + e * sy).normalize();
+        let w = (d * sy - e * sx).normalize();
         let n = u.cross(w).normalize();
         let s = 0.46;
         // The grip pixel (12.5, 12.5 from the top-left) sits in the fist.

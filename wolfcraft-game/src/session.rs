@@ -1425,10 +1425,12 @@ impl GameSession {
         (season, snow, humid)
     }
 
-    /// Name of the season and the day in it, for the HUD clock.
+    /// Date and season for the HUD clock: "2 марта · Весна".
     pub fn season_label(&self) -> String {
-        let (name, day) = wolfcraft_engine::player::season_label(self.player.world_time);
-        format!("{name}, день {day}")
+        use wolfcraft_engine::player as p;
+        let (name, _) = p::season_label(self.player.world_time);
+        let (m, day) = p::month(self.player.world_time);
+        format!("{day} {} · {name}", p::MONTH_GENITIVE[m])
     }
 
     /// Fog colour tint and how much thicker the fog is in this biome (swamps are misty).
@@ -1734,7 +1736,7 @@ impl GameSession {
 
     /// Daylight at the player's position (0 night … 1 day).
     pub fn daylight(&self) -> f32 {
-        smoothstep(-0.12, 0.28, self.player.up().dot(self.sun())) as f32
+        smoothstep(-0.10, 0.14, self.player.up().dot(self.sun())) as f32
     }
 
     pub fn clock(&self) -> String {
