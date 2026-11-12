@@ -363,7 +363,7 @@ pub fn category(id: ItemId) -> &'static str {
         RenderKind::Cross if b == Block::IskritTorch => "Техника",
         RenderKind::Cross if b != Block::Torch => "Растения",
         _ => match b {
-            Block::IskritWire | Block::IskritBlock | Block::IskritLamp | Block::Button => "Техника",
+            Block::IskritWire | Block::IskritBlock | Block::IskritLamp | Block::Button | Block::PressurePlate => "Техника",
             Block::BirchPlanks | Block::SprucePlanks | Block::AcaciaPlanks => "Дерево",
             b if !b.boxes().is_empty() || matches!(b, Block::RedGlass | Block::BlueGlass | Block::GreenGlass | Block::YellowGlass) => "Строительство",
             Block::Wool | Block::RedWool | Block::BlueWool | Block::YellowWool | Block::Torch | Block::PolishedGranite | Block::PolishedMarble | Block::SmoothStone | Block::SandstoneBricks | Block::Bookshelf | Block::Lantern => "Строительство",

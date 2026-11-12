@@ -29,6 +29,8 @@ pub struct Dropped {
     pub delay: f32,
     /// Fixed per item: spin and bob phase.
     pub seed: f32,
+    /// Lying still on the ground (drawn flat instead of spinning in the air).
+    pub resting: bool,
 }
 
 #[derive(Default)]
@@ -52,7 +54,7 @@ impl Drops {
         if self.list.len() >= MAX_ITEMS {
             self.list.remove(0);
         }
-        self.list.push(Dropped { stack, pos, vel, age: 0.0, delay, seed });
+        self.list.push(Dropped { stack, pos, vel, age: 0.0, delay, seed, resting: false });
     }
 
     /// Pops an item out of a block: from the centre of the cell, a small hop in a random
@@ -68,7 +70,12 @@ impl Drops {
     /// Moves every item, merges touching stacks and lets the player pick items up. `give`
     /// tries to put a stack into the inventory and returns what did not fit. Returns how
     /// many items were picked up.
-    pub fn step(&mut self, world: &impl Voxels, player_centre: DVec3, can_pick: bool, dt: f64, mut give: impl FnMut(ItemStack) -> Option<ItemStack>) -> u32 {
+    pub fn step(&mut self, world: &impl Voxels, player_centre: DVec3, can_pick: bool, dt: f64, give: impl FnMut(ItemStack) -> Option<ItemStack>) -> u32 {
+        self.step_log(world, player_centre, can_pick, dt, give, |_, _| {})
+    }
+
+    /// `step`, also telling `picked` each stack (item, count) that went into the bag.
+    pub fn step_log(&mut self, world: &impl Voxels, player_centre: DVec3, can_pick: bool, dt: f64, mut give: impl FnMut(ItemStack) -> Option<ItemStack>, mut log: impl FnMut(crate::items::ItemId, u32)) -> u32 {
         let dt = dt.min(0.1);
         let mut picked = 0u32;
         let g = world.grid();
@@ -103,10 +110,14 @@ impl Drops {
                     match give(d.stack) {
                         None => {
                             picked += before as u32;
+                            log(d.stack.id, before as u32);
                             return false;
                         }
                         Some(rest) => {
                             picked += (before - rest.count) as u32;
+                            if rest.count < before {
+                                log(d.stack.id, (before - rest.count) as u32);
+                            }
                             d.stack = rest;
                         }
                     }
@@ -139,11 +150,13 @@ impl Drops {
             } else {
                 d.pos = next_h;
             }
+            d.resting = false;
             if solid(d.pos - up * (foot + 0.02)) {
                 // Ground friction.
                 let v_up = d.vel.dot(up);
                 let flat = d.vel - up * v_up;
                 d.vel = flat * (1.0 - (8.0 * dt).min(0.95)) + up * v_up;
+                d.resting = d.vel.length_squared() < 0.25 && !here.is_water();
             }
             true
         });

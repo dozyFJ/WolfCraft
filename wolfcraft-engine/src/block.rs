@@ -385,6 +385,8 @@ blocks! {
     250 ComparatorOn2 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 2)))),
     251 ComparatorOn3 => emissive(not_solid(info("Сравниватель (вкл.)", Shape, 0.0, Hand, all(t::COMPARATOR_ON + 3)))),
     252 Baseplate => needs_pick(info("Основа", Opaque, 7.5, Pickaxe, all(t::BASEPLATE))),
+    253 PressurePlate => not_solid(info("Нажимная плита", Shape, 0.5, Pickaxe, all(t::SMOOTH_STONE))),
+    254 PressurePlateOn => not_solid(info("Нажимная плита (нажата)", Shape, 0.5, Pickaxe, all(t::SMOOTH_STONE))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -498,6 +500,8 @@ impl Block {
             [[0.0, 0.0, 0.0, 1.0, 1.0, 0.25], [0.375, 0.375, 0.25, 0.625, 0.625, 1.0]],
         ];
         const BUTTON_ON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.06];
+        const PLATE: [f32; 6] = [0.06, 0.06, 0.0, 0.94, 0.94, 0.0625];
+        const PLATE_ON: [f32; 6] = [0.06, 0.06, 0.0, 0.94, 0.94, 0.03];
         // Stairs: the high half is toward +i, -i, +j or -j.
         const ST0: [[f32; 6]; 2] = [SLAB, [0.5, 0.0, 0.5, 1.0, 1.0, 1.0]];
         const ST1: [[f32; 6]; 2] = [SLAB, [0.0, 0.0, 0.5, 0.5, 1.0, 1.0]];
@@ -530,6 +534,8 @@ impl Block {
             },
             Button => std::slice::from_ref(&BUTTON),
             ButtonOn => std::slice::from_ref(&BUTTON_ON),
+            PressurePlate => std::slice::from_ref(&PLATE),
+            PressurePlateOn => std::slice::from_ref(&PLATE_ON),
             _ => &[],
         }
     }
@@ -608,6 +614,7 @@ impl Block {
             IskritWireOn => IskritWire,
             IskritLampOn => IskritLamp,
             ButtonOn => Button,
+            PressurePlateOn => PressurePlate,
             b => b,
         }
     }

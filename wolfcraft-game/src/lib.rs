@@ -7,6 +7,7 @@ mod loader;
 mod preview;
 mod session;
 mod touch;
+mod worldedit;
 
 use winit::event_loop::EventLoop;
 use wolfcraft_common::launch::LaunchArgs;

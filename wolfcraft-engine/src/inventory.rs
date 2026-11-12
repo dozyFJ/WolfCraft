@@ -269,6 +269,7 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::STICK, 3), (ids::STRING, 3)], (ids::BOW, 1), true, "Вооружение"));
         v.push(r(&[(ids::FLINT, 1), (ids::STICK, 1)], (ids::ARROW, 4), false, "Вооружение"));
         v.push(r(&[(ids::STRING, 4)], (b(Block::Wool), 1), false, "Строительство"));
+        v.push(r(&[(b(Block::Stone), 2)], (b(Block::PressurePlate), 1), false, "Техника"));
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerRed), 1)], (b(Block::RedWool), 1), false, "Строительство"));
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerBlue), 1)], (b(Block::BlueWool), 1), false, "Строительство"));
         v.push(r(&[(b(Block::Wool), 1), (b(Block::FlowerYellow), 1)], (b(Block::YellowWool), 1), false, "Строительство"));

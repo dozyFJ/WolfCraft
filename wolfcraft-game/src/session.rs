@@ -133,6 +133,12 @@ pub struct GameSession {
     pub studio: bool,
     /// Pressed buttons and the seconds until they spring back.
     buttons: Vec<(wolfcraft_engine::cubesphere::Cell, f32)>,
+    /// Pressed pressure plates and the seconds until they spring back up.
+    pub plates: Vec<(wolfcraft_engine::cubesphere::Cell, f32)>,
+    /// Random ticks owed (see `random_ticks`).
+    tick_acc: f32,
+    /// WorldEdit selection, clipboard and history.
+    pub we: crate::worldedit::WorldEdit,
     /// Special effects: amount (the particles setting), light sources nearby (refreshed twice
     /// a second), timers and the player's state last frame (for splashes and landing dust).
     pub fx_amount: f32,
@@ -203,6 +209,9 @@ impl GameSession {
             spawn_checked: false,
             studio: false,
             buttons: Vec::new(),
+            plates: Vec::new(),
+            tick_acc: 0.0,
+            we: Default::default(),
             net_out: Vec::new(),
             fluids: Default::default(),
             radiation: 0.0,
@@ -452,8 +461,16 @@ impl GameSession {
             let centre = self.player.body.pos + wolfcraft_engine::physics::up_at(self.player.body.pos) * 0.8;
             let can = !self.player.survival.dead;
             let inv = &mut self.player.inventory;
-            let n = self.drops.step(&self.chunks, centre, can, dt as f64, |s| inv.add(s));
+            let mut got: Vec<(wolfcraft_engine::items::ItemId, u32)> = Vec::new();
+            let n = self.drops.step_log(&self.chunks, centre, can, dt as f64, |s| inv.add(s), |id, k| match got.iter_mut().find(|g| g.0 == id) {
+                Some(g) => g.1 += k,
+                None => got.push((id, k)),
+            });
             self.picked_up += n;
+            // "+5 Земля" over the hotbar, like the item name when switching.
+            if let Some((id, k)) = got.last() {
+                self.item_name = Some((format!("+{k} {}", wolfcraft_engine::items::info(*id).name), 1.6));
+            }
         }
         // Arrows: flight, hits, pickup.
         if self.ground_ready() {
@@ -559,6 +576,27 @@ impl GameSession {
                 true
             }
         });
+        self.step_plates(dt);
+        self.random_ticks(dt);
+        // Plants crushed by pistons drop as items (a cane column falls apart above the cut).
+        for (c, b) in wolfcraft_engine::power::take_crushed() {
+            let mut cells = vec![(c, b)];
+            let mut above = self.chunks.grid().neighbor(c, 2, 1);
+            while let Some(a) = above {
+                if !matches!(self.chunks.get_block(a), Some(wolfcraft_engine::block::Block::SugarCane)) || b != wolfcraft_engine::block::Block::SugarCane {
+                    break;
+                }
+                self.chunks.set_block(a, wolfcraft_engine::block::Block::Air);
+                cells.push((a, wolfcraft_engine::block::Block::SugarCane));
+                above = self.chunks.grid().neighbor(a, 2, 1);
+            }
+            for (cell, blk) in cells {
+                let centre = self.chunks.grid().cell_center(cell);
+                for d in wolfcraft_engine::items::drops(blk, true, glam::IVec3::new(cell.i, cell.j, cell.k), self.cfg.seed) {
+                    self.drops.pop_from_block(d, centre);
+                }
+            }
+        }
         for pos in released {
             if self.chunks.get_block(pos) == Some(wolfcraft_engine::block::Block::ButtonOn) {
                 self.chunks.set_block(pos, wolfcraft_engine::block::Block::Button);
@@ -1017,6 +1055,89 @@ impl GameSession {
         true
     }
 
+    /// Random ticks around the player: sugar cane and cactus grow a block now and then, up
+    /// to three tall (about one block a minute each).
+    fn random_ticks(&mut self, dt: f32) {
+        use wolfcraft_engine::block::Block as B;
+        self.tick_acc += dt * 128.0;
+        let n = self.tick_acc as usize;
+        self.tick_acc -= n as f32;
+        if n == 0 || !self.ground_ready() {
+            return;
+        }
+        let g = self.chunks.grid();
+        let base = g.world_to_cell(self.player.body.pos);
+        for _ in 0..n.min(64) {
+            let r = |s: &mut Self, span: i32| (s.mobs.rand() * span as f64) as i32 - span / 2;
+            let (di, dj, dk) = (r(self, 32), r(self, 32), r(self, 8));
+            let Some(c) = g.offset(base, di, dj, dk) else { continue };
+            let Some(b) = self.chunks.get_block(c) else { continue };
+            if !matches!(b, B::SugarCane | B::Cactus) {
+                continue;
+            }
+            let Some(top) = g.neighbor(c, 2, 1) else { continue };
+            if self.chunks.get_block(top) != Some(B::Air) {
+                continue;
+            }
+            let mut h = 1;
+            let mut below = g.neighbor(c, 2, -1);
+            while let Some(d) = below {
+                if self.chunks.get_block(d) != Some(b) || h >= 3 {
+                    break;
+                }
+                h += 1;
+                below = g.neighbor(d, 2, -1);
+            }
+            if h < 3 && self.chunks.set_block(top, b) {
+                self.net_out.push((top, b));
+            }
+        }
+    }
+
+    /// Pressure plates: anyone standing on one (the player or a creature) presses it; it
+    /// springs back half a second after they step off.
+    fn step_plates(&mut self, dt: f32) {
+        use wolfcraft_engine::block::Block as B;
+        let g = self.chunks.grid();
+        let mut feet: Vec<DVec3> = vec![self.player.body.pos];
+        feet.extend(self.mobs.mobs.iter().map(|m| m.body.pos));
+        for p in feet {
+            let up = wolfcraft_engine::physics::up_at(p);
+            let c = g.world_to_cell(p + up * 0.02);
+            match self.chunks.get_block(c) {
+                Some(B::PressurePlate) => {
+                    if self.chunks.set_block(c, B::PressurePlateOn) {
+                        wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
+                        self.net_out.push((c, B::PressurePlateOn));
+                        self.plates.push((c, 0.5));
+                    }
+                }
+                Some(B::PressurePlateOn) => match self.plates.iter_mut().find(|(q, _)| *q == c) {
+                    Some(e) => e.1 = 0.5,
+                    None => self.plates.push((c, 0.5)),
+                },
+                _ => {}
+            }
+        }
+        let mut up = Vec::new();
+        self.plates.retain_mut(|(c, t)| {
+            *t -= dt;
+            if *t <= 0.0 {
+                up.push(*c);
+                false
+            } else {
+                true
+            }
+        });
+        for c in up {
+            if self.chunks.get_block(c) == Some(B::PressurePlateOn) {
+                self.chunks.set_block(c, B::PressurePlate);
+                wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
+                self.net_out.push((c, B::PressurePlate));
+            }
+        }
+    }
+
     /// Throws a stack out in front of the player (Bedrock style): it flies along the view
     /// and cannot be picked up again for a moment.
     pub fn throw(&mut self, stack: wolfcraft_engine::items::ItemStack) {
@@ -1244,9 +1365,9 @@ impl GameSession {
             placed.push(c);
             Ok(())
         };
-        // Floor and clear air above it.
+        // Floor and clear air above it (two rows of stands).
         for x in -1..=39 {
-            for z in -2..=24 {
+            for z in -2..=42 {
                 set(self, x, -1, z, B::SmoothStone)?;
                 for y in 0..=4 {
                     set(self, x, y, z, B::Air)?;
@@ -1326,6 +1447,85 @@ impl GameSession {
         }
         set(self, 35, 0, 22, B::IskritLamp)?;
         signs.push(((35, 0, -1), "Повторитель восстанавливает сигнал до полной силы и пропускает его только вперёд"));
+        // ---- Second row: simple everyday mechanisms ----
+        let rdir: u8 = match rgt { (1, 0) => 0, (-1, 0) => 1, (0, 1) => 2, _ => 3 };
+        let wall = |s: &mut Self, set: &mut dyn FnMut(&mut Self, i32, i32, i32, B) -> Result<(), String>, x0: i32, x1: i32, z: i32| -> Result<(), String> {
+            let _ = s;
+            for x in x0..=x1 {
+                for y in 0..=2 {
+                    set(s, x, y, z, B::OakPlanks)?;
+                }
+            }
+            Ok(())
+        };
+        // Doors stand across the walk (the wall runs sideways): the closed state for that way.
+        let (fi, fj) = (fwd.0 as f64, fwd.1 as f64);
+        let door = |s: &mut Self, set: &mut dyn FnMut(&mut Self, i32, i32, i32, B) -> Result<(), String>, x: i32, z: i32, kind: B, top: B| -> Result<(), String> {
+            let lower = kind.oriented(fi, fj);
+            let upper = if lower == kind { top } else { top.door_toggle().unwrap_or(top) };
+            set(s, x, 0, z, lower)?;
+            set(s, x, 1, z, upper)
+        };
+        // Stand 9: automatic door, a pressure plate on both sides.
+        wall(self, &mut set, -1, 3, 33)?;
+        door(self, &mut set, 1, 33, B::Door, B::DoorTop)?;
+        set(self, 1, 0, 32, B::PressurePlate)?;
+        set(self, 1, 0, 34, B::PressurePlate)?;
+        signs.push(((1, 0, 30), "Автодверь: встаньте на нажимную плиту — дверь откроется сама и закроется за вами"));
+        // Stand 10: door on a button, through a short wire.
+        wall(self, &mut set, 5, 9, 33)?;
+        door(self, &mut set, 7, 33, B::IronDoor, B::IronDoorTop)?;
+        set(self, 9, 0, 31, B::Button)?;
+        set(self, 8, 0, 31, B::IskritWire)?;
+        set(self, 7, 0, 31, B::IskritWire)?;
+        set(self, 7, 0, 32, B::IskritWire)?;
+        signs.push(((7, 0, 30), "Железная дверь рукой не открывается: нажмите кнопку справа, сигнал пройдёт по проводу"));
+        // Stand 11: double door on a switch.
+        wall(self, &mut set, 11, 16, 33)?;
+        door(self, &mut set, 13, 33, B::SpruceDoor, B::SpruceDoorTop)?;
+        door(self, &mut set, 14, 33, B::SpruceDoor, B::SpruceDoorTop)?;
+        set(self, 12, 0, 31, B::SwitchOff)?;
+        for x in 12..=14 {
+            set(self, x, 0, 32, B::IskritWire)?;
+        }
+        signs.push(((13, 0, 30), "Двойная автодверь: рубильник открывает обе створки, они расходятся в стороны"));
+        // Stand 12: sugar cane farm. Water, a row of cane on dirt, pistons above that cut it.
+        for z in 33..=37 {
+            set(self, 19, -1, z, B::Water)?;
+            set(self, 20, -1, z, B::Dirt)?;
+            set(self, 20, 0, z, B::SugarCane)?;
+            set(self, 20, 1, z, B::SugarCane)?;
+            set(self, 22, 0, z, B::Stone)?;
+            set(self, 21, 1, z, Part::Piston { sticky: false, extended: false, dir: rdir ^ 1 }.block())?;
+            set(self, 22, 1, z, B::IskritWire)?;
+        }
+        set(self, 22, 0, 32, B::Stone)?;
+        set(self, 22, 1, 32, B::Button)?;
+        signs.push(((20, 0, 30), "Ферма тростника: он сам растёт у воды. Нажмите кнопку — поршни срежут верх, тростник выпадет"));
+        // Stand 13: secret passage. Two sticky pistons hold wall blocks; switch off opens it.
+        for x in 25..=29 {
+            for y in 0..=2 {
+                if x != 27 || y == 2 {
+                    set(self, x, y, 34, B::StoneBricks)?;
+                }
+            }
+        }
+        let back = fdir ^ 1;
+        for y in 0..=1 {
+            set(self, 27, y, 34, B::StoneBricks)?;
+            set(self, 27, y, 35, Part::Head { sticky: true, dir: back }.block())?;
+            set(self, 27, y, 36, Part::Piston { sticky: true, extended: true, dir: back }.block())?;
+        }
+        set(self, 28, 0, 36, B::SwitchOn)?;
+        set(self, 28, 1, 36, B::IskritWire)?;
+        signs.push(((27, 0, 30), "Потайной проход: обойдите стену и выключите рубильник — липкие поршни утянут камни"));
+        // Stand 14: light on a sensor. A plate lights a row of lamps.
+        set(self, 33, 0, 33, B::PressurePlate)?;
+        for z in 34..=37 {
+            set(self, 33, 0, z, B::IskritWire)?;
+            set(self, 34, 0, z, B::IskritLamp)?;
+        }
+        signs.push(((33, 0, 30), "Свет по датчику: встаньте на плиту — загорятся лампы"));
         // Signs with the explanations, in front of every stand.
         for ((x, y, z), text) in signs {
             set(self, x, y, z, B::Sign)?;
@@ -1336,11 +1536,11 @@ impl GameSession {
         self.save_block_commands();
         // Work out every network once.
         for c in placed {
-            if matches!(self.chunks.get_block(c), Some(B::IskritWire | B::IskritTorch | B::IskritBlock | B::IskritLamp)) || self.chunks.get_block(c).is_some_and(|b| b.part().is_some()) {
+            if matches!(self.chunks.get_block(c), Some(B::IskritWire | B::IskritTorch | B::IskritBlock | B::IskritLamp | B::SwitchOn)) || self.chunks.get_block(c).is_some_and(|b| b.part().is_some()) {
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
             }
         }
-        Ok("Выставка искрита построена перед вами: 8 стендов с табличками. Подойдите к табличке, чтобы прочитать".into())
+        Ok("Выставка искрита построена перед вами: 14 стендов в два ряда — схемы, автодвери, ферма, потайной проход. Подойдите к табличке, чтобы прочитать".into())
     }
 
     pub fn cycle_camera(&mut self) {
@@ -1570,7 +1770,7 @@ mod tests {
         let mut s = load("iskrit_demo", 77, true);
         settle(&mut s);
         let msg = s.build_iskrit_demo().expect("demo builds");
-        assert!(msg.contains("8 стендов"));
+        assert!(msg.contains("14 стендов"));
         // Count lamps: torch, block (×2), 15-dust line and staircase lamps are lit; the
         // button, the switch and the 16-dust line are not.
         let feet = s.chunks.grid().world_to_cell(s.player.body.pos);
@@ -1588,8 +1788,42 @@ mod tests {
                 }
             }
         }
-        assert_eq!((on, off), (6, 3), "lit and unlit lamps (the repeater line lights its lamp)");
+        assert_eq!((on, off), (6, 7), "lit and unlit lamps (the repeater line lights its lamp; the sensor lamps wait)");
         assert!(s.block_commands.values().any(|t| t.contains("15 блоков")), "signs carry the explanations");
+        // Automatic door: stepping on a plate beside a door swings it, stepping off swings it back.
+        let g = s.chunks.grid();
+        let mut found = None;
+        'scan: for di in -45..=45 {
+            for dj in -45..=45 {
+                if let Some(c) = g.offset(feet, di, dj, 0) {
+                    if s.chunks.get_block(c) == Some(Block::PressurePlate) {
+                        for (a, sg) in [(0, 1), (0, -1), (1, 1), (1, -1)] {
+                            if let Some(n) = g.neighbor(c, a, sg) {
+                                if s.chunks.get_block(n).is_some_and(|b| b.door_toggle().is_some()) {
+                                    found = Some((c, n));
+                                    break 'scan;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let (plate, door) = found.expect("a plate next to a door");
+        let closed = s.chunks.get_block(door);
+        s.player.body.flying = false;
+        s.teleport(g.cell_center(plate) - wolfcraft_engine::physics::up_at(g.cell_center(plate)) * 0.45);
+        for _ in 0..3 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 3, false);
+        }
+        assert_eq!(s.chunks.get_block(plate), Some(Block::PressurePlateOn), "pressed");
+        assert_ne!(s.chunks.get_block(door), closed, "the door swung open");
+        let away = g.offset(plate, 0, 0, 6).unwrap();
+        s.teleport(g.cell_center(away));
+        for _ in 0..60 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 3, false);
+        }
+        assert_eq!(s.chunks.get_block(door), closed, "and shut after we left");
     }
 
     /// Cube planet end to end: spawn, stand, then walk over a cube edge onto the next face.

@@ -194,6 +194,8 @@ pub struct App {
     hand_block: f32,
     /// Block-placing arm motion, 1 -> 0.
     hand_place: f32,
+    /// Fraction of a crumble particle owed while mining (see the mining effects).
+    mine_dust: f32,
     /// Item-switch dip of the view model: 1 right after changing the slot, fading to 0.
     hand_switch: f32,
     last_hotbar: usize,
@@ -309,6 +311,7 @@ impl App {
             look_pending: (0.0, 0.0),
             hand_block: 0.0,
             hand_place: 0.0,
+            mine_dust: 0.0,
             hand_switch: 0.0,
             last_hotbar: 0,
             audio: crate::audio::Audio::new(),
@@ -1720,15 +1723,55 @@ impl App {
                 let m = strike_moment(tool.is_some());
                 let c1 = self.hand_cycle;
                 let landed = (c1 > c0 && c0 < m && c1 >= m) || (c1 < c0 && c0 < m);
-                if landed && s.interaction.mining_fraction() > 0.0 {
-                    if let Some(h) = s.hit {
-                        let corners = s.chunks.grid().cell_corners(h.cell);
-                        let centre = corners.iter().fold(glam::DVec3::ZERO, |a, c| a + *c) / 8.0;
-                        let towards = (cam.eye - centre).normalize_or_zero();
-                        if let Some(cols) = self.tile_colors.get(h.block.info().tiles[0] as usize) {
-                            s.mobs.chips(centre + towards * 0.55, cols, (4.0 * self.settings.particles) as usize, 1.8);
+                // Mining effects at the exact point the ray touches the block face.
+                let mining = s.interaction.mining_fraction() > 0.0;
+                if let (true, Some(h)) = (mining, s.hit) {
+                    use wolfcraft_engine::block::ToolKind;
+                    use wolfcraft_engine::mobs::FxKind;
+                    let point = cam.eye + cam.forward * (h.dist - 0.04);
+                    let back = -cam.forward;
+                    let up = wolfcraft_engine::physics::up_at(point);
+                    let pk = self.settings.particles.max(0.0);
+                    let cols = self.tile_colors.get(h.block.info().tiles[0] as usize).cloned().unwrap_or_default();
+                    let block_tool = h.block.info().tool;
+                    let held_tool = s.player.inventory.held().and_then(|st| st.info().tool).map(|t| t.0);
+                    if landed {
+                        // The blow: a spray of chips off the face, a dusty puff, and by tool:
+                        // sparks from a pickaxe on stone, splinters from an axe, clods from a shovel.
+                        let speed = match held_tool { Some(ToolKind::Shovel) => 2.6, Some(_) => 2.2, None => 1.6 };
+                        if !cols.is_empty() {
+                            let n = ((8.0 + 4.0 * s.interaction.mining_fraction()) * pk) as usize;
+                            for i in 0..n {
+                                let r = |k: f64| ((i as f64 * 12.9898 + k * 78.233 + self.time.elapsed() as f64).sin() * 43758.5453).fract();
+                                let side = cam.forward.cross(up).normalize_or_zero();
+                                let vel = back * (speed * (0.5 + r(1.0))) + side * (r(2.0) - 0.5) * 3.0 + up * (1.0 + 2.0 * r(3.0)) * if held_tool == Some(ToolKind::Shovel) { 1.6 } else { 1.0 };
+                                let size = 0.04 + 0.05 * r(4.0) as f32;
+                                s.mobs.fx(point + side * (r(5.0) - 0.5) * 0.25, vel, cols[i % cols.len()], size, 0.9, FxKind::Fall);
+                            }
+                            let dust = cols[0].map(|c| c * 0.6 + 0.35);
+                            for k in 0..(2.0 * pk) as usize {
+                                s.mobs.fx(point + back * 0.1, back * 0.5 + up * (0.3 + k as f64 * 0.2), dust, 0.16, 0.7, FxKind::Rise);
+                            }
+                        }
+                        if held_tool == Some(ToolKind::Pickaxe) && block_tool == ToolKind::Pickaxe {
+                            for i in 0..(5.0 * pk) as usize {
+                                let a = i as f64 * 2.4 + self.time.elapsed() as f64 * 7.0;
+                                let side = cam.forward.cross(up).normalize_or_zero();
+                                let vel = back * 3.0 + (side * a.cos() + up * a.sin()) * 2.6;
+                                s.mobs.fx_glow(point, vel, [1.0, 0.85, 0.45], 0.035, 0.35, FxKind::Fall);
+                            }
                         }
                         self.audio.play(crate::audio::Sfx::Hit, 0.7);
+                    } else if !cols.is_empty() && pk > 0.0 {
+                        // Between blows a light crumble keeps falling from the face.
+                        self.mine_dust += dt * 9.0 * pk;
+                        while self.mine_dust >= 1.0 {
+                            self.mine_dust -= 1.0;
+                            let t = self.time.elapsed() as f64 * 13.0;
+                            let side = cam.forward.cross(up).normalize_or_zero();
+                            let p = point + side * (t.sin() * 0.3) + up * (t.cos() * 0.3);
+                            s.mobs.fx(p, back * 0.4, cols[(t as usize) % cols.len()], 0.03, 0.6, FxKind::Fall);
+                        }
                     }
                 }
                 // Body motion of the view model: sprint, sneak, turn inertia, jump and landing.
@@ -1797,6 +1840,7 @@ impl App {
                         sway: self.hand_sway,
                         time: self.time.elapsed(),
                         sleeve: worn_armor(&s.player.inventory)[1].map(wolfcraft_engine::renderer::model::armor_color),
+                        bow: bow.then_some(s.bow_charge),
                     };
                     let hands = build_first_person_hands(&hand_pose);
                     // View model placement: settings, item-switch dip, aspect ratio.

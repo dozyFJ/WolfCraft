@@ -603,16 +603,18 @@ pub fn build_dropped_models(drops: &[crate::drops::Dropped], camera: DVec3, time
         let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
         let r0 = up.cross(helper).normalize();
         let f0 = r0.cross(up);
-        let a = (time * 1.6 + d.seed * 6.28) as f64;
+        // In the air it spins and bobs; on the ground it lies still at its own angle.
+        let a = if d.resting { (d.seed * 6.28) as f64 } else { (time * 1.6 + d.seed * 6.28) as f64 };
         let (s, c) = a.sin_cos();
         let right = r0 * c + f0 * s;
         let fwd = right.cross(up) * -1.0;
-        let bob = 0.13 + ((time * 2.4 + d.seed * 9.0).sin() * 0.05) as f64;
+        let bob = if d.resting { -0.115 } else { 0.13 + ((time * 2.4 + d.seed * 9.0).sin() * 0.05) as f64 };
         let copies = if d.stack.count > 1 { 2 } else { 1 };
         let info = d.stack.info();
         let block = info.place.filter(|b| matches!(b.info().render, crate::block::RenderKind::Opaque | crate::block::RenderKind::Cutout));
         for k in 0..copies {
-            let off = DVec3::new(0.0, 0.0, 0.0) + right * (k as f64 * 0.07) + fwd * (k as f64 * 0.06) + up * (k as f64 * 0.05);
+            // A stack shows a second copy: beside the first on the ground, behind it in the air.
+            let off = if d.resting { right * (k as f64 * 0.11) + fwd * (k as f64 * 0.08) + up * (k as f64 * 0.012) } else { right * (k as f64 * 0.07) + fwd * (k as f64 * 0.06) + up * (k as f64 * 0.05) };
             let frame = Frame { origin: d.pos - camera + up * bob + off, right, up, fwd };
             if let Some(b) = block {
                 add_tiled_cube(&mut v, &frame, 0.12, b.info().tiles);
@@ -623,7 +625,13 @@ pub fn build_dropped_models(drops: &[crate::drops::Dropped], camera: DVec3, time
                 };
                 if let Some(px) = px.filter(|p| p.len() == 256) {
                     let s = 0.34f32;
-                    add_voxel_icon(&mut v, &frame, &px, Vec3::new(-s * 0.5, 0.0, 0.0), Vec3::X, Vec3::Y, Vec3::NEG_Z, s, Vec3::ZERO, 0.0);
+                    if d.resting {
+                        // Lying flat on the ground, one pixel thick.
+                        let (u, w) = (Vec3::X, Vec3::NEG_Z);
+                        add_voxel_icon(&mut v, &frame, &px, Vec3::new(-s * 0.5, s / 16.0 + 0.004, s * 0.5), u, w, u.cross(w), s, Vec3::ZERO, 0.0);
+                    } else {
+                        add_voxel_icon(&mut v, &frame, &px, Vec3::new(-s * 0.5, 0.0, 0.0), Vec3::X, Vec3::Y, Vec3::NEG_Z, s, Vec3::ZERO, 0.0);
+                    }
                 } else if let crate::items::Icon::Block(t) = info.icon {
                     // Plants and other non-cube blocks: a two-sided card with the block sprite.
                     add_tiled_card(&mut v, &frame, 0.3, t);
@@ -734,12 +742,14 @@ pub struct HandsPose {
     pub time: f32,
     /// Colour of the worn chestplate: the sleeve takes it.
     pub sleeve: Option<[f32; 3]>,
+    /// A bow in the main hand and how far it is drawn (0..1).
+    pub bow: Option<f32>,
 }
 
 impl HandsPose {
     /// Resting pose looking along `forward` (handy for tests and previews).
     pub fn rest(forward: Vec3, up: Vec3) -> Self {
-        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None }
+        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None, bow: None }
     }
 }
 
@@ -915,6 +925,20 @@ fn arm_place(pose: &HandsPose, side: f32) -> ArmPlace {
             a.yaw += s.yaw * k;
             a.roll += s.roll * k;
         }
+        if let Some(c) = pose.bow {
+            // Drawing a bow: the hand comes in front of the chest, the bow stands up and leans
+            // a little, the forearm levels out.
+            let c = c.clamp(0.0, 1.0);
+            let e = c * c * (3.0 - 2.0 * c);
+            p = p.lerp(Vec3::new(0.05, -0.17, 0.34) + off * 0.4, e);
+            a.tilt = lerp(a.tilt, -0.05, e);
+            a.yaw = lerp(a.yaw, 0.35, e);
+            a.roll = lerp(a.roll, -0.25, e);
+            // A small tremble when fully drawn.
+            if c >= 1.0 {
+                p.y += (pose.time * 31.0).sin() * 0.003;
+            }
+        }
         if pose.place > 0.0 {
             // The right hand pushes forward and down quickly, then eases back with a recoil.
             let t = 1.0 - pose.place.clamp(0.0, 1.0);
@@ -1065,7 +1089,9 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
         }
         let f = Vec3::new(x, y, z + 0.29); // fist centre before the tilt
         if side > 0.0 {
-            if let Some((kind, mat)) = pose.tool {
+            if let Some(c) = pose.bow {
+                add_bow(&mut v, &frame, f, pivot, angle, c.clamp(0.0, 1.0));
+            } else if let Some((kind, mat)) = pose.tool {
                 add_tool(&mut v, &frame, f, pivot, angle, kind, mat);
             } else if let Some(px) = pose.icon.and_then(|i| textures().and_then(|t| t.item_pixels.get(i as usize).cloned())).filter(|p| p.len() == 256) {
                 // Stick, food, ingots…: a small 3D icon in the fist, facing the camera a bit.
@@ -1129,6 +1155,50 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         0 => b(v, Vec3::new(-0.02, 0.28, -0.13), Vec3::new(0.02, 0.33, 0.13), m),  // pickaxe head
         1 => b(v, Vec3::new(-0.018, 0.22, 0.0), Vec3::new(0.018, 0.34, 0.10), m),  // axe blade
         _ => b(v, Vec3::new(-0.05, 0.31, -0.008), Vec3::new(0.05, 0.42, 0.008), m), // shovel plate
+    }
+}
+
+/// Bow held upright in the fist, seen from the side: the wooden arc bulges away from the
+/// camera, the string runs back towards it. `c` (0..1) is the draw: the string is pulled back,
+/// the limbs bend more and an arrow lies on the string.
+fn add_bow(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle: f32, c: f32) {
+    const WOOD: [f32; 3] = [0.55, 0.36, 0.18];
+    const WOOD_DARK: [f32; 3] = [0.40, 0.25, 0.12];
+    const STRING: [f32; 3] = [0.92, 0.92, 0.88];
+    let mut cube = |p: Vec3, s: f32, col: [f32; 3]| add_box(v, frame, p - Vec3::splat(s * 0.5), p + Vec3::splat(s * 0.5), pivot, angle, col);
+    let half = 0.30; // half the bow's height
+    let bend = 0.10 + 0.05 * c;
+    let grip = f + Vec3::new(0.0, 0.10, 0.05);
+    // Limb point at t (-1 bottom .. 1 top): the tips curve back towards the string.
+    let limb = |t: f32| grip + Vec3::new(0.0, t * half, -t * t * bend);
+    let steps = 24;
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32 * 2.0 - 1.0;
+        let col = if t.abs() < 0.15 { WOOD_DARK } else { WOOD };
+        cube(limb(t), if t.abs() < 0.15 { 0.045 } else { 0.032 }, col);
+    }
+    // String: tips to the nock, which the draw pulls back.
+    let (top, bottom) = (limb(1.0), limb(-1.0));
+    let nock = Vec3::new(grip.x, grip.y, top.z - 0.20 * c);
+    for (a, b) in [(top, nock), (nock, bottom)] {
+        let n = ((a - b).length() / 0.008).ceil() as usize;
+        for i in 0..=n {
+            cube(a.lerp(b, i as f32 / n as f32), 0.013, STRING);
+        }
+    }
+    if c > 0.05 {
+        // Arrow on the string, pointing away from the camera past the grip.
+        let len = 0.62;
+        let tail = nock;
+        let head = tail + Vec3::new(0.0, 0.0, len);
+        let n = 40;
+        for i in 0..=n {
+            cube(tail.lerp(head, i as f32 / n as f32), 0.018, [0.62, 0.45, 0.25]);
+        }
+        cube(head + Vec3::new(0.0, 0.0, 0.02), 0.034, [0.72, 0.74, 0.78]);
+        for dy in [-0.02f32, 0.02] {
+            cube(tail + Vec3::new(0.0, dy, 0.04), 0.022, [0.95, 0.95, 0.93]);
+        }
     }
 }
 

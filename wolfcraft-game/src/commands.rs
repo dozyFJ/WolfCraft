@@ -27,7 +27,8 @@ pub const HELP: &[&str] = &[
     "/heal  /feed  /kill  /fly   ·   /difficulty <мирная|лёгкая|нормальная|сложная>",
     "/pos  /biome  /seed  /save  /say <текст>",
     "/season [весна|лето|осень|зима] — узнать или сменить время года",
-    "/demo — построить перед собой выставку искрита (провода, кнопки, лампы)",
+    "/demo — построить перед собой выставку искрита: схемы, автодвери, ферма, потайной проход",
+    "//help — команды WorldEdit: //pos1 //pos2 //set //replace //walls //copy //paste //sphere //cyl //undo …",
     "/ад — перейти в Ад,  /мир — вернуться (или через адский портал: 4 обсидиана + светокамень)",
 ];
 
@@ -110,6 +111,10 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
     let mut it = body.split_whitespace();
     let cmd = it.next().unwrap_or("").to_lowercase();
     let args: Vec<&str> = it.collect();
+    // WorldEdit: a double slash (//set …).
+    if let Some(we) = cmd.strip_prefix('/') {
+        return crate::worldedit::run(s, we, &args).unwrap_or_else(|| vec![err(format!("Неизвестная команда WorldEdit: //{we}. Список: //help"))]);
+    }
     match cmd.as_str() {
         "help" | "?" | "помощь" => HELP.iter().map(|l| sys(*l)).collect(),
         "hell" | "nether" | "overworld" | "ад" | "мир" => {
@@ -309,6 +314,43 @@ mod tests {
         assert_eq!(parse_mode("с"), None);
         assert_eq!(parse_mode("творческий"), Some(GameMode::Creative));
         assert_eq!(parse_difficulty("Сложная"), Some(Difficulty::Hard));
+    }
+
+    #[test]
+    fn worldedit_sets_copies_pastes_and_undoes() {
+        let mut s = load("we");
+        assert_eq!(run(&mut s, "//set камень")[0].0, ChatKind::Error, "survival: no WorldEdit");
+        run(&mut s, "/gm творческий");
+        let t = std::time::Instant::now();
+        while s.chunks.get_block(s.chunks.grid().world_to_cell(s.player.body.pos)).is_none() {
+            s.update(&crate::session::InputFrame::default(), 0.016, 3, true);
+            assert!(t.elapsed().as_secs() < 60);
+        }
+        let g = s.chunks.grid();
+        let me = g.world_to_cell(s.player.body.pos);
+        // A 3×3×2 box of stone two blocks above the head.
+        s.we.pos1 = g.offset(me, 1, 1, 3);
+        s.we.pos2 = g.offset(me, 3, 3, 4);
+        assert!(run(&mut s, "//size")[0].1.contains("18"));
+        let r = run(&mut s, "//set stone");
+        assert_eq!(r[0].0, ChatKind::System, "{r:?}");
+        let at = |s: &GameSession, di, dj, dk| s.chunks.get_block(g.offset(me, di, dj, dk).unwrap());
+        assert_eq!(at(&s, 2, 2, 3), Some(Block::Stone));
+        // Replace, copy and paste further along.
+        run(&mut s, "//replace камень кирпичи");
+        assert_eq!(at(&s, 1, 1, 4), Some(Block::Bricks));
+        run(&mut s, "//copy");
+        s.player.body.pos = g.cell_center(g.offset(me, 0, 6, 0).unwrap());
+        run(&mut s, "//paste -a");
+        assert_eq!(at(&s, 2, 8, 3), Some(Block::Bricks), "pasted six blocks over");
+        // Undo the paste, then the replace.
+        run(&mut s, "//undo");
+        assert_ne!(at(&s, 2, 8, 3), Some(Block::Bricks));
+        run(&mut s, "//undo");
+        assert_eq!(at(&s, 2, 2, 3), Some(Block::Stone));
+        run(&mut s, "//redo");
+        assert_eq!(at(&s, 2, 2, 3), Some(Block::Bricks));
+        assert_eq!(run(&mut s, "//ой")[0].0, ChatKind::Error);
     }
 
     #[test]

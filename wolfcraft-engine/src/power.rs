@@ -131,7 +131,7 @@ pub fn is_powered(world: &impl WorldEdit, c: Cell) -> bool {
 pub const ISKRIT_MAX: u8 = 15;
 
 fn is_iskrit_source(b: Block) -> bool {
-    matches!(b, Block::IskritBlock | Block::IskritTorch | Block::SwitchOn | Block::ButtonOn)
+    matches!(b, Block::IskritBlock | Block::IskritTorch | Block::SwitchOn | Block::ButtonOn | Block::PressurePlateOn)
 }
 
 fn is_wire(b: Block) -> bool {
@@ -263,6 +263,17 @@ fn eval_part(world: &mut impl WorldEdit, c: Cell) -> Vec<Cell> {
     out
 }
 
+/// Doors a signal holds swung (lower halves).
+static POWERED_DOORS: std::sync::LazyLock<std::sync::Mutex<HashSet<Cell>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
+
+/// Plants a piston crushed (cell, block), for the game to drop as items.
+static CRUSHED: std::sync::Mutex<Vec<(Cell, Block)>> = std::sync::Mutex::new(Vec::new());
+
+/// Takes the plants pistons crushed since the last call.
+pub fn take_crushed() -> Vec<(Cell, Block)> {
+    CRUSHED.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default()
+}
+
 /// Pushes up to 12 blocks in front of the piston one cell on and puts the head out.
 fn extend(world: &mut impl WorldEdit, c: Cell, sticky: bool, dir: u8) -> Option<Vec<Cell>> {
     let front = dir_neighbor(world, c, dir)?;
@@ -280,6 +291,13 @@ fn extend(world: &mut impl WorldEdit, c: Cell, sticky: bool, dir: u8) -> Option<
         cur = dir_neighbor(world, cur, dir)?;
     }
     let mut touched = vec![c, front, cur];
+    // The free cell at the end may hold a plant: it gets crushed (and drops).
+    let end = world.cell_block(cur);
+    if end != Block::Air && !end.is_fluid() {
+        if let Ok(mut v) = CRUSHED.lock() {
+            v.push((cur, end));
+        }
+    }
     let mut dst = cur;
     for &src in line.iter().rev() {
         let b = world.cell_block(src);
@@ -408,6 +426,60 @@ fn update_network(world: &mut impl WorldEdit, origin: Cell) -> (usize, HashSet<C
             changed += 1;
         }
     }
+    // Doors: open while either half is powered, shut when the signal goes (automatic doors).
+    let mut doors: Vec<Cell> = Vec::new();
+    for c in &probe {
+        let b = world.cell_block(*c);
+        if b.door_toggle().is_some() {
+            // Work on the lower half.
+            let bottom = if b.is_door_top() { world.grid().neighbor(*c, 2, -1).unwrap_or(*c) } else { *c };
+            if !doors.contains(&bottom) {
+                doors.push(bottom);
+            }
+        }
+    }
+    for d in doors {
+        let b = world.cell_block(d);
+        if b.door_toggle().is_none() {
+            continue;
+        }
+        let top = crate::interaction::door_partner(world, d, b);
+        // A door the player just used by hand is left alone, and so is any door without iskrit
+        // beside it (ordinary house doors stay manual).
+        if d == origin || top.is_some_and(|(t, _)| t == origin) {
+            continue;
+        }
+        let wired = |c: Cell| neighbors(world, c).into_iter().any(|n| {
+            let nb = world.cell_block(n);
+            is_iskrit_source(nb) || is_wire(nb) || nb.part().is_some() || matches!(nb, Block::SwitchOff | Block::Button | Block::PressurePlate)
+        });
+        if !(wired(d) || top.is_some_and(|(t, _)| wired(t))) {
+            continue;
+        }
+        let on = powered(world, d) || top.is_some_and(|(t, _)| powered(world, t));
+        // "Open" is only a turn of the leaf (a door placed the other way is closed in the open
+        // state), so the signal swings the door when it comes and swings it back when it goes;
+        // the doors held by a signal are remembered.
+        let held = POWERED_DOORS.lock().map(|s| s.contains(&d)).unwrap_or(false);
+        if on != held {
+            if let Ok(mut s) = POWERED_DOORS.lock() {
+                if on {
+                    s.insert(d);
+                } else {
+                    s.remove(&d);
+                }
+            }
+            if let Some(nb) = b.door_toggle() {
+                world.set_block(d, nb);
+                changed += 1;
+            }
+            if let Some((t, tb)) = top {
+                if let Some(nt) = tb.door_toggle() {
+                    world.set_block(t, nt);
+                }
+            }
+        }
+    }
     (changed, probe.into_iter().collect())
 }
 
@@ -441,6 +513,29 @@ mod tests {
     }
     fn at(i: i32, j: i32) -> Cell {
         Cell::new(4, 10 + i, 20 + j, 30)
+    }
+
+    #[test]
+    fn a_pressure_plate_opens_a_door_and_house_doors_stay_manual() {
+        let mut w = mock();
+        let up = |c: Cell| Cell::new(c.f, c.i, c.j, c.k + 1);
+        // Door at 0 with a plate in front of it.
+        w.set_block(at(0, 0), Block::Door);
+        w.set_block(up(at(0, 0)), Block::DoorTop);
+        w.set_block(at(-1, 0), Block::PressurePlate);
+        w.set_block(at(-1, 0), Block::PressurePlateOn);
+        update_iskrit(&mut w, at(-1, 0));
+        assert_eq!(w.cell_block(at(0, 0)), Block::DoorOpen, "stepping on the plate opens the door");
+        assert_eq!(w.cell_block(up(at(0, 0))), Block::DoorTopOpen, "both halves");
+        w.set_block(at(-1, 0), Block::PressurePlate);
+        update_iskrit(&mut w, at(-1, 0));
+        assert_eq!(w.cell_block(at(0, 0)), Block::Door, "and it shuts again");
+        // A door with no iskrit around keeps whatever the player did to it.
+        w.set_block(at(5, 0), Block::DoorOpen);
+        w.set_block(up(at(5, 0)), Block::DoorTopOpen);
+        w.set_block(at(6, 0), Block::Stone);
+        update_iskrit(&mut w, at(6, 0));
+        assert_eq!(w.cell_block(at(5, 0)), Block::DoorOpen, "manual door untouched");
     }
 
     #[test]
