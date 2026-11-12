@@ -177,6 +177,7 @@ impl TextureAtlas {
 pub struct AtlasManager {
     atlases: Vec<TextureAtlas>,
     water_frame: u32,
+    animate_water: bool,
 }
 
 impl AtlasManager {
@@ -184,6 +185,7 @@ impl AtlasManager {
     /// `override_dir/<category>/<sprite>.png` when present.
     pub fn new(override_dir: Option<&Path>) -> Result<Self, String> {
         let mut atlases = Vec::new();
+        let mut animate_water = true;
         for kind in AtlasKind::ALL {
             let mut sprites = procedural::sprites(kind);
             if let Some(dir) = override_dir {
@@ -193,6 +195,9 @@ impl AtlasManager {
                         match Image::load_png(&p) {
                             Ok(o) => {
                                 log::info!("texture override: {}", p.display());
+                                if kind == AtlasKind::Blocks && name == "water" {
+                                    animate_water = false;
+                                }
                                 *img = o;
                             }
                             Err(e) => log::warn!("override failed: {e}"),
@@ -202,7 +207,7 @@ impl AtlasManager {
             }
             atlases.push(TextureAtlas::build(kind, sprites)?);
         }
-        Ok(Self { atlases, water_frame: 0 })
+        Ok(Self { atlases, water_frame: 0, animate_water })
     }
 
     pub fn get(&self, kind: AtlasKind) -> &TextureAtlas {
@@ -221,6 +226,9 @@ impl AtlasManager {
 
     /// Advances texture animations (water). Returns true if anything changed.
     pub fn animate(&mut self, time_s: f32) -> bool {
+        if !self.animate_water {
+            return false;
+        }
         let frame = (time_s * 6.0) as u32 % 16;
         if frame == self.water_frame {
             return false;
@@ -272,9 +280,28 @@ mod tests {
     }
 
     #[test]
+    fn water_override_survives_animation_at_native_and_pack_sizes() {
+        for size in [16, 32] {
+            let dir = std::env::temp_dir().join(format!("wolfcraft_water_override_{}_{size}", std::process::id()));
+            let mut water = Image::new(size, size);
+            for pixel in water.pixels.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&[32, 75, 90, 180]);
+            }
+            water.save_png(&dir.join("blocks/water.png")).unwrap();
+            let mut m = AtlasManager::new(Some(&dir)).unwrap();
+            assert!(!m.animate(1.0));
+            let atlas = m.get(AtlasKind::Blocks);
+            let r = atlas.rect(procedural::tiles::WATER as usize);
+            assert_eq!(atlas.image().crop(r.x, r.y, r.w, r.h), water);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
     fn names_resolve() {
         let m = AtlasManager::new(None).unwrap();
         let gui = m.get(AtlasKind::Gui);
         assert_eq!(gui.id("logo"), Some(procedural::gui::LOGO as usize));
     }
 }
+
