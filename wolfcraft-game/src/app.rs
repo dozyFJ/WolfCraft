@@ -41,6 +41,7 @@ enum Screen {
     /// Studio splash with a loading bar and tips, shown once at start.
     Splash,
     Main,
+    GameMenu,
     WorldSelect,
     Create,
     Settings,
@@ -836,7 +837,8 @@ impl App {
             g.world.clear();
         }
         self.nav.clear();
-        self.screen = Screen::Main;
+        self.nav.push(Screen::Main);
+        self.screen = Screen::GameMenu;
         // Show the planet of the world we just left.
         self.menu_planet_requested = false;
     }
@@ -1632,14 +1634,16 @@ impl App {
                     crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
                 Screen::Main => {
-                    actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref(), settings.skin, worlds));
+                    actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref(), settings.skin, &settings.nickname, worlds));
                     crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
+                Screen::GameMenu => actions.push(wolfcraft_ui::launcher::game_menu(ctx, &icons, version, menu_planet.as_ref())),
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
                 Screen::Create => actions.push(main_menu::create_world(ctx, &icons, create, create_preview.as_ref(), version, random_seed)),
                 Screen::Settings => {
                     let folder = if cfg!(target_os = "android") { ANDROID_PACKS_DIR.to_string() } else { data_dir_str.clone() + "/resourcepacks" };
                     let r = main_menu::settings_screen(ctx, &icons, settings, version, &main_menu::PacksView { list: packs, status: pack_status, folder: &folder });
+                    if r.open_updates { crate::updates::open_release(); }
                     settings_changed |= r.changed;
                     settings_back |= r.back;
                     pack_refresh |= r.refresh_packs;
@@ -2395,6 +2399,9 @@ impl App {
     fn handle_action(&mut self, a: MenuAction, gfx: &mut Gfx) {
         match a {
             MenuAction::None => {}
+            MenuAction::LaunchVersion(version) => {
+                if version == wolfcraft_common::VERSION { self.push(Screen::GameMenu); }
+            }
             MenuAction::OpenNetwork => {
                 self.world_select.mode = 1;
                 self.world_select.net_tab = 0;
@@ -3248,3 +3255,4 @@ fn studio_touch_size(size: (u32, u32), studio: Option<&wolfcraft_ui::studio_ui::
         None => size,
     }
 }
+

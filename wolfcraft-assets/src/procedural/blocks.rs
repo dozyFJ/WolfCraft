@@ -331,9 +331,15 @@ fn leaves(base: Rgb, seed: u32) -> Image {
 
 fn ore(c: Rgb, seed: u32) -> Image {
     p(|q| {
-        q.noisy(Rgb(0.50, 0.50, 0.52), 0.12, 5);
-        q.speckle(Rgb(0.42, 0.42, 0.44), 0.25, 6);
-        q.speckle(c, 0.22, seed);
+        q.noisy(Rgb(0.50, 0.50, 0.52), 0.08, 5);
+        // Larger mineral chips stay readable after the cartoon filter.
+        for y in 0..S { for x in 0..S {
+            let cluster = hash(x / 4, y / 4, seed) % 3 == 0;
+            if cluster && x % 4 > 0 && y % 4 > 0 && hash(x, y, seed + 1) % 7 != 0 {
+                let facet = if x % 4 == 1 || y % 4 == 1 { 0.10 } else { -0.05 };
+                q.put(x, y, c.add(facet), 1.0);
+            }
+        }}
     })
 }
 
@@ -1813,3 +1819,4 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }
     l.0
 }
+

@@ -1,6 +1,7 @@
 //! WolfCraft game library: desktop `main` and the Android entry point share this code.
 
 mod app;
+mod updates;
 mod audio;
 mod commands;
 mod loader;
@@ -256,3 +257,4 @@ pub mod orientation {
         let _ = portrait;
     }
 }
+

@@ -12,6 +12,8 @@ use wolfcraft_engine::config::*;
 pub enum MenuAction {
     None,
     OpenWorldSelect,
+    /// Enter the main menu of the installed game version.
+    LaunchVersion(String),
     OpenCreate,
     OpenSettings,
     Quit,
@@ -181,9 +183,9 @@ fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
 }
 
 /// Home screen: the mobile launcher (toolbar, pages, bottom navigation).
-pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8, worlds: &[WorldEntry]) -> MenuAction {
+pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8, nickname: &str, worlds: &[WorldEntry]) -> MenuAction {
     let _ = data_dir;
-    crate::launcher::show(ctx, icons, version, dark, planet, skin, worlds)
+    crate::launcher::show(ctx, icons, version, dark, planet, skin, nickname, worlds)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -843,6 +845,7 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
 pub struct SettingsResult {
     pub changed: bool,
     pub back: bool,
+    pub open_updates: bool,
     /// Re-scan the resource pack folders.
     pub refresh_packs: bool,
     /// Download a resource pack (.zip) from this link.
@@ -860,7 +863,7 @@ pub struct PacksView<'a> {
 
 const FPS_LIMITS: [u32; 7] = [0, 30, 60, 90, 120, 144, 240];
 
-const SETTINGS_TABS: [(u16, &str); 6] = [(icon::HEART, "Профиль"), (icon::SUN, "Графика"), (icon::CUBE, "Текстуры"), (icon::HAMMER, "Рука"), (icon::EDIT, "Интерфейс"), (icon::CROSSHAIR, "Управление")];
+const SETTINGS_TABS: [(u16, &str); 7] = [(icon::HEART, "Профиль"), (icon::SUN, "Графика"), (icon::CUBE, "Текстуры"), (icon::HAMMER, "Рука"), (icon::EDIT, "Интерфейс"), (icon::CROSSHAIR, "Управление"), (icon::REFRESH, "Обновления")];
 
 /// Resource packs: built-in ones and the player's own, plus import from a link.
 fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs: &PacksView, res: &mut SettingsResult) {
@@ -992,6 +995,16 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
             section_label(ui, SETTINGS_TABS[tab].1);
             ui.add_space(8.0);
             match tab {
+                6 => {
+                    ui.label(format!("Установлена WolfCraft {version}"));
+                    ui.label("Новая версия игры устанавливается поверх текущей через APK. Миры сохраняются; не удаляйте приложение перед обновлением.");
+                    ui.label("Приватный GitHub потребует входа в ваш аккаунт. Токен доступа в игру не встроен.");
+                    if pill_button(ui, icons, Some(icon::REFRESH), "Обновления на GitHub", ButtonKind::Primary, 250.0, true).clicked() {
+                        res.open_updates = true;
+                    }
+                    ui.add_space(12.0);
+                    ui.label("Текстуры обновляются отдельно: раздел «Текстуры» → загрузка ZIP-пака по ссылке.");
+                }
                 0 => {
                     setting_row(ui, "Никнейм", Some("Показывается в чате"), |ui| {
                         res.changed |= ui.add(egui::TextEdit::singleline(&mut s.nickname).desired_width(200.0).char_limit(16)).changed();
@@ -1356,7 +1369,7 @@ mod tests {
         for mode in [ThemeMode::Dark, ThemeMode::Light] {
             crate::theme_manager::apply(&ctx, mode);
             frame(&ctx, |c| {
-                main_menu(c, &icons, "0.1.0", "C:\\data", mode == ThemeMode::Dark, None, 0, &[]);
+                main_menu(c, &icons, "0.1.0", "C:\\data", mode == ThemeMode::Dark, None, 0, "Игрок", &[]);
             });
             let mut ws = WorldSelectState::default();
             frame(&ctx, |c| {
@@ -1414,3 +1427,4 @@ mod tests {
         assert_eq!(names(sorted_filtered(&w, "ГАМ", 0)), vec!["Гамма"]);
     }
 }
+
