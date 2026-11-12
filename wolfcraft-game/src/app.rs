@@ -1237,6 +1237,10 @@ impl App {
         // Atlas animation (water) and mesh uploads.
         if gfx.atlases.animate(self.time.elapsed()) {
             gfx.world.sync_atlas(&gfx.gpu.device, &gfx.gpu.queue, &mut gfx.atlases);
+            // Relief height maps are built only once relief is switched on.
+            if self.settings.relief_mode > 0 {
+                gfx.world.ensure_relief(&gfx.gpu.device, &gfx.gpu.queue, &gfx.atlases);
+            }
         }
         let upload_budget = if self.screen == Screen::Loading { 64 } else { 16 };
         self.pump_meshes(gfx, upload_budget);
