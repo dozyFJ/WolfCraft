@@ -654,6 +654,27 @@ impl Block {
         })
     }
 
+    /// Door leaf moved to the far side of its cell, and the axis (0 i, 1 j) along which the
+    /// neighbour that decides it lies (at -axis). Double doors: the second leaf of a pair
+    /// hangs on the other jamb, so both swing out of the doorway like in Minecraft.
+    pub fn door_mirror(self) -> Option<(usize, [f32; 6])> {
+        self.door_toggle()?;
+        let b = *self.boxes().first()?;
+        if b[3] < 0.5 {
+            Some((0, [1.0 - b[3], b[1], b[2], 1.0, b[4], b[5]]))
+        } else if b[4] < 0.5 {
+            Some((1, [b[0], 1.0 - b[4], b[2], b[3], 1.0, b[5]]))
+        } else {
+            None
+        }
+    }
+
+    /// True when `neighbor` (the cell at -axis of `door_mirror`) is the other leaf of a
+    /// double door: a door leaf of the same shape.
+    pub fn door_mirrored_by(self, neighbor: Block) -> bool {
+        neighbor.door_toggle().is_some() && neighbor.boxes() == self.boxes()
+    }
+
     /// Upper half that goes above this lower door half (same open state).
     pub fn door_top(self) -> Option<Block> {
         use Block::*;

@@ -374,9 +374,19 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let b = inp.get(x, y, z);
-                let boxes = b.boxes();
+                let mut boxes = b.boxes();
                 if boxes.is_empty() {
                     continue;
+                }
+                // The second leaf of a double door hangs on the far jamb.
+                let mirrored;
+                if let Some((axis, mb)) = b.door_mirror() {
+                    // Padded axes are (x, y, z) = (j, k, i).
+                    let n = if axis == 0 { inp.get(x, y, z - 1) } else { inp.get(x - 1, y, z) };
+                    if b.door_mirrored_by(n) {
+                        mirrored = [mb];
+                        boxes = &mirrored;
+                    }
                 }
                 let info = b.info();
                 for s in boxes {

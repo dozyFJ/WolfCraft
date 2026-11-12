@@ -1004,7 +1004,7 @@ impl GameSession {
             let p = feet + up * *h;
             let c = g.world_to_cell(p);
             let Some(b) = self.chunks.get_block(c) else { return false };
-            b.is_solid() && wolfcraft_engine::physics::block_obbs(&g, c, b).iter().any(|o| {
+            b.is_solid() && wolfcraft_engine::physics::block_obbs_in(&self.chunks, c, b).iter().any(|o| {
                 let d = p - o.center;
                 (0..3).all(|a| d.dot(o.axes[a]).abs() < o.half[a] - 0.05)
             })

@@ -206,6 +206,17 @@ fn sub_obb(cell: &Obb, s: &[f32; 6]) -> Obb {
 }
 
 /// All collision boxes of `block` in `cell` (stairs have two).
+/// Like [`block_obbs`], with the second leaf of a double door on its far jamb.
+pub fn block_obbs_in(world: &impl Voxels, cell: Cell, block: Block) -> Vec<Obb> {
+    let g = world.grid();
+    if let Some((axis, mb)) = block.door_mirror() {
+        if g.neighbor(cell, axis, -1).is_some_and(|n| block.door_mirrored_by(world.cell_block(n))) {
+            return vec![sub_obb(&g.cell_obb(cell), &mb)];
+        }
+    }
+    block_obbs(g, cell, block)
+}
+
 pub fn block_obbs(grid: &Grid, cell: Cell, block: Block) -> Vec<Obb> {
     let o = grid.cell_obb(cell);
     let boxes = block.boxes();
@@ -224,7 +235,7 @@ fn overlaps(world: &impl Voxels, feet: DVec3) -> bool {
                 for di in -1..=1 {
                     let Some(cell) = g.offset(base, di, dj, dk) else { continue };
                     let b = world.cell_block(cell);
-                    if b.is_solid() && block_obbs(g, cell, b).iter().any(|o| sphere_obb(c, BODY_RADIUS - 0.01, o).is_some()) {
+                    if b.is_solid() && block_obbs_in(world, cell, b).iter().any(|o| sphere_obb(c, BODY_RADIUS - 0.01, o).is_some()) {
                         return true;
                     }
                 }
@@ -255,7 +266,7 @@ fn resolve(world: &impl Voxels, body: &mut Body, hdir: DVec3) -> (bool, f64, boo
                         if !block.is_solid() {
                             continue;
                         }
-                        for obb in block_obbs(g, cell, block) {
+                        for obb in block_obbs_in(world, cell, block) {
                         let c = body.pos + up * h;
                         let Some((normal, push, face)) = sphere_obb(c, BODY_RADIUS, &obb) else { continue };
                         // A contact with a face that is covered by another solid block is internal
@@ -515,6 +526,43 @@ pub(crate) mod tests {
                 assert!(!inside(&b), "run {run} (speed {speed}, angle {a:.2}) frame {f}: body inside a block");
             }
         }
+    }
+
+    #[test]
+    fn an_open_double_door_leaves_the_doorway_free() {
+        let mut w = Ball::new(60.0);
+        let b0 = settle(&w, DVec3::new(0.0, 66.0, 0.0));
+        let base = w.grid.world_to_cell(b0.pos);
+        let c = |di: i32, dj: i32, dk: i32| Cell::new(base.f, base.i + di, base.j + dj, base.k + dk);
+        // A wall across +i at i+3 with a two-wide doorway at j 0 and 1, both leaves open
+        // (plates along i, at the j = 0 side of their cells).
+        for dj in -4..=4 {
+            for dk in 0..3 {
+                if (dj == 0 || dj == 1) && dk < 2 {
+                    continue;
+                }
+                w.edits.insert(c(3, dj, dk), Block::Stone);
+            }
+        }
+        for dj in 0..2 {
+            w.edits.insert(c(3, dj, 0), Block::DoorOpen);
+            w.edits.insert(c(3, dj, 1), Block::DoorTopOpen);
+        }
+        // The second leaf (j = 1) moves to its far jamb.
+        let second = block_obbs_in(&w, c(3, 1, 0), Block::DoorOpen)[0];
+        let plain = block_obbs(&w.grid, c(3, 1, 0), Block::DoorOpen)[0];
+        assert!((second.center - plain.center).length() > 0.5, "the second leaf hangs on the other side");
+        // Walk through the middle of the doorway (the line between the two cells).
+        let ax = w.grid.cell_obb(base).axes;
+        let mid = (w.grid.cell_center(c(0, 0, 0)) + w.grid.cell_center(c(0, 1, 0))) * 0.5;
+        let start = mid - up_at(mid) * 0.5 + up_at(mid) * 0.05;
+        let mut b = Body::new(start);
+        b.on_ground = true;
+        for _ in 0..180 {
+            step(&w, &mut b, &MoveInput { wish: ax[0], speed: 4.3, ..Default::default() }, 1.0 / 60.0);
+        }
+        let went = (b.pos - start).dot(ax[0]);
+        assert!(went > 4.5, "walked through the open double door ({went})");
     }
 
     #[test]
