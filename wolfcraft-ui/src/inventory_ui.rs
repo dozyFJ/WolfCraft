@@ -40,6 +40,8 @@ pub struct InventoryUiState {
     pub toast: Option<(String, f32)>,
     /// Name of the item the finger is on (phones have no hover): text, slot, seconds left.
     caption: Option<(String, Rect, f32)>,
+    /// Creative: the search line is open (the magnifier in the sidebar).
+    search_open: bool,
 }
 
 /// Shows the item's name over its slot while it is pressed (and a moment after), as on
@@ -168,23 +170,21 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
 
     let left_w = 9.0 * (CELL + GAP) - GAP;
     if creative {
-        // Cells as big as the screen allows: three rows of items plus the hotbar must fit the
-        // height (with the tabs, title and the phone's gesture bar), ten cells the width.
-        let (sw, h) = (ctx.screen_rect().width(), ctx.screen_rect().height());
-        let top = crate::ui_components::SCREEN_BAR;
-        let by_height = (h - 100.0 - top) / (4.0 + 4.0 * GAP / 40.0);
-        let by_width = (sw - 60.0 - 8.0 * GAP - 14.0 - 10.0) / (10.0 + 0.92);
+        // Full screen, no title bar: cells as big as fit, as many columns as fit beside the
+        // sidebar (back, search, categories), as many rows as fit above the hotbar.
+        let ins = crate::gui_renderer::SAFE_INSETS.read().map(|i| *i).unwrap_or([0.0; 4]);
+        let (sw, h) = (ctx.screen_rect().width() - ins[0] - ins[2] - 32.0, ctx.screen_rect().height() - ins[1] - ins[3] - 32.0);
+        let by_height = (h - 46.0) / 5.0;
+        let by_width = (sw - 30.0) / 12.0;
         let cell = by_height.min(by_width).clamp(40.0, 84.0).floor();
-        let rows = (((h - 100.0 - top - cell) / (cell + GAP)).floor() as usize).clamp(2, 7);
-        // The whole screen width: as many columns as fit beside the category sidebar.
         let sidebar = (cell * 0.92).floor() + 16.0;
-        let avail = sw - 40.0 - 24.0 - sidebar;
-        let cols = (((avail + GAP) / (cell + GAP)).floor() as usize).clamp(10, 20);
+        let rows = (((h - 46.0 - cell - 10.0 + GAP) / (cell + GAP)).floor() as usize).clamp(2, 9);
+        let cols = (((sw - sidebar - 14.0 + GAP) / (cell + GAP)).floor() as usize).clamp(9, 24);
         let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;
-        let width = grid_w + sidebar;
-        let dismissed = crate::ui_components::game_screen(ctx, "inventory", "Творческий режим", width.min(ctx.screen_rect().width() - 40.0), |ui| {
+        let esc = crate::ui_components::full_screen(ctx, "inventory", |ui| {
             creative_layout(ui, icons, &p, state, inv, cell, rows, cols, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
+        let dismissed = esc || result.close;
         if dismissed {
             result.close = true;
         }
@@ -540,6 +540,26 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
             egui::ScrollArea::vertical().id_salt("creative-tabs").max_height(content_h).auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                 ui.set_width(tab + 6.0);
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                // Back and search sit at the top of the sidebar (there is no title bar).
+                for (k, ic) in [(0usize, icon::ARROW_LEFT), (1, icon::SEARCH)] {
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
+                    let on = k == 1 && state.search_open;
+                    let fill = if on { p.accent.gamma_multiply(0.35) } else if resp.hovered() || resp.is_pointer_button_down_on() { p.surface_hover } else { p.surface_hi };
+                    ui.painter().rect_filled(rect, Rounding::ZERO, fill);
+                    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if on { p.accent } else { p.outline }));
+                    icons.paint(ui.painter(), rect.shrink(tab * 0.24), ic, if on { p.accent } else { p.text });
+                    if resp.clicked() {
+                        if k == 0 {
+                            result.close = true;
+                        } else {
+                            state.search_open = !state.search_open;
+                            if !state.search_open {
+                                state.search.clear();
+                            }
+                        }
+                    }
+                }
+                ui.add_space(6.0);
                 for (i, name) in CREATIVE_TABS.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
                     let sel = state.tab == i;
@@ -579,11 +599,11 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
     let _ = &result;
     // ---- Tab title + search ----
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(CREATIVE_TABS[state.tab]).font(bold_font(16.0)).color(p.text));
-        if state.tab != BACKPACK_TAB {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                text_input(ui, icons, &mut state.search, "Поиск…", 220.0, Some(icon::SEARCH));
-            });
+        if state.search_open && state.tab != BACKPACK_TAB {
+            // The magnifier opened the search: it takes the title's place, full width.
+            text_input(ui, icons, &mut state.search, "Поиск…", grid_w - 14.0, Some(icon::SEARCH));
+        } else {
+            ui.label(egui::RichText::new(CREATIVE_TABS[state.tab]).font(bold_font(16.0)).color(p.text));
         }
     });
     ui.add_space(6.0);
@@ -601,7 +621,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         });
         return;
     } else {
-        let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| in_tab(*id, state.tab) && matches_search(*id, &state.search)).collect();
+        let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| (in_tab(*id, state.tab) || !state.search.trim().is_empty()) && matches_search(*id, &state.search)).collect();
         // Sorted: by category (in "Все"), then full blocks, shaped blocks (stairs, slabs,
         // doors…), plants, items and tools, alphabetically inside each group so related
         // things sit together (all oak, all diamond…).

@@ -329,7 +329,7 @@ pub enum ThemeMode {
 }
 
 /// Current version of the default look (see `Settings::migrate`).
-pub const STYLE_VERSION: u32 = 2;
+pub const STYLE_VERSION: u32 = 3;
 
 /// Global user settings (`settings.toml` in the data directory).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -427,7 +427,7 @@ impl Default for Settings {
             vsync: true,
             max_fps: 0,
             mouse_sensitivity: 1.0,
-            camera_smooth: 0.5,
+            camera_smooth: 0.15,
             tap_aim: false,
             shaders: 4,
             relief_mode: 0,
@@ -478,6 +478,10 @@ impl Settings {
         if self.style_version < 2 {
             self.texture_pack = "builtin:toon".into();
             self.apply_shader_preset(4);
+        }
+        // 3: the camera turns crisply (the old soft glide felt like lag on phones).
+        if self.style_version < 3 && (self.camera_smooth - 0.5).abs() < 1e-3 {
+            self.camera_smooth = 0.15;
         }
         self.style_version = STYLE_VERSION;
     }

@@ -59,6 +59,131 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         Err(e) => log::error!("event loop: {e}"),
     }
 }
+/// Text input on phones. The game runs in a NativeActivity, which has no input connection:
+/// Gboard and other keyboards cannot type into it (non-Latin letters never arrive at all).
+/// So a text field opens a small system dialog with a real Android text box; its text goes
+/// into the game's field when the dialog closes.
+pub mod text_input {
+    #[cfg(target_os = "android")]
+    struct Open {
+        dialog: jni::objects::GlobalRef,
+        edit: jni::objects::GlobalRef,
+        looper: jni::objects::GlobalRef,
+    }
+
+    #[cfg(target_os = "android")]
+    static STATE: std::sync::Mutex<(bool, Option<Open>)> = std::sync::Mutex::new((false, None));
+
+    /// A dialog is being shown (or about to be).
+    pub fn is_open() -> bool {
+        #[cfg(target_os = "android")]
+        {
+            STATE.lock().map(|s| s.0).unwrap_or(false)
+        }
+        #[cfg(not(target_os = "android"))]
+        false
+    }
+
+    /// Opens the system text box (no-op on desktop).
+    pub fn open(title: &str) {
+        #[cfg(target_os = "android")]
+        {
+            {
+                let Ok(mut s) = STATE.lock() else { return };
+                if s.0 {
+                    return;
+                }
+                s.0 = true;
+            }
+            let title = title.to_string();
+            std::thread::spawn(move || {
+                if let Err(e) = run_dialog(&title) {
+                    log::warn!("text input dialog: {e}");
+                    if let Ok(mut s) = STATE.lock() {
+                        *s = (false, None);
+                    }
+                }
+            });
+        }
+        #[cfg(not(target_os = "android"))]
+        let _ = title;
+    }
+
+    /// The dialog's own thread: a Looper, the dialog, then the loop until the game quits it.
+    #[cfg(target_os = "android")]
+    fn run_dialog(title: &str) -> Result<(), String> {
+        use jni::objects::{JObject, JValue};
+        let app = super::orientation::app().ok_or("no app")?;
+        let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) }.map_err(|e| e.to_string())?;
+        let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+        let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject) };
+        let r = (|| -> jni::errors::Result<()> {
+            env.call_static_method("android/os/Looper", "prepare", "()V", &[])?;
+            let looper = env.call_static_method("android/os/Looper", "myLooper", "()Landroid/os/Looper;", &[])?.l()?;
+            let edit = env.new_object("android/widget/EditText", "(Landroid/content/Context;)V", &[JValue::Object(&activity)])?;
+            env.call_method(&edit, "setSingleLine", "()V", &[])?;
+            let builder = env.new_object("android/app/AlertDialog$Builder", "(Landroid/content/Context;)V", &[JValue::Object(&activity)])?;
+            let t = env.new_string(title)?;
+            env.call_method(&builder, "setTitle", "(Ljava/lang/CharSequence;)Landroid/app/AlertDialog$Builder;", &[JValue::Object(&t)])?;
+            env.call_method(&builder, "setView", "(Landroid/view/View;)Landroid/app/AlertDialog$Builder;", &[JValue::Object(&edit)])?;
+            let ok = env.new_string("Готово")?;
+            let none = JObject::null();
+            env.call_method(&builder, "setPositiveButton", "(Ljava/lang/CharSequence;Landroid/content/DialogInterface$OnClickListener;)Landroid/app/AlertDialog$Builder;", &[JValue::Object(&ok), JValue::Object(&none)])?;
+            let dialog = env.call_method(&builder, "create", "()Landroid/app/AlertDialog;", &[])?.l()?;
+            let window = env.call_method(&dialog, "getWindow", "()Landroid/view/Window;", &[])?.l()?;
+            if !window.is_null() {
+                // SOFT_INPUT_STATE_ALWAYS_VISIBLE: the keyboard comes up with the dialog.
+                env.call_method(&window, "setSoftInputMode", "(I)V", &[JValue::Int(5)])?;
+            }
+            env.call_method(&dialog, "show", "()V", &[])?;
+            env.call_method(&edit, "requestFocus", "()Z", &[])?;
+            let open = Open { dialog: env.new_global_ref(&dialog)?, edit: env.new_global_ref(&edit)?, looper: env.new_global_ref(&looper)? };
+            if let Ok(mut s) = STATE.lock() {
+                s.1 = Some(open);
+            }
+            env.call_static_method("android/os/Looper", "loop", "()V", &[])?;
+            Ok(())
+        })();
+        std::mem::forget(activity);
+        if r.is_err() {
+            let _ = env.exception_clear();
+        }
+        r.map_err(|e| e.to_string())
+    }
+
+    /// Text of a dialog that has just closed (once).
+    pub fn poll() -> Option<String> {
+        #[cfg(target_os = "android")]
+        {
+            let mut s = STATE.lock().ok()?;
+            let open = s.1.as_ref()?;
+            let app = super::orientation::app()?;
+            let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) }.ok()?;
+            let mut env = vm.attach_current_thread().ok()?;
+            let showing = env.call_method(open.dialog.as_obj(), "isShowing", "()Z", &[]).and_then(|v| v.z());
+            match showing {
+                Ok(true) => return None,
+                Ok(false) => {}
+                Err(_) => {
+                    let _ = env.exception_clear();
+                }
+            }
+            let text = (|| -> jni::errors::Result<String> {
+                let editable = env.call_method(open.edit.as_obj(), "getText", "()Landroid/text/Editable;", &[])?.l()?;
+                let js = env.call_method(&editable, "toString", "()Ljava/lang/String;", &[])?.l()?;
+                Ok(env.get_string(&jni::objects::JString::from(js))?.into())
+            })()
+            .unwrap_or_default();
+            let _ = env.call_method(open.looper.as_obj(), "quitSafely", "()V", &[]);
+            let _ = env.exception_clear();
+            *s = (false, None);
+            Some(text)
+        }
+        #[cfg(not(target_os = "android"))]
+        None
+    }
+}
+
 /// Screen orientation on phones: the launcher stands upright, the game lies in landscape.
 pub mod orientation {
     #[cfg(target_os = "android")]
@@ -67,6 +192,11 @@ pub mod orientation {
     #[cfg(target_os = "android")]
     pub fn set_app(app: winit::platform::android::activity::AndroidApp) {
         let _ = APP.set(app);
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn app() -> Option<&'static winit::platform::android::activity::AndroidApp> {
+        APP.get()
     }
 
     /// Lets the Wi-Fi chip pass broadcast packets to the app (many phones drop them to save

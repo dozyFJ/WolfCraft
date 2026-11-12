@@ -341,10 +341,11 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         painter.image(tex, r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
         painter.rect_stroke(r, Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
         painter.rect_stroke(frame, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-        if let Some(b) = s.compass {
+        if s.compass.is_some() {
+            // North is always up: the letters stay put.
             let half = frame.width() / 2.0 - 6.5;
             for (deg, name) in [(0.0f32, "С"), (90.0, "В"), (180.0, "Ю"), (270.0, "З")] {
-                let a = (deg - b).to_radians();
+                let a = deg.to_radians();
                 let (dx, dy) = (a.sin(), -a.cos());
                 let k = half / dx.abs().max(dy.abs()).max(1e-3);
                 let pos = frame.center() + Vec2::new(dx * k, dy * k);
@@ -356,9 +357,11 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         if let Ok(mut h) = MINIMAP_RECT.write() {
             *h = [frame.min.x, frame.min.y, frame.max.x, frame.max.y];
         }
-        // Player arrow (the map turns with the view, so it always points up).
+        // Player arrow, turned to where the player looks.
         let c = r.center();
-        let pts = vec![c + Vec2::new(0.0, -8.0), c + Vec2::new(6.0, 7.0), c + Vec2::new(0.0, 3.5), c + Vec2::new(-6.0, 7.0)];
+        let (sn, cs) = s.compass.unwrap_or(0.0).to_radians().sin_cos();
+        let rot = |v: Vec2| c + Vec2::new(v.x * cs - v.y * sn, v.x * sn + v.y * cs);
+        let pts = vec![rot(Vec2::new(0.0, -8.0)), rot(Vec2::new(6.0, 7.0)), rot(Vec2::new(0.0, 3.5)), rot(Vec2::new(-6.0, 7.0))];
         painter.add(egui::Shape::convex_polygon(pts, p.accent, Stroke::new(1.5_f32, Color32::from_black_alpha(200))));
     }
 

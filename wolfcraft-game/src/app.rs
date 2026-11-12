@@ -221,6 +221,8 @@ pub struct App {
     studio_world: Option<String>,
     /// The world's Luau script while it runs (GUI, events, timers).
     lua: Option<crate::lua::LuaHost>,
+    /// egui wanted the keyboard last frame (to open the phone's text box on a new focus).
+    kb_prev: bool,
     /// The world list was read for the launcher since it was last shown.
     main_worlds_fresh: bool,
     /// Listens for servers on the local network while the world list is open.
@@ -352,6 +354,7 @@ impl App {
             studio: None,
             studio_world: None,
             lua: None,
+            kb_prev: false,
             main_worlds_fresh: false,
             discovery: None,
             container: None,
@@ -1725,6 +1728,16 @@ impl App {
             })
         };
         self.profile.ui_ms = t_ui.ms();
+        // Phones: a text field that just got focus opens the system text box (Gboard cannot
+        // type into the game window); its text comes back into the field.
+        let wants_kb = gfx.gui.wants_keyboard();
+        if cfg!(target_os = "android") && wants_kb && !self.kb_prev && !crate::text_input::is_open() {
+            crate::text_input::open("Введите текст");
+        }
+        self.kb_prev = wants_kb;
+        if let Some(text) = crate::text_input::poll() {
+            gfx.gui.inject_text(text, true);
+        }
 
         // ---- apply UI results ----
         if map_result.close {
@@ -2685,10 +2698,13 @@ fn block_top_colors(atlases: &AtlasManager) -> Vec<[u8; 3]> {
 fn build_minimap_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range<usize>, px: &mut [egui::Color32]) {
     use wolfcraft_engine::block::{Block, RenderKind};
     const N: usize = 64;
+    // North-up (like a navigator): the map stays still while the view turns; only the
+    // player's arrow on it rotates. A turning map was rebuilt a few rows at a time and tore.
     let p = &s.player;
     let up = p.up();
-    let fwd = p.heading;
-    let right = p.right();
+    let axis = if up.y.abs() > 0.995 { DVec3::Z } else { DVec3::Y };
+    let fwd = (axis - up * axis.dot(up)).normalize_or_zero();
+    let right = fwd.cross(up);
     let feet = p.body.pos;
     let g = s.chunks.grid();
     let pk = g.radial(feet).floor() as i32;

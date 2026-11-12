@@ -311,6 +311,27 @@ pub const SCREEN_BAR: f32 = 52.0;
 /// Bedrock-style game screen, the same look as the chat: the world dims, a dark header bar
 /// across the top carries a back arrow and the title, and the content sits in a panel centred
 /// below it. Returns true when it should close (back arrow, a tap outside, Escape).
+/// A window over the whole screen with no title bar (the content has its own back button).
+/// Returns true when Escape was pressed.
+pub fn full_screen(ctx: &egui::Context, id: &str, add: impl FnOnce(&mut Ui)) -> bool {
+    let p: Palette = palette(ctx);
+    let screen = ctx.screen_rect();
+    let ins = crate::gui_renderer::SAFE_INSETS.read().map(|i| *i).unwrap_or([0.0; 4]);
+    let rect = Rect::from_min_max(screen.min + Vec2::new(ins[0] + 6.0, ins[1] + 6.0), screen.max - Vec2::new(ins[2] + 6.0, ins[3] + 6.0));
+    egui::Area::new(Id::new(id).with("full")).order(egui::Order::Foreground).fixed_pos(screen.min).fade_in(false).show(ctx, |ui| {
+        let (bg, _) = ui.allocate_exact_size(screen.size(), Sense::click());
+        ui.painter().rect_filled(bg, 0.0, Color32::from_black_alpha(140));
+    });
+    egui::Area::new(Id::new(id).with("full-body")).order(egui::Order::Tooltip).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
+        Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22))).inner_margin(Margin::same(10.0)).show(ui, |ui| {
+            ui.set_width(rect.width() - 20.0);
+            ui.set_height(rect.height() - 20.0);
+            add(ui);
+        });
+    });
+    ctx.input(|i| i.key_pressed(egui::Key::Escape))
+}
+
 pub fn game_screen(ctx: &egui::Context, id: &str, title: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
     let p: Palette = palette(ctx);
     let screen = ctx.screen_rect();
