@@ -182,6 +182,42 @@ fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
     let _ = t;
 }
 
+/// Classic game main menu, entered after launching from the launcher.
+pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: Option<&TextureHandle>) -> MenuAction {
+    let p = palette(ctx);
+    let mut action = MenuAction::None;
+    egui::CentralPanel::default().frame(Frame::none()).show(ctx, |ui| {
+        planet_backdrop(ui, planet, &p);
+        let rect = ui.max_rect();
+        let width = (rect.width() - 32.0).clamp(180.0, 360.0);
+        let height = (rect.height() - 48.0).clamp(180.0, 320.0);
+        let col = Rect::from_center_size(rect.center(), Vec2::new(width, height));
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col), |ui| {
+            egui::ScrollArea::vertical().id_salt("game-main-menu").show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("WolfCraft").font(bold_font(40.0)).color(Color32::WHITE));
+                    ui.add_space(24.0);
+                    ui.spacing_mut().item_spacing.y = 12.0;
+                    let w = width.min(320.0);
+                    if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, w, true).clicked() {
+                        action = MenuAction::OpenWorldSelect;
+                    }
+                    if pill_button(ui, icons, Some(icon::GEAR), "Настройки", ButtonKind::Secondary, w, true).clicked() {
+                        action = MenuAction::OpenSettings;
+                    }
+                    if pill_button(ui, icons, Some(icon::EXIT), "Выход", ButtonKind::Secondary, w, true)
+                        .on_hover_text("Вернуться в лаунчер").clicked() {
+                        action = MenuAction::Back;
+                    }
+                });
+            });
+        });
+        ui.painter().text(Pos2::new(rect.right() - 16.0, rect.bottom() - 14.0), Align2::RIGHT_BOTTOM,
+            format!("v{version}"), FontId::proportional(12.0), Color32::from_gray(190));
+    });
+    action
+}
+
 /// Home screen: the mobile launcher (toolbar, pages, bottom navigation).
 pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8, nickname: &str, worlds: &[WorldEntry]) -> MenuAction {
     let _ = data_dir;
@@ -1346,6 +1382,27 @@ const _ANIM: f32 = ANIM_TIME;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classic_game_menu_buttons_open_worlds_settings_and_launcher() {
+        for size in [Vec2::new(1280.0, 720.0), Vec2::new(800.0, 360.0)] {
+            let (ctx, icons) = setup();
+            for (label, expected) in [("Играть", MenuAction::OpenWorldSelect), ("Настройки", MenuAction::OpenSettings), ("Выход", MenuAction::Back)] {
+                let mut action = MenuAction::None;
+                let mut frame = |events| ctx.run(egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), events, ..Default::default()
+                }, |ctx| { action = game_menu(ctx, &icons, "0.2.1", None); });
+                let out = frame(vec![]);
+                let text = out.shapes.iter().find_map(|s| match &s.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t), _ => None
+                }).expect("classic menu button");
+                let pos = text.pos + text.galley.size() * 0.5;
+                frame(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+                frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+                assert_eq!(action, expected, "{label}, {size:?}");
+            }
+        }
+    }
 
     fn setup() -> (egui::Context, GuiIcons) {
         let ctx = egui::Context::default();

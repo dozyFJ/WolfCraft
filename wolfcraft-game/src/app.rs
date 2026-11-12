@@ -1637,7 +1637,7 @@ impl App {
                     actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref(), settings.skin, &settings.nickname, worlds));
                     crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
-                Screen::GameMenu => actions.push(wolfcraft_ui::launcher::game_menu(ctx, &icons, version, menu_planet.as_ref())),
+                Screen::GameMenu => actions.push(main_menu::game_menu(ctx, &icons, version, menu_planet.as_ref())),
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
                 Screen::Create => actions.push(main_menu::create_world(ctx, &icons, create, create_preview.as_ref(), version, random_seed)),
                 Screen::Settings => {
