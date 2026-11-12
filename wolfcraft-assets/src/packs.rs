@@ -131,8 +131,8 @@ pub fn vibrant(img: &mut Image) {
 /// * Colours: juicy and light, the fine noise flattened into a few clean patches.
 /// * Shapes that matter (mortar, planks seams, ore gems, door windows) stay crisp: pixels that
 ///   differ clearly from their surroundings keep their own (posterized) colour, sharp-edged.
-/// * Facets: each face is split into eight triangles with slightly different brightness, lit
-///   from the top-left, so blocks read like low-poly models.
+/// * No low-poly facets: a cartoon cushion instead (ink outline, light rim top-left, shade
+///   bottom-right, a small glossy sheen), so blocks read like drawn cartoon tiles.
 /// * A soft bevel on the rim (`bevel` 0 = none, for liquids; natural ground gets little).
 ///
 /// Sprites with transparent pixels (plants, torches, glass) keep their exact shape, upscaled
@@ -153,7 +153,7 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
     let lum = |c: &[f32; 4]| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
     let juicy = |c: [f32; 4]| -> [f32; 4] {
         let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-        let f = |v: f32| ((l + (v - l) * 1.22).max(0.0) * 0.9 + 0.08).min(1.0);
+        let f = |v: f32| ((l + (v - l) * 1.38).max(0.0) * 0.9 + 0.09).min(1.0);
         [f(c[0]), f(c[1]), f(c[2]), c[3]]
     };
     let n = size as i32;
@@ -248,44 +248,37 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
             flat[(y * w + x) as usize] = juicy(c);
         }
     }
-    let hash = |a: u32| {
-        let mut v = a.wrapping_mul(0x9E37_79B9) ^ seed.wrapping_mul(0x85EB_CA6B);
-        v ^= v >> 15;
-        v = v.wrapping_mul(0x2C1B_3C6D);
-        v ^= v >> 12;
-        (v & 0xFFFF) as f32 / 65535.0
-    };
-    let band = (n as f32 * 0.10).max(2.0);
+    let _ = seed;
     for y in 0..n {
         for x in 0..n {
             let mut c = flat[((y * h / n) * w + x * w / n) as usize];
             // Natural ground and foliage stay seamless: facets or a bevel repeat on every
             // block and make a visible grid over a meadow.
             if bevel >= 0.3 {
-                // Facets: 2×2 quads, each cut along a diagonal (alternating) into two triangles.
-                let (u, v) = ((x as f32 + 0.5) / n as f32 * 2.0, (y as f32 + 0.5) / n as f32 * 2.0);
-                let (qx, qy) = (u.floor() as u32, v.floor() as u32);
-                let (fu, fv) = (u.fract(), v.fract());
-                let tri = if (qx + qy) % 2 == 0 { (fu + fv < 1.0) as u32 } else { (fu > fv) as u32 };
-                let id = (qy * 2 + qx) * 2 + tri;
-                // Brightness per facet, plus light from the top-left across the whole face.
-                let k = 1.0 + (hash(id) - 0.5) * 0.10 + (0.5 - (u + v) / 4.0) * 0.06;
-                for i in 0..3 {
-                    c[i] *= k;
-                }
+                // Cartoon block (no low-poly facets): a bold dark ink outline, then a soft
+                // cushion — a light rim along the top and left, a shaded rim along the bottom
+                // and right — so each block reads like a drawn tile.
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                 let (l_, t_, r_, b_) = (fx, fy, n as f32 - fx, n as f32 - fy);
                 let edge = l_.min(t_).min(r_).min(b_);
-                // Cartoon ink: a thin dark outline round built blocks (not natural ground).
-                if bevel >= 1.0 && edge < (n as f32 / 40.0).max(1.0) {
+                let ink = (n as f32 / 22.0).max(1.0);
+                let rim = (n as f32 / 7.0).max(2.0);
+                if bevel >= 1.0 && edge < ink {
                     for v in c.iter_mut().take(3) {
-                        *v *= 0.62;
+                        *v *= 0.55;
                     }
-                } else if edge < band {
-                    // Chamfer: a flat strip, light on the top-left, shaded on the bottom-right.
-                    let lit = if l_.min(t_) <= r_.min(b_) { 0.14 * bevel } else { -0.16 * bevel };
+                } else if edge < ink + rim {
+                    let k = 1.0 - (edge - ink).max(0.0) / rim;
+                    let lit = if l_.min(t_) <= r_.min(b_) { 0.22 * bevel * k } else { -0.20 * bevel * k };
                     for i in 0..3 {
                         c[i] = if lit > 0.0 { c[i] + (1.0 - c[i]) * lit } else { c[i] * (1.0 + lit) };
+                    }
+                }
+                // A small glossy highlight near the top-left corner, like a cartoon sheen.
+                let (hx, hy) = (fx / n as f32 - 0.27, fy / n as f32 - 0.22);
+                if bevel >= 0.9 && hx * hx * 3.0 + hy * hy * 12.0 < 0.012 {
+                    for v in c.iter_mut().take(3) {
+                        *v += (1.0 - *v) * 0.30;
                     }
                 }
             }
