@@ -6,6 +6,7 @@ mod commands;
 mod loader;
 mod preview;
 mod session;
+mod signs;
 mod touch;
 mod worldedit;
 

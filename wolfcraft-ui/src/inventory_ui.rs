@@ -37,6 +37,18 @@ pub struct InventoryUiState {
     last_pos: Option<Pos2>,
     /// Message from the last craft ("Создано: ...").
     pub toast: Option<(String, f32)>,
+    /// Name of the item the finger is on (phones have no hover): text, slot, seconds left.
+    caption: Option<(String, Rect, f32)>,
+}
+
+/// Shows the item's name over its slot while it is pressed (and a moment after), as on
+/// Bedrock phones.
+fn note(state: &mut InventoryUiState, resp: &egui::Response, rect: Rect, text: impl Into<String>) {
+    if resp.is_pointer_button_down_on() || resp.clicked() || resp.drag_started() || resp.hovered() {
+        let fresh = resp.is_pointer_button_down_on() || resp.clicked() || resp.drag_started();
+        let keep = state.caption.as_ref().map(|c| c.2).unwrap_or(0.0);
+        state.caption = Some((text.into(), rect, if fresh { 1.6 } else { keep.max(0.05) }));
+    }
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -231,6 +243,25 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     if result.close {
         close(state, inv);
     }
+    // Item name over the slot under the finger / mouse.
+    if let Some((text, rect, t)) = &mut state.caption {
+        *t -= dt;
+        if *t <= 0.0 {
+            state.caption = None;
+        } else {
+            let layer = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, Id::new("inv-caption")));
+            let font = FontId::proportional(14.0);
+            let galley = ctx.fonts(|f| f.layout_no_wrap(text.clone(), font, p.text));
+            let size = galley.size() + Vec2::new(16.0, 8.0);
+            let sr = ctx.screen_rect();
+            let mut pill = Rect::from_center_size(Pos2::new(rect.center().x, rect.top() - 6.0 - size.y * 0.5), size);
+            pill = pill.translate(Vec2::new((sr.left() + 4.0 - pill.left()).max(0.0) + (sr.right() - 4.0 - pill.right()).min(0.0), (sr.top() + 4.0 - pill.top()).max(0.0)));
+            let a = (*t * 4.0).clamp(0.0, 1.0);
+            layer.rect_filled(pill, Rounding::same(6.0), p.surface.gamma_multiply(0.96 * a));
+            layer.rect_stroke(pill, Rounding::same(6.0), Stroke::new(1.5, p.accent.gamma_multiply(a)));
+            layer.galley(pill.min + Vec2::new(8.0, 4.0), galley, p.text);
+        }
+    }
     if let Some((msg, t)) = &mut state.toast {
         *t -= dt;
         let a = (*t * 2.0).clamp(0.0, 1.0);
@@ -280,7 +311,7 @@ fn draw_slot(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUi
         if dur > 0 {
             tip += &format!("\nПрочность {}/{}", dur - s.damage, dur);
         }
-        resp.on_hover_text(tip);
+        note(state, &resp, rect, tip.replace('\n', " · "));
     }
 }
 
@@ -406,7 +437,8 @@ fn recipe_book(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inventory
                     }
                     let need: Vec<String> = CraftGrid::needs(r).iter().map(|(id, n)| format!("{} ×{n}", ItemStack::new(*id, 1).info().name)).collect();
                     let tip = format!("{}{}\n{}", r.name(), if r.output.1 > 1 { format!(" ×{}", r.output.1) } else { String::new() }, need.join(", "));
-                    let resp = resp.on_hover_text(if *ok { tip } else { format!("{tip}\nНе хватает предметов") });
+                    let full = if *ok { tip } else { format!("{tip}\nНе хватает предметов") };
+                    note(state, &resp, rect, full.replace('\n', " · "));
                     if resp.clicked() && *ok {
                         state.grid.fill_from(r, inv);
                     }
@@ -601,7 +633,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
                             ui.painter().rect_filled(tag, Rounding::same(2.0), p.success);
                             ui.painter().text(tag.center(), egui::Align2::CENTER_CENTER, "NEW", egui::FontId::proportional(7.5), egui::Color32::BLACK);
                         }
-                        resp.on_hover_text(items::info(*id).name);
+                        note(state, &resp, rect, items::info(*id).name);
                     }
                 });
                 ui.add_space(GAP - ui.spacing().item_spacing.y);

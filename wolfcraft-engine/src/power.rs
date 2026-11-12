@@ -337,10 +337,12 @@ fn retract(world: &mut impl WorldEdit, c: Cell, sticky: bool, dir: u8) -> Vec<Ce
 /// A piston or its head was broken: the other part goes too (the base returns to rest).
 pub fn piston_broken(world: &mut impl WorldEdit, pos: Cell, block: Block) {
     match block.part() {
-        Some(Part::Head { sticky, dir }) => {
+        Some(Part::Head { dir, .. }) => {
             if let Some(base) = dir_neighbor(world, pos, dir ^ 1) {
-                if world.cell_block(base) == (Part::Piston { sticky, extended: true, dir }).block() {
-                    world.set_block(base, Part::Piston { sticky, extended: false, dir }.block());
+                for sticky in [false, true] {
+                    if world.cell_block(base) == (Part::Piston { sticky, extended: true, dir }).block() {
+                        world.set_block(base, Part::Piston { sticky, extended: false, dir }.block());
+                    }
                 }
             }
         }

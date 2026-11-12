@@ -37,7 +37,14 @@ pub mod items {
     pub const LEATHER: u16 = 57;
     pub const RAW_URANIUM: u16 = 58;
     pub const URANIUM_INGOT: u16 = 59;
-    pub const COUNT: u16 = 60;
+    /// Hoes: HOE_BASE + material (wood, stone, iron, diamond).
+    pub const HOE_BASE: u16 = 60;
+    pub const WHEAT_SEEDS: u16 = 64;
+    pub const WHEAT: u16 = 65;
+    pub const CARROT: u16 = 66;
+    pub const POTATO: u16 = 67;
+    pub const BAKED_POTATO: u16 = 68;
+    pub const COUNT: u16 = 69;
 }
 
 // Every tool runs from the handle at the bottom-right (the hand model grips it at about pixel
@@ -61,6 +68,12 @@ const SWORD: [&str; 16] = [
     ".x..............", "xXx.............", ".xXx............", "..xXx...........", "...xXx..........", "....xXx.........",
     ".....xXx........", "......xXx....w..", ".......xXx..w...", "........xx.w....", "..........w.....", ".........w.hh...",
     "........w..hh...", ".......w.....hw.", ".............ww.", "................",
+];
+// Hoe: a short blade bent off the top of the handle (same grip as the other tools).
+const HOE: [&str; 16] = [
+    "................", "..xxxxx.........", ".xXXXXhh........", ".xx...hh........", ".......hh.......", "........hh......",
+    "........hh......", ".........hh.....", ".........hh.....", "..........hh....", "..........hh....", "...........hh...",
+    "...........hh...", "............hh..", ".............h..", "................",
 ];
 const MATERIALS: [Rgb; 4] = [Rgb(0.62, 0.45, 0.25), Rgb(0.55, 0.55, 0.55), Rgb(0.85, 0.85, 0.88), Rgb(0.35, 0.90, 0.85)];
 
@@ -292,6 +305,95 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }));
     l.add(RAW_URANIUM, "raw_uranium", blob(Rgb(0.42, 0.88, 0.30), 5.0, 163));
     l.add(URANIUM_INGOT, "uranium_ingot", ingot(Rgb(0.40, 0.90, 0.28)));
+    for (mi, m) in MATERIALS.iter().enumerate() {
+        let m = *m;
+        let img = p(|q| {
+            q.template(&HOE[..], &|ch| match ch {
+                'x' => Some(m.scale(0.75)),
+                'X' => Some(m),
+                'h' => Some(Rgb(0.45, 0.32, 0.18)),
+                _ => None,
+            })
+        });
+        l.add(HOE_BASE + mi as u16, &format!("hoe_{mi}"), img);
+    }
+    l.add(WHEAT_SEEDS, "wheat_seeds", p(|q| {
+        // A small scatter of seeds.
+        for (i, (x, y)) in [(4u32, 9u32), (7, 7), (10, 9), (6, 11), (9, 12), (12, 6), (5, 5), (11, 11)].into_iter().enumerate() {
+            let c = if i % 2 == 0 { Rgb(0.42, 0.62, 0.20) } else { Rgb(0.62, 0.70, 0.28) };
+            q.put(x, y, c, 1.0);
+            q.put(x + 1, y, c.scale(0.8), 1.0);
+            q.put(x, y + 1, c.scale(0.7), 1.0);
+        }
+    }));
+    l.add(WHEAT, "wheat", p(|q| {
+        // A sheaf: golden stalks gathered in the middle, ears on top.
+        for i in 0..5i32 {
+            let x0 = 4 + i * 2;
+            for y in 2..15i32 {
+                let x = x0 + ((y - 9) * (i - 2)) / 7;
+                if !(0..16).contains(&x) {
+                    continue;
+                }
+                let ear = y < 7;
+                let c = if ear { Rgb(0.88, 0.70, 0.28).add(if y % 2 == 0 { 0.06 } else { -0.04 }) } else { Rgb(0.78, 0.66, 0.34) };
+                q.put(x as u32, y as u32, c, 1.0);
+                if ear {
+                    q.put((x + 1).min(15) as u32, y as u32, c.scale(0.85), 1.0);
+                }
+            }
+        }
+        for x in 5..12u32 {
+            q.put(x, 10, Rgb(0.55, 0.40, 0.20), 1.0);
+        }
+    }));
+    l.add(CARROT, "carrot", p(|q| {
+        // Orange root on a diagonal with green leaves at the top.
+        for i in 0..10i32 {
+            let (cx, cy) = (11 - i, 4 + i);
+            let r = (3.0 - i as f32 * 0.28).max(0.6);
+            for dy in -2..=2i32 {
+                for dx in -2..=2i32 {
+                    if ((dx * dx + dy * dy) as f32).sqrt() <= r {
+                        let (x, y) = (cx + dx, cy + dy);
+                        if (0..16).contains(&x) && (0..16).contains(&y) {
+                            let c = Rgb(0.98, 0.55, 0.12).add(if (x + y) % 4 == 0 { -0.12 } else { 0.0 }).scale(1.0 - dx as f32 * 0.04);
+                            q.put(x as u32, y as u32, c, 1.0);
+                        }
+                    }
+                }
+            }
+        }
+        for (x, y) in [(12u32, 1u32), (13, 2), (14, 1), (12, 3), (13, 4), (11, 0), (14, 3), (15, 2)] {
+            q.put(x, y, Rgb(0.30, 0.72, 0.22), 1.0);
+        }
+    }));
+    let potato = |baked: bool| {
+        p(move |q| {
+            for y in 3..14u32 {
+                for x in 2..14u32 {
+                    let dx = (x as f32 - 7.8) / 5.6;
+                    let dy = (y as f32 - 8.2) / 4.6;
+                    if dx * dx + dy * dy > 1.0 {
+                        continue;
+                    }
+                    let base = if baked { Rgb(0.80, 0.55, 0.25) } else { Rgb(0.78, 0.64, 0.38) };
+                    let eye = rnd(x, y, if baked { 171 } else { 172 }) < 0.08;
+                    let c = if eye { base.scale(0.65) } else { base.add(-(dx + dy) * 0.08) };
+                    q.put(x, y, c, 1.0);
+                }
+            }
+            if baked {
+                // A split top with steam-soft yellow flesh.
+                for x in 5..11u32 {
+                    q.put(x, 6, Rgb(1.0, 0.88, 0.50), 1.0);
+                    q.put(x, 7, Rgb(0.96, 0.80, 0.42), 1.0);
+                }
+            }
+        })
+    };
+    l.add(POTATO, "potato", potato(false));
+    l.add(BAKED_POTATO, "baked_potato", potato(true));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);
