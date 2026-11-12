@@ -135,6 +135,29 @@ fn line_job(l: &ChatLine, size: f32, alpha: f32, wrap: f32) -> egui::text::Layou
     job
 }
 
+/// Quick commands in the open chat: (button text, command). A command ending in a space
+/// needs an argument and goes into the field; the rest run at once.
+const QUICK: [(&str, &str); 18] = [
+    ("Творческий", "/gamemode creative"),
+    ("Выживание", "/gamemode survival"),
+    ("День", "/time set day"),
+    ("Ночь", "/time set night"),
+    ("Полёт", "/fly"),
+    ("Лечение", "/heal"),
+    ("Накормить", "/feed"),
+    ("На спавн", "/spawn"),
+    ("Координаты", "/pos"),
+    ("Биом", "/biome"),
+    ("Сохранить", "/save"),
+    ("Демо искрита", "/demo"),
+    ("Выдать…", "/give "),
+    ("Телепорт…", "/tp "),
+    ("Сложность…", "/difficulty "),
+    ("Сезон…", "/season "),
+    ("WorldEdit", "//help"),
+    ("Все команды", "/help"),
+];
+
 /// Width of the message column (left side of the screen).
 fn log_width(screen: Rect) -> f32 {
     (screen.width() * 0.46).clamp(300.0, 560.0)
@@ -249,6 +272,41 @@ fn open_chat(ctx: &Context, st: &mut ChatState, screen: Rect) -> Option<String> 
             if ctx.input(|i| i.key_pressed(Key::Escape)) {
                 close = true;
             }
+        }
+        // Quick commands on the right: a tap runs a ready command at once, or puts one that
+        // needs an argument into the field.
+        {
+            let panel_w = (all.width() * 0.34).clamp(220.0, 360.0);
+            let panel = Rect::from_min_max(Pos2::new(all.right() - panel_w - 10.0, head.bottom() + 8.0), Pos2::new(all.right() - 10.0, bar.top() - 8.0));
+            painter.rect_filled(panel, 0.0, Color32::from_black_alpha(140));
+            painter.text(Pos2::new(panel.left() + 10.0, panel.top() + 8.0), Align2::LEFT_TOP, "Быстрые команды", FontId::proportional(14.0), Color32::from_gray(200));
+            let body = Rect::from_min_max(Pos2::new(panel.left() + 6.0, panel.top() + 30.0), Pos2::new(panel.right() - 6.0, panel.bottom() - 6.0));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
+            egui::ScrollArea::vertical().id_salt("chat-quick").auto_shrink([false, false]).show(&mut child, |ui| {
+                let gap = 6.0;
+                let bw = (ui.available_width() - gap) / 2.0;
+                ui.spacing_mut().item_spacing = Vec2::splat(gap);
+                for row in QUICK.chunks(2) {
+                    ui.horizontal(|ui| {
+                        for (label, cmd) in row {
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(bw, 40.0), egui::Sense::hover());
+                            let r = flat_button(ui, rect, &format!("quick-{cmd}"));
+                            let ready = !cmd.ends_with(' ');
+                            ui.painter().text(rect.center() - Vec2::new(0.0, 2.0), Align2::CENTER_CENTER, *label, FontId::proportional(14.0), if ready { Color32::WHITE } else { Color32::from_rgb(255, 230, 140) });
+                            if r.clicked() {
+                                if ready {
+                                    submitted = Some(cmd.to_string());
+                                    close = true;
+                                } else {
+                                    st.input = cmd.to_string();
+                                    st.prefill = st.input.clone();
+                                    st.just_opened = true;
+                                }
+                            }
+                        }
+                    });
+                }
+            });
         }
         // Log: all recent messages on the left, newest just above the input bar.
         let w = log_width(screen);
