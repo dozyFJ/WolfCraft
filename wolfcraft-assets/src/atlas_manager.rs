@@ -187,6 +187,8 @@ pub struct AtlasManager {
     water_frame: u32,
     /// Upscale factor of the built-in base (1 = 16×).
     scale: u32,
+    /// Cartoon pack: water frames go through the toon filter too.
+    toon: bool,
 }
 
 impl AtlasManager {
@@ -200,6 +202,7 @@ impl AtlasManager {
     /// HD upscale), then the user pack at `user_pack` on top, then loose legacy overrides.
     pub fn load(pack_id: &str, user_pack: Option<&Path>, override_dir: Option<&Path>) -> Result<Self, String> {
         let scale = crate::packs::base_scale(pack_id);
+        let toon = pack_id == crate::packs::TOON_PACK;
         let mut atlases = Vec::new();
         for kind in AtlasKind::ALL {
             let mut sprites = procedural::sprites(kind);
@@ -208,6 +211,17 @@ impl AtlasManager {
                 for (name, img) in sprites.iter_mut() {
                     // HD packs: blocks with an HD painter are drawn at full resolution
                     // (real detail); the rest is a smooth upscale of the 16× art.
+                    if toon {
+                        if kind == AtlasKind::Blocks {
+                            crate::packs::vibrant(img);
+                            *img = crate::packs::toon(img, 16 * scale, crate::packs::toon_bevel(name));
+                        } else {
+                            crate::packs::vibrant(img);
+                            crate::packs::vibrant(img);
+                            *img = crate::packs::upscale(img, scale);
+                        }
+                        continue;
+                    }
                     let hd = if scale > 1 && kind == AtlasKind::Blocks { procedural::hd::block(name, 16 * scale) } else { None };
                     let native = scale == 1 || hd.is_some();
                     match hd {
@@ -250,7 +264,7 @@ impl AtlasManager {
         let blocks = &atlases[AtlasKind::Blocks as usize];
         let heights: Vec<(String, Image)> = blocks.sprites.iter().map(|(n, img)| (n.clone(), crate::packs::height_map(img))).collect();
         let relief = TextureAtlas::build(AtlasKind::Blocks, heights)?;
-        Ok(Self { atlases, relief, water_frame: 0, scale })
+        Ok(Self { atlases, relief, water_frame: 0, scale, toon })
     }
 
     /// Height maps of the block textures, packed exactly like the blocks atlas.
@@ -280,6 +294,7 @@ impl AtlasManager {
         }
         self.water_frame = frame;
         let scale = self.scale;
+        let toon = self.toon;
         let blocks = self.get_mut(AtlasKind::Blocks);
         let id = procedural::tiles::WATER as usize;
         let size = blocks.sprites[id].1.width;
@@ -287,6 +302,10 @@ impl AtlasManager {
             return false; // overridden by a pack with another size: keep it static
         }
         let mut img = procedural::water_frame(frame);
+        if toon {
+            let img = crate::packs::toon(&img, 16 * scale, 0.0);
+            return blocks.update_sprite(id, img).is_ok();
+        }
         crate::packs::vibrant(&mut img);
         let img = if scale > 1 { crate::packs::upscale(&img, scale) } else { img };
         blocks.update_sprite(id, img).is_ok()

@@ -5,7 +5,7 @@ struct Globals {
     fog: vec4<f32>,      // rgb: fog colour, a: density (1 / fog distance)
     misc: vec4<f32>,     // x: time, y: underwater (0/1), z: crack, w: shader preset (0 off, 1 light, 2 ultra)
     env: vec4<f32>,      // x: season 0..4 (spring, summer, autumn, winter), y: snow cover, z: humidity
-    fx: vec4<f32>,       // x: relief mode (0 off, 1 lit, 2 parallax), y: relief strength, z: flags (1 wind, 2 water, 4 grading)
+    fx: vec4<f32>,       // x: relief mode (0 off, 1 lit, 2 parallax), y: relief strength, z: flags (1 wind, 2 water, 4 grading, 8 cartoon)
     tiles: array<vec4<f32>, 256>, // xy: uv min, zw: uv size of every block sprite
 };
 
@@ -146,10 +146,28 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
         default: { face_k = 0.68; }
     }
     // Directional light comes from the sun, ambient from the sky; at night only dim moonlight.
-    let diffuse = max(dot(n, sun), 0.0);
+    var diffuse = max(dot(n, sun), 0.0);
+    let toon = fx_on(8u);
+    var ao = in.light.x;
+    var sky_amb = 0.58;
+    var night_min = 0.10;
+    if (toon) {
+        // Cartoon light: a soft two-tone sun (lit / shade with a smooth step between them),
+        // bright ambient so shadows stay light and colourful, gentle side shading and AO.
+        diffuse = smoothstep(0.08, 0.32, diffuse) * 0.75 + diffuse * 0.25;
+        switch face {
+            case 2u: { face_k = 1.0; }
+            case 3u: { face_k = 0.74; }
+            case 0u, 1u: { face_k = 0.90; }
+            default: { face_k = 0.82; }
+        }
+        ao = mix(1.0, ao, 0.55);
+        sky_amb = 0.70;
+        night_min = 0.18;
+    }
     // Full sun on a top face stays just under 1, so bright surfaces keep their colour
     // instead of washing out to white.
-    let sky_light = mix(0.10, 0.58 + 0.36 * diffuse, day) * in.light.y;
+    let sky_light = mix(night_min, sky_amb + (0.94 - sky_amb) * diffuse, day) * mix(in.light.y, sqrt(in.light.y), select(0.0, 0.6, toon));
     // Cool tint at night, warm at sunrise/sunset.
     let night_tint = vec3<f32>(0.78, 0.88, 1.18);
     let warm = vec3<f32>(1.08, 0.95, 0.85);
@@ -162,7 +180,7 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     let torch_rgb = vec3<f32>(1.0, 0.80, 0.55) * torch;
     // Light adds up, but never brighter than full daylight.
     let lit = min(sky_rgb + torch_rgb * (1.0 - 0.6 * day * in.light.y), vec3<f32>(1.15));
-    var rgb = color.rgb * lit * in.light.x * face_k;
+    var rgb = color.rgb * lit * ao * face_k;
     if (emit == 1u) {
         rgb = color.rgb * (0.85 + 0.15 * in.light.x);
     }
@@ -182,6 +200,13 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
 fn grade(c: vec3<f32>) -> vec3<f32> {
     let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
     let vivid = max(mix(vec3<f32>(l), c, 1.10), vec3<f32>(0.0));
+    if (fx_on(8u)) {
+        // Cartoon: very juicy colours, lifted shadows, cool shade and sunny highlights.
+        var o = max(mix(vec3<f32>(l), c, 1.38), vec3<f32>(0.0));
+        o = o * 0.94 + vec3<f32>(0.012, 0.016, 0.03);
+        o = o * o * (3.0 - 2.0 * o) * 0.25 + o * 0.75;
+        return o * mix(vec3<f32>(0.97, 0.99, 1.04), vec3<f32>(1.04, 1.01, 0.96), clamp(l * 1.6, 0.0, 1.0));
+    }
     if (!fx_on(4u)) {
         return vivid;
     }
@@ -421,7 +446,8 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     let skin = textureSampleLevel(entities_atlas, samp, in.uv, 0.0);
     let item = textureSampleLevel(items_atlas, samp, in.uv, 0.0);
     var base = pow(in.color, vec3<f32>(2.2));
-    if (in.tex < 0.5) {
+    let toon = fx_on(8u);
+    if (in.tex < 0.5 && !toon) {
         // Pixel-art grain on flat-colour creatures: every 1/16 block gets its own brightness.
         let cell = floor(in.uv);
         let h = fract(sin(dot(cell, vec2<f32>(12.9898, 78.233))) * 43758.5453);
@@ -438,12 +464,22 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     let up = normalize(in.world);
     let sun = normalize(g.sun.xyz);
     let day = smoothstep(-0.12, 0.28, dot(up, sun));
-    let diffuse = max(dot(normalize(in.normal), sun), 0.0);
+    let nn = normalize(in.normal);
+    var diffuse = max(dot(nn, sun), 0.0);
     var light = max(mix(0.11, 0.58 + 0.38 * diffuse, day), 0.16);
+    var rim = 0.0;
+    if (toon) {
+        // Cartoon creatures: two-tone soft light and a bright rim around the silhouette.
+        diffuse = smoothstep(0.05, 0.30, diffuse) * 0.8 + diffuse * 0.2;
+        light = max(mix(0.20, 0.70 + 0.30 * diffuse, day), 0.24);
+        let v = normalize(-in.rel);
+        rim = pow(1.0 - max(dot(nn, v), 0.0), 3.0) * mix(0.12, 0.38, day);
+    }
     if (in.tex > 2.5) {
         light = 1.25; // glowing particles: embers, sparks
+        rim = 0.0;
     }
-    var rgb = base * light;
+    var rgb = base * light + vec3<f32>(rim);
     let d = length(in.rel);
     let f = clamp(1.0 - exp(-pow(d * g.fog.a, 2.0)), 0.0, 1.0);
     rgb = mix(rgb, g.fog.rgb, f);

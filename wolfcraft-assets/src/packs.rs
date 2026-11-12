@@ -13,14 +13,18 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Built-in packs: (id, name, upscale factor).
-pub const BUILTIN: [(&str, &str, u32); 4] = [
+pub const BUILTIN: [(&str, &str, u32); 5] = [
     ("builtin:16", "Классика 16×", 1),
+    (TOON_PACK, "Мультяшный 64×", 4),
     ("builtin:32", "Гладкий HD 32×", 2),
     ("builtin:64", "Гладкий Full HD 64×", 4),
     ("builtin:128", "Гладкий 4K 128×", 8),
 ];
 
 pub const DEFAULT_PACK: &str = "builtin:16";
+
+/// The cartoon pack: smooth juicy colours, soft blobs instead of noise, bevelled block edges.
+pub const TOON_PACK: &str = "builtin:toon";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackInfo {
@@ -36,7 +40,7 @@ pub struct PackInfo {
 pub fn list(dirs: &[PathBuf]) -> Vec<PackInfo> {
     let mut v: Vec<PackInfo> = BUILTIN
         .iter()
-        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *f == 1 { "Стандартные текстуры игры".into() } else { format!("Встроенный, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
+        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == TOON_PACK { "Яркий мультяшный стиль, как в топовых симуляторах: сочные гладкие цвета и скруглённые края блоков".into() } else if *f == 1 { "Стандартные текстуры игры".into() } else { format!("Встроенный, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
         .collect();
     let mut users = Vec::new();
     for dir in dirs {
@@ -110,6 +114,139 @@ pub fn vibrant(img: &mut Image) {
         px[0] = (tone(r) * 255.0) as u8;
         px[1] = (tone(g) * 255.0) as u8;
         px[2] = (tone(b) * 255.0) as u8;
+    }
+}
+
+/// Cartoon version of a 16× block sprite at `size` pixels: the noise is calmed into soft
+/// blobs with clean flat colour steps (posterized), colours become juicy and light, and solid
+/// blocks get a bevel (light top-left rim, darker bottom-right) with a thin soft outline, so
+/// each block reads as a chunky toy cube. Sprites with transparent pixels keep their shape
+/// (no bevel) but get the same colours. Seamless where the source is.
+pub fn toon(src: &Image, size: u32, bevel: f32) -> Image {
+    let (w, h) = (src.width as i32, src.height as i32);
+    let opaque = !src.pixels.chunks_exact(4).any(|p| p[3] < 255);
+    // Natural ground is calmed the most (smooth, like a sim's terrain); built blocks keep more detail.
+    let detail = if bevel >= 1.0 { 0.35 } else { 0.12 };
+    let get = |x: i32, y: i32| -> [f32; 4] {
+        let p = src.get(x.rem_euclid(w) as u32, y.rem_euclid(h) as u32);
+        [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0, p[3] as f32 / 255.0]
+    };
+    // Soft version of the source: a 3×3 blur (wrapping) mixed with a calmed copy of the detail.
+    let mut soft = vec![[0.0f32; 4]; (w * h) as usize];
+    let mut mean = [0.0f32; 3];
+    for y in 0..h {
+        for x in 0..w {
+            let o = get(x, y);
+            let mut s = [0.0f32; 3];
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let q = get(x + dx, y + dy);
+                    let k = if dx == 0 && dy == 0 { 4.0 } else if dx == 0 || dy == 0 { 2.0 } else { 1.0 };
+                    for c in 0..3 {
+                        s[c] += q[c] * k;
+                    }
+                }
+            }
+            let mut v = [0.0f32; 4];
+            for c in 0..3 {
+                let b = s[c] / 16.0;
+                v[c] = b + (o[c] - b) * detail;
+                mean[c] += v[c];
+            }
+            v[3] = o[3];
+            soft[(y * w + x) as usize] = v;
+        }
+    }
+    for c in &mut mean {
+        *c /= (w * h) as f32;
+    }
+    let at = |x: i32, y: i32| soft[(y.rem_euclid(h) * w + x.rem_euclid(w)) as usize];
+    let n = size as i32;
+    let mut out = Image::new(size, size);
+    let f = w as f32 / n as f32;
+    let band = (n as f32 * 0.10).max(2.0);
+    let line = (n as f32 / 48.0).max(1.0);
+    for y in 0..n {
+        for x in 0..n {
+            // Sample position in source pixels (centres), bilinear with wrap for opaque tiles,
+            // nearest for cut-out sprites so their shape stays crisp.
+            let sx = (x as f32 + 0.5) * f - 0.5;
+            let sy = (y as f32 + 0.5) * f - 0.5;
+            let mut c = if opaque {
+                let (x0, y0) = (sx.floor() as i32, sy.floor() as i32);
+                let (tx, ty) = (sx - x0 as f32, sy - y0 as f32);
+                // Smoothstep weights make round blobs instead of diamond-shaped bilinear ones.
+                let (tx, ty) = (tx * tx * (3.0 - 2.0 * tx), ty * ty * (3.0 - 2.0 * ty));
+                let (a, b, cc, d) = (at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1));
+                let mut v = [0.0; 4];
+                for i in 0..4 {
+                    v[i] = (a[i] * (1.0 - tx) + b[i] * tx) * (1.0 - ty) + (cc[i] * (1.0 - tx) + d[i] * tx) * ty;
+                }
+                v
+            } else {
+                let p = src.get(((x as f32 + 0.5) * f) as u32 % src.width, ((y as f32 + 0.5) * f) as u32 % src.height);
+                let o = [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0, p[3] as f32 / 255.0];
+                let b = at(((x as f32 + 0.5) * f) as i32, ((y as f32 + 0.5) * f) as i32);
+                [b[0] * 0.7 + o[0] * 0.3, b[1] * 0.7 + o[1] * 0.3, b[2] * 0.7 + o[2] * 0.3, o[3]]
+            };
+            if c[3] < 0.02 {
+                out.set(x as u32, y as u32, [0, 0, 0, 0]);
+                continue;
+            }
+            // Flat colour steps around the tile's mean: clean cartoon patches.
+            if opaque {
+                let q = 0.075;
+                for i in 0..3 {
+                    c[i] = mean[i] + ((c[i] - mean[i]) / q).round() * q;
+                }
+            }
+            // Juicy and light: strong saturation, shadows lifted.
+            let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+            for i in 0..3 {
+                c[i] = (l + (c[i] - l) * 1.55).max(0.0);
+                c[i] = c[i] * 0.86 + 0.12;
+            }
+            if bevel > 0.0 && opaque {
+                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let (l_, t_, r_, b_) = (fx, fy, n as f32 - fx, n as f32 - fy);
+                let edge = l_.min(t_).min(r_).min(b_);
+                if edge < band {
+                    let k = 1.0 - edge / band;
+                    let k = k * k;
+                    // Light from the top-left: those rims shine, the others fall into shade.
+                    let lit = if l_.min(t_) <= r_.min(b_) { 0.20 * bevel } else { -0.20 * bevel };
+                    for i in 0..3 {
+                        c[i] = if lit > 0.0 { c[i] + (1.0 - c[i]) * lit * k } else { c[i] * (1.0 + lit * k) };
+                    }
+                }
+                if edge < line && bevel >= 1.0 {
+                    for i in 0..3 {
+                        c[i] *= 0.72;
+                    }
+                }
+            }
+            let px = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            out.set(x as u32, y as u32, [px(c[0]), px(c[1]), px(c[2]), px(c[3])]);
+        }
+    }
+    out
+}
+
+/// How strongly the cartoon pack bevels a block sprite: built blocks (bricks, planks, stone…)
+/// get the full chunky bevel with an outline, natural ground and plants only a faint one so
+/// terrain flows smoothly instead of looking like floor tiles, liquids none.
+pub fn toon_bevel(name: &str) -> f32 {
+    const NATURAL: [&str; 16] = ["grass", "dirt", "sand", "snow", "leaves", "gravel", "clay", "mud", "moss", "podzol", "mycel", "ice", "farmland", "path", "netherrack", "peat"];
+    if matches!(name, "water" | "lava") || name.contains("water") || name.contains("lava") {
+        0.0
+    } else if name.contains("bricks") || name.contains("sandstone") {
+        1.0
+    } else if NATURAL.iter().any(|n| name.contains(n)) {
+        0.18
+    } else if name.contains("log") || name.contains("cactus") || name.contains("pumpkin") || name.contains("melon") {
+        0.5
+    } else {
+        1.0
     }
 }
 

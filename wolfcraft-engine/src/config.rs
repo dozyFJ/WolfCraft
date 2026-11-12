@@ -342,7 +342,7 @@ pub struct Settings {
     pub camera_smooth: f32,
     /// Phones: pick blocks with the finger instead of the crosshair (off: crosshair).
     pub tap_aim: bool,
-    /// Shader preset on top of the texture pack: 0 off, 1 light, 2 ultra.
+    /// Shader preset on top of the texture pack: 0 off, 1 light, 2 ultra, 3 custom, 4 cartoon.
     pub shaders: u8,
     /// Texture relief: 0 off, 1 lit relief, 2 parallax depth.
     pub relief_mode: u8,
@@ -354,6 +354,8 @@ pub struct Settings {
     pub fx_water: bool,
     /// Colour grading (contrast, saturation, warm highlights).
     pub fx_grading: bool,
+    /// Cartoon look: soft bright light, light shadows, juicy colours, rim light on mobs.
+    pub fx_toon: bool,
     /// Mouse up looks down.
     pub invert_y: bool,
     pub ui_scale: f32,
@@ -391,8 +393,10 @@ impl Settings {
             0 => (0, 1.0, false),
             1 => (1, 1.0, true),
             2 => (2, 1.2, true),
+            4 => (0, 1.0, true),
             _ => return,
         };
+        self.fx_toon = preset == 4;
         self.relief_mode = relief;
         self.relief_strength = strength;
         self.fx_wind = on;
@@ -402,7 +406,7 @@ impl Settings {
 
     /// Effect flags for the renderer (1 wind, 2 water, 4 grading).
     pub fn fx_flags(&self) -> u8 {
-        self.fx_wind as u8 | (self.fx_water as u8) << 1 | (self.fx_grading as u8) << 2
+        self.fx_wind as u8 | (self.fx_water as u8) << 1 | (self.fx_grading as u8) << 2 | (self.fx_toon as u8) << 3
     }
 }
 
@@ -422,6 +426,7 @@ impl Default for Settings {
             fx_wind: true,
             fx_water: true,
             fx_grading: true,
+            fx_toon: false,
             invert_y: false,
             ui_scale: 1.0,
             theme: ThemeMode::Dark,

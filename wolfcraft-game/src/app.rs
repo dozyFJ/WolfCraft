@@ -1583,6 +1583,14 @@ impl App {
                 let altitude = ((r - s.planet.radius - 300.0) / (s.planet.radius * 0.4)).clamp(0.0, 1.0) as f32;
                 let underwater = s.eye_in_water();
                 let mut sky = sky_color(day, twilight, altitude);
+                if self.settings.fx_toon {
+                    // Cartoon sky: a clean candy blue by day.
+                    let k = (day as f32 * (1.0 - altitude)).clamp(0.0, 1.0) * 0.7;
+                    let toon = [0.42, 0.78, 1.0];
+                    for i in 0..3 {
+                        sky[i] += (toon[i] - sky[i]) * k;
+                    }
+                }
                 if underwater {
                     sky = [0.04, 0.18, 0.36];
                 } else if s.hell {

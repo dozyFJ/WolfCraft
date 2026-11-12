@@ -893,10 +893,10 @@ const SETTINGS_TABS: [(u16, &str); 6] = [(icon::HEART, "Профиль"), (icon:
 /// Resource packs: built-in ones and the player's own, plus import from a link.
 fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs: &PacksView, res: &mut SettingsResult) {
     // Shaders: a preset, then every effect on its own (changing one switches to "Свои").
-    setting_row(ui, "Шейдеры", Some("Лёгкие: рельеф текстур, ветер, вода. Ультра: ещё объёмная глубина швов и камней (параллакс)"), |ui| {
+    setting_row(ui, "Шейдеры", Some("Лёгкие: рельеф, ветер, вода. Ультра: ещё глубина швов (параллакс). Мульт: мягкий яркий свет и сочные цвета, как в топовых симуляторах"), |ui| {
         let mut preset = s.shaders;
-        if segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкие"), (2, "Ультра"), (3, "Свои")], &mut preset) {
-            if preset < 3 {
+        if segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкие"), (2, "Ультра"), (4, "Мульт"), (3, "Свои")], &mut preset) {
+            if preset != 3 {
                 s.apply_shader_preset(preset);
             } else {
                 s.shaders = 3;
@@ -905,7 +905,7 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
         }
     });
     ui.add_space(8.0);
-    let before = (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading);
+    let before = (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading, s.fx_toon);
     setting_row(ui, "Рельеф текстур", Some("Объём: свет и тень на каждом камне. Глубина: швы и щели уходят внутрь блока. В HD-паках подробнее"), |ui| {
         res.changed |= segmented(ui, "relief", &[(0u8, "Нет"), (1, "Объём"), (2, "Глубина")], &mut s.relief_mode);
     });
@@ -927,7 +927,11 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
     setting_row(ui, "Цветокоррекция", Some("Контраст и сочные цвета"), |ui| {
         res.changed |= toggle_switch(ui, &mut s.fx_grading).changed();
     });
-    if (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading) != before {
+    ui.add_space(6.0);
+    setting_row(ui, "Мультяшный свет", Some("Мягкие светлые тени, яркие краски, контур-подсветка мобов"), |ui| {
+        res.changed |= toggle_switch(ui, &mut s.fx_toon).changed();
+    });
+    if (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading, s.fx_toon) != before {
         s.shaders = 3;
     }
     ui.add_space(10.0);
@@ -947,6 +951,10 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
         });
         if resp.clicked() && !sel {
             s.texture_pack = pack.id.clone();
+            // The cartoon pack looks its best with the cartoon light.
+            if pack.id == wolfcraft_assets::packs::TOON_PACK && s.shaders != 4 {
+                s.apply_shader_preset(4);
+            }
             res.changed = true;
         }
         ui.add_space(6.0);
