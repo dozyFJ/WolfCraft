@@ -1295,7 +1295,9 @@ impl App {
             self.discovery = None;
             self.world_select.nearby.clear();
         }
-        let portrait = matches!(self.screen, Screen::Splash | Screen::Main);
+        // Portrait for the launcher and for the studio (its windows dock under the world).
+        let studio_upright = self.studio.as_ref().is_some_and(|s| !s.playtest) && matches!(self.screen, Screen::Playing | Screen::Paused | Screen::Inventory);
+        let portrait = matches!(self.screen, Screen::Splash | Screen::Main) || (studio_upright && cfg!(target_os = "android"));
         if self.portrait != Some(portrait) {
             self.portrait = Some(portrait);
             crate::orientation::set_portrait(portrait);
@@ -1619,7 +1621,7 @@ impl App {
         let studio_view = if self.studio.is_some() { self.studio_view() } else { None };
         let frame = {
             let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, studio, studio_world, .. } = self;
-            let touch_size = gfx.gpu.size();
+            let touch_size = studio_touch_size(gfx.gpu.size(), studio.as_ref(), gfx.gui.ctx.pixels_per_point());
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
             gfx.gui.run(&gfx.window, |ctx| match screen {
@@ -2677,7 +2679,7 @@ impl ApplicationHandler for App {
             WindowEvent::Touch(t) => {
                 self.touch.seen = true;
                 if self.screen == Screen::Playing && !self.chat.open {
-                    let size = gfx.gpu.size();
+                    let size = studio_touch_size(gfx.gpu.size(), self.studio.as_ref(), gfx.gui.ctx.pixels_per_point());
                     for a in self.touch.event(&t, size) {
                         match a {
                             TouchAction::Fly => {
@@ -3235,5 +3237,14 @@ fn enchant_offers(ui: &mut egui::Ui, icons: &wolfcraft_ui::GuiIcons, slots: &mut
             }
         }
         *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+    }
+}
+
+/// Size the touch controls lay themselves out in: the whole screen, or in the upright studio
+/// only the world view above its dock (physical pixels).
+fn studio_touch_size(size: (u32, u32), studio: Option<&wolfcraft_ui::studio_ui::StudioState>, ppp: f32) -> (u32, u32) {
+    match studio.and_then(|s| if s.playtest { None } else { s.view_bottom }) {
+        Some(vb) => (size.0, ((vb * ppp) as u32).clamp(200, size.1)),
+        None => size,
     }
 }

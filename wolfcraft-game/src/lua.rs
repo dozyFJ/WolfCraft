@@ -389,8 +389,11 @@ gui.button{ id = "plus", text = "+1", x = 0.5, y = 0.15, w = 0.12, h = 0.07, on_
 end }
 
 -- События
+local broken = 0
+gui.label{ id = "broken", text = "Сломано блоков: 0", x = 0.5, y = 0.22, size = 16 }
 on("block_broken", function(name)
-    print("Сломан блок: " .. name)
+    broken += 1
+    gui.text("broken", "Сломано блоков: " .. broken .. " (последний: " .. name .. ")")
 end)
 
 -- Таймер
@@ -433,7 +436,7 @@ mod tests {
         let out = lua.take_output();
         assert!(out.iter().any(|(_, t)| t == "Мир запущен!"), "{out:?}");
         let gui = lua.gui();
-        assert_eq!(gui.len(), 2);
+        assert_eq!(gui.len(), 3);
         // Pressing the button runs its Luau callback.
         lua.click(&mut s, "plus");
         lua.click(&mut s, "plus");
@@ -445,7 +448,7 @@ mod tests {
         assert!(lua.take_output().iter().any(|(_, t)| t.contains("Прошло 3 секунды")));
         // Events and the world API.
         lua.event(&mut s, "block_broken", "Камень");
-        assert!(lua.take_output().iter().any(|(_, t)| t == "Сломан блок: Камень"));
+        assert_eq!(lua.gui().iter().find(|e| e.id == "broken").unwrap().text, "Сломано блоков: 1 (последний: Камень)");
         lua.run(&mut s, r#"
             world.set(1, 3, 2, "камень")
             print(world.get(1, 3, 2))
