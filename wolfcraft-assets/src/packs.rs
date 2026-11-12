@@ -13,9 +13,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Built-in packs: (id, name, upscale factor).
-pub const BUILTIN: [(&str, &str, u32); 7] = [
-    (TOON_PACK, "Мультяшный (основной) 64×", 4),
-    ("builtin:toon32", "Мультяшный Лайт 32×", 2),
+pub const BUILTIN: [(&str, &str, u32); 8] = [
+    ("builtin:toon16", "Мультяшный Лайт 16× (основной)", 1),
+    ("builtin:toon32", "Мультяшный 32×", 2),
+    (TOON_PACK, "Мультяшный HD 64×", 4),
     ("builtin:toon128", "Мультяшный 4K 128×", 8),
     ("builtin:16", "Старый пак 16×", 1),
     ("builtin:32", "Старый пак HD 32×", 2),
@@ -23,7 +24,8 @@ pub const BUILTIN: [(&str, &str, u32); 7] = [
     ("builtin:128", "Старый пак 4K 128×", 8),
 ];
 
-pub const DEFAULT_PACK: &str = TOON_PACK;
+/// The game's main look: the light 16× cartoon pack (fast on every phone).
+pub const DEFAULT_PACK: &str = "builtin:toon16";
 
 /// The cartoon pack: smooth juicy colours, soft blobs instead of noise, bevelled block edges.
 pub const TOON_PACK: &str = "builtin:toon";
@@ -47,7 +49,7 @@ pub struct PackInfo {
 pub fn list(dirs: &[PathBuf]) -> Vec<PackInfo> {
     let mut v: Vec<PackInfo> = BUILTIN
         .iter()
-        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == TOON_PACK { "Основной стиль игры: мультяшные блоки, персонажи и мобы, сочные плоские цвета".into() } else if *id == "builtin:toon32" { "Мультяшный для слабых телефонов: меньше памяти, быстрее загрузка".into() } else if *id == "builtin:toon128" { "Мультяшный в высоком разрешении (128×128 на блок): чёткие края, для сильных устройств".into() } else if *f == 1 { "Дополнение: старые пиксельные текстуры".into() } else { format!("Дополнение: старые текстуры, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
+        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == DEFAULT_PACK { "Основной стиль игры: мультяшные блоки 16×16, лёгкие шейдеры, быстро на любом телефоне".into() } else if *id == TOON_PACK { "Мультяшный в HD: мягче края и детали".into() } else if *id == "builtin:toon32" { "Мультяшный чуть чётче основного".into() } else if *id == "builtin:toon128" { "Мультяшный в высоком разрешении (128×128 на блок): чёткие края, для сильных устройств".into() } else if *f == 1 { "Дополнение: старые пиксельные текстуры".into() } else { format!("Дополнение: старые текстуры, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
         .collect();
     let mut users = Vec::new();
     for dir in dirs {
