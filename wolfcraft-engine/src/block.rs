@@ -53,7 +53,9 @@ const fn info(name: &'static str, render: RenderKind, hardness: f32, tool: ToolK
     BlockInfo {
         name,
         render,
-        solid: matches!(render, RenderKind::Opaque | RenderKind::Cutout),
+        // Shaped blocks (slabs, stairs, panes, fences, walls, doors) collide with their own
+        // boxes; the few that should be walked through (dust, buttons, signs) say not_solid.
+        solid: matches!(render, RenderKind::Opaque | RenderKind::Cutout | RenderKind::Shape),
         hardness,
         tool,
         needs_tool: false,

@@ -476,6 +476,9 @@ pub(crate) mod tests {
                 }
             }
         }
+        for b in [Block::Door, Block::GlassPaneA, Block::Fence, Block::StoneSlab, Block::PlankStairs, Block::StoneWall] {
+            assert!(b.is_solid(), "{b:?} must block the player");
+        }
         for dk in 0..2 {
             w.edits.insert(c(2, 0, dk), Block::Door);
             w.edits.insert(c(-2, 1, dk), Block::GlassPaneA);
@@ -488,6 +491,8 @@ pub(crate) mod tests {
                 let cell = w.grid.world_to_cell(p);
                 let bl = w.cell_block(cell);
                 // The sphere centre inside a solid block's box = the body went through it.
+                // (Doors, panes and fences must be solid in the first place.)
+                assert!(bl == Block::Air || bl.is_solid() || bl.info().render == crate::block::RenderKind::Cross, "{bl:?} is not solid");
                 bl.is_solid() && block_obbs(&w.grid, cell, bl).iter().any(|o| sphere_obb(p, 0.02, o).is_some())
             })
         };
