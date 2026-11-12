@@ -112,16 +112,41 @@ fn p(f: impl FnOnce(&mut Painter)) -> Image {
     q.finish()
 }
 
+// Layered, tileable material grain: broad patches establish the material,
+// fine pixels add detail without turning every surface into white noise.
+fn grain(x: u32, y: u32, seed: u32) -> f32 {
+    (rnd(x / 4, y / 4, seed) - 0.5) * 0.08
+        + (rnd(x / 2, y / 2, seed + 1) - 0.5) * 0.06
+        + (rnd(x, y, seed + 2) - 0.5) * 0.035
+}
+
+fn soil(q: &mut Painter, base: Rgb) {
+    for y in 0..S {
+        for x in 0..S {
+            let pebble = hash(x / 2, y / 2, 4) % 17 == 0;
+            let c = if pebble { base.lerp(Rgb(0.52, 0.49, 0.43), 0.5) } else { base };
+            q.put(x, y, c.add(grain(x, y, 3)), 1.0);
+        }
+    }
+}
+
+fn turf(q: &mut Painter, base: Rgb, seed: u32) {
+    for y in 0..S {
+        for x in 0..S {
+            let blade = if hash(x, y / 3, seed + 4) % 5 == 0 { 0.035 } else { 0.0 };
+            q.put(x, y, base.add(grain(x, y, seed) + blade), 1.0);
+        }
+    }
+}
+
 fn side_with_top(base: Rgb, top: Rgb, seed: u32) -> Image {
     p(|q| {
-        q.noisy(Rgb(0.47, 0.33, 0.22), 0.14, 3);
-        q.speckle(Rgb(0.38, 0.26, 0.17), 0.25, 4);
-        let _ = base;
+        soil(q, base);
         for x in 0..S {
-            let depth = 3 + (hash(x, 0, seed) % 3);
+            let depth = 2 + hash(x / 2, 0, seed) % 3;
             for y in 0..depth {
-                let n = (rnd(x, y, seed + 1) - 0.5) * 0.12;
-                q.put(x, y, top.add(n), 1.0);
+                let root_shadow = if y + 1 == depth { -0.06 } else { 0.0 };
+                q.put(x, y, top.add(grain(x, y, seed) + root_shadow), 1.0);
             }
         }
     })
@@ -131,12 +156,11 @@ fn log_side(base: Rgb, seed: u32, birch: bool) -> Image {
     p(|q| {
         for y in 0..S {
             for x in 0..S {
-                let stripe = (rnd(x, 0, seed) - 0.5) * 0.12;
-                let n = (rnd(x, y, seed + 1) - 0.5) * 0.06;
-                let groove = if hash(x, y / 3, seed) % 9 == 0 { -0.08 } else { 0.0 };
-                let mut c = base.add(stripe + n + groove);
-                if birch && hash(x / 3, y, seed + 2) % 11 == 0 {
-                    c = Rgb(0.15, 0.15, 0.14);
+                let ridge = rnd(x / 2, y / 8, seed) - 0.5;
+                let groove = if hash(x, y / 4, seed + 1) % 7 == 0 { -0.07 } else { 0.0 };
+                let mut c = base.add(ridge * 0.12 + grain(x, y, seed + 3) * 0.4 + groove);
+                if birch && hash(x / 4, y / 2, seed + 2) % 9 == 0 {
+                    c = Rgb(0.24, 0.23, 0.21).add(grain(x, y, seed));
                 }
                 q.put(x, y, c, 1.0);
             }
@@ -148,22 +172,38 @@ fn leaves(base: Rgb, seed: u32) -> Image {
     p(|q| {
         for y in 0..S {
             for x in 0..S {
-                if rnd(x, y, seed) < 0.18 {
-                    q.put(x, y, Rgb(0.0, 0.0, 0.0), 0.0);
-                } else {
-                    let n = (rnd(x, y, seed + 1) - 0.5) * 0.2;
-                    q.put(x, y, base.add(n), 1.0);
-                }
+                // Small leaf clusters, with sparse gaps rather than isolated confetti.
+                let cluster = rnd(x / 3, y / 3, seed);
+                let gap = cluster < 0.16 && rnd(x, y, seed + 1) < 0.7;
+                let vein = if (x + y) % 4 == 0 { 0.025 } else { 0.0 };
+                q.put(x, y, base.add((cluster - 0.5) * 0.14 + grain(x, y, seed + 2) * 0.5 + vein), if gap { 0.0 } else { 1.0 });
             }
         }
     })
 }
 
+fn rock(q: &mut Painter) {
+    for y in 0..S {
+        for x in 0..S {
+            let seam = if hash(x / 5, y / 3, 6) % 11 == 0 && y % 3 == 0 { -0.035 } else { 0.0 };
+            q.put(x, y, Rgb(0.47, 0.48, 0.47).add(grain(x, y, 5) + seam), 1.0);
+        }
+    }
+}
+
 fn ore(c: Rgb, seed: u32) -> Image {
     p(|q| {
-        q.noisy(Rgb(0.50, 0.50, 0.52), 0.12, 5);
-        q.speckle(Rgb(0.42, 0.42, 0.44), 0.25, 6);
-        q.speckle(c, 0.22, seed);
+        rock(q);
+        for y in 0..S {
+            for x in 0..S {
+                let cluster = hash(x / 4, y / 4, seed) % 3 == 0;
+                let inset = x % 4 > 0 && y % 4 > 0;
+                if cluster && inset && hash(x, y, seed + 1) % 7 != 0 {
+                    let bevel = if x % 4 == 1 || y % 4 == 1 { 0.08 } else { -0.035 };
+                    q.put(x, y, c.add(bevel + grain(x, y, seed) * 0.4), 1.0);
+                }
+            }
+        }
     })
 }
 
@@ -237,7 +277,7 @@ pub fn water_frame(frame: u32) -> Image {
                 let w = ((x as f32 * 0.8 + y as f32 * 0.4 + ph).sin() * 0.05)
                     + ((y as f32 * 0.9 - ph * 2.0).cos() * 0.03)
                     + (rnd(x, y, 18) - 0.5) * 0.03;
-                q.put(x, y, Rgb(0.18 + w, 0.36 + w, 0.78 + w), 0.72);
+                q.put(x, y, Rgb(0.16 + w, 0.32 + w, 0.41 + w), 0.72);
             }
         }
     })
@@ -246,22 +286,18 @@ pub fn water_frame(frame: u32) -> Image {
 pub(crate) fn build() -> Vec<(String, Image)> {
     use tiles::*;
     let mut l = SpriteList::new();
-    let grass = Rgb(0.36, 0.62, 0.24);
+    let grass = Rgb(0.37, 0.49, 0.26);
     let dirt = Rgb(0.47, 0.33, 0.22);
-    let stone = Rgb(0.50, 0.50, 0.52);
 
     l.add(GRASS_TOP, "grass_top", p(|q| {
-        q.noisy(grass, 0.18, 1);
-        q.speckle(Rgb(0.30, 0.54, 0.20), 0.3, 2);
+        turf(q, grass, 1);
     }));
     l.add(GRASS_SIDE, "grass_side", side_with_top(dirt, grass, 9));
     l.add(DIRT, "dirt", p(|q| {
-        q.noisy(dirt, 0.14, 3);
-        q.speckle(Rgb(0.38, 0.26, 0.17), 0.25, 4);
+        soil(q, dirt);
     }));
     l.add(STONE, "stone", p(|q| {
-        q.noisy(stone, 0.12, 5);
-        q.speckle(Rgb(0.42, 0.42, 0.44), 0.25, 6);
+        rock(q);
     }));
     l.add(COBBLESTONE, "cobblestone", p(|q| {
         for y in 0..S {
@@ -309,7 +345,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
-    l.add(LEAVES, "oak_leaves", leaves(Rgb(0.22, 0.50, 0.16), 17));
+    l.add(LEAVES, "oak_leaves", leaves(Rgb(0.26, 0.39, 0.20), 17));
     l.add(WATER, "water", water_frame(0));
     l.add(GLASS, "glass", p(|q| {
         for i in 0..S {
@@ -490,9 +526,9 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
     }));
     l.add(BIRCH_LOG_SIDE, "birch_log_side", log_side(Rgb(0.88, 0.87, 0.82), 90, true));
-    l.add(BIRCH_LEAVES, "birch_leaves", leaves(Rgb(0.42, 0.60, 0.26), 91));
+    l.add(BIRCH_LEAVES, "birch_leaves", leaves(Rgb(0.39, 0.48, 0.25), 91));
     l.add(ACACIA_LOG_SIDE, "acacia_log_side", log_side(Rgb(0.45, 0.40, 0.35), 92, false));
-    l.add(ACACIA_LEAVES, "acacia_leaves", leaves(Rgb(0.45, 0.55, 0.18), 93));
+    l.add(ACACIA_LEAVES, "acacia_leaves", leaves(Rgb(0.40, 0.45, 0.24), 93));
     l.add(MUSHROOM_RED, "mushroom_red", mushroom(Rgb(0.80, 0.15, 0.12), true));
     l.add(MUSHROOM_BROWN, "mushroom_brown", mushroom(Rgb(0.55, 0.40, 0.28), false));
     l.add(SEAGRASS, "seagrass", p(|q| {
@@ -537,8 +573,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }));
     let dry = Rgb(0.62, 0.62, 0.30);
     l.add(DRY_GRASS_TOP, "dry_grass_top", p(|q| {
-        q.noisy(dry, 0.14, 98);
-        q.speckle(Rgb(0.55, 0.52, 0.26), 0.3, 99);
+        turf(q, dry, 98);
     }));
     l.add(DRY_GRASS_SIDE, "dry_grass_side", side_with_top(dirt, dry, 100));
     l.add(MOSSY_STONE_BRICKS, "mossy_stone_bricks", bricks_pattern(sb, sm, 2, 1, 101, 0.3, false));
@@ -608,8 +643,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }));
     let swamp = Rgb(0.30, 0.42, 0.22);
     l.add(SWAMP_GRASS_TOP, "swamp_grass_top", p(|q| {
-        q.noisy(swamp, 0.16, 114);
-        q.speckle(Rgb(0.24, 0.35, 0.18), 0.3, 115);
+        turf(q, swamp, 114);
     }));
     l.add(SWAMP_GRASS_SIDE, "swamp_grass_side", side_with_top(dirt, swamp, 116));
     l.add(MAGMA, "magma", p(|q| {
@@ -851,3 +885,4 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }
     l.0
 }
+
