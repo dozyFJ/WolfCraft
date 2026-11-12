@@ -13,8 +13,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Built-in packs: (id, name, upscale factor).
-pub const BUILTIN: [(&str, &str, u32); 5] = [
-    (TOON_PACK, "Мультяшный (основной)", 4),
+pub const BUILTIN: [(&str, &str, u32); 7] = [
+    (TOON_PACK, "Мультяшный (основной) 64×", 4),
+    ("builtin:toon32", "Мультяшный Лайт 32×", 2),
+    ("builtin:toon128", "Мультяшный 4K 128×", 8),
     ("builtin:16", "Старый пак 16×", 1),
     ("builtin:32", "Старый пак HD 32×", 2),
     ("builtin:64", "Старый пак Full HD 64×", 4),
@@ -25,6 +27,11 @@ pub const DEFAULT_PACK: &str = TOON_PACK;
 
 /// The cartoon pack: smooth juicy colours, soft blobs instead of noise, bevelled block edges.
 pub const TOON_PACK: &str = "builtin:toon";
+
+/// Any of the cartoon packs (the main one and its other resolutions).
+pub fn is_toon(id: &str) -> bool {
+    id.starts_with(TOON_PACK)
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackInfo {
@@ -40,7 +47,7 @@ pub struct PackInfo {
 pub fn list(dirs: &[PathBuf]) -> Vec<PackInfo> {
     let mut v: Vec<PackInfo> = BUILTIN
         .iter()
-        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == TOON_PACK { "Основной стиль игры: мультяшные блоки, персонажи и мобы, сочные плоские цвета".into() } else if *f == 1 { "Дополнение: старые пиксельные текстуры".into() } else { format!("Дополнение: старые текстуры, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
+        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == TOON_PACK { "Основной стиль игры: мультяшные блоки, персонажи и мобы, сочные плоские цвета".into() } else if *id == "builtin:toon32" { "Мультяшный для слабых телефонов: меньше памяти, быстрее загрузка".into() } else if *id == "builtin:toon128" { "Мультяшный в высоком разрешении (128×128 на блок): чёткие края, для сильных устройств".into() } else if *f == 1 { "Дополнение: старые пиксельные текстуры".into() } else { format!("Дополнение: старые текстуры, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
         .collect();
     let mut users = Vec::new();
     for dir in dirs {
@@ -250,7 +257,9 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
     for y in 0..n {
         for x in 0..n {
             let mut c = flat[((y * h / n) * w + x * w / n) as usize];
-            if bevel > 0.0 {
+            // Natural ground and foliage stay seamless: facets or a bevel repeat on every
+            // block and make a visible grid over a meadow.
+            if bevel >= 0.3 {
                 // Facets: 2×2 quads, each cut along a diagonal (alternating) into two triangles.
                 let (u, v) = ((x as f32 + 0.5) / n as f32 * 2.0, (y as f32 + 0.5) / n as f32 * 2.0);
                 let (qx, qy) = (u.floor() as u32, v.floor() as u32);

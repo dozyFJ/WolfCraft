@@ -924,7 +924,7 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
         if resp.clicked() && !sel {
             s.texture_pack = pack.id.clone();
             // The cartoon pack looks its best with the cartoon light.
-            if pack.id == wolfcraft_assets::packs::TOON_PACK && s.shaders != 4 {
+            if wolfcraft_assets::packs::is_toon(&pack.id) && s.shaders != 4 {
                 s.apply_shader_preset(4);
             }
             res.changed = true;

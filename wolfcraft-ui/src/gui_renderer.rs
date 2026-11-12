@@ -292,6 +292,11 @@ impl GuiRenderer {
             self.state.egui_input_mut().events.extend(ev);
         }
         let mut platform = output.platform_output;
+        // With our own keyboard the system one must stay hidden: no IME request to the OS
+        // (on Android that is what pops Gboard up).
+        if self.osk_enabled {
+            platform.ime = None;
+        }
         if self.hide_cursor {
             platform.cursor_icon = egui::CursorIcon::None;
         }

@@ -206,7 +206,7 @@ impl AtlasManager {
     /// HD upscale), then the user pack at `user_pack` on top, then loose legacy overrides.
     pub fn load(pack_id: &str, user_pack: Option<&Path>, override_dir: Option<&Path>) -> Result<Self, String> {
         let scale = crate::packs::base_scale(pack_id);
-        let toon = pack_id == crate::packs::TOON_PACK;
+        let toon = crate::packs::is_toon(pack_id);
         let mut atlases = Vec::new();
         for kind in AtlasKind::ALL {
             let mut sprites = procedural::sprites(kind);
