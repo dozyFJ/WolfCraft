@@ -20,7 +20,8 @@ const OFFHAND: usize = 99;
 const ARMOR: usize = 95;
 
 /// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
-const CREATIVE_TABS: [&str; 12] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Техника", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Инвентарь"];
+// "Техника" is put away for now (its items are still under "Все" and in the search).
+const CREATIVE_TABS: [&str; 11] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Инвентарь"];
 const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 
 

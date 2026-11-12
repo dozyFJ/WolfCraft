@@ -1642,6 +1642,91 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    // ---- Furnace, forge, barrel (they took over the slots of the electric machines) ----
+    let stone_px = |x: u32, y: u32, seed: u32| {
+        let cx = (x + (hash(y / 4, 0, seed) % 3)) % 5;
+        let cy = (y + (hash(x / 5, 1, seed) % 2)) % 4;
+        let b = if cx == 0 || cy == 0 { 0.38 } else { 0.56 + (rnd(x / 5, y / 4, seed + 1) - 0.5) * 0.10 };
+        Rgb(b, b, b + 0.01)
+    };
+    l.0[FURNACE_FRONT as usize].1 = p(|q| {
+        // Stone front with a dark fire mouth glowing at the bottom and a vent above.
+        for y in 0..S {
+            for x in 0..S {
+                let mouth = (4..12).contains(&x) && (8..14).contains(&y);
+                let vent = (5..11).contains(&x) && (3..5).contains(&y);
+                let c = if mouth {
+                    let glow = ((y as f32 - 8.0) / 5.0).clamp(0.0, 1.0);
+                    Rgb(0.10, 0.07, 0.06).lerp(Rgb(1.0, 0.55, 0.15), glow * glow * if rnd(x, y, 270) < 0.7 { 1.0 } else { 0.6 })
+                } else if vent {
+                    Rgb(0.16, 0.15, 0.15)
+                } else {
+                    stone_px(x, y, 271)
+                };
+                q.put(x, y, c, 1.0);
+            }
+        }
+        bevel(q, 3, 7, 12, 14, Rgb(0.30, 0.30, 0.31), Rgb(0.70, 0.70, 0.72));
+    });
+    l.0[MACHINE_CASING as usize].1 = p(|q| {
+        // Forge side: an iron rim on top of a stone-brick hearth with glowing coals.
+        for y in 0..S {
+            for x in 0..S {
+                let c = if y < 3 {
+                    Rgb(0.26, 0.27, 0.30).add(if y == 0 { 0.18 } else { 0.0 })
+                } else if (6..11).contains(&y) && (3..13).contains(&x) {
+                    let hot = rnd(x, y, 272);
+                    if y == 6 { Rgb(0.12, 0.08, 0.06) } else { Rgb(0.95, 0.35, 0.08).lerp(Rgb(1.0, 0.85, 0.35), if hot < 0.3 { 1.0 } else { 0.0 }).scale(0.75 + 0.06 * y as f32 / 10.0) }
+                } else {
+                    let brick = (y - 3) % 4 == 0 || (x + if (y - 3) / 4 % 2 == 0 { 0 } else { 4 }) % 8 == 0;
+                    if brick { Rgb(0.32, 0.30, 0.29) } else { Rgb(0.55, 0.40, 0.33).add((rnd(x / 4, y / 4, 273) - 0.5) * 0.08) }
+                };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    });
+    l.0[GENERATOR_FRONT as usize].1 = p(|q| {
+        // Forge top: the anvil's flat working face.
+        for y in 0..S {
+            for x in 0..S {
+                let face = (2..14).contains(&y) && (1..15).contains(&x);
+                let c = if face { Rgb(0.38, 0.39, 0.43).add((rnd(x, y, 274) - 0.5) * 0.05) } else { Rgb(0.22, 0.22, 0.25) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+        bevel(q, 1, 2, 14, 13, Rgb(0.55, 0.56, 0.60), Rgb(0.20, 0.20, 0.23));
+    });
+    l.0[BATTERY_SIDE as usize].1 = p(|q| {
+        // Barrel side: oak staves and two iron hoops.
+        for y in 0..S {
+            for x in 0..S {
+                let hoop = y == 3 || y == 4 || y == 11 || y == 12;
+                let stave = x % 4 == 0;
+                let c = if hoop {
+                    Rgb(0.30, 0.30, 0.33).add(if y == 3 || y == 11 { 0.08 } else { 0.0 })
+                } else {
+                    Rgb(0.58, 0.40, 0.22).add((rnd(x / 4, y, 275) - 0.5) * 0.06 - if stave { 0.10 } else { 0.0 })
+                };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    });
+    l.0[BATTERY_TOP as usize].1 = p(|q| {
+        // Barrel lid: round planks inside an iron ring.
+        for y in 0..S {
+            for x in 0..S {
+                let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+                let c = if d > 7.0 {
+                    Rgb(0.30, 0.30, 0.33)
+                } else if d > 6.0 {
+                    Rgb(0.44, 0.30, 0.17)
+                } else {
+                    Rgb(0.64, 0.46, 0.27).add((rnd(x, y / 4, 276) - 0.5) * 0.06 - if y % 4 == 0 { 0.08 } else { 0.0 })
+                };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    });
     // ---- Farming ----
     l.add(FARMLAND, "farmland", p(|q| {
         // Dark, moist tilled soil in furrows.

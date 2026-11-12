@@ -1501,15 +1501,31 @@ impl App {
                                     }
                                     close_inventory |= dismissed || run;
                                 } else if let Some((pos, block)) = *container {
-                                    let furnace = block == wolfcraft_engine::block::Block::ElectricFurnace;
-                                    let (prog, powered) = s.furnace_status(pos);
-                                    let status_text = if powered { "Плавка" } else { "Нет питания" };
-                                    let accepts = |slot: usize, st: &wolfcraft_engine::items::ItemStack| !furnace || (slot == 0 && wolfcraft_engine::interaction::smelt_result(st.id).is_some());
+                                    use wolfcraft_engine::block::Block as B;
+                                    let furnace = block == B::ElectricFurnace;
+                                    let forge = block == B::MachineCasing;
+                                    let (prog, working) = s.furnace_status(pos);
+                                    let status_text = if working { "Горит: вход · топливо · результат" } else { "Положите руду и топливо (уголь, дрова)" };
+                                    let accepts = |slot: usize, st: &wolfcraft_engine::items::ItemStack| {
+                                        if furnace {
+                                            (slot == 0 && wolfcraft_engine::interaction::smelt_result(st.id).is_some()) || (slot == 1 && wolfcraft_engine::interaction::fuel_time(st.id) > 0.0)
+                                        } else if forge {
+                                            slot < 2
+                                        } else {
+                                            true
+                                        }
+                                    };
                                     let view = wolfcraft_ui::container_ui::ContainerView {
-                                        title: if furnace { "Электропечь" } else { "Сундук" },
-                                        columns: if furnace { 2 } else { 9 },
+                                        title: if furnace { "Печь" } else if forge { "Кузница" } else if block == B::Battery { "Бочка" } else { "Сундук" },
+                                        columns: if furnace || forge { 3 } else { 9 },
                                         accepts: &accepts,
-                                        status: if furnace { Some((status_text, prog)) } else { None },
+                                        status: if furnace {
+                                            Some((status_text, prog))
+                                        } else if forge {
+                                            Some(("Предмет + его материал — ремонт · два одинаковых — склеить · +3 материала уровнем выше — улучшить", 0.0))
+                                        } else {
+                                            None
+                                        },
                                     };
                                     let mut slots = std::mem::take(s.container_slots(pos, block));
                                     let (closed, thrown) = wolfcraft_ui::container_ui::show(ctx, &icons, &view, &mut slots, &mut s.player.inventory);

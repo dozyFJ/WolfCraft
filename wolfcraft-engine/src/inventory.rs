@@ -341,6 +341,10 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::OakPlanks), 2)], (ids::STICK, 4), false, "Дерево"));
         v.push(r(&[(b(Block::OakPlanks), 4)], (b(Block::CraftingTable), 1), false, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 8)], (b(Block::Chest), 1), true, "Строительство"));
+        // Furnace, forge and barrel.
+        v.push(r(&[(b(Block::Cobblestone), 8)], (b(Block::ElectricFurnace), 1), true, "Строительство"));
+        v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
+        v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (ids::SHIELD, 1), true, "Вооружение"));
         v.push(r(&[(b(Block::Stone), 4)], (b(Block::StoneBricks), 4), true, "Строительство"));
         v.push(r(&[(b(Block::Sand), 4)], (b(Block::Sandstone), 1), false, "Строительство"));
@@ -361,13 +365,7 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::COAL, 9)], (b(Block::CoalBlock), 1), true, "Строительство"));
         v.push(r(&[(ids::BRONZE_INGOT, 9)], (b(Block::BronzeBlock), 1), true, "Строительство"));
         // Tech mod: casing, cable, generator, battery, lamp, electric furnace.
-        v.push(r(&[(ids::IRON_INGOT, 4), (ids::TIN_INGOT, 2)], (b(Block::MachineCasing), 1), true, "Техника"));
-        v.push(r(&[(ids::COPPER_INGOT, 1), (ids::COAL, 1)], (b(Block::Cable), 4), true, "Техника"));
-        v.push(r(&[(b(Block::MachineCasing), 1), (ids::COPPER_INGOT, 3), (ids::COAL, 2)], (b(Block::Generator), 1), true, "Техника"));
-        v.push(r(&[(b(Block::MachineCasing), 1), (ids::COPPER_INGOT, 2), (ids::SILVER_INGOT, 1)], (b(Block::Battery), 1), true, "Техника"));
-        v.push(r(&[(b(Block::Glass), 1), (ids::SILVER_INGOT, 1), (b(Block::Cable), 1)], (b(Block::ElectricLamp), 2), true, "Техника"));
-        v.push(r(&[(b(Block::Cable), 2), (ids::IRON_INGOT, 1), (b(Block::Cobblestone), 1)], (b(Block::SwitchOff), 1), true, "Техника"));
-        v.push(r(&[(b(Block::MachineCasing), 1), (b(Block::Cable), 2), (ids::COAL, 4)], (b(Block::ElectricFurnace), 1), true, "Техника"));
+        v.push(r(&[(ids::STICK, 1), (b(Block::Cobblestone), 1)], (b(Block::SwitchOff), 1), false, "Техника"));
         v.push(r(&[(b(Block::Obsidian), 4), (b(Block::Glowstone), 1)], (b(Block::NetherPortal), 1), true, "Строительство"));
         v.push(r(&[(b(Block::Stone), 3)], (b(Block::StoneSlab), 6), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 3)], (b(Block::PlankSlab), 6), true, "Строительство"));
