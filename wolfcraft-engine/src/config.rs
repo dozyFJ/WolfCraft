@@ -328,6 +328,9 @@ pub enum ThemeMode {
     Light,
 }
 
+/// Current version of the default look (see `Settings::migrate`).
+pub const STYLE_VERSION: u32 = 1;
+
 /// Global user settings (`settings.toml` in the data directory).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -356,6 +359,10 @@ pub struct Settings {
     pub fx_grading: bool,
     /// Cartoon look: soft bright light, light shadows, juicy colours, rim light on mobs.
     pub fx_toon: bool,
+    /// Look the settings were last moved to (1: the cartoon style became the default).
+    /// Missing in old files, so they read 0 and get moved once.
+    #[serde(default)]
+    pub style_version: u32,
     /// Mouse up looks down.
     pub invert_y: bool,
     pub ui_scale: f32,
@@ -420,13 +427,14 @@ impl Default for Settings {
             mouse_sensitivity: 1.0,
             camera_smooth: 0.5,
             tap_aim: false,
-            shaders: 1,
-            relief_mode: 1,
+            shaders: 4,
+            relief_mode: 0,
             relief_strength: 1.0,
             fx_wind: true,
             fx_water: true,
             fx_grading: true,
-            fx_toon: false,
+            fx_toon: true,
+            style_version: STYLE_VERSION,
             invert_y: false,
             ui_scale: 1.0,
             theme: ThemeMode::Dark,
@@ -441,7 +449,7 @@ impl Default for Settings {
             volume: 0.6,
             particles: 1.0,
             hand_anim: 1.0,
-            texture_pack: "builtin:16".into(),
+            texture_pack: "builtin:toon".into(),
             refresh_rate: 120,
             servers: Vec::new(),
         }
@@ -453,7 +461,18 @@ impl Settings {
         data_dir.join("settings.toml")
     }
     pub fn load(data_dir: &Path) -> Self {
-        std::fs::read_to_string(Self::path(data_dir)).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default()
+        let mut s: Self = std::fs::read_to_string(Self::path(data_dir)).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default();
+        s.migrate();
+        s
+    }
+
+    /// Moves old settings to the current default look once (the player can switch back).
+    pub fn migrate(&mut self) {
+        if self.style_version < 1 {
+            self.texture_pack = "builtin:toon".into();
+            self.apply_shader_preset(4);
+        }
+        self.style_version = STYLE_VERSION;
     }
     pub fn save(&self, data_dir: &Path) {
         let _ = std::fs::create_dir_all(data_dir);
@@ -466,6 +485,22 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_settings_move_to_the_cartoon_style_once() {
+        let mut s: Settings = toml::from_str("texture_pack = \"builtin:16\"\nshaders = 2\n").unwrap();
+        assert_eq!(s.style_version, 0);
+        s.migrate();
+        assert_eq!(s.texture_pack, "builtin:toon");
+        assert!(s.fx_toon && s.shaders == 4);
+        // A player who picks classic again keeps it.
+        s.texture_pack = "builtin:16".into();
+        s.apply_shader_preset(1);
+        let mut back: Settings = toml::from_str(&toml::to_string(&s).unwrap()).unwrap();
+        back.migrate();
+        assert_eq!(back.texture_pack, "builtin:16");
+        assert!(!back.fx_toon);
+    }
 
     #[test]
     fn config_roundtrip() {

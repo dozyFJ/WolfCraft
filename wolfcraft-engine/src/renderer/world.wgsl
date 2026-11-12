@@ -472,6 +472,8 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
         // Cartoon creatures: two-tone soft light and a bright rim around the silhouette.
         diffuse = smoothstep(0.05, 0.30, diffuse) * 0.8 + diffuse * 0.2;
         light = max(mix(0.20, 0.70 + 0.30 * diffuse, day), 0.24);
+        let bl = dot(base, vec3<f32>(0.2126, 0.7152, 0.0722));
+        base = max(mix(vec3<f32>(bl), base, 1.3), vec3<f32>(0.0));
         let v = normalize(-in.rel);
         rim = pow(1.0 - max(dot(nn, v), 0.0), 3.0) * mix(0.12, 0.38, day);
     }

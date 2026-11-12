@@ -14,14 +14,14 @@ use std::path::{Path, PathBuf};
 
 /// Built-in packs: (id, name, upscale factor).
 pub const BUILTIN: [(&str, &str, u32); 5] = [
-    ("builtin:16", "Классика 16×", 1),
     (TOON_PACK, "Мультяшный 64×", 4),
+    ("builtin:16", "Классика 16×", 1),
     ("builtin:32", "Гладкий HD 32×", 2),
     ("builtin:64", "Гладкий Full HD 64×", 4),
     ("builtin:128", "Гладкий 4K 128×", 8),
 ];
 
-pub const DEFAULT_PACK: &str = "builtin:16";
+pub const DEFAULT_PACK: &str = TOON_PACK;
 
 /// The cartoon pack: smooth juicy colours, soft blobs instead of noise, bevelled block edges.
 pub const TOON_PACK: &str = "builtin:toon";
@@ -230,6 +230,38 @@ pub fn toon(src: &Image, size: u32, bevel: f32) -> Image {
         }
     }
     out
+}
+
+/// Cartoon items: a dark outline around the icon's shape (like a sticker), drawn on the
+/// transparent pixels touching it, in a deep shade of the neighbouring colour.
+pub fn sticker_outline(img: &mut Image) {
+    let (w, h) = (img.width as i32, img.height as i32);
+    let t = (w / 32).max(1);
+    let src = img.clone();
+    for y in 0..h {
+        for x in 0..w {
+            if src.get(x as u32, y as u32)[3] > 40 {
+                continue;
+            }
+            let mut best: Option<[u8; 4]> = None;
+            'n: for dy in -t..=t {
+                for dx in -t..=t {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                        continue;
+                    }
+                    let p = src.get(nx as u32, ny as u32);
+                    if p[3] > 200 {
+                        best = Some(p);
+                        break 'n;
+                    }
+                }
+            }
+            if let Some(p) = best {
+                img.set(x as u32, y as u32, [(p[0] as f32 * 0.28) as u8, (p[1] as f32 * 0.28) as u8, (p[2] as f32 * 0.32) as u8, 255]);
+            }
+        }
+    }
 }
 
 /// How strongly the cartoon pack bevels a block sprite: built blocks (bricks, planks, stone…)

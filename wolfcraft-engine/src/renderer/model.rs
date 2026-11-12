@@ -166,9 +166,22 @@ impl Frame {
     }
 }
 
+/// Cartoon style: creature and hand boxes get rounded (chamfered) edges.
+static ROUNDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Turns the rounded cartoon shapes of creatures, players and hands on or off.
+pub fn set_rounded(on: bool) {
+    ROUNDED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Appends an axis-aligned (in the character's local frame) box, optionally rotated about the
 /// local X axis (the "right" axis) around `pivot` by `angle` radians.
 fn add_box(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: Vec3, angle: f32, color: [f32; 3]) {
+    add_box_r(out, f, min, max, pivot, angle, color, ROUNDED.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_box_r(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: Vec3, angle: f32, color: [f32; 3], rounded: bool) {
     let (s, c) = angle.sin_cos();
     let rot = |p: Vec3| -> Vec3 {
         let d = p - pivot;
@@ -188,6 +201,26 @@ fn add_box(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: V
     ];
     let skin = textures().and_then(|t| t.player).zip(skin_rows(color));
     let size = max - min;
+    // Cartoon style: chamfered edges, radius from the part's thinnest side (thin overlays stay sharp).
+    let round = (rounded && size.min_element() >= 0.05).then(|| (size.min_element() * 0.26).min(0.08));
+    let centre = (min + max) * 0.5;
+    let half = size * 0.5;
+    // Box corner as signs (-1/+1 per axis) and its point pulled in by `r` on every axis but `axis`.
+    let corner_sign = |(x, y, z): (bool, bool, bool)| Vec3::new(if x { 1.0 } else { -1.0 }, if y { 1.0 } else { -1.0 }, if z { 1.0 } else { -1.0 });
+    let inset_s = |s: Vec3, axis: usize, r: f32| {
+        let mut p = centre + s * half;
+        for k in 0..3 {
+            if k != axis {
+                p[k] -= s[k] * r;
+            }
+        }
+        p
+    };
+    let inset = |q: (bool, bool, bool), axis: usize, r: f32| inset_s(corner_sign(q), axis, r);
+    let sign_index = |s: Vec3| (s.x > 0.0) as usize | ((s.y > 0.0) as usize) << 1 | ((s.z > 0.0) as usize) << 2;
+    let corner_index = |q: (bool, bool, bool)| sign_index(corner_sign(q));
+    let mut face_uv = [[[0.0f32; 2]; 8]; 6];
+    let mut face_tex = [0.0f32; 6];
     for (fi, (n, quad)) in faces.into_iter().enumerate() {
         let nw = f.dir(rot_n(n)).normalize_or_zero();
         let v: Vec<[f32; 3]> = quad.iter().map(|(x, y, z)| f.to_world(rot(corners(*x, *y, *z))).as_vec3().to_array()).collect();
@@ -222,10 +255,72 @@ fn add_box(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: V
                 (0.0, [uv_of(quad[0]), uv_of(quad[1]), uv_of(quad[2]), uv_of(quad[3])])
             }
         };
+        if let Some(r) = round {
+            for (qi, q) in quad.iter().enumerate() {
+                face_uv[fi][corner_index(*q)] = uvs[qi];
+            }
+            face_tex[fi] = tex;
+            // Inset face: each corner pulled in by `r` along the face's own plane, with a normal
+            // leaning a little towards the corner so the face shades like a soft cushion.
+            let axis = fi / 2;
+            let pts: Vec<Vec3> = quad.iter().map(|q| inset(*q, axis, r)).collect();
+            for idx in [0usize, 2, 1, 0, 3, 2] {
+                let s = corner_sign(quad[idx]);
+                let ln = (n + s * 0.35).normalize();
+                let p = f.to_world(rot(pts[idx])).as_vec3().to_array();
+                out.push(ModelVertex { pos: p, normal: f.dir(rot_n(ln)).normalize_or_zero().to_array(), color, uv: uvs[idx], tex });
+            }
+            continue;
+        }
         // (right, up, forward) is a left-handed frame, so the winding is mirrored.
         for idx in [0usize, 2, 1, 0, 3, 2] {
             out.push(ModelVertex { pos: v[idx], normal: nw.to_array(), color, uv: uvs[idx], tex });
         }
+    }
+    let Some(r) = round else { return };
+    // Rounded edges: a bevel strip between every two neighbouring faces and a small triangle
+    // at every corner, with normals that blend between the faces (smooth, toy-like shading).
+    let mut tri = |pts: &[(Vec3, Vec3, [f32; 2])], tex: f32| {
+        // Make the local winding counter-clockwise from outside, then mirror it like the faces.
+        let (a, b, c) = (pts[0].0, pts[1].0, pts[2].0);
+        let outward = pts.iter().map(|p| p.1).sum::<Vec3>();
+        let ccw = (b - a).cross(c - a).dot(outward) >= 0.0;
+        let order: [usize; 3] = if ccw { [0, 2, 1] } else { [0, 1, 2] };
+        for i in order {
+            let (p, nl, uv) = pts[i];
+            out.push(ModelVertex { pos: f.to_world(rot(p)).as_vec3().to_array(), normal: f.dir(rot_n(nl)).normalize_or_zero().to_array(), color, uv, tex });
+        }
+    };
+    let face_n = |axis: usize, s: f32| { let mut v = Vec3::ZERO; v[axis] = s; v };
+    for a in 0..3 {
+        for b in (a + 1)..3 {
+            let c = 3 - a - b;
+            for sa in [-1.0f32, 1.0] {
+                for sb in [-1.0f32, 1.0] {
+                    let fa = a * 2 + (sa < 0.0) as usize;
+                    let fb = b * 2 + (sb < 0.0) as usize;
+                    let corner = |sc: f32| { let mut s = Vec3::ZERO; s[a] = sa; s[b] = sb; s[c] = sc; s };
+                    let (c0, c1) = (corner(-1.0), corner(1.0));
+                    let (na, nb) = (face_n(a, sa), face_n(b, sb));
+                    let mid = (na + nb).normalize();
+                    let uv0 = face_uv[fa][sign_index(c0)];
+                    let uv1 = face_uv[fa][sign_index(c1)];
+                    let p = |s: Vec3, axis: usize| inset_s(s, axis, r);
+                    let blend = |nf: Vec3, s: Vec3| (nf * 0.6 + mid * 0.6 + s * 0.2).normalize();
+                    let q = [(p(c0, a), blend(na, c0), uv0), (p(c1, a), blend(na, c1), uv1), (p(c1, b), blend(nb, c1), uv1), (p(c0, b), blend(nb, c0), uv0)];
+                    tri(&[q[0], q[1], q[2]], face_tex[fa]);
+                    tri(&[q[0], q[2], q[3]], face_tex[fa]);
+                }
+            }
+        }
+    }
+    for i in 0..8 {
+        let s = Vec3::new(if i & 1 != 0 { 1.0 } else { -1.0 }, if i & 2 != 0 { 1.0 } else { -1.0 }, if i & 4 != 0 { 1.0 } else { -1.0 });
+        let fx = (s.x < 0.0) as usize;
+        let uv = face_uv[fx][sign_index(s)];
+        let nc = s.normalize();
+        let pts: Vec<(Vec3, Vec3, [f32; 2])> = (0..3).map(|axis| (inset_s(s, axis, r), (face_n(axis, s[axis]) * 0.5 + nc).normalize(), uv)).collect();
+        tri(&pts, face_tex[fx]);
     }
 }
 
@@ -1058,6 +1153,29 @@ mod tests {
             }
             assert!(n.dot(Vec3::from(t[0].normal)) > 0.99, "inside-out triangle");
         }
+    }
+
+    #[test]
+    fn rounded_boxes_are_closed_and_face_outwards() {
+        let frame = Frame { origin: DVec3::new(1.0, 2.0, 3.0), right: DVec3::X, up: DVec3::Y, fwd: DVec3::Z };
+        let (min, max) = (Vec3::new(-0.3, 0.0, -0.2), Vec3::new(0.3, 0.8, 0.25));
+        let mut v = Vec::new();
+        add_box_r(&mut v, &frame, min, max, Vec3::ZERO, 0.3, [0.5; 3], true);
+        assert_eq!(v.len(), (6 * 2 + 12 * 2 + 8) * 3, "faces, edge strips and corners");
+        let c = v.iter().fold(Vec3::ZERO, |a, x| a + Vec3::from(x.pos)) / v.len() as f32;
+        for t in v.chunks(3) {
+            let (a, b, cc) = (Vec3::from(t[0].pos), Vec3::from(t[1].pos), Vec3::from(t[2].pos));
+            // Left-handed frame: the mirrored winding gives the outward normal as (c-a)x(b-a).
+            let n = (cc - a).cross(b - a).normalize_or_zero();
+            let mid = (a + b + cc) / 3.0;
+            assert!(n.dot(mid - c) > 0.0, "every triangle faces away from the centre");
+            for x in t {
+                assert!(Vec3::from(x.normal).dot(n) > 0.3, "smooth normals lean the same way");
+            }
+        }
+        // The silhouette keeps the box's size.
+        let ext = v.iter().fold(f32::MIN, |m, x| m.max(Vec3::from(x.pos).x - 1.0));
+        assert!((ext - 0.3).abs() < 1e-4);
     }
 
     #[test]

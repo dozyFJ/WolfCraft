@@ -219,6 +219,9 @@ impl AtlasManager {
                             crate::packs::vibrant(img);
                             crate::packs::vibrant(img);
                             *img = crate::packs::upscale(img, scale);
+                            if kind == AtlasKind::Items {
+                                crate::packs::sticker_outline(img);
+                            }
                         }
                         continue;
                     }
