@@ -381,6 +381,57 @@ pub fn game_screen(ctx: &egui::Context, id: &str, title: &str, width: f32, add: 
     dismissed
 }
 
+/// A block's own window (chest, furnace, forge…): no top bar, just a slightly rounded card
+/// in the middle of the dimmed world. A tap outside the card or the round ✕ on its corner
+/// closes it. Returns true when dismissed.
+pub fn block_screen(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+    let p: Palette = palette(ctx);
+    let screen = ctx.screen_rect();
+    let mut dismissed = false;
+    let scrim = egui::Area::new(Id::new(id).with("screen")).order(egui::Order::Foreground).fixed_pos(screen.min).fade_in(false).show(ctx, |ui| {
+        let (rect, resp) = ui.allocate_exact_size(screen.size(), Sense::click());
+        ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(110));
+        resp.clicked()
+    });
+    let body = egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, Vec2::ZERO).fade_in(false).show(ctx, |ui| {
+        Frame::none()
+            .fill(p.surface)
+            .rounding(Rounding::same(10.0))
+            .stroke(Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22)))
+            .inner_margin(Margin::same(14.0))
+            .show(ui, |ui| {
+                ui.set_width(width);
+                let max_h = screen.height() - 2.0 * 14.0 - 20.0;
+                egui::ScrollArea::vertical().id_salt(Id::new(id).with("scroll")).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+                    add(ui);
+                });
+            });
+    });
+    let card = body.response.rect;
+    // Round close button riding on the card's top-right corner.
+    let c = Pos2::new((card.right() + 4.0).min(screen.right() - 20.0), (card.top() - 4.0).max(screen.top() + 20.0));
+    egui::Area::new(Id::new(id).with("close")).order(egui::Order::Tooltip).fixed_pos(c - Vec2::splat(17.0)).fade_in(false).show(ctx, |ui| {
+        let (r, resp) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
+        let fill = if resp.hovered() || resp.is_pointer_button_down_on() { Color32::from_rgb(200, 70, 60) } else { Color32::from_rgb(72, 72, 76) };
+        ui.painter().circle_filled(r.center(), 16.0, fill);
+        ui.painter().circle_stroke(r.center(), 16.0, Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22)));
+        for (a, b) in [(Vec2::new(-5.5, -5.5), Vec2::new(5.5, 5.5)), (Vec2::new(-5.5, 5.5), Vec2::new(5.5, -5.5))] {
+            ui.painter().line_segment([r.center() + a, r.center() + b], Stroke::new(2.5_f32, Color32::WHITE));
+        }
+        if resp.clicked() {
+            dismissed = true;
+        }
+    });
+    // A tap on the dimmed world (not on the card) closes too.
+    if scrim.inner && !ctx.input(|i| i.pointer.interact_pos()).is_some_and(|q| card.expand(8.0).contains(q)) {
+        dismissed = true;
+    }
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        dismissed = true;
+    }
+    dismissed
+}
+
 fn modal_opts(ctx: &egui::Context, id: &str, title: &str, width: f32, scrim: bool, add: impl FnOnce(&mut Ui)) -> bool {
     let p: Palette = palette(ctx);
     let screen = ctx.screen_rect();

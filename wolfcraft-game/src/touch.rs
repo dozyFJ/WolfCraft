@@ -101,7 +101,8 @@ pub const STICK_R: f32 = 110.0;
 
 /// Pixel size of the controls scales with the screen height.
 fn unit(size: (u32, u32)) -> f32 {
-    (size.1 as f32 / 720.0).clamp(0.8, 2.2)
+    // Narrow views (the upright studio) shrink the controls so both thumbs' clusters fit.
+    (size.1 as f32 / 720.0).min(size.0 as f32 / 1100.0).clamp(0.55, 2.2)
 }
 
 /// (centre x, centre y, radius) of a button, in physical pixels.
