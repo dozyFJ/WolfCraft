@@ -734,37 +734,39 @@ const FIST_ANIM: &[AnimKey] = &[
 /// Tool strikes, every one starts and ends at rest so a swing blends in from the idle pose and
 /// repeats without a jump while mining. Order: pickaxe, axe, shovel, sword.
 const TOOL_ANIMS: [&[AnimKey]; 4] = [
-    // Pickaxe: lifted over the shoulder, hard downward blow into the ore, a little rebound.
+    // Pickaxe: raised high over the shoulder, a heavy blow down into the block, a jolt from
+    // the impact, then back.
     &[
         key(0.00, REST, REST, REST, REST, REST, REST),
-        key(0.28, 0.00, 0.08, 0.00, -0.70, 0.05, 0.00),
-        key(0.50, -0.07, -0.02, 0.12, 0.42, 0.25, 0.10),
-        key(0.58, -0.07, 0.00, 0.10, 0.30, 0.22, 0.08),
-        key(0.68, -0.07, -0.02, 0.10, 0.36, 0.22, 0.08),
+        key(0.28, 0.02, 0.12, -0.04, -1.05, 0.05, 0.00),
+        key(0.48, -0.07, -0.05, 0.15, 0.62, 0.24, 0.10),
+        key(0.56, -0.07, -0.03, 0.13, 0.50, 0.22, 0.08),
+        key(0.66, -0.07, -0.04, 0.13, 0.56, 0.22, 0.08),
         key(1.00, REST, REST, REST, REST, REST, REST),
     ],
-    // Axe: chop on a diagonal from the upper right to the lower left.
+    // Axe: wide chop on a diagonal from the upper right to the lower left.
     &[
         key(0.00, REST, REST, REST, REST, REST, REST),
-        key(0.28, 0.06, 0.08, 0.00, -0.65, -0.20, -0.25),
-        key(0.50, -0.14, -0.03, 0.10, 0.40, 0.40, 0.35),
-        key(0.64, -0.14, -0.04, 0.09, 0.34, 0.36, 0.30),
+        key(0.28, 0.08, 0.12, -0.03, -1.00, -0.30, -0.35),
+        key(0.48, -0.16, -0.05, 0.13, 0.60, 0.50, 0.45),
+        key(0.62, -0.16, -0.05, 0.11, 0.52, 0.46, 0.40),
         key(1.00, REST, REST, REST, REST, REST, REST),
     ],
-    // Shovel: pull back, a digging thrust forward and down, then scoop up.
+    // Shovel: lifted, driven down into the ground blade first, then a scoop up and back.
     &[
         key(0.00, REST, REST, REST, REST, REST, REST),
-        key(0.30, 0.01, 0.03, -0.08, -0.20, 0.00, 0.00),
-        key(0.50, -0.04, -0.05, 0.19, 0.38, 0.15, 0.00),
-        key(0.66, -0.02, -0.04, 0.14, 0.05, 0.08, 0.00),
+        key(0.26, 0.00, 0.08, -0.06, -0.55, 0.00, 0.00),
+        key(0.48, -0.05, -0.06, 0.18, 0.72, 0.14, 0.05),
+        key(0.62, -0.05, -0.05, 0.17, 0.66, 0.14, 0.05),
+        key(0.80, -0.02, 0.02, 0.06, -0.35, 0.05, 0.00),
         key(1.00, REST, REST, REST, REST, REST, REST),
     ],
-    // Sword: quick diagonal slash across the view.
+    // Sword: wide diagonal slash across the view.
     &[
         key(0.00, REST, REST, REST, REST, REST, REST),
-        key(0.22, 0.06, 0.07, 0.00, -0.50, -0.30, -0.30),
-        key(0.45, -0.20, -0.03, 0.10, 0.32, 0.75, 0.45),
-        key(0.60, -0.20, -0.04, 0.08, 0.26, 0.70, 0.40),
+        key(0.22, 0.08, 0.10, -0.02, -0.65, -0.35, -0.35),
+        key(0.45, -0.24, -0.06, 0.12, 0.55, 0.85, 0.55),
+        key(0.60, -0.24, -0.07, 0.10, 0.48, 0.80, 0.50),
         key(1.00, REST, REST, REST, REST, REST, REST),
     ],
 ];
@@ -975,9 +977,9 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
         let start = v.len();
         let (pivot, angle) = (a.pos, a.tilt);
         let (x, y, z) = (pivot.x, pivot.y, pivot.z);
-        // A held item replaces the hand: only empty hands are drawn as arms.
-        let item_in_hand = if side > 0.0 { pose.holding } else { pose.shield };
-        if !item_in_hand {
+        // Both arms are always built (the left one rests below the screen unless it carries a
+        // shield); the right one grips the held item, like in Minecraft.
+        {
             // Square arm like the third-person body: sleeve with a slightly wider hand.
             add_box(&mut v, &frame, Vec3::new(x - 0.07, y - 0.07, z), Vec3::new(x + 0.07, y + 0.07, z + 0.26), pivot, angle, sleeve_c);
             add_box(&mut v, &frame, Vec3::new(x - 0.075, y - 0.075, z + 0.25), Vec3::new(x + 0.075, y + 0.075, z + 0.36), pivot, angle, skin_c);
@@ -1011,16 +1013,16 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         // Minecraft grip. Our tool icons run from the handle (bottom-right pixel) to the head
         // (top-left). `d` is that diagonal in the view: up, forward and a bit right; the flat
         // side looks back towards the camera at about 45°.
-        let d = Vec3::new(0.60, 0.80, 0.30).normalize();
-        let to_cam = Vec3::new(-1.0, 0.05, -0.75).normalize();
+        let d = Vec3::new(-0.22, 0.92, 0.32).normalize();
+        let to_cam = Vec3::new(-0.55, 0.0, -1.0).normalize();
         let to_cam = (to_cam - d * d.dot(to_cam)).normalize();
         let e = d.cross(to_cam);
         let u = (e - d).normalize();
         let w = (e + d).normalize();
         let n = u.cross(w).normalize();
-        let s = 0.52;
+        let s = 0.46;
         // The grip pixel (12.5, 12.5 from the top-left) sits in the fist.
-        let o = f + Vec3::new(-0.12, -0.04, 0.06) - u * (s * 0.78) - w * (s * 0.22);
+        let o = f + Vec3::new(-0.01, 0.03, 0.02) - u * (s * 0.78) - w * (s * 0.22);
         add_voxel_icon(v, frame, &px, o, u, w, n, s, pivot, angle);
         return;
     }

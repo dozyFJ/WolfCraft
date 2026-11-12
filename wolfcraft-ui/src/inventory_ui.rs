@@ -171,6 +171,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
             result.close = true;
         }
     } else {
+    // The table window is wider: the recipe book sits next to the grid.
+    let left_w = if near_table { left_w + 160.0 } else { left_w };
     let width = left_w + 8.0;
     let title = if near_table { "Верстак" } else { "Инвентарь" };
     let dismissed = crate::ui_components::game_screen(ctx, "inventory", title, width.min(ctx.screen_rect().width() - 40.0), |ui| {
@@ -277,6 +279,22 @@ fn draw_slot(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUi
 fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, near_table: bool, width: f32, slot_rects: &mut Vec<(usize, Rect)>) -> Option<String> {
     let mut crafted = None;
     ui.set_width(width);
+    if near_table {
+        // The crafting table has its own screen: a recipe book on the left (tap a recipe to
+        // lay it out), the big 3×3 grid on the right; no character panel.
+        ui.horizontal_top(|ui| {
+            let grid_w = 3.0 * (CELL + GAP) + 28.0 + 24.0 + CELL + 8.0 + 8.0;
+            let book_w = (width - grid_w - 24.0).max(CELL * 2.0);
+            ui.vertical(|ui| {
+                ui.set_width(book_w);
+                recipe_book(ui, icons, p, state, inv, book_w);
+            });
+            ui.add_space(24.0);
+            ui.vertical(|ui| {
+                crafted = crafting_grid(ui, icons, p, state, inv, near_table, slot_rects);
+            });
+        });
+    } else {
     ui.horizontal_top(|ui| {
         // ---- Character ----
         ui.vertical(|ui| {
@@ -301,7 +319,8 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 let (r, _) = ui.allocate_exact_size(Vec2::new(h * 0.62, h), Sense::hover());
                 ui.painter().rect_filled(r, Rounding::ZERO, p.surface_hi);
                 ui.painter().rect_stroke(r, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-                paint_character(ui.painter(), r.shrink(10.0), inv.offhand.is_some_and(|s| s.id == items::ids::SHIELD));
+                let armor = inv.armor.map(|s| s.map(|s| (s.id.saturating_sub(items::ids::ARMOR_BASE) / 4) as u8));
+                paint_character(ui.painter(), r.shrink(10.0), inv.offhand.is_some_and(|s| s.id == items::ids::SHIELD), armor);
                 ui.add_space(GAP);
                 ui.vertical(|ui| {
                     ui.add_space(h - CELL - 16.0);
@@ -318,6 +337,7 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
             crafted = crafting_grid(ui, icons, p, state, inv, near_table, slot_rects);
         });
     });
+    }
     ui.add_space(12.0);
     section_label(ui, "Рюкзак");
     ui.add_space(4.0);
@@ -347,7 +367,45 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
 }
 
 /// Blocky front view of the player, in the skin's colours.
-fn paint_character(painter: &egui::Painter, r: Rect, shield: bool) {
+/// Recipe book of the crafting table: every recipe as a tile, the ones the backpack can make
+/// first and bright, the rest dimmed. A tap lays the recipe out in the grid.
+fn recipe_book(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, width: f32) {
+    use wolfcraft_engine::inventory::recipes;
+    section_label(ui, "Рецепты");
+    ui.add_space(4.0);
+    let cell = CELL * 0.85;
+    let per_row = ((width + GAP) / (cell + GAP)).floor().max(1.0) as usize;
+    let mut list: Vec<(&'static wolfcraft_engine::inventory::Recipe, bool)> = recipes().iter().map(|r| (r, state.grid.can_fill(r, inv))).collect();
+    // Craftable first, then by category; stable within.
+    list.sort_by_key(|(r, ok)| (!ok, r.category));
+    let can = list.iter().filter(|x| x.1).count();
+    ui.label(egui::RichText::new(format!("Можно сделать: {can} из {}", list.len())).size(12.0).color(p.text_muted));
+    ui.add_space(4.0);
+    egui::ScrollArea::vertical().id_salt("recipe-book").max_height(3.0 * (CELL + GAP) + 6.0).auto_shrink([false, true]).show(ui, |ui| {
+        for (row_i, row) in list.chunks(per_row).enumerate() {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::splat(GAP);
+                for (i, (r, ok)) in row.iter().enumerate() {
+                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
+                    let out = ItemStack::new(r.output.0, r.output.1);
+                    let picked = state.grid.prefer == Some(r.output) && state.grid.matched().is_some_and(|m| m.output == r.output);
+                    let resp = slot_widget(ui, icons, p, rect, Some(&out), picked, Id::new(("recipe", row_i, i)), Sense::click());
+                    if !ok {
+                        ui.painter().rect_filled(rect, Rounding::ZERO, Color32::from_black_alpha(140));
+                    }
+                    let need: Vec<String> = CraftGrid::needs(r).iter().map(|(id, n)| format!("{} ×{n}", ItemStack::new(*id, 1).info().name)).collect();
+                    let tip = format!("{}{}\n{}", r.name(), if r.output.1 > 1 { format!(" ×{}", r.output.1) } else { String::new() }, need.join(", "));
+                    let resp = resp.on_hover_text(if *ok { tip } else { format!("{tip}\nНе хватает предметов") });
+                    if resp.clicked() && *ok {
+                        state.grid.fill_from(r, inv);
+                    }
+                }
+            });
+        }
+    });
+}
+
+fn paint_character(painter: &egui::Painter, r: Rect, shield: bool, armor: [Option<u8>; 4]) {
     let c = |r: f32, g: f32, b: f32| Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8);
     let (skin, hair, jacket, sleeve, belt, trousers, boots, eye) = (
         c(0.86, 0.68, 0.55),
@@ -377,6 +435,41 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool) {
     b(8.0, 20.0, 4.0, 9.0, trousers);
     b(4.0, 29.0, 4.0, 3.0, boots);
     b(8.0, 29.0, 4.0, 3.0, boots);
+    // Worn armour over the clothes, in the material's colour with a lighter rim on top.
+    let ac = |m: u8| {
+        let v = wolfcraft_engine::renderer::model::armor_color(m);
+        c(v[0].min(1.0), v[1].min(1.0), v[2].min(1.0))
+    };
+    let lit = |col: Color32| Color32::from_rgb(col.r().saturating_add(40), col.g().saturating_add(40), col.b().saturating_add(40));
+    let dark = |col: Color32| Color32::from_rgb((col.r() as f32 * 0.7) as u8, (col.g() as f32 * 0.7) as u8, (col.b() as f32 * 0.7) as u8);
+    if let Some(m) = armor[0] {
+        let a = ac(m);
+        b(3.5, -0.5, 9.0, 3.5, a);
+        b(3.5, -0.5, 1.5, 7.0, a);
+        b(11.0, -0.5, 1.5, 7.0, a);
+        b(3.5, -0.5, 9.0, 1.0, lit(a));
+    }
+    if let Some(m) = armor[1] {
+        let a = ac(m);
+        b(3.5, 7.5, 9.0, 11.0, a);
+        b(-0.5, 7.5, 4.5, 5.0, a);
+        b(12.0, 7.5, 4.5, 5.0, a);
+        b(3.5, 7.5, 9.0, 1.0, lit(a));
+        b(7.5, 9.0, 1.0, 9.0, dark(a));
+    }
+    if let Some(m) = armor[2] {
+        let a = ac(m);
+        b(3.5, 18.0, 9.0, 2.5, a);
+        b(3.5, 20.0, 4.3, 7.0, a);
+        b(8.2, 20.0, 4.3, 7.0, a);
+        b(3.5, 18.0, 9.0, 0.8, lit(a));
+    }
+    if let Some(m) = armor[3] {
+        let a = ac(m);
+        b(3.5, 28.0, 4.6, 4.2, a);
+        b(7.9, 28.0, 4.6, 4.2, a);
+        b(3.5, 28.0, 9.0, 0.8, lit(a));
+    }
     if shield {
         // Shield on the character's left arm (viewer's right).
         b(11.0, 11.0, 5.5, 8.0, c(0.62, 0.64, 0.68));

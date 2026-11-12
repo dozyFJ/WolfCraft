@@ -415,11 +415,13 @@ pub fn recipes() -> &'static [Recipe] {
 pub struct CraftGrid {
     pub cells: [Option<ItemStack>; 9],
     pub size: usize,
+    /// Output picked in the recipe book: wins when several recipes share the same layout.
+    pub prefer: Option<(ItemId, u8)>,
 }
 
 impl Default for CraftGrid {
     fn default() -> Self {
-        Self { cells: [None; 9], size: 2 }
+        Self { cells: [None; 9], size: 2, prefer: None }
     }
 }
 
@@ -471,7 +473,7 @@ impl CraftGrid {
             }
         }
         counts.sort();
-        recipes().iter().find(|r| {
+        let mut found = recipes().iter().filter(|r| {
             if r.needs_table && self.size < 3 {
                 return false;
             }
@@ -485,7 +487,7 @@ impl CraftGrid {
                             }
                         }
                         c
-                    }, size: 3 };
+                    }, size: 3, prefer: None };
                     g.trimmed() == grid
                 }
                 None => {
@@ -494,7 +496,88 @@ impl CraftGrid {
                     want == counts
                 }
             }
+        });
+        let first = found.next()?;
+        match self.prefer {
+            Some(out) if first.output != out => Some(found.find(|r| r.output == out).unwrap_or(first)),
+            _ => Some(first),
+        }
+    }
+
+    /// Items a recipe takes from the inventory to be laid out once: (item, count).
+    pub fn needs(r: &Recipe) -> Vec<(ItemId, u32)> {
+        let mut v: Vec<(ItemId, u32)> = Vec::new();
+        let mut add = |id: ItemId, n: u32| match v.iter_mut().find(|(i, _)| *i == id) {
+            Some((_, c)) => *c += n,
+            None => v.push((id, n)),
+        };
+        match &r.shape {
+            Some(shape) => shape.iter().flatten().flatten().for_each(|id| add(*id, 1)),
+            None => r.ingredients.iter().for_each(|(id, n)| add(*id, *n as u32)),
+        }
+        v
+    }
+
+    /// True when the inventory (plus what is already in the grid) holds everything for `r`
+    /// and the grid is big enough.
+    pub fn can_fill(&self, r: &Recipe, inv: &Inventory) -> bool {
+        if r.needs_table && self.size < 3 {
+            return false;
+        }
+        let cells: u32 = Self::needs(r).iter().map(|n| n.1).sum();
+        if cells as usize > self.size * self.size {
+            return false;
+        }
+        Self::needs(r).iter().all(|(id, n)| {
+            let in_grid: u32 = self.cells.iter().flatten().filter(|s| s.id == *id).map(|s| s.count as u32).sum();
+            inv.count(*id) + in_grid >= *n
         })
+    }
+
+    /// Recipe book: puts the grid back into the inventory and lays out `r` from it (the
+    /// pattern for shaped recipes, one item per cell for shapeless ones). Returns false and
+    /// changes nothing when the items or the space are missing.
+    pub fn fill_from(&mut self, r: &Recipe, inv: &mut Inventory) -> bool {
+        if !self.can_fill(r, inv) {
+            return false;
+        }
+        for s in self.return_all(inv) {
+            // Did not fit back (full inventory): keep it in the grid's first free cell.
+            if let Some(c) = self.cells.iter_mut().find(|c| c.is_none()) {
+                *c = Some(s);
+            }
+        }
+        if self.cells.iter().any(|c| c.is_some()) {
+            return false;
+        }
+        self.prefer = Some(r.output);
+        let cells = self.active();
+        let mut put = |cell: usize, id: ItemId, inv: &mut Inventory| {
+            if inv.take(id, 1) == 1 {
+                self.cells[cell] = Some(ItemStack::new(id, 1));
+            }
+        };
+        match &r.shape {
+            Some(shape) => {
+                for (ri, row) in shape.iter().enumerate() {
+                    for (ci, id) in row.iter().enumerate() {
+                        if let Some(id) = id {
+                            put(ri * 3 + ci, *id, inv);
+                        }
+                    }
+                }
+            }
+            None => {
+                let mut k = 0;
+                for (id, n) in &r.ingredients {
+                    for _ in 0..*n {
+                        put(cells[k], *id, inv);
+                        k += 1;
+                    }
+                }
+            }
+        }
+        true
     }
 
     /// Crafts once: uses one item from every filled cell and returns the result.
@@ -515,6 +598,34 @@ impl CraftGrid {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recipe_book_lays_out_every_craftable_recipe() {
+        let mut inv = Inventory::default();
+        for (id, n) in [(Block::OakPlanks as ItemId, 64), (ids::STICK, 64), (Block::Cobblestone as ItemId, 64), (ids::STRING, 16), (ids::COAL, 8), (ids::FLINT, 4)] {
+            inv.add(ItemStack::new(id, n));
+        }
+        let mut done = 0;
+        for r in recipes() {
+            let mut g = CraftGrid { size: 3, ..Default::default() };
+            if !g.can_fill(r, &inv) {
+                continue;
+            }
+            let before = inv.clone();
+            assert!(g.fill_from(r, &mut inv));
+            assert_eq!(g.matched().map(|m| m.output), Some(r.output), "{} forms its own recipe", r.name());
+            g.return_all(&mut inv);
+            assert_eq!(inv.count(ids::STICK), before.count(ids::STICK));
+            done += 1;
+        }
+        assert!(done >= 10, "many recipes are craftable ({done})");
+        // Not enough: nothing changes.
+        let mut empty = Inventory::default();
+        let mut g = CraftGrid { size: 3, ..Default::default() };
+        let r = recipes().iter().find(|r| r.output.0 == Block::CraftingTable as ItemId).unwrap();
+        assert!(!g.fill_from(r, &mut empty));
+        assert!(g.cells.iter().all(|c| c.is_none()));
+    }
 
     #[test]
     fn add_stacks_and_overflow() {

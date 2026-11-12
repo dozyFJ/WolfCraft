@@ -232,38 +232,6 @@ pub fn toon(src: &Image, size: u32, bevel: f32) -> Image {
     out
 }
 
-/// Cartoon items: a dark outline around the icon's shape (like a sticker), drawn on the
-/// transparent pixels touching it, in a deep shade of the neighbouring colour.
-pub fn sticker_outline(img: &mut Image) {
-    let (w, h) = (img.width as i32, img.height as i32);
-    let t = (w / 32).max(1);
-    let src = img.clone();
-    for y in 0..h {
-        for x in 0..w {
-            if src.get(x as u32, y as u32)[3] > 40 {
-                continue;
-            }
-            let mut best: Option<[u8; 4]> = None;
-            'n: for dy in -t..=t {
-                for dx in -t..=t {
-                    let (nx, ny) = (x + dx, y + dy);
-                    if nx < 0 || ny < 0 || nx >= w || ny >= h {
-                        continue;
-                    }
-                    let p = src.get(nx as u32, ny as u32);
-                    if p[3] > 200 {
-                        best = Some(p);
-                        break 'n;
-                    }
-                }
-            }
-            if let Some(p) = best {
-                img.set(x as u32, y as u32, [(p[0] as f32 * 0.28) as u8, (p[1] as f32 * 0.28) as u8, (p[2] as f32 * 0.32) as u8, 255]);
-            }
-        }
-    }
-}
-
 /// How strongly the cartoon pack bevels a block sprite: built blocks (bricks, planks, stone…)
 /// get the full chunky bevel with an outline, natural ground and plants only a faint one so
 /// terrain flows smoothly instead of looking like floor tiles, liquids none.
