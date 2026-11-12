@@ -11,11 +11,18 @@ pub enum MobKind {
     Crawler,
     Boar,
     Sheep,
+    Cow,
+    Chicken,
+    Wolf,
+    Slime,
 }
+
+/// Every kind of creature (spawn souls, tests).
+pub const ALL_MOBS: [MobKind; 8] = [MobKind::Ghoul, MobKind::Crawler, MobKind::Boar, MobKind::Sheep, MobKind::Cow, MobKind::Chicken, MobKind::Wolf, MobKind::Slime];
 
 impl MobKind {
     pub fn hostile(self) -> bool {
-        matches!(self, MobKind::Ghoul | MobKind::Crawler)
+        matches!(self, MobKind::Ghoul | MobKind::Crawler | MobKind::Wolf | MobKind::Slime)
     }
     pub fn name(self) -> &'static str {
         match self {
@@ -23,6 +30,10 @@ impl MobKind {
             MobKind::Crawler => "Ползун",
             MobKind::Boar => "Кабан",
             MobKind::Sheep => "Овца",
+            MobKind::Cow => "Корова",
+            MobKind::Chicken => "Курица",
+            MobKind::Wolf => "Волк",
+            MobKind::Slime => "Слизень",
         }
     }
     pub fn max_hp(self) -> f32 {
@@ -31,6 +42,10 @@ impl MobKind {
             MobKind::Crawler => 12.0,
             MobKind::Boar => 10.0,
             MobKind::Sheep => 8.0,
+            MobKind::Cow => 10.0,
+            MobKind::Chicken => 4.0,
+            MobKind::Wolf => 12.0,
+            MobKind::Slime => 10.0,
         }
     }
     /// Walking speed, blocks per second.
@@ -40,12 +55,18 @@ impl MobKind {
             MobKind::Crawler => 4.4,
             MobKind::Boar => 2.2,
             MobKind::Sheep => 1.8,
+            MobKind::Cow => 1.6,
+            MobKind::Chicken => 2.0,
+            MobKind::Wolf => 4.8,
+            MobKind::Slime => 2.4,
         }
     }
     pub fn damage(self) -> f32 {
         match self {
             MobKind::Ghoul => 3.0,
             MobKind::Crawler => 2.0,
+            MobKind::Wolf => 2.5,
+            MobKind::Slime => 2.0,
             _ => 0.0,
         }
     }
@@ -265,11 +286,19 @@ impl MobManager {
         let Some(pos) = Self::ground(world, dir, world.grid().radial(player)) else { return };
         let pick = self.rand();
         let kind = if want_hostile {
-            if pick < 0.6 { MobKind::Ghoul } else { MobKind::Crawler }
-        } else if pick < 0.5 {
-            MobKind::Boar
+            match pick {
+                p if p < 0.4 => MobKind::Ghoul,
+                p if p < 0.62 => MobKind::Crawler,
+                p if p < 0.82 => MobKind::Wolf,
+                _ => MobKind::Slime,
+            }
         } else {
-            MobKind::Sheep
+            match pick {
+                p if p < 0.25 => MobKind::Boar,
+                p if p < 0.5 => MobKind::Sheep,
+                p if p < 0.75 => MobKind::Cow,
+                _ => MobKind::Chicken,
+            }
         };
         let h = tangent(t1, up_at(pos));
         self.mobs.push(Mob::new(kind, pos, h.normalize_or_zero()));
@@ -334,6 +363,11 @@ impl MobManager {
                 if wish.length_squared() > 0.0 {
                     m.heading = wish;
                 }
+            }
+            // Slimes travel in hops (and squash when they land).
+            if m.kind == MobKind::Slime && wish.length_squared() > 0.0 && m.body.on_ground && m.attack_cd < 0.6 {
+                m.body.vel += up * 6.5;
+                m.body.on_ground = false;
             }
             let speed = m.kind.speed() * if m.kind.hostile() && day { 0.8 } else { 1.0 };
             let before = m.body.pos;
@@ -410,7 +444,7 @@ mod tests {
 
     #[test]
     fn kinds_have_sane_stats() {
-        for k in [MobKind::Ghoul, MobKind::Crawler, MobKind::Boar, MobKind::Sheep] {
+        for k in ALL_MOBS {
             assert!(k.max_hp() > 0.0 && k.speed() > 0.0);
             assert_eq!(k.hostile(), k.damage() > 0.0);
         }
@@ -469,6 +503,10 @@ impl MobKind {
             MobKind::Crawler => vec![[0.22, 0.14, 0.30], [0.15, 0.10, 0.20], [0.95, 0.20, 0.15]],
             MobKind::Boar => vec![[0.62, 0.42, 0.36], [0.70, 0.50, 0.44], [0.45, 0.30, 0.26]],
             MobKind::Sheep => vec![[0.92, 0.91, 0.86], [0.92, 0.91, 0.86], [0.25, 0.22, 0.22]],
+            MobKind::Cow => vec![[0.95, 0.94, 0.90], [0.18, 0.16, 0.16], [0.95, 0.70, 0.72]],
+            MobKind::Chicken => vec![[0.98, 0.97, 0.94], [0.95, 0.20, 0.18], [1.0, 0.75, 0.20]],
+            MobKind::Wolf => vec![[0.55, 0.56, 0.60], [0.40, 0.41, 0.45], [0.85, 0.85, 0.86]],
+            MobKind::Slime => vec![[0.45, 0.90, 0.40], [0.30, 0.75, 0.28], [0.65, 1.0, 0.55]],
         }
     }
 
@@ -478,7 +516,9 @@ impl MobKind {
         match self {
             MobKind::Ghoul => 0.62,
             MobKind::Crawler => 0.55,
-            MobKind::Boar | MobKind::Sheep => 0.62,
+            MobKind::Boar | MobKind::Sheep | MobKind::Cow | MobKind::Wolf => 0.62,
+            MobKind::Chicken => 0.3,
+            MobKind::Slime => 0.45,
         }
     }
 
@@ -486,7 +526,10 @@ impl MobKind {
         match self {
             MobKind::Ghoul => 1.8,
             MobKind::Crawler => 0.7,
-            MobKind::Boar | MobKind::Sheep => 0.9,
+            MobKind::Boar | MobKind::Sheep | MobKind::Wolf => 0.9,
+            MobKind::Cow => 1.3,
+            MobKind::Chicken => 0.6,
+            MobKind::Slime => 0.8,
         }
     }
 }

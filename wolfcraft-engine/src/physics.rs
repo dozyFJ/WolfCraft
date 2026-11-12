@@ -214,6 +214,17 @@ pub fn block_obbs_in(world: &impl Voxels, cell: Cell, block: Block) -> Vec<Obb> 
             return vec![sub_obb(&g.cell_obb(cell), &mb)];
         }
     }
+    if block.post_family().is_some() {
+        // Fences and walls block the gap to the neighbours they join.
+        let o = g.cell_obb(cell);
+        let mut v = block_obbs(g, cell, block);
+        for (axis, sign) in [(0usize, 1i32), (0, -1), (1, 1), (1, -1)] {
+            if g.neighbor(cell, axis, sign).is_some_and(|n| block.post_joins(world.cell_block(n))) {
+                v.extend(block.post_arms(axis, sign).iter().map(|s| sub_obb(&o, s)));
+            }
+        }
+        return v;
+    }
     block_obbs(g, cell, block)
 }
 

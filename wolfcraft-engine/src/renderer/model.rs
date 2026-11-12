@@ -602,6 +602,113 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3
                     add_box(&mut v, &f, Vec3::new(ex, ey, 0.56), Vec3::new(ex + sz, ey + sz, 0.572), z, 0.0, eye);
                 }
             }
+            MobKind::Cow => {
+                // Black-and-white cow: big body with patches, horns, pink muzzle and udder.
+                let white = tint([0.96, 0.95, 0.91]);
+                let black = tint([0.17, 0.15, 0.15]);
+                let pink = tint([0.95, 0.70, 0.72]);
+                let horn = tint([0.92, 0.88, 0.76]);
+                let bob = (m.anim * 2.0).sin().abs() * 0.03 * m.amount;
+                let h = 0.52;
+                for (x0, z0, a) in [(-0.34f32, -0.5f32, swing), (0.12, -0.5, -swing), (-0.34, 0.3, -swing), (0.12, 0.3, swing)] {
+                    add_box(&mut v, &f, Vec3::new(x0, 0.0, z0), Vec3::new(x0 + 0.22, h + 0.05, z0 + 0.22), Vec3::new(x0 + 0.11, h, z0 + 0.11), a, white);
+                    add_box(&mut v, &f, Vec3::new(x0 - 0.005, 0.0, z0 - 0.005), Vec3::new(x0 + 0.225, 0.1, z0 + 0.225), Vec3::new(x0 + 0.11, h, z0 + 0.11), a, black);
+                }
+                add_box(&mut v, &f, Vec3::new(-0.4, h + bob, -0.62), Vec3::new(0.4, h + 0.62 + bob, 0.56), z, 0.0, white);
+                // Patches on the sides and back.
+                for (x0, y0, z0, x1, y1, z1) in [(-0.41f32, 0.2f32, -0.3f32, -0.39f32, 0.5f32, 0.1f32), (0.39, 0.1, 0.05, 0.41, 0.45, 0.4), (-0.2, 0.61, -0.4, 0.15, 0.63, -0.1), (-0.41, 0.05, 0.25, -0.39, 0.3, 0.5)] {
+                    add_box(&mut v, &f, Vec3::new(x0, h + y0 + bob, z0), Vec3::new(x1, h + y1 + bob, z1), z, 0.0, black);
+                }
+                add_box(&mut v, &f, Vec3::new(-0.12, h - 0.06 + bob, -0.3), Vec3::new(0.12, h + bob, -0.05), z, 0.0, pink);
+                let hz = 0.56;
+                let hy = h + 0.3 + bob;
+                add_box(&mut v, &f, Vec3::new(-0.24, hy, hz), Vec3::new(0.24, hy + 0.42, hz + 0.3), z, 0.0, white);
+                add_box(&mut v, &f, Vec3::new(-0.2, hy - 0.02, hz + 0.28), Vec3::new(0.2, hy + 0.16, hz + 0.38), z, 0.0, pink);
+                for nx in [-0.12f32, 0.06] {
+                    add_box(&mut v, &f, Vec3::new(nx, hy + 0.06, hz + 0.38), Vec3::new(nx + 0.06, hy + 0.11, hz + 0.385), z, 0.0, [0.45, 0.25, 0.26]);
+                }
+                for ex in [-0.17f32, 0.07] {
+                    add_box(&mut v, &f, Vec3::new(ex, hy + 0.24, hz + 0.3), Vec3::new(ex + 0.1, hy + 0.33, hz + 0.312), z, 0.0, [0.08, 0.07, 0.09]);
+                    add_box(&mut v, &f, Vec3::new(ex + 0.06, hy + 0.29, hz + 0.313), Vec3::new(ex + 0.09, hy + 0.32, hz + 0.316), z, 0.0, [1.0, 1.0, 1.0]);
+                }
+                for sx in [-0.34f32, 0.24] {
+                    add_box(&mut v, &f, Vec3::new(sx, hy + 0.36, hz + 0.06), Vec3::new(sx + 0.1, hy + 0.44, hz + 0.14), z, 0.0, horn);
+                }
+                add_box(&mut v, &f, Vec3::new(-0.26, hy + 0.3, hz + 0.02), Vec3::new(-0.2, hy + 0.36, hz + 0.1), z, 0.0, black);
+            }
+            MobKind::Chicken => {
+                // Little white chicken: round body, red comb and wattle, yellow beak, orange legs.
+                let white = tint([0.98, 0.97, 0.94]);
+                let red = tint([0.95, 0.20, 0.18]);
+                let beak = tint([1.0, 0.75, 0.20]);
+                let leg = tint([0.98, 0.58, 0.18]);
+                let bob = (m.anim * 2.5).sin().abs() * 0.04 * m.amount;
+                for (x0, a) in [(-0.1f32, swing), (0.04, -swing)] {
+                    add_box(&mut v, &f, Vec3::new(x0, 0.0, -0.03), Vec3::new(x0 + 0.06, 0.2, 0.03), Vec3::new(x0 + 0.03, 0.2, 0.0), a, leg);
+                    add_box(&mut v, &f, Vec3::new(x0 - 0.02, 0.0, -0.02), Vec3::new(x0 + 0.08, 0.02, 0.08), Vec3::new(x0 + 0.03, 0.2, 0.0), a, leg);
+                }
+                add_box(&mut v, &f, Vec3::new(-0.16, 0.2 + bob, -0.2), Vec3::new(0.16, 0.48 + bob, 0.16), z, 0.0, white);
+                // Wings flap while walking.
+                let flap = (m.anim * 3.0).sin() * 0.3 * m.amount;
+                for sx in [-0.2f32, 0.16] {
+                    add_box(&mut v, &f, Vec3::new(sx, 0.26 + bob, -0.14), Vec3::new(sx + 0.04, 0.44 + bob, 0.1), Vec3::new(sx + 0.02, 0.44 + bob, 0.0), flap, white);
+                }
+                add_box(&mut v, &f, Vec3::new(-0.1, 0.4 + bob, -0.28), Vec3::new(0.1, 0.52 + bob, -0.2), z, 0.0, white);
+                let hy = 0.44 + bob;
+                add_box(&mut v, &f, Vec3::new(-0.11, hy, 0.06), Vec3::new(0.11, hy + 0.26, 0.24), z, 0.0, white);
+                add_box(&mut v, &f, Vec3::new(-0.05, hy + 0.08, 0.24), Vec3::new(0.05, hy + 0.14, 0.33), z, 0.0, beak);
+                add_box(&mut v, &f, Vec3::new(-0.03, hy + 0.0, 0.23), Vec3::new(0.03, hy + 0.08, 0.27), z, 0.0, red);
+                add_box(&mut v, &f, Vec3::new(-0.03, hy + 0.26, 0.1), Vec3::new(0.03, hy + 0.34, 0.22), z, 0.0, red);
+                for ex in [-0.1f32, 0.07] {
+                    add_box(&mut v, &f, Vec3::new(ex, hy + 0.15, 0.2), Vec3::new(ex + 0.03, hy + 0.19, 0.245), z, 0.0, [0.08, 0.07, 0.09]);
+                }
+            }
+            MobKind::Wolf => {
+                // Grey wolf: lean body, pointy ears, long snout, bushy tail, fierce yellow eyes.
+                let fur = tint([0.55, 0.56, 0.60]);
+                let dark = tint([0.38, 0.39, 0.43]);
+                let light = tint([0.85, 0.85, 0.86]);
+                let eye = [1.0, 0.82, 0.25];
+                let h = 0.36;
+                for (x0, z0, a) in [(-0.2f32, -0.36f32, swing), (0.06, -0.36, -swing), (-0.2, 0.22, -swing), (0.06, 0.22, swing)] {
+                    add_box(&mut v, &f, Vec3::new(x0, 0.0, z0), Vec3::new(x0 + 0.14, h + 0.04, z0 + 0.14), Vec3::new(x0 + 0.07, h, z0 + 0.07), a, fur);
+                }
+                add_box(&mut v, &f, Vec3::new(-0.22, h, -0.42), Vec3::new(0.22, h + 0.36, 0.36), z, 0.0, fur);
+                add_box(&mut v, &f, Vec3::new(-0.25, h + 0.08, 0.12), Vec3::new(0.25, h + 0.44, 0.4), z, 0.0, dark);
+                add_box(&mut v, &f, Vec3::new(-0.15, h - 0.01, -0.3), Vec3::new(0.15, h + 0.05, 0.3), z, 0.0, light);
+                // Tail up and swishing.
+                let wag = (m.anim * 1.5).sin() * 0.2;
+                add_box(&mut v, &f, Vec3::new(-0.07, h + 0.15, -0.72), Vec3::new(0.07, h + 0.29, -0.42), Vec3::new(0.0, h + 0.22, -0.42), -0.6 + wag, dark);
+                let hz = 0.38;
+                let hy = h + 0.16;
+                add_box(&mut v, &f, Vec3::new(-0.17, hy, hz), Vec3::new(0.17, hy + 0.3, hz + 0.24), z, 0.0, fur);
+                add_box(&mut v, &f, Vec3::new(-0.09, hy, hz + 0.24), Vec3::new(0.09, hy + 0.14, hz + 0.42), z, 0.0, light);
+                add_box(&mut v, &f, Vec3::new(-0.04, hy + 0.1, hz + 0.42), Vec3::new(0.04, hy + 0.15, hz + 0.44), z, 0.0, [0.1, 0.09, 0.1]);
+                for sx in [-0.16f32, 0.07] {
+                    add_box(&mut v, &f, Vec3::new(sx, hy + 0.3, hz + 0.06), Vec3::new(sx + 0.09, hy + 0.44, hz + 0.12), z, 0.0, dark);
+                }
+                for ex in [-0.13f32, 0.06] {
+                    add_box(&mut v, &f, Vec3::new(ex, hy + 0.18, hz + 0.24), Vec3::new(ex + 0.07, hy + 0.23, hz + 0.252), z, 0.0, eye);
+                }
+            }
+            MobKind::Slime => {
+                // Jelly cube: a see-through-looking green shell with a darker core and big
+                // cartoon eyes; squashes while it is on the ground, stretches in the air.
+                let shell = tint([0.45, 0.90, 0.40]);
+                let core = tint([0.28, 0.70, 0.26]);
+                let squash = if m.body.on_ground { 0.85 } else { 1.12 };
+                let s = 0.42f32;
+                let hgt = 2.0 * s * squash;
+                let wide = s / squash.sqrt();
+                add_box(&mut v, &f, Vec3::new(-wide, 0.0, -wide), Vec3::new(wide, hgt, wide), z, 0.0, shell);
+                add_box(&mut v, &f, Vec3::new(-wide * 0.5, hgt * 0.2, -wide * 0.5), Vec3::new(wide * 0.5, hgt * 0.62, wide * 0.5 + 0.01), z, 0.0, core);
+                let fz = wide + 0.005;
+                for ex in [-0.22f32, 0.07] {
+                    add_box(&mut v, &f, Vec3::new(ex, hgt * 0.55, fz), Vec3::new(ex + 0.15, hgt * 0.55 + 0.16, fz + 0.01), z, 0.0, [0.98, 0.98, 0.98]);
+                    add_box(&mut v, &f, Vec3::new(ex + 0.05, hgt * 0.55 + 0.02, fz + 0.008), Vec3::new(ex + 0.12, hgt * 0.55 + 0.11, fz + 0.016), z, 0.0, [0.08, 0.10, 0.08]);
+                }
+                add_box(&mut v, &f, Vec3::new(-0.1, hgt * 0.38, fz), Vec3::new(0.1, hgt * 0.38 + 0.04, fz + 0.01), z, 0.0, [0.15, 0.40, 0.15]);
+            }
             MobKind::Boar | MobKind::Sheep => {
                 let sheep = m.kind == MobKind::Sheep;
                 let bob = (m.anim * 2.0).sin().abs() * 0.03 * m.amount;

@@ -32,6 +32,8 @@ pub enum InteractionEvent {
     OpenContainer { pos: Cell, block: Block },
     /// A broken block dropped an item into the world (only with `Interaction::spill`).
     Dropped { pos: Cell, stack: ItemStack },
+    /// A spawn soul was used: a creature appears in this cell.
+    SpawnMob { pos: Cell, kind: crate::mobs::MobKind },
 }
 
 #[derive(Default)]
@@ -222,6 +224,18 @@ impl Interaction {
             return events;
         }
         let info = stack.info();
+        // Spawn soul: the creature appears on the block you point at.
+        if let Some(kind) = items::soul_mob(stack.id) {
+            if let Some(target) = hit.and_then(|h| h.front_cell(world.grid())) {
+                if world.cell_block(target).is_replaceable() {
+                    if !player.is_creative() {
+                        player.inventory.consume_selected();
+                    }
+                    events.push(InteractionEvent::SpawnMob { pos: target, kind });
+                }
+            }
+            return events;
+        }
         // Hoe: till dirt or grass with free air above into farmland.
         if (items::ids::HOE_BASE..=items::ids::HOE_LAST).contains(&stack.id) {
             if let Some(h) = hit {

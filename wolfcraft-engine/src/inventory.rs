@@ -291,6 +291,7 @@ pub fn recipes() -> &'static [Recipe] {
         let comparator = Part::Comparator { on: false, dir: 0 }.block();
         v.push(r(&[(b(Block::OakPlanks), 3), (b(Block::Cobblestone), 4), (ids::IRON_INGOT, 1), (b(Block::IskritWire), 1)], (b(piston), 1), true, "Техника"));
         v.push(r(&[(b(piston), 1), (b(Block::Kelp), 1)], (b(sticky), 1), false, "Техника"));
+        v.push(r(&[(b(piston), 1), (ids::SLIME, 1)], (b(sticky), 1), false, "Техника"));
         v.push(r(&[(b(Block::Stone), 3), (b(Block::IskritTorch), 2), (b(Block::IskritWire), 1)], (b(repeater), 1), true, "Техника"));
         v.push(r(&[(b(Block::Stone), 3), (b(Block::IskritTorch), 3), (ids::IRON_INGOT, 1)], (b(comparator), 1), true, "Техника"));
         v.push(r(&[(b(Block::Granite), 4)], (b(Block::PolishedGranite), 4), true, "Строительство"));

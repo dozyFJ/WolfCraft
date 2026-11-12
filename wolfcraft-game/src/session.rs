@@ -507,6 +507,19 @@ impl GameSession {
                 self.player.inventory.add(wolfcraft_engine::items::ItemStack::new(wolfcraft_engine::items::ids::ARROW, ev.picked as u8));
             }
         }
+        // Spawn souls bring creatures to life (standing on the bottom of the cell).
+        for e in &events {
+            if let InteractionEvent::SpawnMob { pos, kind } = e {
+                let g = self.chunks.grid();
+                let c = g.cell_center(*pos);
+                let feet = c - wolfcraft_engine::physics::up_at(c) * 0.48;
+                let up = wolfcraft_engine::physics::up_at(feet);
+                let to = self.player.body.pos - feet;
+                let heading = (to - up * to.dot(up)).normalize_or_zero();
+                let heading = if heading.length_squared() > 0.5 { heading } else { self.player.heading };
+                self.mobs.mobs.push(wolfcraft_engine::mobs::Mob::new(*kind, feet, heading));
+            }
+        }
         // Broken blocks drop their items into the world; broken chests spill their contents.
         // Ore loot jumps out higher and sparkles.
         let ores: Vec<_> = events.iter().filter_map(|e| match e {

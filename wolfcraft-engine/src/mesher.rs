@@ -388,6 +388,19 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
                         boxes = &mirrored;
                     }
                 }
+                // Fences and walls: rails towards the neighbours they join.
+                let joined;
+                if b.post_family().is_some() {
+                    // Padded axes are (x, y, z) = (j, k, i).
+                    let mut v: Vec<[f32; 6]> = boxes.to_vec();
+                    for (axis, sign, n) in [(0usize, 1i32, inp.get(x, y, z + 1)), (0, -1, inp.get(x, y, z - 1)), (1, 1, inp.get(x + 1, y, z)), (1, -1, inp.get(x - 1, y, z))] {
+                        if b.post_joins(n) {
+                            v.extend(b.post_arms(axis, sign));
+                        }
+                    }
+                    joined = v;
+                    boxes = &joined;
+                }
                 let info = b.info();
                 for s in boxes {
                 let sky = if info.emissive { 1.0 } else { sky_at(inp, [x, y, z]).max(sky_at(inp, [x, y + 1, z])) as f32 / 15.0 };

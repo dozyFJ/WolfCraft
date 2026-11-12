@@ -1378,6 +1378,12 @@ impl App {
                             }
                             InteractionEvent::Ate { .. } => self.audio.play(crate::audio::Sfx::Eat, 1.0),
                             InteractionEvent::Dropped { .. } => {}
+                            InteractionEvent::SpawnMob { pos, .. } => {
+                                // The soul bursts into a puff where the creature appears.
+                                let c = s.chunks.grid().cell_center(pos);
+                                s.mobs.chips(c, &[[0.95, 0.95, 1.0], [0.80, 0.90, 1.0]], (14.0 * self.settings.particles) as usize, 2.0);
+                                self.audio.play(crate::audio::Sfx::Pop, 1.0);
+                            }
                         }
                     }
                     if std::mem::take(&mut s.picked_up) > 0 {
