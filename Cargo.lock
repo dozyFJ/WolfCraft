@@ -3855,6 +3855,7 @@ version = "0.2.0"
 dependencies = [
  "image",
  "log",
+ "rayon",
  "serde_json",
  "zip",
 ]
