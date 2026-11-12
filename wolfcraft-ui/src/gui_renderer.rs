@@ -235,6 +235,18 @@ impl GuiRenderer {
         self.ctx.wants_keyboard_input()
     }
 
+    /// Puts text typed elsewhere (the phone's system input box) into the focused text field:
+    /// it replaces what the field held, and `submit` presses Enter after it (chat sends).
+    pub fn inject_text(&mut self, text: String, submit: bool) {
+        let ev = &mut self.state.egui_input_mut().events;
+        let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+        ev.push(key(egui::Key::A, egui::Modifiers::COMMAND));
+        ev.push(egui::Event::Text(text));
+        if submit {
+            ev.push(key(egui::Key::Enter, egui::Modifiers::NONE));
+        }
+    }
+
     /// Runs the UI closure and tessellates the result.
     pub fn run(&mut self, window: &Window, mut add_ui: impl FnMut(&egui::Context)) -> GuiFrame {
         let mut input = self.state.take_egui_input(window);
