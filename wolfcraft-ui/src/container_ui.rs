@@ -37,12 +37,12 @@ fn paint_slot(ui: &mut Ui, icons: &GuiIcons, rect: Rect, stack: Option<&ItemStac
     ui.painter().rect_filled(rect, Rounding::ZERO, if hover { p.surface_hover } else { p.surface_hi });
     ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if hover { p.accent } else { p.outline }));
     if let Some(s) = stack {
-        icons.paint_item(ui.painter(), rect.shrink(6.0), s.id);
+        icons.paint_stack(ui.painter(), rect.shrink(6.0), s);
         if s.count > 1 {
             ui.painter().text(rect.right_bottom() - Vec2::new(4.0, 2.0), Align2::RIGHT_BOTTOM, s.count.to_string(), FontId::monospace(13.0), Color32::WHITE);
         }
         if resp.hovered() {
-            resp.clone().on_hover_text(wolfcraft_engine::items::info(s.id).name);
+            resp.clone().on_hover_text(s.display_name());
         }
     }
     resp
@@ -116,6 +116,12 @@ fn drop_on(slots: &mut [Option<ItemStack>], inv: &mut Inventory, from: Src, to: 
 
 /// Shows the window. Returns (close, stacks thrown out of the window).
 pub fn show(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, slots: &mut [Option<ItemStack>], inv: &mut Inventory) -> (bool, Vec<ItemStack>) {
+    show_with(ctx, icons, view, slots, inv, &mut |_, _, _| {})
+}
+
+/// `show` with extra controls under the container slots (the Чаровальня's offers): `extra`
+/// gets the UI, the container slots and the player's inventory.
+pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, slots: &mut [Option<ItemStack>], inv: &mut Inventory, extra: &mut dyn FnMut(&mut Ui, &mut [Option<ItemStack>], &mut Inventory)) -> (bool, Vec<ItemStack>) {
     let p = palette(ctx);
     let mut close = false;
     let drag_id = egui::Id::new("container-drag");
@@ -152,6 +158,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, slots: 
             ui.add_space(8.0);
             progress_bar(ui, f, text, width);
         }
+        extra(ui, slots, inv);
         ui.add_space(10.0);
         ui.label(egui::RichText::new("Инвентарь").font(FontId::proportional(13.0)).color(p.text_muted));
         ui.add_space(4.0);

@@ -71,6 +71,26 @@ impl GuiIcons {
         }
     }
 
+    /// An item stack's icon; enchanted ones shimmer red (our enchantment glow): the sprite
+    /// is drawn again tinted red, pulsing, with a bright band sweeping across it.
+    pub fn paint_stack(&self, painter: &egui::Painter, rect: Rect, s: &wolfcraft_engine::items::ItemStack) {
+        self.paint_item(painter, rect, s.id);
+        if !s.enchanted() {
+            return;
+        }
+        let Icon::Item(t) = wolfcraft_engine::items::info(s.id).icon else { return };
+        let Some(uv) = self.item_uv.get(t as usize) else { return };
+        let time = painter.ctx().input(|i| i.time) as f32;
+        painter.ctx().request_repaint();
+        let pulse = 0.5 + 0.5 * (time * 3.0).sin();
+        painter.image(self.items.id(), rect, *uv, Color32::from_rgba_unmultiplied(255, 40, 40, (60.0 + 60.0 * pulse) as u8));
+        // A band of light runs across every 1.6 s.
+        let phase = (time / 1.6).fract();
+        let x = rect.left() - rect.width() * 0.3 + phase * rect.width() * 1.6;
+        let band = Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + rect.width() * 0.28, rect.bottom()));
+        painter.with_clip_rect(band.intersect(painter.clip_rect())).image(self.items.id(), rect, *uv, Color32::from_rgba_unmultiplied(255, 150, 140, 170));
+    }
+
     /// Draws an item or block icon from the proper atlas (pixel-perfect, nearest filtering).
     pub fn paint_item(&self, painter: &egui::Painter, rect: Rect, item: ItemId) {
         // Full blocks are drawn as a small 3D cube; plants and items stay flat sprites.

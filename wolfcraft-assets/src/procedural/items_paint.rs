@@ -49,7 +49,20 @@ pub mod items {
     pub const SOUL_BASE: u16 = 70;
     pub const BONE: u16 = 78;
     pub const BONE_MEAL: u16 = 79;
-    pub const COUNT: u16 = 80;
+    pub const BOOK: u16 = 80;
+    pub const ENCH_BOOK: u16 = 81;
+    pub const BOTTLE: u16 = 82;
+    /// Potions, one per effect (order of `POTION_COLORS`).
+    pub const POTION_BASE: u16 = 83;
+    /// Tipped arrows: poison, slowness, harm.
+    pub const TIPPED_BASE: u16 = 92;
+    pub const COUNT: u16 = 95;
+    /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
+    /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
+    pub const POTION_COLORS: [[f32; 3]; 9] = [
+        [0.97, 0.25, 0.35], [0.95, 0.45, 0.75], [0.45, 0.85, 1.0], [0.85, 0.30, 0.15], [0.55, 0.55, 0.70],
+        [1.0, 0.62, 0.15], [0.35, 0.75, 0.20], [0.40, 0.45, 0.60], [0.40, 0.08, 0.10],
+    ];
     /// Glow of each spawn soul: ghoul, crawler, boar, sheep, cow, chicken, wolf, slime.
     pub const SOUL_COLORS: [[f32; 3]; 8] = [
         [0.55, 0.80, 0.45], [0.62, 0.35, 0.85], [0.80, 0.55, 0.45], [0.95, 0.95, 0.92],
@@ -476,6 +489,84 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    // A book: leather cover, pages on the right edge; the enchanted one has a red rune.
+    let book = |ench: bool| {
+        p(move |q| {
+            for y in 2..14u32 {
+                for x in 3..13u32 {
+                    let c = if x >= 11 {
+                        Rgb(0.95, 0.92, 0.84).add(if y % 2 == 0 { -0.05 } else { 0.0 })
+                    } else if x == 3 {
+                        Rgb(0.40, 0.20, 0.12)
+                    } else if ench {
+                        Rgb(0.42, 0.14, 0.28)
+                    } else {
+                        Rgb(0.60, 0.32, 0.18).add((rnd(x, y, 183) - 0.5) * 0.05)
+                    };
+                    q.put(x, y, c, 1.0);
+                }
+            }
+            if ench {
+                // A glowing red rune on the cover.
+                for (x, y) in [(7u32, 4u32), (6, 5), (8, 5), (5, 6), (9, 6), (7, 6), (7, 7), (7, 8), (6, 9), (8, 9), (7, 10)] {
+                    q.put(x, y, Rgb(1.0, 0.30, 0.25), 1.0);
+                }
+            } else {
+                for x in 5..10u32 {
+                    q.put(x, 5, Rgb(0.85, 0.70, 0.30), 1.0);
+                }
+            }
+        })
+    };
+    l.add(BOOK, "book", book(false));
+    l.add(ENCH_BOOK, "enchanted_book", book(true));
+    // Bottles: a round flask with a neck and a cork; potions are filled with colour.
+    let flask = |liquid: Option<Rgb>| {
+        p(move |q| {
+            for y in 1..16u32 {
+                for x in 2..14u32 {
+                    let (fx, fy) = (x as f32 - 7.5, y as f32 - 10.0);
+                    let body = fx * fx / 30.0 + fy * fy / 22.0 < 1.0;
+                    let neck = (6..10).contains(&x) && (3..6).contains(&y);
+                    let cork = (6..10).contains(&x) && (1..3).contains(&y);
+                    if cork {
+                        q.put(x, y, Rgb(0.62, 0.45, 0.28), 1.0);
+                    } else if body || neck {
+                        let glass = Rgb(0.78, 0.88, 0.95);
+                        let c = match liquid {
+                            Some(l) if body && y >= 8 => l.add(-(fy * 0.03)),
+                            _ => glass.scale(if body { 0.85 } else { 0.95 }),
+                        };
+                        q.put(x, y, c, 1.0);
+                    }
+                }
+            }
+            // Shine on the glass.
+            for (x, y) in [(5u32, 8u32), (5, 9), (4, 10)] {
+                q.put(x, y, Rgb(1.0, 1.0, 1.0), 1.0);
+            }
+        })
+    };
+    l.add(BOTTLE, "bottle", flask(None));
+    for (i, c) in POTION_COLORS.iter().enumerate() {
+        l.add(POTION_BASE + i as u16, &format!("potion_{i}"), flask(Some(Rgb(c[0], c[1], c[2]))));
+    }
+    for (i, ci) in [6usize, 7, 8].into_iter().enumerate() {
+        let c = POTION_COLORS[ci];
+        let tip = Rgb(c[0], c[1], c[2]);
+        l.add(TIPPED_BASE + i as u16, &format!("tipped_arrow_{i}"), p(move |q| {
+            for i in 3..13u32 {
+                q.put(i, 15 - i, Rgb(0.55, 0.40, 0.22), 1.0);
+            }
+            // The head dipped in the potion.
+            for (x, y) in [(12u32, 2u32), (13, 2), (13, 3), (12, 3), (11, 3), (12, 4), (11, 4), (10, 5)] {
+                q.put(x, y, tip, 1.0);
+            }
+            for (x, y) in [(2u32, 12u32), (2, 13), (3, 13), (3, 14), (1, 12), (2, 11)] {
+                q.put(x, y, Rgb(0.92, 0.92, 0.90), 1.0);
+            }
+        }));
+    }
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

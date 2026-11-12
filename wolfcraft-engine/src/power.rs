@@ -1,6 +1,6 @@
 //! Redstone-style power network.
 //!
-//! * `Generator` is a power source.
+//! * (The old generator block is now the Чаровальня: no power source any more.)
 //! * `Battery` conducts power between face-adjacent blocks.
 //! * `ElectricLamp` / `ElectricLampOn` are consumers: lit while touching a powered conductor
 //!   or generator.
@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const MAX_NODES: usize = 4096;
 
 fn conducts(b: Block) -> bool {
-    matches!(b, Block::Generator | Block::SwitchOn)
+    matches!(b, Block::SwitchOn)
 }
 
 fn is_lamp(b: Block) -> bool {
@@ -36,7 +36,7 @@ fn flood(world: &impl WorldEdit, start: Cell) -> (bool, Vec<Cell>) {
     seen.insert(start);
     queue.push_back(start);
     while let Some(c) = queue.pop_front() {
-        if world.cell_block(c) == Block::Generator {
+        if world.cell_block(c) == Block::SwitchOn {
             powered = true;
         }
         if seen.len() >= MAX_NODES {

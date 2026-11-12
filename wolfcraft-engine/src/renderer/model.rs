@@ -950,12 +950,16 @@ pub struct HandsPose {
     pub sleeve: Option<[f32; 3]>,
     /// A bow in the main hand and how far it is drawn (0..1).
     pub bow: Option<f32>,
+    /// The held item is enchanted: it shimmers red.
+    pub glint: bool,
+    /// Colour of the potion on the tip of the arrow on the bow string (tipped arrows).
+    pub arrow_tip: Option<[f32; 3]>,
 }
 
 impl HandsPose {
     /// Resting pose looking along `forward` (handy for tests and previews).
     pub fn rest(forward: Vec3, up: Vec3) -> Self {
-        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None, bow: None }
+        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None, bow: None, glint: false, arrow_tip: None }
     }
 }
 
@@ -1301,9 +1305,10 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
             add_hand_box(&mut v, &frame, Vec3::new(x - 0.066, y - 0.066, z + 0.175), Vec3::new(x + 0.066, y + 0.066, z + 0.36), pivot, angle, skin_c);
         }
         let f = Vec3::new(x, y, z + 0.29); // fist centre before the tilt
+        let held_start = v.len();
         if side > 0.0 {
             if let Some(c) = pose.bow {
-                add_bow(&mut v, &frame, f, pivot, angle, c.clamp(0.0, 1.0));
+                add_bow(&mut v, &frame, f, pivot, angle, c.clamp(0.0, 1.0), pose.arrow_tip);
             } else if let Some((kind, mat)) = pose.tool {
                 add_tool(&mut v, &frame, f, pivot, angle, kind, mat);
             } else if let Some(px) = pose.icon.and_then(|i| textures().and_then(|t| t.item_pixels.get(i as usize).cloned())).filter(|p| p.len() == 256) {
@@ -1315,6 +1320,15 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
             }
         } else if pose.shield {
             add_shield(&mut v, &frame, f, pivot, angle);
+        }
+        if side > 0.0 && pose.glint {
+            // Enchanted: a red shimmer runs along the held item.
+            for q in v[held_start..].iter_mut() {
+                let p = Vec3::from(q.pos);
+                let wave = 0.5 + 0.5 * (pose.time * 4.0 - (p.x + p.y + p.z) * 18.0).sin();
+                let k = 0.25 + 0.35 * wave;
+                q.color = [q.color[0] + (1.0 - q.color[0]) * k, q.color[1] * (1.0 - k * 0.75), q.color[2] * (1.0 - k * 0.75)];
+            }
         }
         twist_verts(&mut v[start..], &frame, &a, side);
     }
@@ -1420,7 +1434,7 @@ fn add_rod(out: &mut Vec<ModelVertex>, f: &Frame, a: Vec3, b: Vec3, t: f32, pivo
 /// Bow held upright in the fist, seen from the side: the wooden arc bulges away from the
 /// camera, the string runs back towards it. `c` (0..1) is the draw: the string is pulled back,
 /// the limbs bend more and an arrow lies on the string.
-fn add_bow(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle: f32, c: f32) {
+fn add_bow(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle: f32, c: f32, tip: Option<[f32; 3]>) {
     const WOOD: [f32; 3] = [0.55, 0.36, 0.18];
     const GRIP: [f32; 3] = [0.36, 0.22, 0.11];
     const STRING: [f32; 3] = [0.92, 0.92, 0.88];
@@ -1445,7 +1459,17 @@ fn add_bow(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle:
         // Arrow on the string, pointing away from the camera past the grip.
         let head = nock + Vec3::new(0.0, 0.0, 0.46);
         add_rod(v, frame, nock, head, 0.012, pivot, angle, [0.62, 0.45, 0.25]);
-        add_rod(v, frame, head, head + Vec3::new(0.0, 0.0, 0.04), 0.026, pivot, angle, [0.72, 0.74, 0.78]);
+        // The head; a tipped arrow's head is dipped in its potion and grows brighter as the
+        // string is pulled.
+        let head_c = match tip {
+            Some(t) => [t[0] * (0.7 + 0.3 * c), t[1] * (0.7 + 0.3 * c), t[2] * (0.7 + 0.3 * c)],
+            None => [0.72, 0.74, 0.78],
+        };
+        add_rod(v, frame, head, head + Vec3::new(0.0, 0.0, 0.04), 0.026, pivot, angle, head_c);
+        if tip.is_some() {
+            // Drops of the potion along the shaft.
+            add_rod(v, frame, head - Vec3::new(0.0, 0.0, 0.08), head, 0.016, pivot, angle, head_c);
+        }
         for dy in [-0.016f32, 0.016] {
             add_rod(v, frame, nock + Vec3::new(0.0, dy, 0.01), nock + Vec3::new(0.0, dy, 0.07), 0.01, pivot, angle, [0.95, 0.95, 0.93]);
         }

@@ -198,7 +198,8 @@ blocks! {
     // Tech
     // Was the machine casing: now the forge (repair and upgrade tools).
     75 MachineCasing => needs_pick(info("Кузница", Opaque, 5.0, Pickaxe, column(t::MACHINE_CASING, t::GENERATOR_FRONT, t::COBBLESTONE))),
-    76 Generator => needs_pick(info("Генератор", Opaque, 8.0, Pickaxe, [t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::GENERATOR_FRONT, t::MACHINE_CASING])),
+    // The Чаровальня (enchanting station; was the generator): items + iskrit + levels → чары.
+    76 EnchantTable => emissive(needs_pick(info("Чаровальня", Opaque, 5.0, Pickaxe, column(t::ENCHANT_SIDE, t::ENCHANT_TOP, t::OBSIDIAN)))),
     // A heap of bones left where a creature or a player died (was the copper cable).
     77 Bones => needs_pick(info("Кости", Shape, 1.5, Pickaxe, all(t::BONES))),
     // Was the battery: now a wooden barrel (storage like a chest).
