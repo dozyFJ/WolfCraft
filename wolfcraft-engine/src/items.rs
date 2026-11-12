@@ -291,6 +291,23 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
     }
 }
 
+/// Colour of the gems in an ore (its shards fly out when it is mined), `None` for other blocks.
+pub fn ore_glow(b: Block) -> Option<[f32; 3]> {
+    Some(match b {
+        Block::CoalOre => [0.30, 0.30, 0.34],
+        Block::IronOre => [0.92, 0.74, 0.58],
+        Block::GoldOre => [1.0, 0.85, 0.25],
+        Block::DiamondOre => [0.45, 1.0, 0.95],
+        Block::CopperOre => [1.0, 0.58, 0.32],
+        Block::TinOre => [0.85, 0.88, 0.92],
+        Block::SilverOre => [0.92, 0.95, 1.0],
+        Block::CobaltOre => [0.30, 0.50, 1.0],
+        Block::IskritOre => [1.0, 0.32, 0.78],
+        Block::UraniumOre => [0.50, 1.0, 0.32],
+        _ => return None,
+    })
+}
+
 /// Loot dropped by a creature.
 pub fn mob_drops(kind: crate::mobs::MobKind, salt: u64) -> Vec<ItemStack> {
     use crate::mobs::MobKind;

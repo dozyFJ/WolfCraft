@@ -459,6 +459,21 @@ impl GameSession {
                 self.try_attack(0.45);
             }
         }
+        // Sparkles round fresh ore loot.
+        for i in 0..self.drops.list.len() {
+            let d = &mut self.drops.list[i];
+            if d.shine <= 0.0 {
+                continue;
+            }
+            d.shine -= dt;
+            let (pos, k) = (d.pos, d.shine);
+            if self.mobs.rand() < (dt as f64 * 14.0) {
+                let up = wolfcraft_engine::physics::up_at(pos);
+                let o = DVec3::new(self.mobs.rand() - 0.5, self.mobs.rand() - 0.5, self.mobs.rand() - 0.5) * 0.35;
+                let col = if self.mobs.rand() < 0.5 { [1.0, 1.0, 0.85] } else { [1.0, 0.92, 0.55] };
+                self.mobs.fx_glow(pos + up * 0.2 + o, up * 0.6, col, 0.028 + 0.01 * k.min(1.0), 0.6, wolfcraft_engine::mobs::FxKind::Rise);
+            }
+        }
         // Items in the world: fall, merge, fly to the player.
         if self.ground_ready() && !self.drops.list.is_empty() {
             let centre = self.player.body.pos + wolfcraft_engine::physics::up_at(self.player.body.pos) * 0.8;
@@ -493,10 +508,19 @@ impl GameSession {
             }
         }
         // Broken blocks drop their items into the world; broken chests spill their contents.
+        // Ore loot jumps out higher and sparkles.
+        let ores: Vec<_> = events.iter().filter_map(|e| match e {
+            InteractionEvent::Broken { pos, block } if wolfcraft_engine::items::ore_glow(*block).is_some() => Some(*pos),
+            _ => None,
+        }).collect();
         for e in &events {
             if let InteractionEvent::Dropped { pos, stack } = e {
                 let c = self.chunks.grid().cell_center(*pos);
-                self.drops.pop_from_block(*stack, c);
+                if ores.contains(pos) {
+                    self.drops.pop_shiny(*stack, c);
+                } else {
+                    self.drops.pop_from_block(*stack, c);
+                }
             }
             if let InteractionEvent::Broken { pos, .. } = e {
                 if let Some(slots) = self.containers.remove(pos) {

@@ -1302,10 +1302,31 @@ impl App {
                             InteractionEvent::Broken { pos, block } => {
                                 // Final burst of chips in the colours of the block.
                                 let n = (14.0 * self.settings.particles) as usize;
+                                let corners = s.chunks.grid().cell_corners(pos);
+                                let centre = corners.iter().fold(glam::DVec3::ZERO, |a, c| a + *c) / 8.0;
                                 if let Some(cols) = self.tile_colors.get(block.info().tiles[0] as usize) {
-                                    let corners = s.chunks.grid().cell_corners(pos);
-                                    let centre = corners.iter().fold(glam::DVec3::ZERO, |a, c| a + *c) / 8.0;
                                     s.mobs.chips(centre, cols, n, 3.2);
+                                }
+                                // An ore bursts into glowing gem shards and a ring of sparkles.
+                                if let (Some(gem), false) = (wolfcraft_engine::items::ore_glow(block), s.is_creative()) {
+                                    use wolfcraft_engine::mobs::FxKind;
+                                    let up = wolfcraft_engine::physics::up_at(centre);
+                                    let k = self.settings.particles.max(0.3);
+                                    for i in 0..(18.0 * k) as usize {
+                                        let a = i as f64 * 2.399;
+                                        let side = glam::DVec3::new(a.cos(), (a * 1.3).sin(), a.sin());
+                                        let side = (side - up * side.dot(up)).normalize_or_zero();
+                                        let vel = side * (2.0 + (i % 5) as f64 * 0.6) + up * (3.0 + (i % 3) as f64 * 1.2);
+                                        let col = if i % 4 == 0 { [1.0, 1.0, 1.0] } else { gem };
+                                        s.mobs.fx_glow(centre, vel, col, 0.05 + (i % 3) as f32 * 0.015, 1.1, FxKind::Fall);
+                                    }
+                                    for i in 0..(10.0 * k) as usize {
+                                        let a = i as f64 * std::f64::consts::TAU / 10.0;
+                                        let side = glam::DVec3::new(a.cos(), 0.3, a.sin());
+                                        let side = (side - up * side.dot(up)).normalize_or_zero();
+                                        s.mobs.fx_glow(centre + side * 0.3, side * 1.5 + up * 0.5, [1.0, 0.97, 0.80], 0.03, 0.5, FxKind::Rise);
+                                    }
+                                    self.audio.play(crate::audio::Sfx::Pop, 1.0);
                                 }
                                 if let Some(net) = &mut self.net {
                                     net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: 0, hell: s.hell });
@@ -1911,6 +1932,15 @@ impl App {
                             let dust = cols[0].map(|c| c * 0.6 + 0.35);
                             for k in 0..(2.0 * pk) as usize {
                                 s.mobs.fx(point + back * 0.1, back * 0.5 + up * (0.3 + k as f64 * 0.2), dust, 0.16, 0.7, FxKind::Rise);
+                            }
+                        }
+                        // Ores: little gem shards fly off with every blow.
+                        if let Some(gem) = wolfcraft_engine::items::ore_glow(h.block) {
+                            for i in 0..(4.0 * pk) as usize {
+                                let a = i as f64 * 2.1 + self.time.elapsed() as f64 * 5.0;
+                                let side = cam.forward.cross(up).normalize_or_zero();
+                                let vel = back * 2.4 + side * a.cos() * 1.8 + up * (1.5 + a.sin().abs() * 1.5);
+                                s.mobs.fx_glow(point, vel, gem, 0.04, 0.8, FxKind::Fall);
                             }
                         }
                         if held_tool == Some(ToolKind::Pickaxe) && block_tool == ToolKind::Pickaxe {
