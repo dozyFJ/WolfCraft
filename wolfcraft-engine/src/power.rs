@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const MAX_NODES: usize = 4096;
 
 fn conducts(b: Block) -> bool {
-    matches!(b, Block::Cable | Block::Battery | Block::Generator | Block::SwitchOn)
+    matches!(b, Block::Cable | Block::Generator | Block::SwitchOn)
 }
 
 fn is_lamp(b: Block) -> bool {

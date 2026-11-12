@@ -211,7 +211,7 @@ impl Interaction {
                 return events;
             }
             // Chest and electric furnace open their own window (sneak to place blocks instead).
-            if matches!(h.block, Block::Chest | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) && !player.sneaking {
+            if matches!(h.block, Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) && !player.sneaking {
                 events.push(InteractionEvent::OpenContainer { pos: h.cell, block: h.block });
                 return events;
             }
@@ -399,6 +399,26 @@ mod tests {
         w.blocks.insert(c(1, 50, 0), Block::Dirt);
         let p = Player::new(wp(0.5, 80.0, 0.5), GameMode::Survival);
         (w, p)
+    }
+
+    #[test]
+    fn the_forge_repairs_joins_and_upgrades_and_fuel_burns() {
+        let pick = ids::tool(2, 0); // iron pickaxe
+        let dur = items::info(pick).durability;
+        let worn = ItemStack { damage: (dur / 4) * 2, ..ItemStack::new(pick, 1) };
+        // Repair with iron ingots: a quarter each.
+        let (r, used) = forge_result(worn, ItemStack::new(ids::IRON_INGOT, 5)).unwrap();
+        assert_eq!(used, 2);
+        assert_eq!(r.damage, 0);
+        // Join two worn pickaxes.
+        let (j, _) = forge_result(worn, worn).unwrap();
+        assert!(j.damage < worn.damage);
+        // Upgrade with three diamonds.
+        let (u, used) = forge_result(worn, ItemStack::new(ids::DIAMOND, 3)).unwrap();
+        assert_eq!((u.id, used), (ids::tool(3, 0), 3));
+        assert!(forge_result(ItemStack::new(ids::STICK, 1), ItemStack::new(ids::STICK, 1)).is_none());
+        assert!(fuel_time(ids::COAL) > fuel_time(Block::OakPlanks as items::ItemId));
+        assert_eq!(fuel_time(ids::DIAMOND), 0.0);
     }
 
     #[test]
@@ -602,6 +622,70 @@ pub fn door_partner(world: &impl WorldEdit, c: Cell, b: Block) -> Option<(Cell, 
     let other = world.grid().neighbor(c, 2, if b.is_door_top() { -1 } else { 1 })?;
     let ob = world.cell_block(other);
     (ob.door_toggle().is_some() && ob.is_door_top() != b.is_door_top()).then_some((other, ob))
+}
+
+/// Seconds of burning a fuel item gives in the furnace (0 = not a fuel).
+pub fn fuel_time(id: items::ItemId) -> f32 {
+    use items::ids;
+    let b = |x: Block| x as items::ItemId;
+    match id {
+        ids::COAL => 80.0,
+        x if x == b(Block::CoalBlock) => 800.0,
+        x if [Block::OakLog, Block::BirchLog, Block::SpruceLog, Block::AcaciaLog].iter().any(|l| b(*l) == x) => 15.0,
+        x if [Block::OakPlanks, Block::BirchPlanks, Block::SprucePlanks, Block::AcaciaPlanks, Block::CraftingTable, Block::Chest, Block::Battery, Block::Bookshelf].iter().any(|l| b(*l) == x) => 15.0,
+        ids::STICK => 5.0,
+        x if x == b(Block::Peat) => 40.0,
+        x if items::tool_shape(x).is_some_and(|(_, m)| m == 0) => 10.0,
+        _ => 0.0,
+    }
+}
+
+/// Forge: what the tool or armour in slot 0 becomes with what lies in slot 1.
+/// * its material repairs it, a quarter of its durability per item;
+/// * a second identical item: the two are joined (durability added up, plus 10 %);
+/// * three items of the next material up upgrade it a tier (wood → stone → iron → diamond),
+///   keeping its wear.
+/// Returns (result, how many items slot 1 gives up).
+pub fn forge_result(item: items::ItemStack, with: items::ItemStack) -> Option<(items::ItemStack, u8)> {
+    use items::ids;
+    let info = item.info();
+    let dur = info.durability;
+    if dur == 0 || item.count != 1 {
+        return None;
+    }
+    let b = |x: Block| x as items::ItemId;
+    // Material tier of a tool, a hoe or armour, and the item of the same kind one tier up.
+    let (tier, up): (usize, Option<items::ItemId>) = if let Some((kind, m)) = items::tool_shape(item.id) {
+        let m = m as usize;
+        let up = (m < 3).then(|| if kind == 4 { ids::HOE_BASE + m as u16 + 1 } else { ids::tool(m as u16 + 1, kind as u16) });
+        (m, up)
+    } else if let Some(slot) = items::armor_slot(item.id) {
+        let m = ((item.id - ids::ARMOR_BASE) / 4) as usize;
+        (m, (m < 3).then(|| ids::ARMOR_BASE + (m as u16 + 1) * 4 + slot as u16))
+    } else {
+        return None;
+    };
+    let tool_mats = [b(Block::OakPlanks), b(Block::Cobblestone), ids::IRON_INGOT, ids::DIAMOND];
+    let armor_mats = [ids::LEATHER, ids::BRONZE_INGOT, ids::IRON_INGOT, ids::DIAMOND];
+    let mats = if items::armor_slot(item.id).is_some() { armor_mats } else { tool_mats };
+    if with.id == item.id && with.count == 1 {
+        let left = |s: items::ItemStack| (dur - s.damage.min(dur)) as u32;
+        let total = (left(item) + left(with) + dur as u32 / 10).min(dur as u32);
+        return Some((items::ItemStack { damage: dur - total as u16, ..item }, 1));
+    }
+    if with.id == mats[tier] && item.damage > 0 {
+        let per = (dur / 4).max(1);
+        let need = item.damage.div_ceil(per).min(with.count as u16) as u8;
+        let fixed = item.damage.saturating_sub(per * need as u16);
+        return Some((items::ItemStack { damage: fixed, ..item }, need));
+    }
+    if tier < 3 && with.id == mats[tier + 1] && with.count >= 3 {
+        let up = up?;
+        let new_dur = items::info(up).durability;
+        let worn = item.damage as f32 / dur as f32;
+        return Some((items::ItemStack { id: up, count: 1, damage: (worn * new_dur as f32) as u16 }, 3));
+    }
+    None
 }
 
 /// Electric furnace recipes: input item -> output item.

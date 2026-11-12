@@ -329,7 +329,7 @@ pub enum ThemeMode {
 }
 
 /// Current version of the default look (see `Settings::migrate`).
-pub const STYLE_VERSION: u32 = 1;
+pub const STYLE_VERSION: u32 = 2;
 
 /// Global user settings (`settings.toml` in the data directory).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -473,7 +473,9 @@ impl Settings {
 
     /// Moves old settings to the current default look once (the player can switch back).
     pub fn migrate(&mut self) {
-        if self.style_version < 1 {
+        // 2: the low-poly cartoon look (shader "Мульт", no relief, wind, water, grading and the
+        // cartoon light on) is the game's own style.
+        if self.style_version < 2 {
             self.texture_pack = "builtin:toon".into();
             self.apply_shader_preset(4);
         }

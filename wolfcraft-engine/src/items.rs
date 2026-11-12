@@ -364,6 +364,8 @@ pub fn creative_palette() -> Vec<ItemId> {
     let mut v: Vec<ItemId> = Block::ALL
         .iter()
         .filter(|b| b.crop().is_none())
+        // The electric machines are put away for now.
+        .filter(|b| !matches!(b, Block::Generator | Block::Cable | Block::ElectricLamp))
         .filter(|b| !matches!(b, Block::Air | Block::Water | Block::Magma | Block::InnerCore | Block::Bedrock | Block::ElectricLampOn | Block::SwitchOn | Block::GlassPaneB | Block::StoneSlabVerticalB | Block::PlankSlabVerticalB | Block::BrickSlabVerticalB) && b.base_item() == **b)
         .map(|b| *b as ItemId)
         .collect();
@@ -420,7 +422,8 @@ pub fn category(id: ItemId) -> &'static str {
             Block::Pumpkin | Block::Melon => "Растения",
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
-            Block::MachineCasing | Block::Generator | Block::Cable | Block::Battery | Block::ElectricLamp | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
+            Block::MachineCasing | Block::Battery | Block::ElectricFurnace => "Строительство",
+            Block::Generator | Block::Cable | Block::ElectricLamp | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
             Block::IskritOre | Block::UraniumOre | Block::UraniumBlock => "Руды",
             Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable => "Строительство",
             _ => "Природа",

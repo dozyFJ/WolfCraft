@@ -127,6 +127,8 @@ pub struct GameSession {
     pub containers: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, Vec<Option<wolfcraft_engine::items::ItemStack>>>,
     /// Smelting progress in seconds per furnace.
     furnace_t: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, f32>,
+    /// Seconds of fuel still burning in each furnace.
+    pub furnace_fuel: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, f32>,
     /// The start position was checked for blocks (a structure may have been built over it).
     spawn_checked: bool,
     /// Opened in the studio: creative rules without changing the world's saved mode.
@@ -206,6 +208,7 @@ impl GameSession {
             portal_t: -2.0,
             pending_portal: None,
             furnace_t: Default::default(),
+            furnace_fuel: Default::default(),
             spawn_checked: false,
             studio: false,
             buttons: Vec::new(),
@@ -621,49 +624,99 @@ impl GameSession {
         events
     }
 
-    /// Slots for a container block, created on first use.
+    /// Slots for a container block, created on first use: the furnace has input, fuel and
+    /// output, the forge item, material and result, chests and barrels 27.
     pub fn container_slots(&mut self, pos: wolfcraft_engine::cubesphere::Cell, block: wolfcraft_engine::block::Block) -> &mut Vec<Option<wolfcraft_engine::items::ItemStack>> {
-        let n = if block == wolfcraft_engine::block::Block::ElectricFurnace { 2 } else { 27 };
-        self.containers.entry(pos).or_insert_with(|| vec![None; n])
+        use wolfcraft_engine::block::Block as B;
+        let n = if matches!(block, B::ElectricFurnace | B::MachineCasing) { 3 } else { 27 };
+        let v = self.containers.entry(pos).or_insert_with(|| vec![None; n]);
+        // Furnaces from before the fuel slot: [input, output] → [input, fuel, output].
+        if block == B::ElectricFurnace && v.len() == 2 {
+            let out = v.pop().flatten();
+            v.push(None);
+            v.push(out);
+        }
+        v
     }
 
-    /// Smelting progress 0..1 and whether the furnace is powered.
+    /// Smelting progress 0..1 and whether the furnace is working (burning or powered).
     pub fn furnace_status(&self, pos: wolfcraft_engine::cubesphere::Cell) -> (f32, bool) {
         let t = self.furnace_t.get(&pos).copied().unwrap_or(0.0);
-        (t / FURNACE_TIME, wolfcraft_engine::power::is_powered(&self.chunks, pos))
+        let burning = self.furnace_fuel.get(&pos).is_some_and(|f| *f > 0.0);
+        (t / FURNACE_TIME, burning || wolfcraft_engine::power::is_powered(&self.chunks, pos))
     }
 
     fn tick_furnaces(&mut self, dt: f32) {
-        use wolfcraft_engine::interaction::smelt_result;
+        use wolfcraft_engine::block::Block as B;
+        use wolfcraft_engine::interaction::{forge_result, fuel_time, smelt_result};
         use wolfcraft_engine::items::ItemStack;
-        let cells: Vec<_> = self.containers.iter().filter(|(_, v)| v.len() == 2 && v[0].is_some()).map(|(c, _)| *c).collect();
+        let cells: Vec<_> = self.containers.keys().copied().collect();
         for c in cells {
-            let Some(out) = self.containers[&c][0].and_then(|s| smelt_result(s.id)) else {
-                self.furnace_t.remove(&c);
-                continue;
-            };
-            let room = match self.containers[&c][1] {
-                None => true,
-                Some(o) => o.id == out && o.count < 64,
-            };
-            if !room || !wolfcraft_engine::power::is_powered(&self.chunks, c) {
-                continue;
-            }
-            let t = self.furnace_t.entry(c).or_insert(0.0);
-            *t += dt;
-            if *t >= FURNACE_TIME {
-                *t = 0.0;
-                let v = self.containers.get_mut(&c).unwrap();
-                if let Some(i) = v[0].as_mut() {
-                    i.count -= 1;
-                    if i.count == 0 {
-                        v[0] = None;
+            match self.chunks.get_block(c) {
+                Some(B::ElectricFurnace) => {
+                    self.container_slots(c, B::ElectricFurnace);
+                    let v = &self.containers[&c];
+                    let out = v[0].and_then(|s| smelt_result(s.id));
+                    let room = out.is_some_and(|o| match v[2] {
+                        None => true,
+                        Some(s) => s.id == o && s.count < 64,
+                    });
+                    let powered = wolfcraft_engine::power::is_powered(&self.chunks, c);
+                    let mut fuel = self.furnace_fuel.get(&c).copied().unwrap_or(0.0);
+                    // Light a new piece of fuel when there is something to smelt.
+                    if room && !powered && fuel <= 0.0 {
+                        let v = self.containers.get_mut(&c).unwrap();
+                        if let Some(f) = v[1].filter(|f| fuel_time(f.id) > 0.0) {
+                            fuel = fuel_time(f.id);
+                            v[1] = if f.count > 1 { Some(ItemStack { count: f.count - 1, ..f }) } else { None };
+                        }
+                    }
+                    if fuel > 0.0 {
+                        fuel -= dt;
+                    }
+                    if fuel > 0.0 {
+                        self.furnace_fuel.insert(c, fuel);
+                    } else {
+                        self.furnace_fuel.remove(&c);
+                    }
+                    let Some(out) = out.filter(|_| room) else {
+                        self.furnace_t.remove(&c);
+                        continue;
+                    };
+                    if !(powered || fuel > 0.0) {
+                        continue;
+                    }
+                    let t = self.furnace_t.entry(c).or_insert(0.0);
+                    *t += dt;
+                    if *t >= FURNACE_TIME {
+                        *t = 0.0;
+                        let v = self.containers.get_mut(&c).unwrap();
+                        if let Some(i) = v[0].as_mut() {
+                            i.count -= 1;
+                            if i.count == 0 {
+                                v[0] = None;
+                            }
+                        }
+                        match v[2].as_mut() {
+                            Some(o) => o.count += 1,
+                            None => v[2] = Some(ItemStack::new(out, 1)),
+                        }
                     }
                 }
-                match v[1].as_mut() {
-                    Some(o) => o.count += 1,
-                    None => v[1] = Some(ItemStack::new(out, 1)),
+                Some(B::MachineCasing) => {
+                    // Forge: the result appears as soon as the two inputs fit together.
+                    let v = self.containers.get_mut(&c).unwrap();
+                    if v.len() == 3 && v[2].is_none() {
+                        if let (Some(a), Some(b)) = (v[0], v[1]) {
+                            if let Some((res, used)) = forge_result(a, b) {
+                                v[2] = Some(res);
+                                v[0] = None;
+                                v[1] = if b.count > used { Some(ItemStack { count: b.count - used, ..b }) } else { None };
+                            }
+                        }
+                    }
                 }
+                _ => {}
             }
         }
     }

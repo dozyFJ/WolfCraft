@@ -196,12 +196,15 @@ blocks! {
     73 Peat => info("Торф", Opaque, 0.8, Shovel, all(t::PEAT)),
     74 Glowstone => emissive(info("Светокамень", Opaque, 0.6, Hand, all(t::GLOWSTONE))),
     // Tech
-    75 MachineCasing => needs_pick(info("Корпус машины", Opaque, 8.0, Pickaxe, all(t::MACHINE_CASING))),
+    // Was the machine casing: now the forge (repair and upgrade tools).
+    75 MachineCasing => needs_pick(info("Кузница", Opaque, 5.0, Pickaxe, column(t::MACHINE_CASING, t::GENERATOR_FRONT, t::COBBLESTONE))),
     76 Generator => needs_pick(info("Генератор", Opaque, 8.0, Pickaxe, [t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::GENERATOR_FRONT, t::MACHINE_CASING])),
     77 Cable => needs_pick(info("Медный кабель", Opaque, 2.0, Pickaxe, all(t::CABLE))),
-    78 Battery => needs_pick(info("Аккумулятор", Opaque, 8.0, Pickaxe, column(t::BATTERY_SIDE, t::BATTERY_TOP, t::BATTERY_TOP))),
+    // Was the battery: now a wooden barrel (storage like a chest).
+    78 Battery => info("Бочка", Opaque, 2.5, Axe, column(t::BATTERY_SIDE, t::BATTERY_TOP, t::BATTERY_TOP)),
     79 ElectricLamp => emissive(info("Электролампа", Opaque, 0.5, Hand, all(t::ELECTRIC_LAMP))),
-    80 ElectricFurnace => needs_pick(info("Электропечь", Opaque, 8.0, Pickaxe, [t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::FURNACE_FRONT, t::MACHINE_CASING])),
+    // The furnace: burns fuel (coal, wood) or runs on power.
+    80 ElectricFurnace => needs_pick(info("Печь", Opaque, 3.5, Pickaxe, [t::COBBLESTONE, t::COBBLESTONE, t::SMOOTH_STONE, t::COBBLESTONE, t::FURNACE_FRONT, t::COBBLESTONE])),
     81 ElectricLampOn => emissive(info("Электролампа (вкл.)", Opaque, 0.5, Hand, all(t::ELECTRIC_LAMP_ON))),
     82 SwitchOff => not_solid(info("Рычаг", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
     83 SwitchOn => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
