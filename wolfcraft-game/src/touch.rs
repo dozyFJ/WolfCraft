@@ -7,7 +7,8 @@ use winit::event::{Touch, TouchPhase};
 /// Something the touch layer wants the game to do right now.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TouchAction {
-    Jump,
+    /// Creative flight on/off.
+    Fly,
     Inventory,
     Pause,
     Debug,
@@ -25,6 +26,8 @@ enum Role {
     Joystick,
     Look,
     Hotbar,
+    /// A finger on a hotbar slot: held long it throws the item out.
+    Slot,
     Button(Btn),
 }
 
@@ -41,6 +44,8 @@ enum Btn {
     Tab,
     Prev,
     Next,
+    /// Creative: flight on/off (separate from jump).
+    Fly,
 }
 
 struct Finger {
@@ -51,6 +56,8 @@ struct Finger {
     t0: Instant,
     moved: f32,
     breaking: bool,
+    /// Items thrown by this finger after the first (hotbar long press).
+    throws: u32,
 }
 
 #[derive(Default)]
@@ -66,6 +73,12 @@ pub struct TouchState {
     /// The "Поставить" button is held (draws a bow, raises a shield).
     pub place_held: bool,
     pub jump_held: bool,
+    /// "Вниз" held while flying.
+    pub down_held: bool,
+    /// Set by the game every frame: creative mode (shows the flight button) and flying
+    /// (jump and sneak become "up" and "down").
+    pub creative: bool,
+    pub flying: bool,
     /// Accumulated look drag in pixels since the last frame.
     pub look: (f32, f32),
     pub breaking: bool,
@@ -78,6 +91,8 @@ pub struct TouchState {
     pub studio: bool,
     /// Screen areas covered by other panels (physical pixels): touches there are left to them.
     pub blocked: Vec<(f32, f32, f32, f32)>,
+    /// Items to throw out of the selected hotbar slot (long press), taken by the game.
+    pub throws: u32,
     /// Where the last short tap landed (physical pixels), for the frame that handles it.
     pub tap_point: Option<(f32, f32)>,
 }
@@ -105,11 +120,13 @@ fn button_rect(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>) -
         }
     }
     match b {
-        // Right-hand cluster: big jump, then sneak, sprint and place around it.
-        Btn::Jump => (w - 130.0 * u, h - 150.0 * u, 60.0 * u),
-        Btn::Sneak => (w - 265.0 * u, h - 95.0 * u, 40.0 * u),
-        Btn::Sprint => (w - 280.0 * u, h - 215.0 * u, 40.0 * u),
-        Btn::Place => (w - 130.0 * u, h - 300.0 * u, 44.0 * u),
+        // Right-hand cluster in two tidy columns: the outer one holds the movement pair
+        // (jump/up over sneak/down), the inner one place, sprint and flight.
+        Btn::Jump => (w - 120.0 * u, h - 255.0 * u, 56.0 * u),
+        Btn::Sneak => (w - 120.0 * u, h - 110.0 * u, 50.0 * u),
+        Btn::Place => (w - 255.0 * u, h - 320.0 * u, 42.0 * u),
+        Btn::Sprint => (w - 255.0 * u, h - 200.0 * u, 40.0 * u),
+        Btn::Fly => (w - 255.0 * u, h - 85.0 * u, 36.0 * u),
         Btn::Inventory => (w - 70.0 * u, h - 50.0 * u, 34.0 * u),
         Btn::Chat | Btn::Camera | Btn::Tab | Btn::Pause => {
             let i = ISLAND.iter().position(|x| *x == b).unwrap_or(0) as f32;
@@ -135,7 +152,7 @@ fn island_layout(size: (u32, u32)) -> (f32, f32, f32) {
 }
 
 /// Round on-screen buttons (the inventory is a tile next to the hotbar, drawn by the HUD).
-const BUTTONS: [Btn; 8] = [Btn::Jump, Btn::Sneak, Btn::Sprint, Btn::Place, Btn::Pause, Btn::Chat, Btn::Camera, Btn::Tab];
+const BUTTONS: [Btn; 9] = [Btn::Jump, Btn::Sneak, Btn::Sprint, Btn::Place, Btn::Fly, Btn::Pause, Btn::Chat, Btn::Camera, Btn::Tab];
 
 fn hit(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>, p: (f32, f32)) -> bool {
     let (cx, cy, r) = button_rect(b, size, hotbar);
@@ -169,13 +186,16 @@ impl TouchState {
                     let (l, _, r, _) = self.hotbar.unwrap_or((0.0, 0.0, 1.0, 1.0));
                     let slot = (((p.0 - l) / (r - l).max(1.0)) * 9.0).floor().clamp(0.0, 8.0) as usize;
                     out.push(TouchAction::HotbarSet(slot));
-                    Role::Hotbar
-                } else if let Some(b) = BUTTONS.iter().copied().filter(|b| !(self.studio && island(b))).find(|b| hit(*b, size, self.hotbar, p)) {
+                    Role::Slot
+                } else if let Some(b) = BUTTONS.iter().copied().filter(|b| !(self.studio && island(b)) && (*b != Btn::Fly || self.creative)).find(|b| hit(*b, size, self.hotbar, p)) {
                     match b {
                         Btn::Jump => {
+                            // Held: jump on the ground, rise while flying. Flight itself has
+                            // its own button, so no double-tap toggling here.
                             self.jump_held = true;
-                            out.push(TouchAction::Jump);
                         }
+                        Btn::Fly => out.push(TouchAction::Fly),
+                        Btn::Sneak if self.flying => self.down_held = true,
                         Btn::Sneak => {
                             self.sneak = !self.sneak;
                             if self.sneak {
@@ -206,7 +226,7 @@ impl TouchState {
                 } else {
                     Role::Look
                 };
-                self.fingers.push(Finger { id: t.id, role, start: p, last: p, t0: Instant::now(), moved: 0.0, breaking: false });
+                self.fingers.push(Finger { id: t.id, role, start: p, last: p, t0: Instant::now(), moved: 0.0, breaking: false, throws: 0 });
             }
             TouchPhase::Moved => {
                 if let Some(f) = self.fingers.iter_mut().find(|f| f.id == t.id) {
@@ -221,6 +241,7 @@ impl TouchState {
                             self.look.1 += p.1 - f.last.1;
                             f.moved += (p.0 - f.last.0).abs() + (p.1 - f.last.1).abs();
                         }
+                        Role::Slot => f.moved += (p.0 - f.last.0).abs() + (p.1 - f.last.1).abs(),
                         Role::Button(_) | Role::Hotbar => {}
                     }
                     f.last = p;
@@ -240,8 +261,9 @@ impl TouchState {
                             }
                         }
                         Role::Button(Btn::Jump) => self.jump_held = false,
+                        Role::Button(Btn::Sneak) => self.down_held = false,
                         Role::Button(Btn::Place) => self.place_held = false,
-                        Role::Button(_) | Role::Hotbar => {}
+                        Role::Button(_) | Role::Hotbar | Role::Slot => {}
                     }
                 }
             }
@@ -252,6 +274,17 @@ impl TouchState {
     /// Call every frame: a look finger held still for a moment starts breaking.
     pub fn tick(&mut self) {
         for f in self.fingers.iter_mut() {
+            // Long press on a hotbar slot: throw one item, then one more every 0.2 s.
+            if f.role == Role::Slot && f.moved < 30.0 {
+                let ms = f.t0.elapsed().as_millis() as f32;
+                let due = if ms < 600.0 { 0 } else { 1 + ((ms - 600.0) / 200.0) as u32 };
+                let done = f.breaking as u32 + f.throws;
+                if due > done {
+                    f.breaking = true;
+                    f.throws = due - 1;
+                    self.throws += 1;
+                }
+            }
             if f.role == Role::Look && !f.breaking && f.moved < 24.0 && f.t0.elapsed().as_millis() > 350 {
                 f.breaking = true;
                 self.breaking = true;
@@ -283,6 +316,7 @@ impl TouchState {
         self.fingers.clear();
         self.move_vec = (0.0, 0.0);
         self.jump_held = false;
+        self.down_held = false;
         self.place_held = false;
         self.breaking = false;
         self.look = (0.0, 0.0);
@@ -345,14 +379,16 @@ impl TouchState {
             }
         }
         for b in BUTTONS {
-            if ISLAND.contains(&b) {
+            if ISLAND.contains(&b) || (b == Btn::Fly && !self.creative) {
                 continue;
             }
             let (cx, cy, r) = button_rect(b, size, self.hotbar);
             let on = match b {
+                Btn::Sneak if self.flying => self.down_held,
                 Btn::Sneak => self.sneak,
                 Btn::Sprint => self.sprint,
                 Btn::Jump => self.jump_held,
+                Btn::Fly => self.flying,
                 _ => false,
             };
             let col = if on { Color32::from_rgba_unmultiplied(38, 198, 218, 170) } else { fill };
@@ -375,6 +411,16 @@ impl TouchState {
                         painter.line_segment([o + egui::vec2(k * 0.35, 0.0), o + egui::vec2(-k * 0.35, k * 0.7)], st);
                     }
                 }
+                Btn::Fly => {
+                    // Two wings.
+                    for sgn in [-1.0f32, 1.0] {
+                        painter.add(egui::Shape::convex_polygon(
+                            vec![c + egui::vec2(sgn * k * 0.15, k * 0.5), c + egui::vec2(sgn * k * 1.15, -k * 0.75), c + egui::vec2(sgn * k * 0.95, k * 0.05), c + egui::vec2(sgn * k * 0.55, k * 0.45)],
+                            white,
+                            Stroke::NONE,
+                        ));
+                    }
+                }
                 Btn::Place => {
                     // A block with a plus.
                     painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(k * 1.6, k * 1.6)), 0.0, st);
@@ -384,8 +430,11 @@ impl TouchState {
                 _ => {}
             }
             let label = match b {
+                Btn::Jump if self.flying => "Вверх",
+                Btn::Sneak if self.flying => "Вниз",
                 Btn::Jump => "Прыжок",
                 Btn::Sneak => "Присесть",
+                Btn::Fly => "Полёт",
                 Btn::Sprint => "Бег",
                 Btn::Place => "Поставить",
                 _ => "",

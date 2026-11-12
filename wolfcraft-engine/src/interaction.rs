@@ -30,6 +30,8 @@ pub enum InteractionEvent {
     OpenCrafting,
     /// Right click on a chest or electric furnace.
     OpenContainer { pos: Cell, block: Block },
+    /// A broken block dropped an item into the world (only with `Interaction::spill`).
+    Dropped { pos: Cell, stack: ItemStack },
 }
 
 #[derive(Default)]
@@ -40,6 +42,9 @@ pub struct Interaction {
     /// Seconds since LMB was last held on the target (progress fades after a pause).
     idle: f32,
     was_holding: bool,
+    /// Drops fall into the world as items (`InteractionEvent::Dropped`) instead of going
+    /// straight into the inventory.
+    pub spill: bool,
 }
 
 /// Mining progress is kept this long after releasing LMB, so repeated clicks also break blocks.
@@ -100,13 +105,20 @@ impl Interaction {
         if self.progress >= 1.0 {
             self.progress = 0.0;
             self.target = None;
-            if self.break_block(world, player, hit.cell, hit.block, seed) {
+            let mut spilled = Vec::new();
+            if self.break_block(world, player, hit.cell, hit.block, seed, &mut spilled) {
+                events.extend(spilled.into_iter().map(|stack| InteractionEvent::Dropped { pos: hit.cell, stack }));
                 events.push(InteractionEvent::Broken { pos: hit.cell, block: hit.block });
                 // A door is two blocks: the other half goes too (one door drops).
                 if let Some((other, ob)) = door_partner(world, hit.cell, hit.block) {
                     if world.set_block(other, Block::Air) {
                         if hit.block.is_door_top() && !player.is_creative() {
-                            player.inventory.add(ItemStack::of_block(ob.base_item(), 1));
+                            let s = ItemStack::of_block(ob.base_item(), 1);
+                            if self.spill {
+                                events.push(InteractionEvent::Dropped { pos: other, stack: s });
+                            } else {
+                                player.inventory.add(s);
+                            }
                         }
                         events.push(InteractionEvent::Broken { pos: other, block: ob });
                     }
@@ -116,7 +128,7 @@ impl Interaction {
         events
     }
 
-    fn break_block(&mut self, world: &mut impl WorldEdit, player: &mut Player, pos: Cell, block: Block, seed: u64) -> bool {
+    fn break_block(&mut self, world: &mut impl WorldEdit, player: &mut Player, pos: Cell, block: Block, seed: u64, spilled: &mut Vec<ItemStack>) -> bool {
         if !world.set_block(pos, Block::Air) {
             return false;
         }
@@ -124,7 +136,11 @@ impl Interaction {
             let held = player.inventory.held().map(|s| s.info());
             let ok = items::can_harvest(held, block);
             for d in items::drops(block, ok, IVec3::new(pos.i, pos.j, pos.k ^ ((pos.f as i32) << 24)), seed) {
-                player.inventory.add(d);
+                if self.spill {
+                    spilled.push(d);
+                } else {
+                    player.inventory.add(d);
+                }
             }
             player.survival.add_xp(items::xp_for(block));
             player.survival.exhaust(0.025);

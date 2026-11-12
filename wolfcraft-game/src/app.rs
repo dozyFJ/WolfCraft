@@ -371,7 +371,7 @@ impl App {
         let mut world = WorldRenderer::new(&gpu.device, &gpu.queue, gpu.config.format, &atlases, gpu.config.width, gpu.config.height);
         if cfg!(target_os = "android") {
             // The phone GPU is fill-rate bound: draw the world smaller and stretch it.
-            world.set_render_scale(1.0);
+            world.set_render_scale(self.settings.render_scale);
         }
         Ok(Gfx { window, gpu, gui, atlases, world })
     }
@@ -833,6 +833,13 @@ impl App {
             (Screen::Playing | Screen::Paused | Screen::Inventory, KeyCode::F3 | KeyCode::Tab) => self.debug = !self.debug,
             (Screen::Playing, KeyCode::Space) => self.input.jump_press = true,
             (Screen::Playing, KeyCode::KeyF) => self.input.swap_press = true,
+            // Q throws the held item (one; with Ctrl the whole stack), like the classic game.
+            (Screen::Playing, KeyCode::KeyQ) => {
+                let all = self.input.keys.contains(&KeyCode::ControlLeft);
+                if let Some(s) = &mut self.session {
+                    s.throw_held(all);
+                }
+            }
             (Screen::Playing, c) => {
                 let digit = match c {
                     KeyCode::Digit1 => Some(0),
@@ -898,6 +905,14 @@ impl App {
         let axis = |pos: KeyCode, neg: KeyCode| (k.contains(&pos) as i32 - k.contains(&neg) as i32) as f32;
         let sens = 0.0022 * self.settings.mouse_sensitivity as f64;
         self.touch.tick();
+        let throws = std::mem::take(&mut self.touch.throws);
+        if throws > 0 {
+            if let Some(s) = &mut self.session {
+                for _ in 0..throws {
+                    s.throw_held(false);
+                }
+            }
+        }
         let tl = self.touch.take_look();
         // With a bow in hand a long press on the screen draws it instead of breaking blocks.
         let bow = self.session.as_ref().is_some_and(|s| s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::BOW));
@@ -908,7 +923,7 @@ impl App {
             jump: k.contains(&KeyCode::Space) || self.touch.jump_held,
             jump_pressed: std::mem::take(&mut self.input.jump_press),
             sprint: k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight) || self.touch.sprint,
-            sneak: k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || self.touch.sneak,
+            sneak: k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || if self.touch.flying { self.touch.down_held } else { self.touch.sneak },
             look: self.smooth_look(((self.input.mouse_dx + tl.0 as f64 * 1.4) * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy + tl.1 as f64 * 1.4) * sens)),
             break_held: self.input.left || (self.touch.breaking && !bow),
             use_pressed: std::mem::take(&mut self.input.right_press),
@@ -1193,7 +1208,11 @@ impl App {
                                 self.audio.play(crate::audio::Sfx::Break, 1.0);
                             }
                             InteractionEvent::Ate { .. } => self.audio.play(crate::audio::Sfx::Eat, 1.0),
+                            InteractionEvent::Dropped { .. } => {}
                         }
+                    }
+                    if std::mem::take(&mut s.picked_up) > 0 {
+                        self.audio.play(crate::audio::Sfx::Pop, 0.8);
                     }
                     if s.player.survival.dead && self.screen == Screen::Playing {
                         deaths = true;
@@ -1482,12 +1501,18 @@ impl App {
                                         status: if furnace { Some((status_text, prog)) } else { None },
                                     };
                                     let mut slots = std::mem::take(s.container_slots(pos, block));
-                                    let closed = wolfcraft_ui::container_ui::show(ctx, &icons, &view, &mut slots, &mut s.player.inventory);
+                                    let (closed, thrown) = wolfcraft_ui::container_ui::show(ctx, &icons, &view, &mut slots, &mut s.player.inventory);
                                     *s.container_slots(pos, block) = slots;
+                                    for st in thrown {
+                                        s.throw(st);
+                                    }
                                     close_inventory |= closed;
                                 } else {
                                     let creative = s.is_creative();
                                     let r = inventory_ui::show(ctx, &icons, inv_ui, &mut s.player.inventory, creative, *near_table, ctx_dt);
+                                    for st in r.thrown {
+                                        s.throw(st);
+                                    }
                                     close_inventory |= r.close;
                                 }
                             }
@@ -1541,6 +1566,10 @@ impl App {
         // Studio panels: keep the touch controls off them, then do what the ribbon asked.
         let ppp = gfx.gui.ctx.pixels_per_point();
         self.touch.studio = self.studio.is_some();
+        if let Some(s) = &self.session {
+            self.touch.creative = s.player.is_creative();
+            self.touch.flying = s.player.body.flying;
+        }
         if self.screen == Screen::Playing {
             self.touch.blocked = studio_cover.iter().map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
         }
@@ -1571,6 +1600,7 @@ impl App {
         let view_tex = output.texture.create_view(&Default::default());
         let mut encoder = gfx.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
         let (w, h) = gfx.gpu.size();
+        gfx.world.set_render_scale(self.settings.render_scale);
         gfx.world.resize(&gfx.gpu.device, w, h);
         if self.screen.in_world() || (self.screen == Screen::Loading && self.session.is_some()) {
             if let Some(s) = &mut self.session {
@@ -1627,6 +1657,7 @@ impl App {
                 };
                 // Character model is visible in third-person views only.
                 let mut model_verts = wolfcraft_engine::renderer::model::build_mob_models(&s.mobs.mobs, cam.eye, cam.forward, (self.settings.render_distance * 16) as f64 * 1.15);
+                model_verts.extend(wolfcraft_engine::renderer::model::build_dropped_models(&s.drops.list, cam.eye, self.time.elapsed(), 48.0));
                 let arrows: Vec<(glam::DVec3, glam::DVec3)> = s.arrows.list.iter().map(|a| (a.pos, a.dir)).collect();
                 model_verts.extend(wolfcraft_engine::renderer::model::build_arrow_models(&arrows, cam.eye));
                 if s.camera_mode != crate::session::CameraMode::First && !s.player.survival.dead {
@@ -2086,6 +2117,7 @@ fn key_code(ke: &KeyEvent) -> Option<KeyCode> {
             "f" | "а" => KeyCode::KeyF,
             "t" | "е" => KeyCode::KeyT,
             "c" | "с" => KeyCode::KeyC,
+            "q" | "й" => KeyCode::KeyQ,
             "/" | "." => KeyCode::Slash,
             "1" => KeyCode::Digit1,
             "2" => KeyCode::Digit2,
@@ -2198,7 +2230,13 @@ impl ApplicationHandler for App {
                     let size = gfx.gpu.size();
                     for a in self.touch.event(&t, size) {
                         match a {
-                            TouchAction::Jump => self.input.jump_press = true,
+                            TouchAction::Fly => {
+                                if let Some(s) = &mut self.session {
+                                    s.player.toggle_flight();
+                                    // Sneak toggled on would pull a fresh flight down.
+                                    self.touch.sneak = false;
+                                }
+                            }
                             TouchAction::Place => self.input.right_press = true,
                             TouchAction::Hotbar(d) => self.input.scroll += d as f32,
                             TouchAction::Camera => self.handle_key(KeyCode::F5, true, false),

@@ -225,7 +225,10 @@ fn sample_tile(in: VsOut) -> vec4<f32> {
     let tile = in.flags & 0xFFFFu;
     let r = g.tiles[tile];
     let f = clamp(fract(in.uv), vec2<f32>(0.001), vec2<f32>(0.999));
-    return textureSample(atlas, samp, r.xy + f * r.zw);
+    // Gradients of the unwrapped uv: the mip level stays smooth across tile repeats (fract
+    // would otherwise pick the smallest level along every block edge).
+    let suv = in.uv * r.zw;
+    return textureSampleGrad(atlas, samp, r.xy + f * r.zw, dpdx(suv), dpdy(suv));
 }
 
 // Height (0 deep .. 1 high) of the tile under `uv` (any value: the tile repeats).
@@ -453,7 +456,15 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
         let h = fract(sin(dot(cell, vec2<f32>(12.9898, 78.233))) * 43758.5453);
         base = base * (0.80 + 0.36 * h);
     }
-    if (in.tex > 1.5 && in.tex < 2.5) {
+    if (in.tex > 3.5) {
+        // Dropped block: a block sprite from the world atlas (sprite id in colour.r).
+        let r = g.tiles[min(u32(in.color.r + 0.5), 255u)];
+        let bt = textureSampleLevel(atlas, samp, r.xy + clamp(in.uv, vec2<f32>(0.01), vec2<f32>(0.99)) * r.zw, 0.0);
+        if (bt.a < 0.5) {
+            discard;
+        }
+        base = bt.rgb;
+    } else if (in.tex > 1.5 && in.tex < 2.5) {
         if (item.a < 0.5) {
             discard;
         }
@@ -477,7 +488,7 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
         let v = normalize(-in.rel);
         rim = pow(1.0 - max(dot(nn, v), 0.0), 3.0) * mix(0.12, 0.38, day);
     }
-    if (in.tex > 2.5) {
+    if (in.tex > 2.5 && in.tex < 3.5) {
         light = 1.25; // glowing particles: embers, sparks
         rim = 0.0;
     }

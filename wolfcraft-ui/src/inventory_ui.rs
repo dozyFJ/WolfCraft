@@ -43,6 +43,8 @@ pub struct InventoryUiState {
 pub struct InventoryResult {
     pub close: bool,
     pub crafted: Option<String>,
+    /// Stacks dragged out of the window: the game throws them into the world (Bedrock style).
+    pub thrown: Vec<ItemStack>,
 }
 
 /// Call when the inventory closes: items left in the crafting grid go back to the inventory.
@@ -207,6 +209,15 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
                 } else if let (Some(tr), Some(pos)) = (trash_rect, pointer) {
                     if tr.contains(pos) {
                         set(inv, &mut state.grid, src, None);
+                    }
+                } else if let Some(pos) = pointer {
+                    // Released outside the window (well away from every slot): throw it out.
+                    let area = slot_rects.iter().fold(Rect::NOTHING, |a, (_, r)| a.union(*r)).expand(36.0);
+                    if !area.contains(pos) {
+                        if let Some(s) = get(inv, &state.grid, src) {
+                            set(inv, &mut state.grid, src, None);
+                            result.thrown.push(s);
+                        }
                     }
                 }
             }

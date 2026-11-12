@@ -13,6 +13,8 @@ pub enum Sfx {
     Splash,
     /// A single hit on a block while mining.
     Hit,
+    /// An item picked up from the ground: a short bright pop.
+    Pop,
 }
 
 const RATE: u32 = 44100;
@@ -72,6 +74,7 @@ fn synth(s: Sfx) -> Vec<f32> {
         }
         Sfx::Splash => burst(0.35, 0.3, 4.0, 83),
         Sfx::Hit => mix(&burst(0.06, 0.45, 9.0, 97), &sweep(0.05, 210.0, 140.0, 8.0), 0.4),
+        Sfx::Pop => sweep(0.07, 620.0, 1100.0, 6.0).into_iter().map(|v| v * 0.5).collect(),
     }
 }
 
@@ -92,7 +95,7 @@ impl Audio {
                 (None, None)
             }
         };
-        let bufs = [Sfx::Break, Sfx::Place, Sfx::Step, Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit].into_iter().map(|s| (s, synth(s))).collect();
+        let bufs = [Sfx::Break, Sfx::Place, Sfx::Step, Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit, Sfx::Pop].into_iter().map(|s| (s, synth(s))).collect();
         Self { _stream: stream, handle, bufs, volume: 0.6, seed: 12345 }
     }
 

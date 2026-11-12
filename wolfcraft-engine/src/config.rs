@@ -357,6 +357,8 @@ pub struct Settings {
     pub fx_water: bool,
     /// Colour grading (contrast, saturation, warm highlights).
     pub fx_grading: bool,
+    /// World resolution (0.5..1 of the screen): lower is much faster on phones.
+    pub render_scale: f32,
     /// Cartoon look: soft bright light, light shadows, juicy colours, rim light on mobs.
     pub fx_toon: bool,
     /// Look the settings were last moved to (1: the cartoon style became the default).
@@ -434,6 +436,9 @@ impl Default for Settings {
             fx_water: true,
             fx_grading: true,
             fx_toon: true,
+            // Phones are fill-rate bound: three quarters of the screen looks the same and is
+            // close to twice as fast.
+            render_scale: if cfg!(target_os = "android") { 0.75 } else { 1.0 },
             style_version: STYLE_VERSION,
             invert_y: false,
             ui_scale: 1.0,

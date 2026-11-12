@@ -84,6 +84,8 @@ pub struct GameSession {
     pub chunks: ChunkManager,
     pub player: Player,
     pub interaction: Interaction,
+    /// Items lying in the world.
+    pub drops: wolfcraft_engine::drops::Drops,
     pub hit: Option<Hit>,
     pub item_name: Option<(String, f32)>,
     pub near_table: bool,
@@ -146,6 +148,8 @@ pub struct GameSession {
     aim_dir: Option<DVec3>,
     /// Blows that landed on creatures this frame (the app plays the swing and the sound).
     pub mob_hits: u32,
+    /// Items picked up from the ground since the game last looked (pop sound).
+    pub picked_up: u32,
     /// Radiation dose from uranium (seconds of exposure); every 3 s of it costs half a heart.
     radiation: f32,
     /// Flowing water and lava around edits.
@@ -165,7 +169,8 @@ impl GameSession {
             planet: l.planet,
             chunks,
             player: l.player,
-            interaction: Interaction::default(),
+            interaction: { let mut i = Interaction::default(); i.spill = true; i },
+            drops: wolfcraft_engine::drops::Drops::new(),
             hit: None,
             item_name: None,
             near_table: false,
@@ -202,6 +207,7 @@ impl GameSession {
             fluids: Default::default(),
             radiation: 0.0,
             mob_hits: 0,
+            picked_up: 0,
             aim_dir: None,
             fx_amount: 1.0,
             fx_lights: Vec::new(),
@@ -441,14 +447,24 @@ impl GameSession {
                 self.try_attack(0.45);
             }
         }
+        // Items in the world: fall, merge, fly to the player.
+        if self.ground_ready() && !self.drops.list.is_empty() {
+            let centre = self.player.body.pos + wolfcraft_engine::physics::up_at(self.player.body.pos) * 0.8;
+            let can = !self.player.survival.dead;
+            let inv = &mut self.player.inventory;
+            let n = self.drops.step(&self.chunks, centre, can, dt as f64, |s| inv.add(s));
+            self.picked_up += n;
+        }
         // Arrows: flight, hits, pickup.
         if self.ground_ready() {
             let feet = self.player.body.pos;
             let can_pick = !self.player.survival.dead;
             let ev = self.arrows.step(&self.chunks, &mut self.mobs, feet, can_pick, dt.min(0.1) as f64);
             for kind in ev.killed {
+                // Shot from afar: the loot lands at the player's feet (the arrow event has no spot).
                 for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64) {
-                    self.player.inventory.add(drop);
+                    let at = self.player.body.pos + wolfcraft_engine::physics::up_at(self.player.body.pos) * 0.5;
+                    self.drops.pop_from_block(drop, at);
                 }
                 self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
             }
@@ -456,12 +472,17 @@ impl GameSession {
                 self.player.inventory.add(wolfcraft_engine::items::ItemStack::new(wolfcraft_engine::items::ids::ARROW, ev.picked as u8));
             }
         }
-        // Containers: broken chests spill into the inventory; furnaces smelt while powered.
+        // Broken blocks drop their items into the world; broken chests spill their contents.
         for e in &events {
+            if let InteractionEvent::Dropped { pos, stack } = e {
+                let c = self.chunks.grid().cell_center(*pos);
+                self.drops.pop_from_block(*stack, c);
+            }
             if let InteractionEvent::Broken { pos, .. } = e {
                 if let Some(slots) = self.containers.remove(pos) {
+                    let c = self.chunks.grid().cell_center(*pos);
                     for s in slots.into_iter().flatten() {
-                        self.player.inventory.add(s);
+                        self.drops.pop_from_block(s, c);
                     }
                 }
                 self.furnace_t.remove(pos);
@@ -982,7 +1003,7 @@ impl GameSession {
         self.mobs.chips(at - look * 0.3, &[[0.95, 0.15, 0.12], [1.0, 1.0, 1.0], [0.75, 0.05, 0.05]], n, 2.2 + dmg as f64 * 0.15);
         if let Some(kind) = self.mobs.hurt(i, dmg, self.player.body.pos) {
             for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64) {
-                self.player.inventory.add(drop);
+                self.drops.pop_from_block(drop, at);
             }
             self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
         }
@@ -994,6 +1015,26 @@ impl GameSession {
             }
         }
         true
+    }
+
+    /// Throws a stack out in front of the player (Bedrock style): it flies along the view
+    /// and cannot be picked up again for a moment.
+    pub fn throw(&mut self, stack: wolfcraft_engine::items::ItemStack) {
+        let eye = self.player.eye_pos();
+        let look = self.player.look_dir();
+        let up = wolfcraft_engine::physics::up_at(eye);
+        self.drops.spawn(stack, eye - up * 0.3 + look * 0.4, look * 6.5 + up * 1.8, 1.5);
+    }
+
+    /// Throws the held item: one, or the whole stack.
+    pub fn throw_held(&mut self, all: bool) {
+        let inv = &mut self.player.inventory;
+        let sel = inv.selected;
+        let Some(s) = inv.slots[sel] else { return };
+        let n = if all { s.count } else { 1 };
+        let thrown = wolfcraft_engine::items::ItemStack { count: n, ..s };
+        inv.slots[sel] = if s.count > n { Some(wolfcraft_engine::items::ItemStack { count: s.count - n, ..s }) } else { None };
+        self.throw(thrown);
     }
 
     /// True when the centre of one of the body's spheres is inside a solid block's box.

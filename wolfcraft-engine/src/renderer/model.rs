@@ -590,6 +590,85 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3
     v
 }
 
+/// Items lying in the world: blocks as small spinning textured cubes, other items as 3D
+/// pixel icons; a stack shows a second copy behind the first. Bob up and down a little.
+pub fn build_dropped_models(drops: &[crate::drops::Dropped], camera: DVec3, time: f32, max_dist: f64) -> Vec<ModelVertex> {
+    let mut v = Vec::new();
+    let tex = textures();
+    for d in drops {
+        if (d.pos - camera).length_squared() > max_dist * max_dist {
+            continue;
+        }
+        let up = crate::physics::up_at(d.pos);
+        let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let r0 = up.cross(helper).normalize();
+        let f0 = r0.cross(up);
+        let a = (time * 1.6 + d.seed * 6.28) as f64;
+        let (s, c) = a.sin_cos();
+        let right = r0 * c + f0 * s;
+        let fwd = right.cross(up) * -1.0;
+        let bob = 0.13 + ((time * 2.4 + d.seed * 9.0).sin() * 0.05) as f64;
+        let copies = if d.stack.count > 1 { 2 } else { 1 };
+        let info = d.stack.info();
+        let block = info.place.filter(|b| matches!(b.info().render, crate::block::RenderKind::Opaque | crate::block::RenderKind::Cutout));
+        for k in 0..copies {
+            let off = DVec3::new(0.0, 0.0, 0.0) + right * (k as f64 * 0.07) + fwd * (k as f64 * 0.06) + up * (k as f64 * 0.05);
+            let frame = Frame { origin: d.pos - camera + up * bob + off, right, up, fwd };
+            if let Some(b) = block {
+                add_tiled_cube(&mut v, &frame, 0.12, b.info().tiles);
+            } else {
+                let px = match info.icon {
+                    crate::items::Icon::Item(i) => tex.as_ref().and_then(|t| t.item_pixels.get(i as usize).cloned()),
+                    crate::items::Icon::Block(_) => None,
+                };
+                if let Some(px) = px.filter(|p| p.len() == 256) {
+                    let s = 0.34f32;
+                    add_voxel_icon(&mut v, &frame, &px, Vec3::new(-s * 0.5, 0.0, 0.0), Vec3::X, Vec3::Y, Vec3::NEG_Z, s, Vec3::ZERO, 0.0);
+                } else if let crate::items::Icon::Block(t) = info.icon {
+                    // Plants and other non-cube blocks: a two-sided card with the block sprite.
+                    add_tiled_card(&mut v, &frame, 0.3, t);
+                }
+            }
+        }
+    }
+    v
+}
+
+/// Small cube textured with block sprites (`tiles` in +X, -X, +Y, -Y, +Z, -Z order), drawn by
+/// the model shader from the blocks atlas (`tex` 4, sprite id in `color[0]`).
+fn add_tiled_cube(out: &mut Vec<ModelVertex>, f: &Frame, h: f32, tiles: [u16; 6]) {
+    let faces: [(usize, Vec3, Vec3, Vec3); 6] = [
+        (0, Vec3::X, Vec3::Z, Vec3::Y),
+        (1, Vec3::NEG_X, Vec3::NEG_Z, Vec3::Y),
+        (2, Vec3::Y, Vec3::X, Vec3::NEG_Z),
+        (3, Vec3::NEG_Y, Vec3::X, Vec3::Z),
+        (4, Vec3::Z, Vec3::NEG_X, Vec3::Y),
+        (5, Vec3::NEG_Z, Vec3::X, Vec3::Y),
+    ];
+    let c = Vec3::new(0.0, h, 0.0);
+    for (ti, n, ua, va) in faces {
+        let corner = |u: f32, w: f32| c + (n + ua * (u * 2.0 - 1.0) + va * (w * 2.0 - 1.0)) * h;
+        let p = [corner(0.0, 0.0), corner(1.0, 0.0), corner(1.0, 1.0), corner(0.0, 1.0)];
+        let uv = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        let nw = f.dir(n).normalize_or_zero().to_array();
+        let color = [tiles[ti] as f32, 0.0, 0.0];
+        // Both windings: tiny and always seen from outside, so culling stays simple.
+        for i in [0usize, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2] {
+            out.push(ModelVertex { pos: f.to_world(p[i]).as_vec3().to_array(), normal: nw, color, uv: uv[i], tex: 4.0 });
+        }
+    }
+}
+
+/// Upright two-sided card with one block sprite (flowers, torches…).
+fn add_tiled_card(out: &mut Vec<ModelVertex>, f: &Frame, s: f32, tile: u16) {
+    let p = [Vec3::new(-s * 0.5, 0.0, 0.0), Vec3::new(s * 0.5, 0.0, 0.0), Vec3::new(s * 0.5, s, 0.0), Vec3::new(-s * 0.5, s, 0.0)];
+    let uv = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+    let nw = f.dir(Vec3::NEG_Z).normalize_or_zero().to_array();
+    for i in [0usize, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2] {
+        out.push(ModelVertex { pos: f.to_world(p[i]).as_vec3().to_array(), normal: nw, color: [tile as f32, 0.0, 0.0], uv: uv[i], tex: 4.0 });
+    }
+}
+
 /// Arrows in flight or stuck in blocks: `(tip position, direction)` relative to nothing
 /// (world space); drawn relative to `camera`.
 pub fn build_arrow_models(arrows: &[(DVec3, DVec3)], camera: DVec3) -> Vec<ModelVertex> {

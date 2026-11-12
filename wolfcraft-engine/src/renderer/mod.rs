@@ -31,6 +31,12 @@ struct Globals {
     tiles: [[f32; 4]; MAX_TILES],
 }
 
+/// Mip levels of the block atlas (full, ½, ¼).
+const MIP_LEVELS: u32 = 3;
+
+/// sRGB byte → linear light.
+static SRGB_TO_LIN: std::sync::LazyLock<[f32; 256]> = std::sync::LazyLock::new(|| std::array::from_fn(|i| (i as f32 / 255.0).powf(2.2)));
+
 /// An atlas on the GPU (nearest filtering, no mip bleeding thanks to extruded padding).
 pub struct GpuAtlas {
     pub texture: wgpu::Texture,
@@ -45,13 +51,68 @@ impl GpuAtlas {
         Self { texture, view, kind: atlas.kind(), generation: atlas.generation() }
     }
 
+    /// Mip levels of an atlas: the block atlas gets two smaller copies (½ and ¼), so distant
+    /// blocks read a small texture (fast on phones, no shimmering); others have none.
+    fn levels(atlas: &TextureAtlas) -> u32 {
+        let img = atlas.image();
+        if atlas.kind() == AtlasKind::Blocks && img.width % 4 == 0 && img.height % 4 == 0 { MIP_LEVELS } else { 1 }
+    }
+
+    /// Writes the smaller mip levels of the region `(x, y, w, h)` (level-0 pixels, aligned to 4).
+    fn write_mips(queue: &wgpu::Queue, texture: &wgpu::Texture, img: &wolfcraft_assets::image::Image, x: u32, y: u32, w: u32, h: u32, levels: u32) {
+        let mut cur: Vec<[f32; 4]> = Vec::with_capacity((w * h) as usize);
+        for yy in y..y + h {
+            for xx in x..x + w {
+                let p = img.get(xx, yy);
+                cur.push([SRGB_TO_LIN[p[0] as usize], SRGB_TO_LIN[p[1] as usize], SRGB_TO_LIN[p[2] as usize], p[3] as f32 / 255.0]);
+            }
+        }
+        let (mut cw, mut ch) = (w, h);
+        for level in 1..levels {
+            let (nw, nh) = (cw / 2, ch / 2);
+            if nw == 0 || nh == 0 {
+                break;
+            }
+            let mut next = Vec::with_capacity((nw * nh) as usize);
+            let mut bytes = Vec::with_capacity((nw * nh * 4) as usize);
+            for yy in 0..nh {
+                for xx in 0..nw {
+                    // Alpha-weighted average in linear light: cut-out edges do not darken.
+                    let mut s = [0.0f32; 4];
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let q = cur[((yy * 2 + dy) * cw + xx * 2 + dx) as usize];
+                        for c in 0..3 {
+                            s[c] += q[c] * q[3];
+                        }
+                        s[3] += q[3];
+                    }
+                    let a = s[3] / 4.0;
+                    let px = if s[3] > 0.0 { [s[0] / s[3], s[1] / s[3], s[2] / s[3], a] } else { [0.0; 4] };
+                    next.push(px);
+                    let enc = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0 + 0.5) as u8;
+                    bytes.extend_from_slice(&[enc(px[0]), enc(px[1]), enc(px[2]), (a * 255.0 + 0.5) as u8]);
+                }
+            }
+            queue.write_texture(
+                wgpu::ImageCopyTexture { texture, mip_level: level, origin: wgpu::Origin3d { x: x >> level, y: y >> level, z: 0 }, aspect: wgpu::TextureAspect::All },
+                &bytes,
+                wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(nw * 4), rows_per_image: Some(nh) },
+                wgpu::Extent3d { width: nw, height: nh, depth_or_array_layers: 1 },
+            );
+            cur = next;
+            cw = nw;
+            ch = nh;
+        }
+    }
+
     fn create(device: &wgpu::Device, queue: &wgpu::Queue, atlas: &TextureAtlas) -> (wgpu::Texture, wgpu::TextureView) {
         let img = atlas.image();
         let size = wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 };
+        let levels = Self::levels(atlas);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(&format!("{:?}-atlas", atlas.kind())),
             size,
-            mip_level_count: 1,
+            mip_level_count: levels,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -64,6 +125,9 @@ impl GpuAtlas {
             wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(img.width * 4), rows_per_image: Some(img.height) },
             size,
         );
+        if levels > 1 {
+            Self::write_mips(queue, &texture, img, 0, 0, img.width, img.height, levels);
+        }
         let view = texture.create_view(&Default::default());
         (texture, view)
     }
@@ -80,8 +144,15 @@ impl GpuAtlas {
             return true;
         }
         let dirty = atlas.take_dirty();
+        let levels = Self::levels(atlas);
         let img = atlas.image();
         for r in dirty {
+            if levels > 1 {
+                // Keep the small copies of an animated sprite (water) in step.
+                let (x0, y0) = (r.x & !3, r.y & !3);
+                let (x1, y1) = (((r.x + r.w + 3) & !3).min(img.width), ((r.y + r.h + 3) & !3).min(img.height));
+                Self::write_mips(queue, &self.texture, img, x0, y0, x1 - x0, y1 - y0, levels);
+            }
             let mut data = Vec::with_capacity((r.w * r.h * 4) as usize);
             for y in r.y..r.y + r.h {
                 let s = ((y * img.width + r.x) * 4) as usize;
@@ -625,8 +696,11 @@ impl WorldRenderer {
 
     /// Renders the world at a fraction of the screen resolution (phones) and stretches it.
     pub fn set_render_scale(&mut self, scale: f32) {
-        self.render_scale = scale.clamp(0.4, 1.0);
-        self.depth_size = (0, 0);
+        let scale = scale.clamp(0.4, 1.0);
+        if (scale - self.render_scale).abs() > 1e-3 {
+            self.render_scale = scale;
+            self.depth_size = (0, 0);
+        }
     }
 
     /// The screen size is w x h pixels; the world targets are render_scale times that.

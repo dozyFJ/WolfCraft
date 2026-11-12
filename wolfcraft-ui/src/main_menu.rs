@@ -1043,6 +1043,14 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                         res.changed |= ui.add(egui::Slider::new(&mut s.render_distance, 3..=16).suffix(" чанк.")).changed();
                     });
                     ui.add_space(8.0);
+                    setting_row(ui, "Разрешение", Some("Чем меньше, тем быстрее. 75% на телефоне почти не отличить, а FPS выше"), |ui| {
+                        let mut pct = (s.render_scale * 100.0).round() as u8;
+                        if segmented(ui, "render-scale", &[(50u8, "50%"), (67, "67%"), (75, "75%"), (100, "100%")], &mut pct) {
+                            s.render_scale = pct as f32 / 100.0;
+                            res.changed = true;
+                        }
+                    });
+                    ui.add_space(8.0);
                     setting_row(ui, "Поле зрения", None, |ui| {
                         res.changed |= ui.add(egui::Slider::new(&mut s.fov, 50.0..=110.0).suffix("°").integer()).changed();
                     });

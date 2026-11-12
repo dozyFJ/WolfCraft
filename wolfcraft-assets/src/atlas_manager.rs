@@ -44,7 +44,9 @@ impl AtlasKind {
     /// Pixels of extruded padding around each sprite.
     fn padding(self) -> u32 {
         match self {
-            AtlasKind::Blocks => 2,
+            // 4: with sprites a multiple of 4 wide, every tile then starts on a multiple of 4,
+            // so the GPU's 2× and 4× smaller mip levels never mix neighbouring tiles.
+            AtlasKind::Blocks => 4,
             _ => 1,
         }
     }
