@@ -31,6 +31,8 @@ pub struct Dropped {
     pub seed: f32,
     /// Lying still on the ground (drawn flat instead of spinning in the air).
     pub resting: bool,
+    /// Seconds it still sparkles (loot from an ore).
+    pub shine: f32,
 }
 
 #[derive(Default)]
@@ -54,7 +56,7 @@ impl Drops {
         if self.list.len() >= MAX_ITEMS {
             self.list.remove(0);
         }
-        self.list.push(Dropped { stack, pos, vel, age: 0.0, delay, seed, resting: false });
+        self.list.push(Dropped { stack, pos, vel, age: 0.0, delay, seed, resting: false, shine: 0.0 });
     }
 
     /// Pops an item out of a block: from the centre of the cell, a small hop in a random
@@ -65,6 +67,18 @@ impl Drops {
         let side = DVec3::new(s.cos(), s.sin(), (s * 1.7).cos());
         let side = (side - up * side.dot(up)).normalize_or_zero();
         self.spawn(stack, centre, up * 3.2 + side * 1.4, 0.4);
+    }
+
+    /// Loot from an ore: a higher hop and a few seconds of sparkle.
+    pub fn pop_shiny(&mut self, stack: ItemStack, centre: DVec3) {
+        let up = up_at(centre);
+        let s = self.list.len() as f64 * 2.399 + centre.x * 0.37;
+        let side = DVec3::new(s.cos(), s.sin(), (s * 1.7).cos());
+        let side = (side - up * side.dot(up)).normalize_or_zero();
+        self.spawn(stack, centre, up * 5.2 + side * 1.2, 0.5);
+        if let Some(d) = self.list.last_mut() {
+            d.shine = 2.5;
+        }
     }
 
     /// Moves every item, merges touching stacks and lets the player pick items up. `give`

@@ -127,25 +127,25 @@ fn swing_angle(a: f32, held: Held) -> f32 {
 }
 
 /// Names of the built-in skins, in the order of `skin_colors`.
-pub const SKIN_NAMES: [&str; 6] = ["Бирюзовый", "Красный", "Зелёный", "Фиолетовый", "Оранжевый", "Тёмный"];
+pub const SKIN_NAMES: [&str; 6] = ["Искатель", "Огонёк", "Лесник", "Мечта", "Солнце", "Тень"];
 
 /// (skin tone, hair, jacket, sleeve, trousers) of skin preset `i`.
 pub fn skin_colors(i: u8) -> ([f32; 3], [f32; 3], [f32; 3], [f32; 3], [f32; 3]) {
     match i {
-        1 => ([0.86, 0.68, 0.55], [0.12, 0.08, 0.06], [0.75, 0.15, 0.15], [0.62, 0.12, 0.12], [0.20, 0.20, 0.24]),
-        2 => ([0.78, 0.60, 0.46], [0.35, 0.22, 0.10], [0.20, 0.60, 0.25], [0.15, 0.50, 0.20], [0.30, 0.24, 0.16]),
-        3 => ([0.92, 0.76, 0.64], [0.55, 0.25, 0.70], [0.50, 0.25, 0.75], [0.42, 0.20, 0.64], [0.14, 0.14, 0.26]),
-        4 => ([0.70, 0.50, 0.38], [0.85, 0.35, 0.08], [0.95, 0.55, 0.12], [0.82, 0.45, 0.10], [0.22, 0.22, 0.28]),
-        5 => ([0.55, 0.38, 0.28], [0.06, 0.06, 0.08], [0.16, 0.16, 0.20], [0.12, 0.12, 0.16], [0.08, 0.08, 0.10]),
+        1 => ([0.95, 0.78, 0.64], [0.85, 0.28, 0.12], [0.92, 0.26, 0.24], [0.80, 0.20, 0.20], [0.24, 0.26, 0.36]),
+        2 => ([0.82, 0.62, 0.46], [0.42, 0.26, 0.12], [0.30, 0.62, 0.30], [0.24, 0.52, 0.24], [0.40, 0.30, 0.20]),
+        3 => ([0.98, 0.84, 0.74], [0.95, 0.55, 0.78], [0.62, 0.42, 0.90], [0.52, 0.34, 0.80], [0.30, 0.30, 0.52]),
+        4 => ([0.74, 0.52, 0.38], [0.98, 0.80, 0.30], [1.0, 0.70, 0.18], [0.92, 0.58, 0.12], [0.22, 0.42, 0.70]),
+        5 => ([0.52, 0.36, 0.27], [0.10, 0.10, 0.14], [0.22, 0.22, 0.30], [0.16, 0.16, 0.24], [0.12, 0.12, 0.16]),
         _ => (SKIN, HAIR, JACKET, SLEEVE, TROUSERS),
     }
 }
 
-const SKIN: [f32; 3] = [0.86, 0.68, 0.55];
-const HAIR: [f32; 3] = [0.20, 0.13, 0.08];
-const JACKET: [f32; 3] = [0.10, 0.50, 0.55];
-const SLEEVE: [f32; 3] = [0.08, 0.42, 0.47];
-const TROUSERS: [f32; 3] = [0.18, 0.20, 0.30];
+const SKIN: [f32; 3] = [0.94, 0.76, 0.62];
+const HAIR: [f32; 3] = [0.36, 0.22, 0.12];
+const JACKET: [f32; 3] = [0.12, 0.62, 0.68];
+const SLEEVE: [f32; 3] = [0.10, 0.54, 0.60];
+const TROUSERS: [f32; 3] = [0.20, 0.24, 0.40];
 const BOOTS: [f32; 3] = [0.26, 0.17, 0.11];
 const EYE: [f32; 3] = [0.10, 0.12, 0.18];
 const BELT: [f32; 3] = [0.95, 0.60, 0.15];
@@ -183,6 +183,13 @@ fn add_box(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: V
 #[allow(clippy::too_many_arguments)]
 fn add_box_r(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: Vec3, angle: f32, color: [f32; 3], rounded: bool) {
     add_box_opts(out, f, min, max, pivot, angle, color, if rounded { 0.26 } else { 0.0 }, true);
+}
+
+/// Character part: flat colour (no skin texture), a soft chamfer in the cartoon style.
+#[allow(clippy::too_many_arguments)]
+fn add_char_box(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, pivot: Vec3, angle: f32, color: [f32; 3]) {
+    let r = if ROUNDED.load(std::sync::atomic::Ordering::Relaxed) { 0.16 } else { 0.0 };
+    add_box_opts(out, f, min, max, pivot, angle, color, r, false);
 }
 
 /// First-person arm part: flat colour (no skin patches) and only a small chamfer.
@@ -358,17 +365,27 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
     let lean = if pose.sneaking { 0.0 } else { 0.0 };
     let _ = lean;
 
-    // Legs (pivot at the hip).
+    // Cartoon look: flat colours (no skin texture), soft chamfers.
+    let shirt = [(jacket_c[0] * 0.35 + 0.65).min(1.0), (jacket_c[1] * 0.35 + 0.65).min(1.0), (jacket_c[2] * 0.35 + 0.65).min(1.0)];
+    let dark = |c: [f32; 3], k: f32| [c[0] * k, c[1] * k, c[2] * k];
+    let style = pose.skin % 3;
+    // Legs (pivot at the hip): trousers and sneakers with a white sole.
     let hip = 0.68;
     for (side, ang) in [(-1.0f32, swing), (1.0, -swing)] {
         let x0 = if side < 0.0 { -0.25 } else { 0.0 };
-        add_box(&mut v, &frame, Vec3::new(x0, 0.0, -0.125), Vec3::new(x0 + 0.25, hip, 0.125), Vec3::new(x0 + 0.125, hip, 0.0), ang, trousers_c);
-        add_box(&mut v, &frame, Vec3::new(x0 - 0.005, 0.0, -0.13), Vec3::new(x0 + 0.255, 0.18, 0.15), Vec3::new(x0 + 0.125, hip, 0.0), ang, BOOTS);
+        let lp = Vec3::new(x0 + 0.125, hip, 0.0);
+        add_char_box(&mut v, &frame, Vec3::new(x0 + 0.01, 0.12, -0.12), Vec3::new(x0 + 0.24, hip, 0.12), lp, ang, trousers_c);
+        add_char_box(&mut v, &frame, Vec3::new(x0, 0.04, -0.13), Vec3::new(x0 + 0.25, 0.17, 0.17), lp, ang, dark(BOOTS, 1.25));
+        add_char_box(&mut v, &frame, Vec3::new(x0 - 0.005, 0.0, -0.135), Vec3::new(x0 + 0.255, 0.05, 0.18), lp, ang, [0.95, 0.95, 0.93]);
     }
-    // Torso.
+    // Torso: an open jacket over a light shirt, a zip line and a hood behind the neck.
     let ty0 = hip - crouch * 0.4;
-    add_box(&mut v, &frame, Vec3::new(-0.25, ty0, -0.125), Vec3::new(0.25, ty0 + 0.65, 0.125), Vec3::ZERO, 0.0, jacket_c);
-    add_box(&mut v, &frame, Vec3::new(-0.255, ty0, -0.13), Vec3::new(0.255, ty0 + 0.08, 0.13), Vec3::ZERO, 0.0, BELT);
+    add_char_box(&mut v, &frame, Vec3::new(-0.25, ty0, -0.125), Vec3::new(0.25, ty0 + 0.62, 0.125), Vec3::ZERO, 0.0, jacket_c);
+    add_char_box(&mut v, &frame, Vec3::new(-0.09, ty0 + 0.08, 0.12), Vec3::new(0.09, ty0 + 0.6, 0.135), Vec3::ZERO, 0.0, shirt);
+    add_char_box(&mut v, &frame, Vec3::new(-0.11, ty0 + 0.08, 0.125), Vec3::new(-0.09, ty0 + 0.6, 0.138), Vec3::ZERO, 0.0, dark(jacket_c, 0.7));
+    add_char_box(&mut v, &frame, Vec3::new(0.09, ty0 + 0.08, 0.125), Vec3::new(0.11, ty0 + 0.6, 0.138), Vec3::ZERO, 0.0, dark(jacket_c, 0.7));
+    add_char_box(&mut v, &frame, Vec3::new(-0.2, ty0 + 0.48, -0.17), Vec3::new(0.2, ty0 + 0.64, -0.1), Vec3::ZERO, 0.0, dark(jacket_c, 0.85));
+    add_char_box(&mut v, &frame, Vec3::new(-0.255, ty0, -0.13), Vec3::new(0.255, ty0 + 0.07, 0.13), Vec3::ZERO, 0.0, dark(trousers_c, 0.7));
     // Arms (pivot at the shoulder), opposite phase to the legs.
     let shoulder = ty0 + 0.6;
     for (side, ang) in [(-1.0f32, -swing), (1.0, swing)] {
@@ -384,16 +401,17 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
         } else {
             ang * if hold != 0.0 { 0.4 } else { 1.0 } + hold
         };
-        let x0 = if side < 0.0 { -0.5 } else { 0.25 };
-        add_box(&mut v, &frame, Vec3::new(x0, ty0, -0.125), Vec3::new(x0 + 0.25, shoulder, 0.125), Vec3::new(x0 + 0.125, shoulder, 0.0), ang, sleeve_c);
-        add_box(&mut v, &frame, Vec3::new(x0, ty0 - 0.02, -0.12), Vec3::new(x0 + 0.25, ty0 + 0.16, 0.12), Vec3::new(x0 + 0.125, shoulder, 0.0), ang, skin_c);
-        let pivot = Vec3::new(x0 + 0.125, shoulder, 0.0);
+        let x0 = if side < 0.0 { -0.48 } else { 0.25 };
+        let pivot = Vec3::new(x0 + 0.115, shoulder, 0.0);
+        add_char_box(&mut v, &frame, Vec3::new(x0, ty0 + 0.18, -0.115), Vec3::new(x0 + 0.23, shoulder + 0.02, 0.115), pivot, ang, sleeve_c);
+        add_char_box(&mut v, &frame, Vec3::new(x0 - 0.005, ty0 + 0.13, -0.12), Vec3::new(x0 + 0.235, ty0 + 0.2, 0.12), pivot, ang, dark(sleeve_c, 0.72));
+        add_char_box(&mut v, &frame, Vec3::new(x0 + 0.015, ty0 - 0.02, -0.1), Vec3::new(x0 + 0.215, ty0 + 0.14, 0.1), pivot, ang, skin_c);
         if let Some(m) = pose.armor[1] {
             // Chestplate shoulder pads.
-            add_box(&mut v, &frame, Vec3::new(x0 - 0.03, shoulder - 0.28, -0.155), Vec3::new(x0 + 0.28, shoulder + 0.03, 0.155), pivot, ang, armor_color(m));
+            add_box(&mut v, &frame, Vec3::new(x0 - 0.03, shoulder - 0.28, -0.155), Vec3::new(x0 + 0.26, shoulder + 0.03, 0.155), pivot, ang, armor_color(m));
         }
         if side > 0.0 && !swim {
-            add_held(&mut v, &frame, Vec3::new(x0 + 0.125, ty0 + 0.02, 0.0), pivot, ang, pose.held);
+            add_held(&mut v, &frame, Vec3::new(x0 + 0.115, ty0 + 0.02, 0.0), pivot, ang, pose.held);
         }
     }
     // Armour over the body.
@@ -412,22 +430,65 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
             }
         }
     }
-    // Head follows the look pitch, pivoting at the neck.
-    let neck = ty0 + 0.65;
+    // Head follows the look pitch, pivoting at the neck: a big cartoon head with large eyes.
+    let neck = ty0 + 0.62;
     let head_ang = if swim { -1.3 - pose.pitch * 0.8 } else { -pose.pitch * 0.9 };
-    add_box(&mut v, &frame, Vec3::new(-0.25, neck, -0.25), Vec3::new(0.25, neck + 0.5, 0.25), Vec3::new(0.0, neck, 0.0), head_ang, skin_c);
-    add_box(&mut v, &frame, Vec3::new(-0.26, neck + 0.38, -0.26), Vec3::new(0.26, neck + 0.52, 0.26), Vec3::new(0.0, neck, 0.0), head_ang, hair_c);
-    for ex in [-0.14f32, 0.06] {
-        add_box(&mut v, &frame, Vec3::new(ex, neck + 0.22, 0.25), Vec3::new(ex + 0.08, neck + 0.30, 0.262), Vec3::new(0.0, neck, 0.0), head_ang, EYE);
+    let hp = Vec3::new(0.0, neck, 0.0);
+    let (hw, hh) = (0.28f32, 0.54f32);
+    let fz = hw; // the face plane
+    add_char_box(&mut v, &frame, Vec3::new(-hw, neck, -hw), Vec3::new(hw, neck + hh, hw), hp, head_ang, skin_c);
+    // Eyes: white, a coloured pupil looking a little inward, a light glint.
+    for ex in [-0.17f32, 0.05] {
+        let ey = neck + 0.2;
+        add_char_box(&mut v, &frame, Vec3::new(ex, ey, fz), Vec3::new(ex + 0.12, ey + 0.13, fz + 0.012), hp, head_ang, [0.98, 0.98, 0.98]);
+        let px = if ex < 0.0 { ex + 0.05 } else { ex + 0.02 };
+        add_char_box(&mut v, &frame, Vec3::new(px, ey + 0.01, fz + 0.01), Vec3::new(px + 0.06, ey + 0.1, fz + 0.02), hp, head_ang, [0.18, 0.24, 0.42]);
+        add_char_box(&mut v, &frame, Vec3::new(px + 0.03, ey + 0.065, fz + 0.019), Vec3::new(px + 0.05, ey + 0.088, fz + 0.024), hp, head_ang, [1.0, 1.0, 1.0]);
+        // Eyebrow.
+        add_char_box(&mut v, &frame, Vec3::new(ex, ey + 0.16, fz), Vec3::new(ex + 0.12, ey + 0.19, fz + 0.012), hp, head_ang, dark(hair_c, 0.8));
+        // Blush.
+        add_char_box(&mut v, &frame, Vec3::new(ex + if ex < 0.0 { -0.04 } else { 0.08 }, neck + 0.12, fz), Vec3::new(ex + if ex < 0.0 { 0.04 } else { 0.16 }, neck + 0.165, fz + 0.008), hp, head_ang, [0.98, 0.62, 0.60]);
+    }
+    // Smile.
+    add_char_box(&mut v, &frame, Vec3::new(-0.06, neck + 0.1, fz), Vec3::new(0.06, neck + 0.125, fz + 0.01), hp, head_ang, [0.55, 0.22, 0.20]);
+    for sx in [-0.08f32, 0.06] {
+        add_char_box(&mut v, &frame, Vec3::new(sx, neck + 0.12, fz), Vec3::new(sx + 0.02, neck + 0.145, fz + 0.01), hp, head_ang, [0.55, 0.22, 0.20]);
+    }
+    // Hair: a cap over the top and back, a fringe, and the style of the preset.
+    add_char_box(&mut v, &frame, Vec3::new(-hw - 0.015, neck + hh - 0.12, -hw - 0.015), Vec3::new(hw + 0.015, neck + hh + 0.06, hw + 0.015), hp, head_ang, hair_c);
+    add_char_box(&mut v, &frame, Vec3::new(-hw - 0.015, neck + 0.18, -hw - 0.015), Vec3::new(hw + 0.015, neck + hh, -hw + 0.08), hp, head_ang, hair_c);
+    for (i, fx) in [-0.26f32, -0.12, 0.02, 0.14].iter().enumerate() {
+        let drop = [0.1f32, 0.06, 0.09, 0.05][i];
+        add_char_box(&mut v, &frame, Vec3::new(*fx, neck + hh - 0.12 - drop, fz - 0.02), Vec3::new(fx + 0.13, neck + hh - 0.1, fz + 0.016), hp, head_ang, hair_c);
+    }
+    match style {
+        // Long hair down the back and over the sides.
+        1 => {
+            add_char_box(&mut v, &frame, Vec3::new(-hw - 0.02, neck - 0.18, -hw - 0.02), Vec3::new(hw + 0.02, neck + 0.2, -hw + 0.06), hp, head_ang, hair_c);
+            for sx in [-hw - 0.02, hw - 0.03] {
+                add_char_box(&mut v, &frame, Vec3::new(sx, neck + 0.05, -hw), Vec3::new(sx + 0.05, neck + hh - 0.08, hw - 0.06), hp, head_ang, hair_c);
+            }
+        }
+        // Spiky top.
+        2 => {
+            for (sx, sz) in [(-0.18f32, -0.1f32), (0.02, -0.14), (-0.06, 0.06), (0.12, 0.02)] {
+                add_char_box(&mut v, &frame, Vec3::new(sx, neck + hh + 0.05, sz), Vec3::new(sx + 0.12, neck + hh + 0.16, sz + 0.12), hp, head_ang, hair_c);
+            }
+        }
+        // Short: side tufts over the ears.
+        _ => {
+            for sx in [-hw - 0.02, hw - 0.03] {
+                add_char_box(&mut v, &frame, Vec3::new(sx, neck + 0.28, -hw + 0.04), Vec3::new(sx + 0.05, neck + hh - 0.08, hw - 0.1), hp, head_ang, hair_c);
+            }
+        }
     }
     if let Some(m) = pose.armor[0] {
         // Helmet: cap over the top and the back of the head, the face stays free.
         let c = armor_color(m);
-        let hp = Vec3::new(0.0, neck, 0.0);
-        add_box(&mut v, &frame, Vec3::new(-0.285, neck + 0.36, -0.285), Vec3::new(0.285, neck + 0.56, 0.285), hp, head_ang, c);
-        add_box(&mut v, &frame, Vec3::new(-0.285, neck + 0.08, -0.285), Vec3::new(0.285, neck + 0.36, -0.12), hp, head_ang, c);
-        for sx in [-0.285f32, 0.215] {
-            add_box(&mut v, &frame, Vec3::new(sx, neck + 0.12, -0.285), Vec3::new(sx + 0.07, neck + 0.36, 0.2), hp, head_ang, c);
+        add_box(&mut v, &frame, Vec3::new(-0.315, neck + 0.4, -0.315), Vec3::new(0.315, neck + 0.62, 0.315), hp, head_ang, c);
+        add_box(&mut v, &frame, Vec3::new(-0.315, neck + 0.08, -0.315), Vec3::new(0.315, neck + 0.4, -0.14), hp, head_ang, c);
+        for sx in [-0.315f32, 0.245] {
+            add_box(&mut v, &frame, Vec3::new(sx, neck + 0.12, -0.315), Vec3::new(sx + 0.07, neck + 0.4, 0.22), hp, head_ang, c);
         }
     }
     v

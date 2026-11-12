@@ -217,11 +217,11 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
             }
             // Roblox low-poly look: nearly solid colour; only strong shapes (ore gems, windows,
             // mortar, seams) survive, and those a little softened toward the block's colour.
-            let feature = (lum(&o) - lum(&b)).abs() > 0.14 || (lum(&o) - mean_l).abs() > 0.28;
+            let feature = (lum(&o) - lum(&b)).abs() > 0.10 || (lum(&o) - mean_l).abs() > 0.24;
             let base = if feature {
                 [mean[0] + (o[0] - mean[0]) * 0.85, mean[1] + (o[1] - mean[1]) * 0.85, mean[2] + (o[2] - mean[2]) * 0.85, 1.0]
             } else {
-                [mean[0] + (b[0] - mean[0]) * 0.3, mean[1] + (b[1] - mean[1]) * 0.3, mean[2] + (b[2] - mean[2]) * 0.3, 1.0]
+                [mean[0] + (b[0] - mean[0]) * 0.6, mean[1] + (b[1] - mean[1]) * 0.6, mean[2] + (b[2] - mean[2]) * 0.6, 1.0]
             };
             // Posterize around the mean: a few clean colour steps.
             let step = if feature { 0.10 } else { 0.07 };
@@ -259,7 +259,12 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                 let (l_, t_, r_, b_) = (fx, fy, n as f32 - fx, n as f32 - fy);
                 let edge = l_.min(t_).min(r_).min(b_);
-                if edge < band {
+                // Cartoon ink: a thin dark outline round built blocks (not natural ground).
+                if bevel >= 1.0 && edge < (n as f32 / 40.0).max(1.0) {
+                    for v in c.iter_mut().take(3) {
+                        *v *= 0.62;
+                    }
+                } else if edge < band {
                     // Chamfer: a flat strip, light on the top-left, shaded on the bottom-right.
                     let lit = if l_.min(t_) <= r_.min(b_) { 0.14 * bevel } else { -0.16 * bevel };
                     for i in 0..3 {

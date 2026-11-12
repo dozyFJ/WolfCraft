@@ -189,7 +189,7 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
         rgb = rgb * hemi;
         let v = normalize(-in.rel);
         let hv = normalize(sun + v);
-        let spec = pow(max(dot(n, hv), 0.0), 28.0) * 0.20 * day * in.light.y * ao;
+        let spec = pow(max(dot(n, hv), 0.0), 20.0) * 0.05 * day * in.light.y * ao;
         rgb = rgb + vec3<f32>(1.0, 0.97, 0.90) * spec;
     }
     if (emit == 1u) {
@@ -504,7 +504,7 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
         rim = pow(1.0 - max(dot(nn, v), 0.0), 3.0) * mix(0.12, 0.38, day);
         // Plastic sheen, like Roblox characters.
         let hv = normalize(sun + v);
-        rim = rim + pow(max(dot(nn, hv), 0.0), 24.0) * 0.25 * day;
+        rim = rim + pow(max(dot(nn, hv), 0.0), 16.0) * 0.06 * day;
     }
     if (in.tex > 2.5 && in.tex < 3.5) {
         light = 1.25; // glowing particles: embers, sparks
