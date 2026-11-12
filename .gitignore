@@ -1,0 +1,16 @@
+# Сборка
+/target/
+/dist/
+**/*.rs.bk
+
+# Данные сервера и локальные миры
+wolfserver_data/
+
+# Скриншоты отладки с телефона
+/docs/*.png
+
+# Редакторы и ОС
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

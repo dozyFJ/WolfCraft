@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WolfServer</title>
+<style>
+  :root { --bg:#12151b; --surface:#1b2029; --line:#2c3442; --text:#e8edf4; --muted:#8d98a8; --accent:#2fb6c4; --ok:#48c774; --danger:#e5534b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; border-bottom:2px solid var(--line); background:var(--surface); }
+  .logo { width:28px; height:28px; background:var(--accent); box-shadow: inset -6px -6px 0 rgba(0,0,0,.25); }
+  h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  .pill { margin-left:auto; padding:4px 12px; border:2px solid var(--ok); color:var(--ok); font-weight:600; }
+  main { max-width:980px; margin:0 auto; padding:20px 16px; display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
+  @media (max-width:760px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--surface); border:2px solid var(--line); padding:16px; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin:0 0 10px; }
+  .big { font-size:22px; font-weight:700; color:var(--accent); word-break:break-all; }
+  .row { display:flex; justify-content:space-between; gap:12px; padding:6px 0; border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .muted { color:var(--muted); }
+  button { background:transparent; color:var(--text); border:2px solid var(--line); padding:6px 14px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  button.danger:hover { border-color:var(--danger); color:var(--danger); }
+  input { flex:1; background:var(--bg); color:var(--text); border:2px solid var(--line); padding:7px 10px; font:inherit; min-width:0; }
+  input:focus { outline:none; border-color:var(--accent); }
+  .say { display:flex; gap:8px; margin-top:10px; }
+  pre { margin:0; height:260px; overflow:auto; background:var(--bg); border:2px solid var(--line); padding:10px; font:13px/1.5 Consolas, monospace; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<header><div class="logo"></div><h1>WolfServer</h1><span class="muted" id="ver"></span><span class="pill" id="state">РАБОТАЕТ</span></header>
+<main>
+  <section>
+    <h2>Адрес для подключения</h2>
+    <div class="big" id="addr">…</div>
+    <p class="muted">Введите его в игре: Играть → Игра по сети. Телефон и ПК должны быть в одной сети Wi‑Fi.</p>
+  </section>
+  <section>
+    <h2>Мир</h2>
+    <div class="row"><span class="muted">Название</span><span id="name"></span></div>
+    <div class="row"><span class="muted">Seed</span><span id="seed"></span></div>
+    <div class="row"><span class="muted">Режим</span><span id="mode"></span></div>
+    <div class="row"><span class="muted">Изменено блоков</span><span id="edits"></span></div>
+    <div class="row"><span class="muted">Работает</span><span id="uptime"></span></div>
+  </section>
+  <section>
+    <h2>Игроки (<span id="count">0</span>)</h2>
+    <div id="players"><span class="muted">Никого нет</span></div>
+  </section>
+  <section>
+    <h2>Управление</h2>
+    <div class="say"><input id="msg" placeholder="Сообщение всем игрокам" maxlength="200"><button onclick="say()">Отправить</button></div>
+    <p><button class="danger" onclick="stop()">Остановить сервер</button></p>
+  </section>
+  <section class="wide">
+    <h2>Журнал</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+<script>
+const T='__TOKEN__';
+function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+function fmt(s){ const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return (h? h+' ч ':'')+m+' мин '+(s%60)+' с'; }
+async function tick(){
+  try {
+    const s = await (await fetch('/api/status?t='+T)).json();
+    document.getElementById('ver').textContent = 'версия ' + s.version;
+    document.getElementById('addr').textContent = s.addresses.join('   или   ');
+    document.getElementById('name').textContent = s.name;
+    document.getElementById('seed').textContent = s.seed;
+    document.getElementById('mode').textContent = s.mode;
+    document.getElementById('edits').textContent = s.edits;
+    document.getElementById('uptime').textContent = fmt(s.uptime);
+    document.getElementById('count').textContent = s.players.length;
+    document.getElementById('players').innerHTML = s.players.length ? s.players.map(p =>
+      '<div class="row"><span>'+esc(p.nick)+(p.hell?' <span class="muted">(в Аду)</span>':'')+'</span><button class="danger" onclick="kick('+p.id+')">Выгнать</button></div>').join('')
+      : '<span class="muted">Никого нет</span>';
+    const log = document.getElementById('log');
+    const bottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+    log.textContent = s.log.join('\n');
+    if (bottom) log.scrollTop = log.scrollHeight;
+    document.getElementById('state').textContent = 'РАБОТАЕТ';
+    document.getElementById('state').style.borderColor = 'var(--ok)'; document.getElementById('state').style.color = 'var(--ok)';
+  } catch(e) {
+    document.getElementById('state').textContent = 'ОСТАНОВЛЕН';
+    document.getElementById('state').style.borderColor = 'var(--danger)'; document.getElementById('state').style.color = 'var(--danger)';
+  }
+}
+async function say(){ const i=document.getElementById('msg'); if(!i.value.trim()) return; await fetch('/api/say?t='+T+'&text='+encodeURIComponent(i.value),{method:'POST'}); i.value=''; tick(); }
+async function kick(id){ await fetch('/api/kick?t='+T+'&id='+id,{method:'POST'}); tick(); }
+async function stop(){ if(confirm('Остановить сервер? Игроки будут отключены.')) { await fetch('/api/stop?t='+T,{method:'POST'}); tick(); } }
+document.getElementById('msg').addEventListener('keydown', e => { if(e.key==='Enter') say(); });
+tick(); setInterval(tick, 1500);
+</script>
+</body>
+</html>
