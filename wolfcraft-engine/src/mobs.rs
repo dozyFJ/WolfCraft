@@ -88,11 +88,14 @@ pub struct Mob {
     alert: f32,
     wander: f32,
     wander_dir: DVec3,
+    /// Seconds of poison (damage over time, never kills) and of slowness left.
+    pub poison: f32,
+    pub slow: f32,
 }
 
 impl Mob {
     pub fn new(kind: MobKind, pos: DVec3, heading: DVec3) -> Self {
-        Self { kind, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO }
+        Self { kind, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0 }
     }
     /// Centre of the body, for aiming.
     pub fn centre(&self) -> DVec3 {
@@ -324,6 +327,14 @@ impl MobManager {
             let flat = tangent(to_player, up);
             let dist = to_player.length();
             m.hurt = (m.hurt - dt as f32).max(0.0);
+            // Poison eats away health but leaves the last bit; slowness wears off.
+            if m.poison > 0.0 {
+                m.poison -= dt as f32;
+                if m.hp > 1.0 {
+                    m.hp = (m.hp - 0.8 * dt as f32).max(1.0);
+                }
+            }
+            m.slow = (m.slow - dt as f32).max(0.0);
             m.attack_cd = (m.attack_cd - dt as f32).max(0.0);
             let mut wish = DVec3::ZERO;
             m.alert = (m.alert - dt as f32).max(0.0);
@@ -369,7 +380,7 @@ impl MobManager {
                 m.body.vel += up * 6.5;
                 m.body.on_ground = false;
             }
-            let speed = m.kind.speed() * if m.kind.hostile() && day { 0.8 } else { 1.0 };
+            let speed = m.kind.speed() * if m.kind.hostile() && day { 0.8 } else { 1.0 } * if m.slow > 0.0 { 0.45 } else { 1.0 };
             let before = m.body.pos;
             step(world, &mut m.body, &MoveInput { wish, speed, jump: false, up: false, down: false }, dt);
             // The body is a thin column, but heads and the ghoul's outstretched arms reach

@@ -60,7 +60,18 @@ pub mod ids {
     pub const SOUL_LAST: ItemId = 333;
     pub const BONE: ItemId = 334;
     pub const BONE_MEAL: ItemId = 335;
-    pub const LAST: ItemId = 335;
+    /// A blank book: the Чаровальня turns it into a «Книга чар».
+    pub const BOOK: ItemId = 336;
+    /// A book holding enchantments (in the stack's `ench`), put on items at the forge.
+    pub const ENCH_BOOK: ItemId = 337;
+    pub const BOTTLE: ItemId = 338;
+    /// Potions: POTION_BASE + effect id − 1 (see `magic::Effect`).
+    pub const POTION_BASE: ItemId = 339;
+    pub const POTION_LAST: ItemId = 347;
+    /// Tipped arrows: poison, slowness, harm.
+    pub const TIPPED_BASE: ItemId = 348;
+    pub const TIPPED_LAST: ItemId = 350;
+    pub const LAST: ItemId = 350;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -179,6 +190,19 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::SLIME => plain("Слизь", sp::SLIME),
         ids::BONE => plain("Кость", sp::BONE),
         ids::BONE_MEAL => plain("Костная мука", sp::BONE_MEAL),
+        ids::BOOK => plain("Книга", sp::BOOK),
+        ids::ENCH_BOOK => ItemInfo { max_stack: 1, ..plain("Книга чар", sp::ENCH_BOOK) },
+        ids::BOTTLE => plain("Склянка", sp::BOTTLE),
+        p if (ids::POTION_BASE..=ids::POTION_LAST).contains(&p) => {
+            const NAMES: [&str; 9] = ["Зелье лечения", "Зелье регенерации", "Зелье скорости", "Зелье силы", "Зелье стойкости", "Зелье огнестойкости", "Зелье яда", "Зелье медлительности", "Зелье вреда"];
+            let i = (p - ids::POTION_BASE) as usize;
+            ItemInfo { max_stack: 16, ..plain(NAMES[i], sp::POTION_BASE + i as u16) }
+        }
+        a if (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&a) => {
+            const NAMES: [&str; 3] = ["Стрела яда", "Стрела медлительности", "Стрела вреда"];
+            let i = (a - ids::TIPPED_BASE) as usize;
+            plain(NAMES[i], sp::TIPPED_BASE + i as u16)
+        }
         s if (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&s) => {
             const NAMES: [&str; 8] = ["Душа спавна: Упырь", "Душа спавна: Ползун", "Душа спавна: Кабан", "Душа спавна: Овца", "Душа спавна: Корова", "Душа спавна: Курица", "Душа спавна: Волк", "Душа спавна: Слизень"];
             let i = (s - ids::SOUL_BASE) as usize;
@@ -225,11 +249,30 @@ pub struct ItemStack {
     pub count: u8,
     /// Wear (tools).
     pub damage: u16,
+    /// Enchantments (see `magic`): up to four, one per byte; 0 = none.
+    pub ench: u32,
 }
 
 impl ItemStack {
     pub fn new(id: ItemId, count: u8) -> Self {
-        Self { id, count, damage: 0 }
+        Self { id, count, damage: 0, ench: 0 }
+    }
+    /// Has enchantments (glows red).
+    pub fn enchanted(&self) -> bool {
+        self.ench != 0 && !crate::magic::list(self.ench).is_empty()
+    }
+    pub fn ench_level(&self, e: crate::magic::Ench) -> u8 {
+        crate::magic::level(self.ench, e)
+    }
+    /// Name with the enchantments, for tooltips: "Алмазный меч (Острота II)".
+    pub fn display_name(&self) -> String {
+        let base = self.info().name;
+        let l = crate::magic::list(self.ench);
+        if l.is_empty() {
+            return base.to_string();
+        }
+        let parts: Vec<String> = l.iter().map(|(e, lv)| format!("{} {}", e.name(), crate::magic::roman(*lv))).collect();
+        format!("{base} ({})", parts.join(", "))
     }
     pub fn info(&self) -> ItemInfo {
         info(self.id)
@@ -238,7 +281,7 @@ impl ItemStack {
         Self::new(b as ItemId, count)
     }
     pub fn can_stack_with(&self, o: &ItemStack) -> bool {
-        self.id == o.id && self.info().max_stack > 1 && self.damage == o.damage
+        self.id == o.id && self.info().max_stack > 1 && self.damage == o.damage && self.ench == o.ench
     }
 }
 
@@ -406,7 +449,7 @@ pub fn creative_palette() -> Vec<ItemId> {
         .iter()
         .filter(|b| b.crop().is_none())
         // The electric machines are put away for now.
-        .filter(|b| !matches!(b, Block::Generator | Block::ElectricLamp))
+        .filter(|b| !matches!(b, Block::ElectricLamp))
         .filter(|b| !matches!(b, Block::Air | Block::Water | Block::Magma | Block::InnerCore | Block::Bedrock | Block::ElectricLampOn | Block::SwitchOn | Block::GlassPaneB | Block::StoneSlabVerticalB | Block::PlankSlabVerticalB | Block::BrickSlabVerticalB) && b.base_item() == **b)
         .map(|b| *b as ItemId)
         .collect();
@@ -446,6 +489,12 @@ pub fn category(id: ItemId) -> &'static str {
         if matches!(id, ids::WHEAT_SEEDS | ids::WHEAT | ids::CARROT | ids::POTATO) {
             return "Растения";
         }
+        if (ids::POTION_BASE..=ids::POTION_LAST).contains(&id) || matches!(id, ids::BOTTLE | ids::BOOK | ids::ENCH_BOOK) {
+            return "Предметы";
+        }
+        if (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id) {
+            return "Вооружение";
+        }
         if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
             return "Вооружение";
         }
@@ -464,11 +513,12 @@ pub fn category(id: ItemId) -> &'static str {
             b if !b.boxes().is_empty() || matches!(b, Block::RedGlass | Block::BlueGlass | Block::GreenGlass | Block::YellowGlass) => "Строительство",
             Block::Wool | Block::RedWool | Block::BlueWool | Block::YellowWool | Block::Torch | Block::PolishedGranite | Block::PolishedMarble | Block::SmoothStone | Block::SandstoneBricks | Block::Bookshelf | Block::Lantern => "Строительство",
             Block::Pumpkin | Block::Melon => "Растения",
+            Block::EnchantTable => "Предметы",
             Block::Bones => "Мобы",
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Battery | Block::ElectricFurnace => "Строительство",
-            Block::Generator | Block::ElectricLamp | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
+            Block::ElectricLamp | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
             Block::IskritOre | Block::UraniumOre | Block::UraniumBlock => "Руды",
             Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable => "Строительство",
             _ => "Природа",

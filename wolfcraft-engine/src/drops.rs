@@ -39,6 +39,8 @@ pub struct Dropped {
 pub struct Drops {
     pub list: Vec<Dropped>,
     next_seed: u32,
+    /// Extra pull radius (blocks), from «Магнит» on the held tool.
+    pub magnet_bonus: f64,
 }
 
 impl Drops {
@@ -91,6 +93,7 @@ impl Drops {
     /// `step`, also telling `picked` each stack (item, count) that went into the bag.
     pub fn step_log(&mut self, world: &impl Voxels, player_centre: DVec3, can_pick: bool, dt: f64, mut give: impl FnMut(ItemStack) -> Option<ItemStack>, mut log: impl FnMut(crate::items::ItemId, u32)) -> u32 {
         let dt = dt.min(0.1);
+        let magnet = MAGNET + self.magnet_bonus;
         let mut picked = 0u32;
         let g = world.grid();
         let solid = |p: DVec3| {
@@ -118,7 +121,7 @@ impl Drops {
             // Magnet towards the player.
             let to = player_centre - d.pos;
             let dist = to.length();
-            if can_pick && d.delay <= 0.0 && dist < MAGNET {
+            if can_pick && d.delay <= 0.0 && dist < magnet {
                 if dist < PICK {
                     let before = d.stack.count;
                     match give(d.stack) {

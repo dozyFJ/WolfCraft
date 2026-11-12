@@ -169,6 +169,8 @@ pub mod tiles {
     pub const CARROT_RIPE: u16 = 168;
     pub const POTATO_YOUNG: u16 = 169;
     pub const POTATO_RIPE: u16 = 170;
+    pub const ENCHANT_TOP: u16 = 171;
+    pub const ENCHANT_SIDE: u16 = 172;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -1760,6 +1762,30 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(CARROT_RIPE, "carrot_ripe", crop(265, Rgb(0.28, 0.62, 0.18), true, Some(Rgb(0.98, 0.55, 0.12)), None));
     l.add(POTATO_YOUNG, "potato_young", crop(266, Rgb(0.34, 0.62, 0.24), false, None, None));
     l.add(POTATO_RIPE, "potato_ripe", crop(267, Rgb(0.30, 0.58, 0.22), true, Some(Rgb(0.78, 0.64, 0.38)), None));
+    // The Чаровальня: a dark obsidian desk with a red glowing rune circle on top and red
+    // runes running round the sides.
+    l.add(ENCHANT_TOP, "enchant_top", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let d = (dx * dx + dy * dy).sqrt();
+                let ring = (d - 5.5).abs() < 0.8 || (d - 2.5).abs() < 0.6;
+                let spoke = d < 5.5 && d > 2.5 && ((dx.abs() < 0.6) || (dy.abs() < 0.6));
+                let c = if ring || spoke { Rgb(1.0, 0.25, 0.22).add(-(d / 30.0)) } else { Rgb(0.16, 0.10, 0.20).add((rnd(x, y, 291) - 0.5) * 0.06) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(ENCHANT_SIDE, "enchant_side", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let edge = y < 2 || y > 13;
+                let rune = (5..11).contains(&y) && x % 4 != 0 && rnd(x / 2, y, 292) < 0.45;
+                let c = if edge { Rgb(0.30, 0.18, 0.12) } else if rune { Rgb(0.95, 0.22, 0.20) } else { Rgb(0.14, 0.09, 0.18).add((rnd(x, y, 293) - 0.5) * 0.05) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
     // Pixel-art finish. Natural, noisy materials get clumps instead of per-pixel static, a
     // gentle large-scale variation and a few luminance bands (the hand-painted look); every
     // opaque pixel then gets a touch more contrast and a limited palette.

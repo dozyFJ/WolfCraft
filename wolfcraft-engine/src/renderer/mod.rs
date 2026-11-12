@@ -1309,6 +1309,8 @@ mod hand_preview {
             let mut pose = super::model::HandsPose::rest(glam::Vec3::NEG_Z, glam::Vec3::Y);
             pose.holding = true;
             pose.tool = Some((kind, mat));
+            pose.glint = kind == 3;
+            pose.time = 0.3;
             let v = super::model::build_first_person_hands(&pose);
             s += &format!("# {kind}\n");
             for t in v.chunks(3) {

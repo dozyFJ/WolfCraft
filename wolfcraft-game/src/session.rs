@@ -107,6 +107,10 @@ pub struct GameSession {
     pub arrows: wolfcraft_engine::projectiles::Arrows,
     /// Bow draw 0..1 while the use button is held with a bow.
     pub bow_charge: f32,
+    /// The arrow the bow would shoot now (drawn on the string, tinted if tipped).
+    pub bow_arrow: Option<wolfcraft_engine::items::ItemId>,
+    /// Seed of the Чаровальня offers (changes after each enchanting).
+    pub ench_seed: u32,
     prev_use_held: bool,
     attack_cd: f32,
     death_burst_done: bool,
@@ -197,6 +201,8 @@ impl GameSession {
             death_burst_done: false,
             arrows: Default::default(),
             bow_charge: 0.0,
+            bow_arrow: None,
+            ench_seed: 1,
             prev_use_held: false,
             containers: Default::default(),
             block_commands: Default::default(),
@@ -326,18 +332,24 @@ impl GameSession {
                 i.place.is_some() || i.food.is_some()
             });
         // Bow: hold to draw (one second for full power), release to shoot.
-        let has_arrows = self.player.is_creative() || self.player.inventory.count(wolfcraft_engine::items::ids::ARROW) > 0;
+        // The arrow the bow will shoot: the first arrow in the bag (tipped ones included).
+        let arrow_id = self.next_arrow();
+        self.bow_arrow = arrow_id;
+        let has_arrows = self.player.is_creative() || arrow_id.is_some();
         if holding_bow && input.use_held && has_arrows && !self.player.survival.dead {
             self.bow_charge = (self.bow_charge + dt).min(1.0);
         } else {
             if holding_bow && self.prev_use_held && !input.use_held && self.bow_charge > 0.12 && has_arrows {
                 let power = self.bow_charge;
                 let creative = self.player.is_creative();
+                let id = arrow_id.unwrap_or(wolfcraft_engine::items::ids::ARROW);
+                let power_ench = self.player.inventory.held().map(|s| s.ench_level(wolfcraft_engine::magic::Ench::Power)).unwrap_or(0);
                 if !creative {
-                    self.player.inventory.take(wolfcraft_engine::items::ids::ARROW, 1);
+                    self.player.inventory.take(id, 1);
                     self.player.inventory.wear_selected();
                 }
-                self.arrows.shoot(self.player.eye_pos(), self.player.look_dir(), power, !creative);
+                let effect = tipped_effect(id);
+                self.arrows.shoot_with(self.player.eye_pos(), self.player.look_dir(), power, !creative && effect.is_none(), power_ench, effect);
             }
             self.bow_charge = 0.0;
         }
@@ -352,7 +364,7 @@ impl GameSession {
         }
         if self.last_selected != self.player.inventory.selected {
             self.last_selected = self.player.inventory.selected;
-            self.item_name = self.player.inventory.held().map(|s| (s.info().name.to_string(), 2.0));
+            self.item_name = self.player.inventory.held().map(|s| (s.display_name(), 2.0));
         }
         if let Some((_, t)) = &mut self.item_name {
             *t -= dt;
@@ -445,7 +457,9 @@ impl GameSession {
             let dealt = self.mobs.update(&self.chunks, self.player.body.pos, day, peaceful, !self.player.is_creative(), dt.min(0.1) as f64);
             if dealt > 0.0 {
                 let armor = self.player.armor_points();
-                let reduced = dealt * (1.0 - (armor as f32 * 0.04).min(0.8));
+                // «Защита» on worn pieces: another 3 % per level.
+                let prot: u32 = self.player.inventory.armor.iter().flatten().map(|s| s.ench_level(wolfcraft_engine::magic::Ench::Protection) as u32).sum();
+                let reduced = dealt * (1.0 - (armor as f32 * 0.04 + prot as f32 * 0.03).min(0.85));
                 self.player.damage(reduced, self.cfg.difficulty);
             }
             if self.player.survival.dead && !self.death_burst_done {
@@ -480,6 +494,7 @@ impl GameSession {
         if self.ground_ready() && !self.drops.list.is_empty() {
             let centre = self.player.body.pos + wolfcraft_engine::physics::up_at(self.player.body.pos) * 0.8;
             let can = !self.player.survival.dead;
+            self.drops.magnet_bonus = self.player.inventory.held().map(|s| s.ench_level(wolfcraft_engine::magic::Ench::Magnet) as f64 * 2.5).unwrap_or(0.0);
             let inv = &mut self.player.inventory;
             let mut got: Vec<(wolfcraft_engine::items::ItemId, u32)> = Vec::new();
             let n = self.drops.step_log(&self.chunks, centre, can, dt as f64, |s| inv.add(s), |id, k| match got.iter_mut().find(|g| g.0 == id) {
@@ -506,6 +521,35 @@ impl GameSession {
                     self.drops.pop_from_block(drop, at);
                 }
                 self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
+            }
+            // Tipped arrows leave a trail of their colour; potion effects swirl round the player.
+            let trails: Vec<(DVec3, [f32; 3])> = self.arrows.list.iter().filter(|a| !a.stuck).filter_map(|a| a.effect.map(|e| (a.pos, e.color()))).collect();
+            for (p, c) in trails {
+                if self.mobs.rand() < (dt as f64 * 30.0) {
+                    self.mobs.fx_glow(p, DVec3::ZERO, c, 0.03, 0.5, wolfcraft_engine::mobs::FxKind::Rise);
+                }
+            }
+            let colors: Vec<[f32; 3]> = self.player.effects.iter().map(|a| a.effect.color()).collect();
+            for c in colors {
+                if self.mobs.rand() < (dt as f64 * 4.0) {
+                    let up = wolfcraft_engine::physics::up_at(feet);
+                    let a = self.mobs.rand() * std::f64::consts::TAU;
+                    let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+                    let t1 = up.cross(helper).normalize();
+                    let t2 = up.cross(t1);
+                    let p = feet + (t1 * a.cos() + t2 * a.sin()) * 0.45 + up * (0.2 + self.mobs.rand() * 1.0);
+                    self.mobs.fx_glow(p, up * 0.6, c, 0.035, 0.9, wolfcraft_engine::mobs::FxKind::Rise);
+                }
+            }
+            // Tipped arrows burst into the colour of their potion where they hit.
+            for (at, e) in &ev.effect_hits {
+                let c = e.color();
+                for k in 0..12 {
+                    let a = k as f64 * 0.52;
+                    let up = wolfcraft_engine::physics::up_at(*at);
+                    let side = DVec3::new(a.cos(), (a * 1.7).sin(), a.sin());
+                    self.mobs.fx_glow(*at, (side - up * side.dot(up)) * 1.6 + up * 1.2, c, 0.05, 0.8, wolfcraft_engine::mobs::FxKind::Rise);
+                }
             }
             if ev.picked > 0 {
                 self.player.inventory.add(wolfcraft_engine::items::ItemStack::new(wolfcraft_engine::items::ids::ARROW, ev.picked as u8));
@@ -669,7 +713,7 @@ impl GameSession {
     /// output, the forge item, material and result, chests and barrels 27.
     pub fn container_slots(&mut self, pos: wolfcraft_engine::cubesphere::Cell, block: wolfcraft_engine::block::Block) -> &mut Vec<Option<wolfcraft_engine::items::ItemStack>> {
         use wolfcraft_engine::block::Block as B;
-        let n = if matches!(block, B::ElectricFurnace | B::MachineCasing) { 3 } else { 27 };
+        let n = if matches!(block, B::ElectricFurnace | B::MachineCasing) { 3 } else if block == B::EnchantTable { 2 } else { 27 };
         let v = self.containers.entry(pos).or_insert_with(|| vec![None; n]);
         // Furnaces from before the fuel slot: [input, output] → [input, fuel, output].
         if block == B::ElectricFurnace && v.len() == 2 {
@@ -861,13 +905,13 @@ impl GameSession {
         let Ok(text) = std::fs::read_to_string(self.containers_path()) else { return };
         for line in text.lines() {
             let n: Vec<i64> = line.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-            if n.len() == 9 {
+            if n.len() == 9 || n.len() == 10 {
                 let cell = wolfcraft_engine::cubesphere::Cell::new(n[0] as u8, n[1] as i32, n[2] as i32, n[3] as i32);
                 let size = n[4] as usize;
                 let slot = n[5] as usize;
                 let v = self.containers.entry(cell).or_insert_with(|| vec![None; size]);
                 if slot < v.len() && wolfcraft_engine::items::is_valid(n[6] as u16) {
-                    v[slot] = Some(wolfcraft_engine::items::ItemStack { id: n[6] as u16, count: n[7] as u8, damage: n[8] as u16 });
+                    v[slot] = Some(wolfcraft_engine::items::ItemStack { id: n[6] as u16, count: n[7] as u8, damage: n[8] as u16, ench: n.get(9).copied().unwrap_or(0) as u32 });
                 }
             }
         }
@@ -878,7 +922,7 @@ impl GameSession {
         for (c, v) in &self.containers {
             for (i, s) in v.iter().enumerate() {
                 if let Some(s) = s {
-                    out += &format!("{} {} {} {} {} {} {} {} {}\n", c.f, c.i, c.j, c.k, v.len(), i, s.id, s.count, s.damage);
+                    out += &format!("{} {} {} {} {} {} {} {} {} {}\n", c.f, c.i, c.j, c.k, v.len(), i, s.id, s.count, s.damage, s.ench);
                 }
             }
         }
@@ -1114,6 +1158,12 @@ impl GameSession {
     /// Hits the creature in the crosshair if there is one within reach and nothing solid in
     /// front of it. Returns true when a creature was targeted (even during the cooldown, so a
     /// tap on a mob never places a block on it).
+    /// First arrow in the bag (plain or tipped), in slot order.
+    fn next_arrow(&self) -> Option<wolfcraft_engine::items::ItemId> {
+        use wolfcraft_engine::items::ids;
+        self.player.inventory.slots.iter().flatten().map(|s| s.id).find(|id| *id == ids::ARROW || (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(id))
+    }
+
     fn try_attack(&mut self, cooldown: f32) -> bool {
         if self.player.survival.dead || !self.ground_ready() {
             return false;
@@ -1129,7 +1179,16 @@ impl GameSession {
         if self.attack_cd > 0.0 {
             return true;
         }
-        let dmg = self.player.inventory.held().map(|s| s.info().attack).unwrap_or(1.0).max(1.0);
+        let held = self.player.inventory.held();
+        // Weapon, «Острота» (+1.5 per level) and the Сила potion (+3 per level).
+        let sharp = held.map(|s| s.ench_level(wolfcraft_engine::magic::Ench::Sharpness)).unwrap_or(0);
+        let steal = held.map(|s| s.ench_level(wolfcraft_engine::magic::Ench::Lifesteal)).unwrap_or(0);
+        let strength = self.player.effect_level(wolfcraft_engine::magic::Effect::Strength);
+        let dmg = held.map(|s| s.info().attack).unwrap_or(1.0).max(1.0) + 1.5 * sharp as f32 + 3.0 * strength as f32;
+        // «Жажда жизни»: each blow that lands gives back a little health.
+        if steal > 0 && !self.player.survival.dead {
+            self.player.survival.health = (self.player.survival.health + 0.5 * steal as f32).min(wolfcraft_engine::player::MAX_HEALTH);
+        }
         let at = self.mobs.mobs.get(i).map(|m| m.centre()).unwrap_or(eye + look * t);
         // Hit feedback: a burst of red and white sparks, more for strong weapons.
         let n = ((4.0 + dmg * 1.5) * self.fx_amount) as usize;
@@ -2217,4 +2276,11 @@ mod tests {
         // The player sits somewhere on the planet: at least the sun position differs.
         assert!((noon - midnight).abs() > 0.5 || s.player.up().dot(s.sun()).abs() < 0.3);
     }
+}
+
+/// Effect of a tipped arrow item.
+pub fn tipped_effect(id: wolfcraft_engine::items::ItemId) -> Option<wolfcraft_engine::magic::Effect> {
+    use wolfcraft_engine::items::ids;
+    use wolfcraft_engine::magic::Effect;
+    (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id).then(|| [Effect::Poison, Effect::Slowness, Effect::Harm][(id - ids::TIPPED_BASE) as usize])
 }

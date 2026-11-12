@@ -81,6 +81,8 @@ pub struct HudState<'a> {
     pub compact: bool,
     /// Draw the crosshair (hidden when blocks are picked with the finger).
     pub crosshair: bool,
+    /// Running potion effects: name with level, colour, seconds left.
+    pub effects: Vec<(String, [f32; 3], f32)>,
 }
 
 fn pill(painter: &Painter, rect: Rect, p: &Palette) {
@@ -93,7 +95,7 @@ pub const SLOT_GAP: f32 = 5.0;
 
 /// Draws an item icon with count and durability inside `rect`.
 pub fn draw_stack(painter: &Painter, icons: &GuiIcons, rect: Rect, s: &ItemStack, p: &Palette) {
-    icons.paint_item(painter, rect.shrink(rect.width() * 0.14), s.id);
+    icons.paint_stack(painter, rect.shrink(rect.width() * 0.14), s);
     if s.count > 1 {
         let pos = Pos2::new(rect.right() - 4.0, rect.bottom() - 3.0);
         painter.text(pos + Vec2::splat(1.0), Align2::RIGHT_BOTTOM, s.count.to_string(), FontId::proportional(13.0), Color32::from_black_alpha(200));
@@ -326,6 +328,24 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         let y = if s.compass.is_some() && !s.compact { compass_bottom - 32.0 } else { hotbar.top() - if s.creative { 24.0 } else { 70.0 } };
         painter.text(Pos2::new(hotbar.center().x, y), Align2::CENTER_BOTTOM, name, FontId::proportional(16.0), p.text.gamma_multiply(a));
     }
+    // Potion effects: a column of chips on the right, under the minimap on phones.
+    if !s.effects.is_empty() {
+        let x = screen.right() - 14.0;
+        let mut y = if s.compact { screen.top() + 160.0 } else { screen.top() + 20.0 };
+        for (name, c, left) in &s.effects {
+            let col = Color32::from_rgb((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
+            let secs = left.max(0.0) as u32;
+            let text = format!("{name}  {}:{:02}", secs / 60, secs % 60);
+            let g = painter.layout_no_wrap(text, FontId::proportional(14.0), Color32::WHITE);
+            let w = g.size().x + 34.0;
+            let r = Rect::from_min_size(Pos2::new(x - w, y), Vec2::new(w, 26.0));
+            painter.rect_filled(r, Rounding::same(13.0), Color32::from_rgba_unmultiplied(14, 16, 22, 200));
+            painter.rect_stroke(r, Rounding::same(13.0), Stroke::new(1.5_f32, col));
+            painter.circle_filled(Pos2::new(r.left() + 14.0, r.center().y), 6.0, col);
+            painter.galley(Pos2::new(r.left() + 26.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
+            y += 32.0;
+        }
+    }
     // Minimap, bottom-right.
     if let Some(tex) = s.minimap {
         let size = if s.compact { 104.0 } else { 156.0 };
@@ -496,6 +516,7 @@ mod tests {
                     minimap: None,
                     compact: false,
                     crosshair: true,
+                    effects: Vec::new(),
                 };
                 draw(ctx, &icons, &s);
             });

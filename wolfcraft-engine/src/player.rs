@@ -110,6 +110,9 @@ pub struct Player {
     anim_prev: DVec3,
     air_time: f32,
     fall_peak: f64,
+    /// Potion effects running now (not saved).
+    pub effects: Vec<crate::magic::Active>,
+    effect_tick: f32,
 }
 
 pub fn tangent_fallback(up: DVec3) -> DVec3 {
@@ -137,6 +140,8 @@ impl Player {
             anim_prev: spawn,
             air_time: 0.0,
             fall_peak: 0.0,
+            effects: Vec::new(),
+            effect_tick: 0.0,
         }
     }
 
@@ -193,7 +198,53 @@ impl Player {
         if self.is_creative() {
             return;
         }
-        self.survival.damage(amount, difficulty);
+        // Стойкость: −20 % per level.
+        let k = 1.0 - 0.2 * self.effect_level(crate::magic::Effect::Resistance) as f32;
+        self.survival.damage(amount * k.max(0.2), difficulty);
+    }
+
+    /// Level of a running effect (0 = none).
+    pub fn effect_level(&self, e: crate::magic::Effect) -> u8 {
+        self.effects.iter().filter(|a| a.effect == e).map(|a| a.level).max().unwrap_or(0)
+    }
+
+    /// Starts (or refreshes) an effect; instant ones act at once.
+    pub fn apply_effect(&mut self, e: crate::magic::Effect, level: u8, secs: f32) {
+        use crate::magic::Effect;
+        match e {
+            Effect::Healing => self.survival.health = (self.survival.health + 4.0 * level as f32).min(MAX_HEALTH),
+            Effect::Harm => self.damage(4.0 * level as f32, Difficulty::Normal),
+            _ => {
+                if let Some(a) = self.effects.iter_mut().find(|a| a.effect == e) {
+                    a.left = a.left.max(secs);
+                    a.level = a.level.max(level);
+                } else {
+                    self.effects.push(crate::magic::Active { effect: e, left: secs, level });
+                }
+            }
+        }
+    }
+
+    /// Effects wear off; regeneration heals, poison hurts (never below one heart).
+    pub(crate) fn tick_effects(&mut self, dt: f32) {
+        use crate::magic::Effect;
+        for a in self.effects.iter_mut() {
+            a.left -= dt;
+        }
+        self.effects.retain(|a| a.left > 0.0);
+        self.effect_tick += dt;
+        if self.effect_tick >= 1.0 {
+            self.effect_tick -= 1.0;
+            let regen = self.effect_level(Effect::Regeneration);
+            if regen > 0 && !self.survival.dead {
+                self.survival.health = (self.survival.health + 0.6 * regen as f32).min(MAX_HEALTH);
+            }
+            let poison = self.effect_level(Effect::Poison);
+            if poison > 0 && self.survival.health > 1.0 && !self.is_creative() {
+                self.survival.health = (self.survival.health - 0.8 * poison as f32).max(1.0);
+                self.survival.hurt_flash = 0.2;
+            }
+        }
     }
 
     pub fn respawn(&mut self) {
@@ -229,6 +280,12 @@ impl Player {
             4.3
         };
         let speed: f64 = if self.blocking && !self.body.flying { f64::min(speed, 1.9) } else { speed };
+        // Potions: Скорость +20 % per level, Медлительность −35 %.
+        let speed = if self.body.flying {
+            speed
+        } else {
+            speed * (1.0 + 0.2 * self.effect_level(crate::magic::Effect::Speed) as f64) * if self.effect_level(crate::magic::Effect::Slowness) > 0 { 0.65 } else { 1.0 }
+        };
         // Creative flight speeds up with height: in space you cover distances quickly.
         let speed = if self.body.flying { speed * space_boost(world.grid(), world.grid().radial(self.body.pos)) } else { speed };
         let input = MoveInput { wish, speed, jump: c.jump, up: c.jump, down: c.sneak };
@@ -264,10 +321,14 @@ impl Player {
         if impact > 0.0 && !self.body.in_water && !self.is_creative() {
             let height = impact * impact / (2.0 * physics::GRAVITY);
             if height > 3.5 {
-                self.damage((height - 3.0) as f32, difficulty);
+                // «Пёрышко» on the boots: −25 % fall damage per level.
+                let feather = self.inventory.armor[3].map(|b| b.ench_level(crate::magic::Ench::Feather)).unwrap_or(0);
+                let k = (1.0 - 0.25 * feather as f32).max(0.1);
+                self.damage((height - 3.0) as f32 * k, difficulty);
             }
         }
         let _ = was_grounded;
+        self.tick_effects(dt as f32);
 
         if self.is_creative() {
             self.survival.hunger = MAX_HUNGER;
@@ -356,8 +417,9 @@ impl Player {
             s.air = (s.air + dt * 6.0).min(MAX_AIR);
             s.drown_timer = 0.0;
         }
-        // Lava.
-        if self.body.in_lava {
+        // Lava (not with Огнестойкость).
+        let fire_proof = self.effects.iter().any(|a| a.effect == crate::magic::Effect::FireResist);
+        if self.body.in_lava && !fire_proof {
             s.lava_timer += dt;
             if s.lava_timer >= 0.5 {
                 s.lava_timer = 0.0;

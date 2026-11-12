@@ -15,11 +15,13 @@ pub struct Inventory {
     pub offhand: Option<ItemStack>,
     /// Worn armor: helmet, chestplate, leggings, boots.
     pub armor: [Option<ItemStack>; 4],
+    /// Counts uses, for «Крепость» (which use wears the item).
+    pub wear_count: u32,
 }
 
 impl Default for Inventory {
     fn default() -> Self {
-        Self { slots: [None; SLOTS], selected: 0, offhand: None, armor: [None; 4] }
+        Self { slots: [None; SLOTS], selected: 0, offhand: None, armor: [None; 4], wear_count: 0 }
     }
 }
 
@@ -111,9 +113,13 @@ impl Inventory {
 
     /// Wears the held tool by one use; breaks it when exhausted.
     pub fn wear_selected(&mut self) {
+        self.wear_count = self.wear_count.wrapping_add(1);
+        let tick = self.wear_count;
         if let Some(s) = self.slots[self.selected].as_mut() {
             let dur = s.info().durability;
-            if dur > 0 {
+            // «Крепость»: a use wears the item only one time in (level + 1).
+            let unb = s.ench_level(crate::magic::Ench::Unbreaking) as u32;
+            if dur > 0 && (unb == 0 || tick.wrapping_mul(2654435761) % (unb + 1) == 0) {
                 s.damage += 1;
                 if s.damage >= dur {
                     self.slots[self.selected] = None;
@@ -194,6 +200,11 @@ impl Inventory {
                 None => out.extend_from_slice(&[0xFF, 0xFF, 0, 0, 0]),
             }
         }
+        // Enchantments of every slot, the off-hand and the armor (older saves end before).
+        out.extend_from_slice(b"EN");
+        for s in self.slots.iter().chain(std::iter::once(&self.offhand)).chain(self.armor.iter()) {
+            out.extend_from_slice(&s.map(|s| s.ench).unwrap_or(0).to_le_bytes());
+        }
     }
 
     pub fn from_bytes(data: &[u8]) -> Option<(Inventory, usize)> {
@@ -206,12 +217,12 @@ impl Inventory {
             let o = 1 + i * 5;
             let id = u16::from_le_bytes([data[o], data[o + 1]]);
             if id != 0xFFFF && crate::items::is_valid(id) && data[o + 2] > 0 {
-                inv.slots[i] = Some(ItemStack { id, count: data[o + 2], damage: u16::from_le_bytes([data[o + 3], data[o + 4]]) });
+                inv.slots[i] = Some(ItemStack { id, count: data[o + 2], damage: u16::from_le_bytes([data[o + 3], data[o + 4]]), ench: 0 });
             }
         }
         let read = |o: &[u8]| {
             let id = u16::from_le_bytes([o[0], o[1]]);
-            (id != 0xFFFF && crate::items::is_valid(id) && o[2] > 0).then(|| ItemStack { id, count: o[2], damage: u16::from_le_bytes([o[3], o[4]]) })
+            (id != 0xFFFF && crate::items::is_valid(id) && o[2] > 0).then(|| ItemStack { id, count: o[2], damage: u16::from_le_bytes([o[3], o[4]]), ench: 0 })
         };
         let mut used = need;
         if let Some(o) = data.get(used..used + 5) {
@@ -221,6 +232,18 @@ impl Inventory {
                 let Some(o) = data.get(used..used + 5) else { break };
                 inv.armor[a] = read(o).filter(|s| crate::items::armor_slot(s.id) == Some(a));
                 used += 5;
+            }
+        }
+        if data.get(used..used + 2) == Some(b"EN") {
+            used += 2;
+            for i in 0..SLOTS + 5 {
+                let Some(b) = data.get(used..used + 4) else { break };
+                let e = u32::from_le_bytes(b.try_into().unwrap_or([0; 4]));
+                used += 4;
+                let slot = if i < SLOTS { inv.slots[i].as_mut() } else if i == SLOTS { inv.offhand.as_mut() } else { inv.armor[i - SLOTS - 1].as_mut() };
+                if let Some(s) = slot {
+                    s.ench = e;
+                }
             }
         }
         Some((inv, used))
@@ -393,6 +416,18 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::Cobblestone), 1), (ids::COAL, 1)], (b(Block::Stone), 1), true, "Плавка"));
         v.push(r(&[(b(Block::Sand), 1), (ids::COAL, 1)], (b(Block::Glass), 2), true, "Плавка"));
         v.push(r(&[(b(Block::MushroomRed), 1), (b(Block::MushroomBrown), 1), (ids::APPLE, 1)], (ids::MUSHROOM_STEW, 1), false, "Еда"));
+        // Magic: books, the Чаровальня, bottles, potions and tipped arrows.
+        let iskrit = b(Block::IskritWire);
+        v.push(r(&[(b(Block::SugarCane), 3), (ids::LEATHER, 1)], (ids::BOOK, 1), false, "Магия"));
+        v.push(r(&[(ids::BOOK, 1), (ids::DIAMOND, 2), (b(Block::Obsidian), 4)], (b(Block::EnchantTable), 1), true, "Магия"));
+        v.push(r(&[(b(Block::Glass), 3)], (ids::BOTTLE, 3), false, "Магия"));
+        for e in crate::magic::ALL_EFFECTS {
+            let potion = ids::POTION_BASE + e as u16 - 1;
+            v.push(r(&[(ids::BOTTLE, 1), (crate::magic::potion_ingredient(e), 1), (iskrit, 1)], (potion, 1), true, "Магия"));
+        }
+        for (i, e) in [crate::magic::Effect::Poison, crate::magic::Effect::Slowness, crate::magic::Effect::Harm].into_iter().enumerate() {
+            v.push(r(&[(ids::ARROW, 8), (ids::POTION_BASE + e as u16 - 1, 1)], (ids::TIPPED_BASE + i as u16, 8), true, "Магия"));
+        }
         // A bone grinds into three portions of bone meal.
         v.push(r(&[(ids::BONE, 1)], (ids::BONE_MEAL, 3), false, "Предметы"));
         // Tools: pickaxe 3, axe 3, shovel 1, sword 2 material units + sticks.

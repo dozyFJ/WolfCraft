@@ -20,6 +20,8 @@ pub struct Arrow {
     pub damage: f32,
     /// Can be picked up (survival shots; creative arrows just vanish).
     pub pickup: bool,
+    /// Tipped arrow: the effect it puts on what it hits.
+    pub effect: Option<crate::magic::Effect>,
 }
 
 /// What happened during a step.
@@ -28,6 +30,8 @@ pub struct ArrowEvents {
     /// Creatures killed by arrows (for loot and xp).
     /// Creatures killed by arrows (for loot, bones and xp), with where they fell.
     pub killed: Vec<(MobKind, DVec3)>,
+    /// Tipped arrows that hit: where and which effect (for the splash of colour).
+    pub effect_hits: Vec<(DVec3, crate::magic::Effect)>,
     /// Arrows picked up by the player.
     pub picked: u32,
     /// Something was hit (for a sound or a hit marker).
@@ -42,9 +46,16 @@ pub struct Arrows {
 impl Arrows {
     /// Shoots an arrow from `from` along `dir` with power 0..1.
     pub fn shoot(&mut self, from: DVec3, dir: DVec3, power: f32, pickup: bool) {
+        self.shoot_with(from, dir, power, pickup, 0, None);
+    }
+
+    /// `shoot` from a bow with «Меткость» `power_ench` (+25 % damage per level), with a
+    /// tipped arrow's effect.
+    pub fn shoot_with(&mut self, from: DVec3, dir: DVec3, power: f32, pickup: bool, power_ench: u8, effect: Option<crate::magic::Effect>) {
         let speed = 12.0 + 48.0 * power as f64;
         let dir = dir.normalize_or_zero();
-        self.list.push(Arrow { pos: from + dir * 0.4, vel: dir * speed, dir, stuck: false, age: 0.0, damage: 2.0 + 8.0 * power * power, pickup });
+        let damage = (2.0 + 8.0 * power * power) * (1.0 + 0.25 * power_ench as f32);
+        self.list.push(Arrow { pos: from + dir * 0.4, vel: dir * speed, dir, stuck: false, age: 0.0, damage, pickup, effect });
         if self.list.len() > 256 {
             self.list.remove(0);
         }
@@ -76,7 +87,18 @@ impl Arrows {
             // Creatures in the way.
             if let Some((i, _)) = mobs.raycast(a.pos, dir, len + 0.3) {
                 let from = a.pos - dir * 2.0;
-                if let Some(kind) = mobs.hurt(i, a.damage, from) {
+                if let Some(m) = mobs.mobs.get_mut(i) {
+                    match a.effect {
+                        Some(crate::magic::Effect::Poison) => m.poison = m.poison.max(12.0),
+                        Some(crate::magic::Effect::Slowness) => m.slow = m.slow.max(15.0),
+                        _ => {}
+                    }
+                }
+                let extra = if a.effect == Some(crate::magic::Effect::Harm) { 6.0 } else { 0.0 };
+                if let Some(e) = a.effect {
+                    ev.effect_hits.push((a.pos, e));
+                }
+                if let Some(kind) = mobs.hurt(i, a.damage + extra, from) {
                     ev.killed.push((kind, a.pos));
                 }
                 ev.hits += 1;

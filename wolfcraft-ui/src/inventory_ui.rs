@@ -311,7 +311,7 @@ fn draw_slot(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUi
     }
     if let Some(s) = stack {
         let dur = s.info().durability;
-        let mut tip = s.info().name.to_string();
+        let mut tip = s.display_name();
         if dur > 0 {
             tip += &format!("\nПрочность {}/{}", dur - s.damage, dur);
         }

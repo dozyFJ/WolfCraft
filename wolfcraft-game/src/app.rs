@@ -1604,6 +1604,7 @@ impl App {
                             minimap: if studio.is_some() { None } else { minimap_tex },
                             compact: cfg!(target_os = "android"),
                             crosshair: !(touch.seen && settings.tap_aim),
+                            effects: p.effects.iter().map(|a| (format!("{} {}", a.effect.name(), wolfcraft_engine::magic::roman(a.level)), a.effect.color(), a.left)).collect(),
                         };
                         if screen != Screen::Map {
                             hud::draw(ctx, &icons, &hud);
@@ -1692,6 +1693,7 @@ impl App {
                                     use wolfcraft_engine::block::Block as B;
                                     let furnace = block == B::ElectricFurnace;
                                     let forge = block == B::MachineCasing;
+                                    let magic = block == B::EnchantTable;
                                     let (prog, working) = s.furnace_status(pos);
                                     let status_text = if working { "Горит: вход · топливо · результат" } else { "Положите руду и топливо (уголь, дрова)" };
                                     let accepts = |slot: usize, st: &wolfcraft_engine::items::ItemStack| {
@@ -1699,24 +1701,37 @@ impl App {
                                             (slot == 0 && wolfcraft_engine::interaction::smelt_result(st.id).is_some()) || (slot == 1 && wolfcraft_engine::interaction::fuel_time(st.id) > 0.0)
                                         } else if forge {
                                             slot < 2
+                                        } else if magic {
+                                            (slot == 0 && st.count == 1 && wolfcraft_engine::magic::kind_of(st.id) != wolfcraft_engine::magic::Kind::Other) || (slot == 1 && st.id == B::IskritWire as u16)
                                         } else {
                                             true
                                         }
                                     };
                                     let view = wolfcraft_ui::container_ui::ContainerView {
-                                        title: if furnace { "Печь" } else if forge { "Кузница" } else if block == B::Battery { "Бочка" } else { "Сундук" },
-                                        columns: if furnace || forge { 3 } else { 9 },
+                                        title: if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else { "Сундук" },
+                                        columns: if furnace || forge { 3 } else if magic { 2 } else { 9 },
                                         accepts: &accepts,
                                         status: if furnace {
                                             Some((status_text, prog))
                                         } else if forge {
-                                            Some(("Предмет + его материал — ремонт · два одинаковых — склеить · +3 материала уровнем выше — улучшить", 0.0))
+                                            Some(("Предмет + его материал — ремонт · два одинаковых — склеить · +3 материала уровнем выше — улучшить · + книга чар — зачаровать", 0.0))
+                                        } else if magic {
+                                            Some(("Слева предмет или книга, справа искрит · чары стоят уровни опыта и искрит", 0.0))
                                         } else {
                                             None
                                         },
                                     };
                                     let mut slots = std::mem::take(s.container_slots(pos, block));
-                                    let (closed, thrown) = wolfcraft_ui::container_ui::show(ctx, &icons, &view, &mut slots, &mut s.player.inventory);
+                                    let creative = s.is_creative();
+                                    let seed = &mut s.ench_seed;
+                                    let surv = &mut s.player.survival;
+                                    let mut extra = |ui: &mut egui::Ui, slots: &mut [Option<wolfcraft_engine::items::ItemStack>], _inv: &mut wolfcraft_engine::inventory::Inventory| {
+                                        if !magic {
+                                            return;
+                                        }
+                                        enchant_offers(ui, &icons, slots, surv, seed, creative);
+                                    };
+                                    let (closed, thrown) = wolfcraft_ui::container_ui::show_with(ctx, &icons, &view, &mut slots, &mut s.player.inventory, &mut extra);
                                     *s.container_slots(pos, block) = slots;
                                     for st in thrown {
                                         s.throw(st);
@@ -2133,6 +2148,8 @@ impl App {
                         time: self.time.elapsed(),
                         sleeve: worn_armor(&s.player.inventory)[1].map(wolfcraft_engine::renderer::model::armor_color),
                         bow: bow.then_some(s.bow_charge),
+                        glint: s.player.inventory.held().is_some_and(|h| h.enchanted()),
+                        arrow_tip: s.bow_arrow.and_then(crate::session::tipped_effect).map(|e| e.color()),
                     };
                     let hands = build_first_person_hands(&hand_pose);
                     // View model placement: settings, item-switch dip, aspect ratio.
@@ -3072,4 +3089,48 @@ fn worn_armor(inv: &wolfcraft_engine::inventory::Inventory) -> [Option<u8>; 4] {
         out[i] = slot.map(|s| ((s.id.saturating_sub(wolfcraft_engine::items::ids::ARMOR_BASE)) / 4) as u8);
     }
     out
+}
+
+/// The Чаровальня's three offers for the item in its left slot: name and level, the cost in
+/// levels and iskrit; a tap casts it (a blank book becomes a «Книга чар»).
+fn enchant_offers(ui: &mut egui::Ui, icons: &wolfcraft_ui::GuiIcons, slots: &mut [Option<wolfcraft_engine::items::ItemStack>], surv: &mut wolfcraft_engine::player::Survival, seed: &mut u32, creative: bool) {
+    use wolfcraft_engine::items::ids;
+    use wolfcraft_engine::magic;
+    use wolfcraft_ui::ui_components::{ButtonKind, pill_button};
+    let Some(item) = slots.first().copied().flatten() else {
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new("Положите инструмент, оружие, броню, лук или книгу").color(egui::Color32::from_gray(170)));
+        return;
+    };
+    let iskrit = slots.get(1).copied().flatten().map(|s| s.count as u32).unwrap_or(0);
+    let level = surv.level();
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new(format!("Ваш уровень: {level} · искрит: {iskrit}")).color(egui::Color32::from_rgb(255, 170, 160)));
+    let mut cast: Option<(magic::Ench, u8, u32)> = None;
+    for (e, lvl, cost) in magic::offers(item.id, *seed) {
+        let can = creative || (level >= cost && iskrit >= cost);
+        let text = format!("{} {} · {} ур. · {} искрита", e.name(), magic::roman(lvl), cost, cost);
+        if pill_button(ui, icons, None, &text, if can { ButtonKind::Primary } else { ButtonKind::Secondary }, ui.available_width().min(420.0), can).clicked() {
+            cast = Some((e, lvl, cost));
+        }
+    }
+    if let Some((e, lvl, cost)) = cast {
+        let mut out = item;
+        if item.id == ids::BOOK {
+            out = wolfcraft_engine::items::ItemStack::new(ids::ENCH_BOOK, 1);
+        }
+        out.ench = magic::with(out.ench, e, lvl);
+        slots[0] = Some(out);
+        if !creative {
+            let new_level = level - cost;
+            surv.xp = new_level * new_level;
+            if let Some(s) = slots[1].as_mut() {
+                s.count = s.count.saturating_sub(cost as u8);
+                if s.count == 0 {
+                    slots[1] = None;
+                }
+            }
+        }
+        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+    }
 }

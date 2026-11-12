@@ -95,6 +95,9 @@ impl Interaction {
             self.progress = 0.0;
             return events;
         };
+        // «Сноровка»: +35 % mining speed per level.
+        let eff = player.inventory.held().map(|s| s.ench_level(crate::magic::Ench::Efficiency)).unwrap_or(0);
+        let time = time / (1.0 + 0.35 * eff as f32);
         if time <= 0.0 {
             if self.cooldown > 0.0 {
                 return events;
@@ -137,7 +140,13 @@ impl Interaction {
         if !player.is_creative() {
             let held = player.inventory.held().map(|s| s.info());
             let ok = items::can_harvest(held, block);
-            for d in items::drops(block, ok, IVec3::new(pos.i, pos.j, pos.k ^ ((pos.f as i32) << 24)), seed) {
+            // «Удача» on a pickaxe: ore loot (not the ore block itself) sometimes doubles.
+            let fortune = player.inventory.held().map(|s| s.ench_level(crate::magic::Ench::Fortune)).unwrap_or(0);
+            let roll = ((pos.i.wrapping_mul(73856093) ^ pos.j.wrapping_mul(19349663) ^ pos.k.wrapping_mul(83492791)) as u32 % 100) as u8;
+            for mut d in items::drops(block, ok, IVec3::new(pos.i, pos.j, pos.k ^ ((pos.f as i32) << 24)), seed) {
+                if fortune > 0 && d.id != block as items::ItemId && items::xp_for(block) > 0 && roll < 30 * fortune {
+                    d.count = d.count.saturating_add(1 + (roll % fortune.max(1)));
+                }
                 if self.spill {
                     spilled.push(d);
                 } else {
@@ -213,7 +222,7 @@ impl Interaction {
                 return events;
             }
             // Chest and electric furnace open their own window (sneak to place blocks instead).
-            if matches!(h.block, Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) && !player.sneaking {
+            if matches!(h.block, Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::EnchantTable | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) && !player.sneaking {
                 events.push(InteractionEvent::OpenContainer { pos: h.cell, block: h.block });
                 return events;
             }
@@ -265,6 +274,19 @@ impl Interaction {
                 if used && !player.is_creative() {
                     player.inventory.consume_selected();
                 }
+            }
+            return events;
+        }
+        // Potions: drink (instant ones work at once, the rest run for a while); the empty
+        // bottle comes back.
+        if (items::ids::POTION_BASE..=items::ids::POTION_LAST).contains(&stack.id) {
+            if let Some(e) = crate::magic::Effect::from_id((stack.id - items::ids::POTION_BASE) as u8 + 1) {
+                player.apply_effect(e, 1, e.duration());
+                if !player.is_creative() {
+                    player.inventory.consume_selected();
+                    player.inventory.add(items::ItemStack::new(items::ids::BOTTLE, 1));
+                }
+                events.push(InteractionEvent::Ate { hunger: 0.0 });
             }
             return events;
         }
@@ -694,6 +716,11 @@ pub fn fuel_time(id: items::ItemId) -> f32 {
 /// Returns (result, how many items slot 1 gives up).
 pub fn forge_result(item: items::ItemStack, with: items::ItemStack) -> Option<(items::ItemStack, u8)> {
     use items::ids;
+    // A «Книга чар» puts its enchantments on a tool, weapon, armour or the bow.
+    if with.id == ids::ENCH_BOOK && item.count == 1 {
+        let (e, changed) = crate::magic::combine(item.ench, with.ench, crate::magic::kind_of(item.id));
+        return changed.then_some((items::ItemStack { ench: e, ..item }, 1));
+    }
     let info = item.info();
     let dur = info.durability;
     if dur == 0 || item.count != 1 {
@@ -729,7 +756,7 @@ pub fn forge_result(item: items::ItemStack, with: items::ItemStack) -> Option<(i
         let up = up?;
         let new_dur = items::info(up).durability;
         let worn = item.damage as f32 / dur as f32;
-        return Some((items::ItemStack { id: up, count: 1, damage: (worn * new_dur as f32) as u16 }, 3));
+        return Some((items::ItemStack { id: up, count: 1, damage: (worn * new_dur as f32) as u16, ench: item.ench }, 3));
     }
     None
 }

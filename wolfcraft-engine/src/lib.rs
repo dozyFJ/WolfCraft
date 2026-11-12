@@ -11,6 +11,7 @@ pub mod cubesphere;
 pub mod interaction;
 pub mod inventory;
 pub mod items;
+pub mod magic;
 pub mod mesher;
 pub mod mobs;
 pub mod physics;

@@ -28,6 +28,8 @@ pub const HELP: &[&str] = &[
     "/pos  /biome  /seed  /save  /say <текст>",
     "/season [весна|лето|осень|зима] — узнать или сменить время года",
     "/month [январь…декабрь|1–12] — узнать дату или перейти к месяцу",
+    "/enchant <чары> [уровень] — зачаровать предмет в руке (острота, сноровка, крепость, защита…)",
+    "/effect <эффект> [секунды] — наложить эффект (скорость, сила, регенерация…); /effect clear",
     "/demo — построить перед собой выставку искрита: схемы, автодвери, ферма, потайной проход",
     "//help — команды WorldEdit: //pos1 //pos2 //set //replace //walls //copy //paste //sphere //cyl //undo …",
     "/ад — перейти в Ад,  /мир — вернуться (или через адский портал: 4 обсидиана + светокамень)",
@@ -243,6 +245,36 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
             Ok(m) => vec![sys(m)],
             Err(e) => vec![err(e)],
         },
+        "enchant" | "чары" => {
+            use wolfcraft_engine::magic::{self, ALL_ENCH};
+            let Some(q) = args.first().map(|a| a.to_lowercase()) else {
+                let names: Vec<&str> = ALL_ENCH.iter().map(|e| e.name()).collect();
+                return vec![sys(format!("Чары: {}", names.join(", ")))];
+            };
+            let Some(e) = ALL_ENCH.iter().copied().find(|e| e.name().to_lowercase().starts_with(&q)) else { return vec![err("Нет таких чар. /enchant — список")] };
+            let lvl = args.get(1).and_then(|l| l.parse::<u8>().ok()).unwrap_or(e.max_level()).clamp(1, e.max_level());
+            let Some(st) = s.player.inventory.slots[s.player.inventory.selected].as_mut() else { return vec![err("Возьмите предмет в руку")] };
+            if !e.fits(magic::kind_of(st.id)) && st.id != wolfcraft_engine::items::ids::ENCH_BOOK {
+                return vec![err(format!("{} не подходит для «{}»", e.name(), st.info().name))];
+            }
+            st.ench = magic::with(st.ench, e, lvl);
+            vec![sys(format!("Зачаровано: {}", st.display_name()))]
+        }
+        "effect" | "эффект" => {
+            use wolfcraft_engine::magic::ALL_EFFECTS;
+            let Some(q) = args.first().map(|a| a.to_lowercase()) else {
+                let names: Vec<&str> = ALL_EFFECTS.iter().map(|e| e.name()).collect();
+                return vec![sys(format!("Эффекты: {}", names.join(", ")))];
+            };
+            if q == "clear" || q == "снять" {
+                s.player.effects.clear();
+                return vec![sys("Эффекты сняты")];
+            }
+            let Some(e) = ALL_EFFECTS.iter().copied().find(|e| e.name().to_lowercase().starts_with(&q)) else { return vec![err("Нет такого эффекта. /effect — список")] };
+            let secs = args.get(1).and_then(|l| l.parse::<f32>().ok()).unwrap_or(e.duration().max(30.0));
+            s.player.apply_effect(e, 1, secs);
+            vec![sys(format!("Эффект: {}", e.name()))]
+        }
         "month" | "месяц" => {
             use wolfcraft_engine::player::{DAY_LENGTH, MONTH_NAMES, month_start};
             let Some(a) = args.first().map(|a| a.to_lowercase()) else {
