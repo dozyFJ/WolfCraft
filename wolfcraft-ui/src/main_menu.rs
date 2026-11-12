@@ -968,39 +968,34 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
 pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, version: &str, packs: &PacksView) -> SettingsResult {
     let p = palette(ctx);
     let mut res = SettingsResult::default();
-    top_bar(ctx, icons, "Настройки", version, false);
-    bottom_bar(ctx, |ui| {
-        if pill_button(ui, icons, Some(icon::ARROW_LEFT), "Назад", ButtonKind::Primary, 160.0, true).clicked() {
-            res.back = true;
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(egui::RichText::new("Сохраняется автоматически").size(13.0).color(p.text_muted));
-        });
-    });
-    // Selected section is kept in egui memory, so the screen needs no extra state.
     let tab_id = egui::Id::new("settings-tab");
     let mut tab: usize = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
-    egui::SidePanel::left("settings-side")
-        .resizable(false)
-        .exact_width(230.0)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
+    tab = tab.min(SETTINGS_TABS.len() - 1);
+    egui::TopBottomPanel::top("settings-header")
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 8.0)))
         .show(ctx, |ui| {
-            egui::ScrollArea::vertical().id_salt("settings-side-scroll").auto_shrink([false, false]).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 10.0;
-                for (i, (ic, label)) in SETTINGS_TABS.iter().enumerate() {
-                    let kind = if tab == i { ButtonKind::Primary } else { ButtonKind::Secondary };
-                    if pill_button(ui, icons, Some(*ic), label, kind, ui.available_width(), true).clicked() {
-                        tab = i;
-                    }
+            ui.horizontal(|ui| {
+                if square_button(ui, icons, icon::ARROW_LEFT, false).on_hover_text("Назад").clicked() {
+                    res.back = true;
                 }
+                ui.label(egui::RichText::new("Настройки").font(bold_font(21.0)).color(p.text));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(format!("v{version}")).size(12.0).color(p.text_muted));
+                    if ui.available_width() > 270.0 {
+                        ui.label(egui::RichText::new("Сохраняется автоматически").size(12.0).color(p.text_muted));
+                    }
+                });
+            });
+            ui.add_space(4.0);
+            egui::ScrollArea::horizontal().id_salt("settings-tabs-scroll").auto_shrink([false, true]).show(ui, |ui| {
+                let labels: Vec<&str> = SETTINGS_TABS.iter().map(|(_, label)| *label).collect();
+                tab_bar(ui, "settings-section-tabs", &labels, &mut tab);
             });
         });
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
     egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
         egui::ScrollArea::vertical().id_salt("settings-body").auto_shrink([false, false]).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            section_label(ui, SETTINGS_TABS[tab].1);
-            ui.add_space(8.0);
             match tab {
                 6 => {
                     ui.label(format!("Установлена WolfCraft {version}"));
@@ -1398,6 +1393,30 @@ mod tests {
         render(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
         render(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
         assert_eq!(st.mode, 1);
+    }
+
+    #[test]
+    fn settings_sections_are_tabs_below_the_header() {
+        let (ctx, icons) = setup();
+        let mut settings = Settings::default();
+        let packs = PacksView { list: &[], status: "", folder: "" };
+        let mut render = |events| ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 540.0))),
+            events, ..Default::default()
+        }, |ctx| { settings_screen(ctx, &icons, &mut settings, "0.2.1", &packs); });
+        render(vec![]);
+        let out = render(vec![]);
+        let text = |label: &str| out.shapes.iter().find_map(|s| match &s.shape {
+            egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t), _ => None
+        }).expect("settings label");
+        let title = text("Настройки");
+        let graphics = text("Графика");
+        assert!(graphics.pos.y > title.pos.y && graphics.pos.y < 110.0);
+        assert!(text("Никнейм").pos.x < 100.0, "settings content must use the former sidebar space");
+        let pos = graphics.pos + graphics.galley.size() * 0.5;
+        render(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+        render(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+        assert_eq!(ctx.data(|d| d.get_temp::<usize>(egui::Id::new("settings-tab"))), Some(1));
     }
 
     fn setup() -> (egui::Context, GuiIcons) {
