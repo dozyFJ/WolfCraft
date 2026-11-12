@@ -91,6 +91,7 @@ pub struct StudioState {
     /// Portrait layout: the docked window shown under the world, and how much of the
     /// screen below the ribbon the world takes (0..1).
     pub dock_tab: usize,
+    pub dock_open: bool,
     pub dock_frac: f32,
     /// Bottom of the world view (points), for the touch controls (portrait).
     pub view_bottom: Option<f32>,
@@ -123,6 +124,7 @@ impl Default for StudioState {
             assets_open: true,
             script_open: false,
             dock_tab: 0,
+            dock_open: true,
             dock_frac: 0.5,
             view_bottom: None,
         }
@@ -377,7 +379,8 @@ const DOCK_TABS: [(&str, u16); 5] = [("Тулбокс", icon::CUBE), ("Пров�
 #[allow(clippy::too_many_arguments)]
 fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &StudioView, inv: &mut Inventory, p: &Palette, mut actions: Vec<StudioAction>, mut covered: Vec<Rect>) -> (Vec<StudioAction>, Vec<Rect>) {
     let screen = ctx.screen_rect();
-    let top_bar = Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H));
+    const PILLS_H: f32 = 38.0;
+    let top_bar = Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H + PILLS_H));
     covered.push(top_bar);
     egui::Area::new(Id::new("studio-top-p")).order(egui::Order::Foreground).fixed_pos(top_bar.min).show(ctx, |ui| {
         let painter = ui.painter().clone();
@@ -406,6 +409,37 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
                 }
             });
         });
+        // Window pills under the ribbon: a tap opens that window in the dock below, a tap
+        // on the open one hides the dock (the whole screen is the world then).
+        let pills = Rect::from_min_size(top_bar.min + Vec2::new(0.0, MENU_H + RIBBON_H), Vec2::new(top_bar.width(), PILLS_H));
+        painter.rect_filled(pills, 0.0, p.bg);
+        painter.line_segment([pills.left_bottom(), pills.right_bottom()], Stroke::new(1.0_f32, p.outline));
+        let gap = 5.0;
+        let pw = (pills.width() - gap * (DOCK_TABS.len() as f32 + 1.0)) / DOCK_TABS.len() as f32;
+        for (i, (name, ic)) in DOCK_TABS.iter().enumerate() {
+            let r = Rect::from_min_size(Pos2::new(pills.left() + gap + (pw + gap) * i as f32, pills.top() + 5.0), Vec2::new(pw, PILLS_H - 10.0));
+            let resp = ui.interact(r, Id::new(("dock-pill", i)), Sense::click());
+            let on = st.dock_open && st.dock_tab == i;
+            let round = Rounding::same(r.height() / 2.0);
+            ui.painter().rect_filled(r, round, if on { p.accent } else if resp.hovered() { p.surface_hover } else { p.surface });
+            if !on {
+                ui.painter().rect_stroke(r, round, Stroke::new(1.0_f32, p.outline));
+            }
+            let col = if on { p.on_accent } else { p.text };
+            let g = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(10.5), col);
+            let total = 13.0 + 3.0 + g.size().x;
+            let x0 = r.center().x - total / 2.0;
+            icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(x0 + 6.5, r.center().y), Vec2::splat(13.0)), *ic, col);
+            ui.painter().galley(Pos2::new(x0 + 16.0, r.center().y - g.size().y / 2.0), g, col);
+            if resp.clicked() {
+                if on {
+                    st.dock_open = false;
+                } else {
+                    st.dock_tab = i;
+                    st.dock_open = true;
+                }
+            }
+        }
         // Ribbon: scrolls sideways; save/server/exit at its end, ▶ first.
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(Rect::from_min_size(top_bar.min + Vec2::new(4.0, MENU_H + 3.0), Vec2::new(top_bar.width() - 8.0, RIBBON_H - 6.0))), |ui| {
             egui::ScrollArea::horizontal().id_salt("studio-ribbon-p").drag_to_scroll(true).show(ui, |ui| {
@@ -435,6 +469,11 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
     if st.center == Center::Script {
         st.center = Center::World;
         st.dock_tab = 4;
+        st.dock_open = true;
+    }
+    if !st.dock_open {
+        st.view_bottom = None;
+        return (actions, covered);
     }
     // World and dock.
     let avail = screen.bottom() - top_bar.bottom();
@@ -451,27 +490,11 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
             ui.set_width(dock.width());
             ui.set_height(dock.height());
             ui.set_max_height(dock.height());
-            // Window tabs.
-            let (bar, _) = ui.allocate_exact_size(Vec2::new(dock.width(), 34.0), Sense::hover());
-            ui.painter().rect_filled(bar, 0.0, p.bg);
-            let tw = bar.width() / DOCK_TABS.len() as f32;
-            for (i, (name, ic)) in DOCK_TABS.iter().enumerate() {
-                let r = Rect::from_min_size(Pos2::new(bar.left() + tw * i as f32, bar.top()), Vec2::new(tw, bar.height()));
-                let resp = ui.interact(r, Id::new(("dock-tab", i)), Sense::click());
-                let on = st.dock_tab == i;
-                if on {
-                    ui.painter().rect_filled(r, 0.0, p.surface);
-                    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(r.left(), r.bottom() - 3.0), r.max), 0.0, p.accent);
-                }
-                let col = if on { p.accent } else { p.text_muted };
-                icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 11.0), Vec2::splat(14.0)), *ic, col);
-                ui.painter().text(Pos2::new(r.center().x, r.bottom() - 9.0), Align2::CENTER_CENTER, *name, FontId::proportional(10.0), col);
-                if resp.clicked() {
-                    st.dock_tab = i;
-                }
-            }
+            // A grip line on top: drag it to resize.
+            let (grip, _) = ui.allocate_exact_size(Vec2::new(dock.width(), 10.0), Sense::hover());
+            ui.painter().rect_filled(Rect::from_center_size(grip.center(), Vec2::new(44.0, 4.0)), Rounding::same(2.0), p.outline);
             Frame::none().inner_margin(Margin::same(6.0)).show(ui, |ui| {
-                let h = dock.height() - 34.0 - 12.0;
+                let h = dock.height() - 10.0 - 12.0;
                 ui.set_width(dock.width() - 12.0);
                 ui.set_height(h);
                 ui.set_max_height(h);

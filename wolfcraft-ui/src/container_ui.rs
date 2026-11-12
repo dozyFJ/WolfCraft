@@ -35,8 +35,8 @@ fn paint_slot(ui: &mut Ui, icons: &GuiIcons, rect: Rect, stack: Option<&ItemStac
     let p = palette(ui.ctx());
     let resp = ui.allocate_rect(rect, Sense::click_and_drag());
     let hover = resp.hovered() && enabled;
-    ui.painter().rect_filled(rect, Rounding::ZERO, if hover { p.surface_hover } else { p.surface_hi });
-    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if hover { p.accent } else { p.outline }));
+    ui.painter().rect_filled(rect, Rounding::same(4.0), if hover { p.surface_hover } else { p.surface_hi });
+    ui.painter().rect_stroke(rect, Rounding::same(4.0), Stroke::new(2.0_f32, if hover { p.accent } else { p.outline }));
     if let Some(s) = stack {
         icons.paint_stack(ui.painter(), rect.shrink(6.0), s);
         if s.count > 1 {
@@ -131,7 +131,7 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
     let mut thrown = Vec::new();
     let cols = view.columns.max(1);
     let width = cols.max(9) as f32 * (CELL + GAP) - GAP;
-    let dismissed = crate::ui_components::game_screen(ctx, "container", view.title, width + 4.0, |ui| {
+    let dismissed = crate::ui_components::block_screen(ctx, "container", width + 4.0, |ui| {
         // Atlas banner and recess belong to the interacted block.
         let (banner,_)=ui.allocate_exact_size(Vec2::new(width,30.),Sense::hover());
         icons.paint_panel(ui.painter(),banner,view.skin,Color32::WHITE);
@@ -206,7 +206,7 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
         if let (Some(s), Some(pos)) = (stack, pointer) {
             let layer = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("container-ghost")));
             let ghost = Rect::from_center_size(pos, Vec2::splat(CELL));
-            layer.rect_filled(ghost, Rounding::ZERO, p.surface.gamma_multiply(0.9));
+            layer.rect_filled(ghost, Rounding::same(4.0), p.surface.gamma_multiply(0.9));
             icons.paint_item(&layer, ghost.shrink(6.0), s.id);
         }
         if ctx.input(|i| i.pointer.any_released()) {
