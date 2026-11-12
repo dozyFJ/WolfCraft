@@ -129,6 +129,11 @@ fn season_tint(c: vec3<f32>, in: VsOut, n: vec3<f32>) -> vec3<f32> {
     return o;
 }
 
+fn fog_amount(d: f32) -> f32 {
+    let x = d * g.fog.a * 1.1;
+    return clamp(1.0 - exp(-x * x * x * x), 0.0, 1.0);
+}
+
 fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     let color = vec4<f32>(season_tint(color0.rgb, in, n), color0.a);
     let emit = (in.flags >> 16u) & 1u;
@@ -212,9 +217,11 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     }
     // Distance fog (the cartoon look adds a light aerial haze that starts sooner).
     let d = length(in.rel);
-    var f = clamp(1.0 - exp(-pow(d * g.fog.a, 2.0)), 0.0, 1.0);
+    // Clear air nearby, the fog closes in only towards the edge of the view distance (it
+    // just hides where the world ends); the cartoon look adds a faint haze far away.
+    var f = fog_amount(d);
     if (fx_on(8u)) {
-        f = max(f, clamp(d * g.fog.a * 0.35, 0.0, 0.35));
+        f = max(f, clamp((d * g.fog.a - 0.45) * 0.25, 0.0, 0.10));
     }
     rgb = mix(rgb, g.fog.rgb, f);
     if (g.misc.y > 0.5) {
@@ -527,7 +534,7 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     }
     var rgb = base * light + vec3<f32>(rim);
     let d = length(in.rel);
-    let f = clamp(1.0 - exp(-pow(d * g.fog.a, 2.0)), 0.0, 1.0);
+    let f = fog_amount(d);
     rgb = mix(rgb, g.fog.rgb, f);
     return vec4<f32>(to_srgb(grade(rgb)), 1.0);
 }
