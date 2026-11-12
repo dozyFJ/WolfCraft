@@ -3,15 +3,64 @@
 use rodio::buffer::SamplesBuffer;
 use rodio::{OutputStream, OutputStreamHandle, Source};
 
+/// What a block sounds like (dig, step, place), like the material sets of the classic game.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mat {
+    Stone,
+    Wood,
+    Dirt,
+    Grass,
+    Sand,
+    Gravel,
+    Glass,
+    Wool,
+    Leaves,
+    Snow,
+    Metal,
+}
+
+impl Mat {
+    pub const ALL: [Mat; 11] = [Mat::Stone, Mat::Wood, Mat::Dirt, Mat::Grass, Mat::Sand, Mat::Gravel, Mat::Glass, Mat::Wool, Mat::Leaves, Mat::Snow, Mat::Metal];
+
+    /// Sound material of a block.
+    pub fn of(b: wolfcraft_engine::block::Block) -> Mat {
+        use wolfcraft_engine::block::{Block as B, RenderKind, ToolKind};
+        let name = b.info().name.to_lowercase();
+        match b {
+            B::Sand | B::RedSand => Mat::Sand,
+            B::Gravel | B::Farmland => Mat::Gravel,
+            B::Grass | B::DryGrass | B::SwampGrass | B::SnowyGrass | B::Podzol | B::MossBlock | B::TallGrass | B::Fern => Mat::Grass,
+            B::Snow => Mat::Snow,
+            B::Glass | B::Ice | B::PackedIce | B::Glowstone => Mat::Glass,
+            _ if name.contains("листв") => Mat::Leaves,
+            _ if name.contains("шерст") => Mat::Wool,
+            _ if name.contains("стекл") || name.contains("панел") => Mat::Glass,
+            _ if name.contains("железн") || name.contains("золот") || name.contains("медн") || name.contains("бронз") || name.contains("алмазн") || name.contains("урановый блок") => Mat::Metal,
+            _ if b.info().render == RenderKind::Cross => Mat::Grass,
+            _ => match b.info().tool {
+                ToolKind::Axe => Mat::Wood,
+                ToolKind::Shovel => Mat::Dirt,
+                ToolKind::Pickaxe => Mat::Stone,
+                _ => Mat::Dirt,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sfx {
-    Break,
-    Place,
-    Step,
+    /// A block breaks.
+    Break(Mat),
+    /// A block is put down.
+    Place(Mat),
+    /// A footstep on this material.
+    Step(Mat),
+    /// One blow on a block while mining.
+    Dig(Mat),
     Hurt,
     Eat,
     Splash,
-    /// A single hit on a block while mining.
+    /// A blow that lands on a creature.
     Hit,
     /// An item picked up from the ground: a short bright pop.
     Pop,
@@ -60,20 +109,108 @@ fn mix(a: &[f32], b: &[f32], gb: f32) -> Vec<f32> {
     (0..a.len().max(b.len())).map(|i| a.get(i).copied().unwrap_or(0.0) + b.get(i).copied().unwrap_or(0.0) * gb).collect()
 }
 
-fn synth(s: Sfx) -> Vec<f32> {
-    match s {
-        Sfx::Break => mix(&burst(0.20, 0.35, 6.0, 11), &sweep(0.12, 170.0, 90.0, 5.0), 0.5),
-        Sfx::Place => mix(&burst(0.09, 0.25, 7.0, 23), &sweep(0.10, 150.0, 80.0, 6.0), 0.9),
-        Sfx::Step => burst(0.08, 0.18, 9.0, 37).into_iter().map(|v| v * 0.7).collect(),
-        Sfx::Hurt => mix(&sweep(0.28, 260.0, 110.0, 3.5), &burst(0.2, 0.5, 6.0, 51), 0.35),
-        Sfx::Eat => {
-            let mut v = burst(0.05, 0.5, 8.0, 61);
-            v.extend(burst(0.05, 0.45, 8.0, 67));
-            v.extend(burst(0.06, 0.4, 8.0, 71));
+/// Granular texture: `count` tiny clicks of noise scattered over `len_s`, each through a
+/// low-pass of `tone`, fading out with `decay` (gravel crunch, rustle, snow).
+fn grains(len_s: f32, count: usize, grain_s: f32, tone: f32, decay: f32, seed: u32) -> Vec<f32> {
+    let n = (len_s * RATE as f32) as usize;
+    let mut out = vec![0.0f32; n];
+    let mut rng = Noise(seed | 1);
+    for g in 0..count {
+        let start = ((rng.next() * 0.5 + 0.5) * (n as f32) * 0.85) as usize;
+        let amp = 0.5 + 0.5 * (rng.next() * 0.5 + 0.5);
+        let b = burst(grain_s * (0.6 + 0.8 * (rng.next() * 0.5 + 0.5)), tone, 6.0, seed.wrapping_add(g as u32 * 977));
+        let fade = (-(start as f32 / n as f32) * decay).exp();
+        for (i, v) in b.iter().enumerate() {
+            if let Some(o) = out.get_mut(start + i) {
+                *o += v * amp * fade;
+            }
+        }
+    }
+    out
+}
+
+/// Several decaying sine partials (a struck body: wood knock, metal clang, glass ping).
+fn ring(len_s: f32, partials: &[(f32, f32)], decay: f32) -> Vec<f32> {
+    let n = (len_s * RATE as f32) as usize;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            let env = (-t / len_s * decay).exp() * (1.0 - (-(i as f32) / 30.0).exp());
+            partials.iter().map(|(f, a)| (t * f * std::f32::consts::TAU).sin() * a).sum::<f32>() * env
+        })
+        .collect()
+}
+
+fn gain(v: Vec<f32>, g: f32) -> Vec<f32> {
+    v.into_iter().map(|x| x * g).collect()
+}
+
+/// A material's sound for an action. Length and weight: break > place > dig > step.
+fn material(kind: u8, m: Mat) -> Vec<f32> {
+    // kind: 0 break, 1 place, 2 step, 3 dig.
+    let len = [0.30, 0.16, 0.12, 0.10][kind as usize];
+    let loud = [1.0, 0.85, 0.45, 0.7][kind as usize];
+    let seed = 1000 + kind as u32 * 131 + m as u32 * 17;
+    let v = match m {
+        // Sharp stony crack: bright short noise and a dry click.
+        Mat::Stone => mix(&burst(len * 0.8, 0.55, 9.0, seed), &ring(len * 0.5, &[(420.0, 0.35), (980.0, 0.15)], 10.0), 0.6),
+        // Hollow wooden knock: low resonances with a soft woody noise.
+        Mat::Wood => mix(&ring(len, &[(190.0, 0.6), (380.0, 0.25), (610.0, 0.12)], 7.0), &burst(len * 0.6, 0.22, 8.0, seed), 0.6),
+        // Dull earthy thud with a little crumble.
+        Mat::Dirt => mix(&burst(len, 0.12, 7.0, seed), &grains(len, 6, 0.012, 0.25, 4.0, seed + 1), 0.5),
+        // Grassy rustle: many light, bright grains.
+        Mat::Grass => mix(&grains(len * 1.2, 18, 0.010, 0.55, 3.5, seed), &burst(len * 0.7, 0.10, 8.0, seed + 2), 0.6),
+        // Sand: a soft hiss.
+        Mat::Sand => gain(grains(len * 1.3, 28, 0.010, 0.75, 2.5, seed), 0.6),
+        // Gravel: a coarse crunch of pebbles.
+        Mat::Gravel => mix(&grains(len * 1.2, 14, 0.018, 0.35, 3.0, seed), &burst(len * 0.5, 0.18, 9.0, seed + 3), 0.5),
+        // Glass: a bright clink; breaking adds a shower of tinkles.
+        Mat::Glass => {
+            let mut v = ring(len, &[(1850.0, 0.35), (2730.0, 0.22), (3900.0, 0.12)], 9.0);
+            if kind == 0 {
+                for (i, f) in [2200.0f32, 3100.0, 2650.0, 3600.0, 2900.0].iter().enumerate() {
+                    let off = (i as f32 * 0.035 * RATE as f32) as usize;
+                    let p = ring(0.12, &[(*f, 0.25)], 10.0);
+                    if v.len() < off + p.len() {
+                        v.resize(off + p.len(), 0.0);
+                    }
+                    for (k, x) in p.iter().enumerate() {
+                        v[off + k] += x;
+                    }
+                }
+                v = mix(&v, &burst(0.18, 0.8, 8.0, seed), 0.35);
+            }
             v
         }
-        Sfx::Splash => burst(0.35, 0.3, 4.0, 83),
-        Sfx::Hit => mix(&burst(0.06, 0.45, 9.0, 97), &sweep(0.05, 210.0, 140.0, 8.0), 0.4),
+        // Wool: a soft, muffled pat.
+        Mat::Wool => gain(burst(len * 0.8, 0.06, 9.0, seed), 0.9),
+        // Leaves: a crisp rustle.
+        Mat::Leaves => gain(grains(len * 1.2, 22, 0.008, 0.65, 3.0, seed), 0.8),
+        // Snow: a cold, squeaky crunch.
+        Mat::Snow => mix(&grains(len * 1.2, 12, 0.014, 0.30, 3.0, seed), &ring(len * 0.6, &[(760.0, 0.06)], 8.0), 1.0),
+        // Metal: a ringing clang.
+        Mat::Metal => mix(&ring(len * 1.5, &[(520.0, 0.35), (1310.0, 0.22), (2120.0, 0.14)], 5.0), &burst(len * 0.3, 0.6, 10.0, seed), 0.4),
+    };
+    gain(v, loud)
+}
+
+fn synth(s: Sfx) -> Vec<f32> {
+    match s {
+        Sfx::Break(m) => material(0, m),
+        Sfx::Place(m) => material(1, m),
+        Sfx::Step(m) => material(2, m),
+        Sfx::Dig(m) => material(3, m),
+        // "Oof": a short voiced drop with a breath of noise.
+        Sfx::Hurt => mix(&ring(0.22, &[(240.0, 0.5), (480.0, 0.2), (720.0, 0.1)], 4.0).iter().enumerate().map(|(i, v)| v * (1.0 - i as f32 / (0.22 * RATE as f32) * 0.4)).collect::<Vec<_>>(), &burst(0.15, 0.4, 6.0, 51), 0.25),
+        Sfx::Eat => {
+            let mut v = grains(0.07, 6, 0.010, 0.5, 2.0, 61);
+            v.extend(grains(0.07, 6, 0.010, 0.45, 2.0, 67));
+            v.extend(grains(0.08, 7, 0.010, 0.4, 2.0, 71));
+            v
+        }
+        Sfx::Splash => mix(&burst(0.40, 0.35, 4.0, 83), &grains(0.35, 20, 0.010, 0.7, 3.0, 89), 0.5),
+        // A blow on a creature: a punchy thump.
+        Sfx::Hit => mix(&ring(0.10, &[(140.0, 0.6), (95.0, 0.3)], 6.0), &burst(0.07, 0.4, 9.0, 97), 0.5),
         Sfx::Pop => sweep(0.07, 620.0, 1100.0, 6.0).into_iter().map(|v| v * 0.5).collect(),
     }
 }
@@ -95,7 +232,11 @@ impl Audio {
                 (None, None)
             }
         };
-        let bufs = [Sfx::Break, Sfx::Place, Sfx::Step, Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit, Sfx::Pop].into_iter().map(|s| (s, synth(s))).collect();
+        let mut all = vec![Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit, Sfx::Pop];
+        for m in Mat::ALL {
+            all.extend([Sfx::Break(m), Sfx::Place(m), Sfx::Step(m), Sfx::Dig(m)]);
+        }
+        let bufs = all.into_iter().map(|s| (s, synth(s))).collect();
         Self { _stream: stream, handle, bufs, volume: 0.6, seed: 12345 }
     }
 
@@ -110,5 +251,27 @@ impl Audio {
         let pitch = 0.9 + (self.seed >> 16) as f32 / 65536.0 * 0.25;
         let src = SamplesBuffer::new(1, RATE, data.clone()).amplify(self.volume * gain).speed(pitch);
         let _ = h.play_raw(src);
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_material_sound_is_audible_and_does_not_clip() {
+        for m in Mat::ALL {
+            for s in [Sfx::Break(m), Sfx::Place(m), Sfx::Step(m), Sfx::Dig(m)] {
+                let v = synth(s);
+                let peak = v.iter().fold(0.0f32, |a, x| a.max(x.abs()));
+                assert!(v.iter().all(|x| x.is_finite()), "{s:?}");
+                assert!(peak > 0.02 && peak < 1.6, "{s:?} peak {peak}");
+                assert!(v.len() < RATE as usize, "{s:?} short");
+            }
+        }
+        assert_eq!(Mat::of(wolfcraft_engine::block::Block::Stone), Mat::Stone);
+        assert_eq!(Mat::of(wolfcraft_engine::block::Block::OakPlanks), Mat::Wood);
+        assert_eq!(Mat::of(wolfcraft_engine::block::Block::Sand), Mat::Sand);
+        assert_eq!(Mat::of(wolfcraft_engine::block::Block::Grass), Mat::Grass);
+        assert_eq!(Mat::of(wolfcraft_engine::block::Block::OakLeaves), Mat::Leaves);
     }
 }

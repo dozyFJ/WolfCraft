@@ -27,6 +27,7 @@ pub const HELP: &[&str] = &[
     "/heal  /feed  /kill  /fly   ·   /difficulty <мирная|лёгкая|нормальная|сложная>",
     "/pos  /biome  /seed  /save  /say <текст>",
     "/season [весна|лето|осень|зима] — узнать или сменить время года",
+    "/month [январь…декабрь|1–12] — узнать дату или перейти к месяцу",
     "/demo — построить перед собой выставку искрита: схемы, автодвери, ферма, потайной проход",
     "//help — команды WorldEdit: //pos1 //pos2 //set //replace //walls //copy //paste //sphere //cyl //undo …",
     "/ад — перейти в Ад,  /мир — вернуться (или через адский портал: 4 обсидиана + светокамень)",
@@ -242,6 +243,21 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
             Ok(m) => vec![sys(m)],
             Err(e) => vec![err(e)],
         },
+        "month" | "месяц" => {
+            use wolfcraft_engine::player::{DAY_LENGTH, MONTH_NAMES, month_start};
+            let Some(a) = args.first().map(|a| a.to_lowercase()) else {
+                return vec![sys(format!("Сейчас: {}", s.season_label()))];
+            };
+            let idx = a.parse::<usize>().ok().filter(|n| (1..=12).contains(n)).map(|n| n - 1).or_else(|| {
+                let en = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+                MONTH_NAMES.iter().position(|m| a.chars().count() >= 3 && m.to_lowercase().starts_with(&a.chars().take(3).collect::<String>())).or_else(|| en.iter().position(|e| a.starts_with(e)))
+            });
+            let Some(idx) = idx else { return vec![err("Месяцы: январь … декабрь или 1–12")] };
+            // Keep the time of day, move to the 1st of that month.
+            let t = s.player.world_time;
+            s.player.world_time = month_start(t, idx) + t.rem_euclid(DAY_LENGTH);
+            vec![sys(format!("Дата: {}", s.season_label()))]
+        }
         "season" | "сезон" => {
             use wolfcraft_engine::player::{DAY_LENGTH, SEASON_DAYS};
             let year = DAY_LENGTH * SEASON_DAYS * 4.0;

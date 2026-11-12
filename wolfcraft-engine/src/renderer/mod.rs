@@ -1294,3 +1294,30 @@ const KEEP_ALPHA_BLEND: wgpu::BlendState = wgpu::BlendState {
     color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::SrcAlpha, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
     alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
 };
+
+#[cfg(test)]
+mod hand_preview {
+    /// Writes the first-person arm with a tool, projected to the screen, for a look at it.
+    #[test]
+    #[ignore]
+    fn dump_hand() {
+        let atlases = wolfcraft_assets::atlas_manager::AtlasManager::load("builtin:toon", None, None).unwrap();
+        super::set_model_textures(&atlases);
+        let out = std::env::var("HAND_OUT").unwrap_or("/tmp/hand.txt".into());
+        let mut s = String::new();
+        for (kind, mat) in [(0u8, 3u8), (3, 3), (1, 2), (2, 1)] {
+            let mut pose = super::model::HandsPose::rest(glam::Vec3::NEG_Z, glam::Vec3::Y);
+            pose.holding = true;
+            pose.tool = Some((kind, mat));
+            let v = super::model::build_first_person_hands(&pose);
+            s += &format!("# {kind}\n");
+            for t in v.chunks(3) {
+                let p: Vec<String> = t.iter().map(|q| format!("{} {} {}", q.pos[0], q.pos[1], -q.pos[2])).collect();
+                let c = t[0].color;
+                let n = t[0].normal;
+                s += &format!("{} {} {} {} {} {} {}\n", p.join(" "), c[0], c[1], c[2], n[0], n[1], n[2]);
+            }
+        }
+        std::fs::write(out, s).unwrap();
+    }
+}

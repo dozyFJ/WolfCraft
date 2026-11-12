@@ -1271,7 +1271,11 @@ impl App {
                     if step_no != self.last_step {
                         self.last_step = step_no;
                         if s.player.body.on_ground && s.player.anim_amount > 0.3 && !s.player.sneaking {
-                            self.audio.play(crate::audio::Sfx::Step, 0.8);
+                            // The step sounds like what is underfoot.
+                            let feet = s.player.body.pos;
+                            let below = s.chunks.grid().world_to_cell(feet - wolfcraft_engine::physics::up_at(feet) * 0.3);
+                            let mat = s.chunks.get_block(below).filter(|b| b.is_solid()).map(crate::audio::Mat::of).unwrap_or(crate::audio::Mat::Grass);
+                            self.audio.play(crate::audio::Sfx::Step(mat), 0.8);
                         }
                     }
                     if s.player.survival.health < self.last_health - 0.01 {
@@ -1302,7 +1306,7 @@ impl App {
                                 let n = (12.0 * self.settings.particles) as usize;
                                 s.mobs.chips(c, &[[0.40, 0.26, 0.14], [0.30, 0.19, 0.10], [0.36, 0.62, 0.22]], n, 2.6);
                                 self.hand_place = 0.6;
-                                self.audio.play(crate::audio::Sfx::Break, 0.7);
+                                self.audio.play(crate::audio::Sfx::Dig(crate::audio::Mat::Dirt), 1.0);
                                 if let Some(net) = &mut self.net {
                                     net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u8, hell: s.hell });
                                 }
@@ -1318,7 +1322,7 @@ impl App {
                                     net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u8, hell: s.hell });
                                 }
                                 self.hand_place = 1.0;
-                                self.audio.play(crate::audio::Sfx::Place, 1.0);
+                                self.audio.play(crate::audio::Sfx::Place(crate::audio::Mat::of(block)), 1.0);
                             }
                             InteractionEvent::Broken { pos, block } => {
                                 // Final burst of chips in the colours of the block.
@@ -1383,7 +1387,7 @@ impl App {
                                 if let Some(net) = &mut self.net {
                                     net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: 0, hell: s.hell });
                                 }
-                                self.audio.play(crate::audio::Sfx::Break, 1.0);
+                                self.audio.play(crate::audio::Sfx::Break(crate::audio::Mat::of(block)), 1.0);
                             }
                             InteractionEvent::Ate { .. } => self.audio.play(crate::audio::Sfx::Eat, 1.0),
                             InteractionEvent::Dropped { .. } => {}
@@ -2049,7 +2053,7 @@ impl App {
                                 s.mobs.fx_glow(point, vel, [1.0, 0.85, 0.45], 0.035, 0.35, FxKind::Fall);
                             }
                         }
-                        self.audio.play(crate::audio::Sfx::Hit, 0.7);
+                        self.audio.play(crate::audio::Sfx::Dig(crate::audio::Mat::of(h.block)), 0.9);
                     } else if !cols.is_empty() && pk > 0.0 {
                         // Between blows a light crumble keeps falling from the face.
                         self.mine_dust += dt * 9.0 * pk;

@@ -140,7 +140,7 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     let face = (in.flags >> 17u) & 7u;
     let up = normalize(in.world);
     let sun = normalize(g.sun.xyz);
-    let day = smoothstep(-0.12, 0.28, dot(up, sun));
+    let day = smoothstep(-0.10, 0.14, dot(up, sun));
     let _axis = face_normal(face);
     // Classic voxel face shading: top brightest, sides darker, bottom darkest -> cubes read as 3D.
     var face_k = 1.0;
@@ -191,7 +191,7 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
         // everything stays readable (the moon lights from the side opposite the sun).
         let sky_k = mix(in.light.y, sqrt(in.light.y), 0.6);
         let shade_t = 1.0 - diffuse;
-        let day_rgb = (sky_amb + (0.96 - sky_amb) * diffuse) * mix(vec3<f32>(1.04, 1.0, 0.92), vec3<f32>(0.86, 0.93, 1.10), shade_t * 0.8);
+        let day_rgb = (0.80 + 0.18 * diffuse) * mix(vec3<f32>(1.04, 1.0, 0.92), vec3<f32>(0.86, 0.93, 1.10), shade_t * 0.8);
         let moon = smoothstep(0.0, 0.4, max(dot(n, -sun), 0.0)) * 0.6 + 0.4;
         let night_rgb = vec3<f32>(0.30, 0.38, 0.62) * (0.75 + 0.35 * moon);
         let gold = vec3<f32>(1.16, 0.90, 0.78);
@@ -353,7 +353,7 @@ fn fs_opaque(in: VsOut) -> @location(0) vec4<f32> {
         // Make the relief read clearly: the side of a bump facing the sun gets lighter, the
         // far side darker (on top of the normal lighting, which only partly follows the sun).
         let sun = normalize(g.sun.xyz);
-        let day = smoothstep(-0.12, 0.28, dot(normalize(in.world), sun));
+        let day = smoothstep(-0.10, 0.14, dot(normalize(in.world), sun));
         relief_light = clamp(1.0 + 1.1 * (dot(n, sun) - dot(n_geom, sun)) * day, 0.55, 1.45);
         // Cavities get a little darker (ambient occlusion from the height map).
         c = vec4<f32>(c.rgb * mix(1.0, 0.72 + 0.28 * h0, min(strength, 1.5) * 0.6), c.a);
@@ -380,7 +380,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         let v = normalize(-in.rel);
         let sun = normalize(g.sun.xyz);
         let up = normalize(in.world);
-        let day = smoothstep(-0.12, 0.28, dot(up, sun));
+        let day = smoothstep(-0.10, 0.14, dot(up, sun));
         let spec = pow(max(dot(reflect(-sun, nw), v), 0.0), 120.0) * day * in.light.y;
         let fres = pow(1.0 - max(dot(nw, v), 0.0), 3.0);
         rgb = mix(rgb, g.fog.rgb * mix(0.35, 1.0, day), fres * 0.55) + vec3<f32>(1.0, 0.95, 0.85) * spec * 1.4;
@@ -511,7 +511,7 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     }
     let up = normalize(in.world);
     let sun = normalize(g.sun.xyz);
-    let day = smoothstep(-0.12, 0.28, dot(up, sun));
+    let day = smoothstep(-0.10, 0.14, dot(up, sun));
     let nn = normalize(in.normal);
     var diffuse = max(dot(nn, sun), 0.0);
     var light = max(mix(0.11, 0.58 + 0.38 * diffuse, day), 0.16);
