@@ -195,6 +195,9 @@ pub struct GuiRenderer {
     last_jobs: Vec<egui::ClippedPrimitive>,
     /// The game has captured the mouse: keep the OS cursor hidden (egui would show it again).
     pub hide_cursor: bool,
+    /// Phones: the game's own keyboard comes up under focused text fields.
+    pub osk_enabled: bool,
+    osk: crate::osk::OskState,
 }
 
 pub struct GuiFrame {
@@ -212,7 +215,7 @@ impl GuiRenderer {
         let state = egui_winit::State::new(ctx.clone(), egui::ViewportId::ROOT, window, Some(window.scale_factor() as f32), None, None);
         let renderer = egui_wgpu::Renderer::new(device, color_format, None, 1, false);
         let icons = Arc::new(GuiIcons::new(&ctx, atlases));
-        Self { ctx, state, renderer, icons, ui_scale: 1.0, last_vertices: 0, last_meshes: 0, last_jobs: Vec::new(), hide_cursor: false }
+        Self { ctx, state, renderer, icons, ui_scale: 1.0, last_vertices: 0, last_meshes: 0, last_jobs: Vec::new(), hide_cursor: false, osk_enabled: false, osk: Default::default() }
     }
 
     /// Feeds a window event to egui; returns true if egui wants it (UI consumed the input).
@@ -256,7 +259,18 @@ impl GuiRenderer {
         // egui may run the closure several times per frame (a pass can be discarded when layout
         // changes). Every pass must draw the UI, otherwise the frame comes out empty and the
         // whole interface blinks.
-        let output = self.ctx.run(input, |c| add_ui(c));
+        let (osk_on, osk) = (self.osk_enabled, &mut self.osk);
+        let output = self.ctx.run(input, |c| {
+            add_ui(c);
+            if osk_on {
+                crate::osk::draw(c, osk);
+            }
+        });
+        // Keys typed on the on-screen keyboard reach the focused field next frame.
+        if !self.osk.pending.is_empty() {
+            let ev = std::mem::take(&mut self.osk.pending);
+            self.state.egui_input_mut().events.extend(ev);
+        }
         let mut platform = output.platform_output;
         if self.hide_cursor {
             platform.cursor_icon = egui::CursorIcon::None;

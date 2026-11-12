@@ -222,7 +222,9 @@ fn open_chat(ctx: &Context, st: &mut ChatState, screen: Rect) -> Option<String> 
         }
         // Input bar.
         let bar_h = 58.0;
-        let bar = Rect::from_min_max(Pos2::new(all.left(), all.bottom() - bar_h), all.max);
+        // Above the on-screen keyboard when it is up.
+        let kb = crate::osk::height(ctx);
+        let bar = Rect::from_min_max(Pos2::new(all.left(), all.bottom() - kb - bar_h), Pos2::new(all.right(), all.bottom() - kb));
         painter.rect_filled(bar, 0.0, BAR_BG);
         let pad = 8.0;
         let bh = bar_h - pad * 2.0;

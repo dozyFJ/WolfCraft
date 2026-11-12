@@ -221,8 +221,6 @@ pub struct App {
     studio_world: Option<String>,
     /// The world's Luau script while it runs (GUI, events, timers).
     lua: Option<crate::lua::LuaHost>,
-    /// egui wanted the keyboard last frame (to open the phone's text box on a new focus).
-    kb_prev: bool,
     /// The world list was read for the launcher since it was last shown.
     main_worlds_fresh: bool,
     /// Listens for servers on the local network while the world list is open.
@@ -357,7 +355,6 @@ impl App {
             studio: None,
             studio_world: None,
             lua: None,
-            kb_prev: false,
             main_worlds_fresh: false,
             discovery: None,
             container: None,
@@ -1737,16 +1734,8 @@ impl App {
             })
         };
         self.profile.ui_ms = t_ui.ms();
-        // Phones: a text field that just got focus opens the system text box (Gboard cannot
-        // type into the game window); its text comes back into the field.
-        let wants_kb = gfx.gui.wants_keyboard();
-        if cfg!(target_os = "android") && wants_kb && !self.kb_prev && !crate::text_input::is_open() {
-            crate::text_input::open("Введите текст");
-        }
-        self.kb_prev = wants_kb;
-        if let Some(text) = crate::text_input::poll() {
-            gfx.gui.inject_text(text, true);
-        }
+        // Phones: the game's own keyboard (Gboard cannot type into the game window).
+        gfx.gui.osk_enabled = cfg!(target_os = "android");
 
         // ---- apply UI results ----
         if map_result.close {
