@@ -1395,7 +1395,7 @@ impl GameSession {
             set(self, 8, 0, z, B::IskritWire)?;
         }
         set(self, 8, 0, 6, B::IskritLamp)?;
-        signs.push(((8, 0, -1), "Рубильник: нажмите, чтобы включить и выключить"));
+        signs.push(((8, 0, -1), "Рычаг: нажмите, чтобы включить и выключить"));
         // Stand 4: an iskrit block powers what touches it.
         set(self, 12, 0, 1, B::IskritBlock)?;
         set(self, 12, 0, 2, B::IskritLamp)?;
@@ -1435,7 +1435,7 @@ impl GameSession {
             set(self, x, 0, 2, Part::Piston { sticky, extended: false, dir: fdir }.block())?;
             set(self, x, 0, 3, B::OakPlanks)?;
         }
-        signs.push(((28, 0, -1), "Поршни: включите рубильник. Обычный толкает блок, липкий ещё и тянет назад"));
+        signs.push(((28, 0, -1), "Поршни: переключите рычаг. Обычный толкает блок, липкий ещё и тянет назад"));
         // Stand 8: a repeater renews the signal: torch, 13 dust, repeater, 6 dust, lamp.
         set(self, 35, 0, 1, B::IskritTorch)?;
         for z in 2..=14 {
@@ -1488,7 +1488,7 @@ impl GameSession {
         for x in 12..=14 {
             set(self, x, 0, 32, B::IskritWire)?;
         }
-        signs.push(((13, 0, 30), "Двойная автодверь: рубильник открывает обе створки, они расходятся в стороны"));
+        signs.push(((13, 0, 30), "Двойная автодверь: рычаг открывает обе створки, они расходятся в стороны"));
         // Stand 12: sugar cane farm. Water, a row of cane on dirt, pistons above that cut it.
         for z in 33..=37 {
             set(self, 19, -1, z, B::Water)?;
@@ -1518,7 +1518,7 @@ impl GameSession {
         }
         set(self, 28, 0, 36, B::SwitchOn)?;
         set(self, 28, 1, 36, B::IskritWire)?;
-        signs.push(((27, 0, 30), "Потайной проход: обойдите стену и выключите рубильник — липкие поршни утянут камни"));
+        signs.push(((27, 0, 30), "Потайной проход: обойдите стену и опустите рычаг — липкие поршни утянут камни"));
         // Stand 14: light on a sensor. A plate lights a row of lamps.
         set(self, 33, 0, 33, B::PressurePlate)?;
         for z in 34..=37 {

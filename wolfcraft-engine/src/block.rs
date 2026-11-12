@@ -203,8 +203,8 @@ blocks! {
     79 ElectricLamp => emissive(info("Электролампа", Opaque, 0.5, Hand, all(t::ELECTRIC_LAMP))),
     80 ElectricFurnace => needs_pick(info("Электропечь", Opaque, 8.0, Pickaxe, [t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::FURNACE_FRONT, t::MACHINE_CASING])),
     81 ElectricLampOn => emissive(info("Электролампа (вкл.)", Opaque, 0.5, Hand, all(t::ELECTRIC_LAMP_ON))),
-    82 SwitchOff => needs_pick(info("Рубильник", Opaque, 2.0, Pickaxe, all(t::SWITCH_OFF))),
-    83 SwitchOn => emissive(needs_pick(info("Рубильник (вкл.)", Opaque, 2.0, Pickaxe, all(t::SWITCH_ON)))),
+    82 SwitchOff => not_solid(info("Рычаг", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    83 SwitchOn => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
     84 CommandBlock => needs_pick(info("Командный блок", Opaque, 8.0, Pickaxe, all(t::COMMAND_BLOCK))),
     85 Terminal => needs_pick(info("Терминал", Opaque, 8.0, Pickaxe, all(t::TERMINAL))),
     86 Netherrack => needs_pick(info("Адский камень", Opaque, 2.0, Pickaxe, all(t::NETHERRACK))),
@@ -500,6 +500,22 @@ impl Block {
             [[0.0, 0.0, 0.0, 1.0, 1.0, 0.25], [0.375, 0.375, 0.25, 0.625, 0.625, 1.0]],
         ];
         const BUTTON_ON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.06];
+        // Lever like the classic one: a cobblestone base and a wooden handle that leans one
+        // way when off and the other when on (a little staircase of boxes makes the slope).
+        const LEVER_OFF: [[f32; 6]; 5] = [
+            [0.30, 0.22, 0.0, 0.70, 0.78, 0.19],
+            [0.44, 0.48, 0.19, 0.56, 0.60, 0.33],
+            [0.44, 0.55, 0.33, 0.56, 0.67, 0.46],
+            [0.44, 0.62, 0.46, 0.56, 0.74, 0.59],
+            [0.43, 0.68, 0.59, 0.57, 0.82, 0.73],
+        ];
+        const LEVER_ON: [[f32; 6]; 5] = [
+            [0.30, 0.22, 0.0, 0.70, 0.78, 0.19],
+            [0.44, 0.40, 0.19, 0.56, 0.52, 0.33],
+            [0.44, 0.33, 0.33, 0.56, 0.45, 0.46],
+            [0.44, 0.26, 0.46, 0.56, 0.38, 0.59],
+            [0.43, 0.18, 0.59, 0.57, 0.32, 0.73],
+        ];
         const PLATE: [f32; 6] = [0.06, 0.06, 0.0, 0.94, 0.94, 0.0625];
         const PLATE_ON: [f32; 6] = [0.06, 0.06, 0.0, 0.94, 0.94, 0.03];
         // Stairs: the high half is toward +i, -i, +j or -j.
@@ -534,6 +550,8 @@ impl Block {
             },
             Button => std::slice::from_ref(&BUTTON),
             ButtonOn => std::slice::from_ref(&BUTTON_ON),
+            SwitchOff => &LEVER_OFF,
+            SwitchOn => &LEVER_ON,
             PressurePlate => std::slice::from_ref(&PLATE),
             PressurePlateOn => std::slice::from_ref(&PLATE_ON),
             _ => &[],

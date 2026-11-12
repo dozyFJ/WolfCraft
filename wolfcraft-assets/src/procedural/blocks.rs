@@ -190,12 +190,20 @@ fn gate_tile(dir: u8, on: bool, comparator: bool) -> Image {
                 q.put(x, y, dust, 1.0);
             }
         }
-        let torch = if on { Rgb(1.0, 0.55, 0.85) } else { Rgb(0.35, 0.18, 0.12) };
+        // Torches seen from above: a wooden ring round the head; the head glows when on.
+        let (head, ring) = if on { (Rgb(1.0, 0.70, 0.92), Rgb(0.95, 0.25, 0.65)) } else { (Rgb(0.42, 0.12, 0.28), Rgb(0.40, 0.27, 0.15)) };
         let spots: &[(i32, i32)] = if comparator { &[(-4, -3), (-4, 3), (3, 0)] } else { &[(-3, 0), (2, 0)] };
         for &(a, b) in spots {
-            for (da, db) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                let (x, y) = at(a + da, b + db);
-                q.put(x, y, torch, 1.0);
+            for da in -1..=2 {
+                for db in -1..=2 {
+                    let inner = (0..=1).contains(&da) && (0..=1).contains(&db);
+                    let corner = (da == -1 || da == 2) && (db == -1 || db == 2);
+                    if corner {
+                        continue;
+                    }
+                    let (x, y) = at(a + da, b + db);
+                    q.put(x, y, if inner { head } else { ring }, 1.0);
+                }
             }
         }
         bevel(q, 0, 0, 15, 15, Rgb(0.78, 0.78, 0.80), Rgb(0.36, 0.36, 0.38));
@@ -1205,31 +1213,41 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         q.finish()
     });
     l.add(ELECTRIC_LAMP_ON, "electric_lamp_on", lamp(true, 151));
-    let switch = |on: bool, seed: u32| {
-        let mut q = Painter { img: steel_plate(seed, false) };
-        inset(&mut q, 6, 2, 9, 13);
-        for y in 3..13u32 {
-            q.put(7, y, Rgb(0.06, 0.06, 0.08), 1.0);
-            q.put(8, y, Rgb(0.10, 0.10, 0.12), 1.0);
-        }
-        // Lever knob: up = on, down = off.
-        let ky = if on { 3u32 } else { 9u32 };
-        for y in ky..ky + 4 {
-            for x in 5..11u32 {
-                let c = Rgb(0.88, 0.88, 0.90).lerp(Rgb(0.45, 0.46, 0.50), (y - ky) as f32 / 3.0);
-                q.put(x, y, if x == 5 || x == 10 { c.scale(0.8) } else { c }, 1.0);
+    // Lever (the "switch" slots): side and top tiles of a 3D lever. The base boxes sit in the
+    // bottom three rows of the side tile (cobblestone), the handle above (wood with a red tip);
+    // on top the cobblestone base has a dark slot where the handle stands.
+    let cobble_px = |x: u32, y: u32| {
+        let cx = (x + (hash(y / 4, 0, 7) % 3)) % 5;
+        let cy = (y + (hash(x / 5, 1, 7) % 2)) % 4;
+        let b = if cx == 0 || cy == 0 { 0.36 } else { 0.56 + (rnd(x / 5, y / 4, 9) - 0.5) * 0.12 };
+        Rgb(b, b, b + 0.01)
+    };
+    l.add(SWITCH_OFF, "switch_off", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let c = if y >= 13 {
+                    cobble_px(x, y).scale(if y == 13 { 1.15 } else { 1.0 })
+                } else if (3..7).contains(&y) {
+                    // Red knob at the end of the handle.
+                    Rgb(0.86, 0.16, 0.14).lerp(Rgb(1.0, 0.45, 0.40), if y == 3 { 0.6 } else { 0.0 }).scale(if y == 6 { 0.75 } else { 1.0 })
+                } else {
+                    let g = (rnd(x, y / 3, 152) - 0.5) * 0.08;
+                    Rgb(0.55, 0.38, 0.20).add(g).scale(if x % 4 == 0 { 0.85 } else { 1.0 })
+                };
+                q.put(x, y, c, 1.0);
             }
         }
-        // Indicator light.
-        let led = if on { Rgb(0.30, 1.0, 0.40) } else { Rgb(0.95, 0.20, 0.18) };
-        q.put(12, 3, led, 1.0);
-        q.put(13, 3, led.scale(0.8), 1.0);
-        q.put(12, 4, led.scale(0.8), 1.0);
-        q.put(13, 4, led.scale(0.6), 1.0);
-        q.finish()
-    };
-    l.add(SWITCH_OFF, "switch_off", switch(false, 152));
-    l.add(SWITCH_ON, "switch_on", switch(true, 153));
+    }));
+    l.add(SWITCH_ON, "switch_on", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let slot = (6..10).contains(&x) && (3..13).contains(&y);
+                let c = if slot { Rgb(0.30, 0.20, 0.11).add((rnd(x, y, 153) - 0.5) * 0.05) } else { cobble_px(x, y) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+        bevel(q, 0, 0, 15, 15, Rgb(0.66, 0.66, 0.68), Rgb(0.30, 0.30, 0.32));
+    }));
     l.add(COMMAND_BLOCK, "command_block", p(|q| {
         q.noisy(Rgb(0.78, 0.45, 0.18), 0.05, 154);
         for y in 0..S {
@@ -1401,25 +1419,33 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    // Iskrit dust, like the classic dust: a speckled cross with a round blob in the middle.
+    // Off it is a dark wine colour, on a bright glowing pink with light sparkles.
     let wire = |on: bool| {
         p(|q| {
             q.clear();
-            let core = if on { Rgb(1.0, 0.38, 0.80) } else { Rgb(0.42, 0.10, 0.30) };
-            let edge = if on { Rgb(0.80, 0.16, 0.55) } else { Rgb(0.28, 0.06, 0.20) };
-            // Dust trail: a cross of specks, denser in the middle.
+            let (core, mid, edge) = if on {
+                (Rgb(1.0, 0.62, 0.90), Rgb(1.0, 0.30, 0.74), Rgb(0.78, 0.12, 0.52))
+            } else {
+                (Rgb(0.52, 0.10, 0.34), Rgb(0.40, 0.07, 0.26), Rgb(0.26, 0.04, 0.17))
+            };
             for y in 0..S {
                 for x in 0..S {
-                    let on_line = (6..10).contains(&x) || (6..10).contains(&y);
-                    let centre = (5..11).contains(&x) && (5..11).contains(&y);
-                    if (on_line || centre) && rnd(x, y, 195) < 0.85 {
-                        let c = if (7..9).contains(&x) || (7..9).contains(&y) { core } else { edge };
-                        q.put(x, y, c, 1.0);
+                    let (fx, fy) = (x as f32 - 7.5, y as f32 - 7.5);
+                    let blob = (fx * fx + fy * fy).sqrt() < 3.4;
+                    let arm = fx.abs() < 1.6 || fy.abs() < 1.6;
+                    let fringe = (fx.abs() < 2.6 || fy.abs() < 2.6) && rnd(x, y, 195) < 0.45;
+                    if !(blob || arm || fringe) {
+                        continue;
                     }
+                    let d = fx.abs().min(fy.abs()).min((fx * fx + fy * fy).sqrt() - 1.0).max(0.0);
+                    let c = if d < 0.8 { core.lerp(mid, rnd(x, y, 196) * 0.6) } else if d < 1.6 || blob { mid } else { edge };
+                    q.put(x, y, c, 1.0);
                 }
             }
             if on {
-                for (x, y) in [(7u32, 7u32), (8, 8), (3, 7), (12, 8), (7, 2), (8, 13)] {
-                    q.put(x, y, Rgb(1.0, 0.85, 0.96), 1.0);
+                for (x, y) in [(7u32, 7u32), (8, 8), (2, 7), (13, 8), (7, 1), (8, 14), (10, 6)] {
+                    q.put(x, y, Rgb(1.0, 0.92, 0.98), 1.0);
                 }
             }
         })
@@ -1427,36 +1453,64 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(ISKRIT_WIRE, "iskrit_wire", wire(false));
     l.add(ISKRIT_WIRE_ON, "iskrit_wire_on", wire(true));
     l.add(ISKRIT_BLOCK, "iskrit_block", p(|q| {
+        // Solid iskrit: a glowing pink block with a lattice of crystal facets and sparks.
         for y in 0..S {
             for x in 0..S {
                 let t = value_noise(x, y, 4, 196);
-                let c = Rgb(0.62, 0.10, 0.42).lerp(Rgb(1.0, 0.45, 0.82), t);
-                q.put(x, y, if rnd(x, y, 197) < 0.06 { Rgb(1.0, 0.85, 0.95) } else { c }, 1.0);
+                let mut c = Rgb(0.70, 0.12, 0.46).lerp(Rgb(1.0, 0.42, 0.80), t);
+                if (x + y) % 6 == 0 || (x + 16 - y) % 6 == 0 {
+                    c = c.scale(0.78);
+                }
+                if rnd(x, y, 197) < 0.05 {
+                    c = Rgb(1.0, 0.90, 0.97);
+                }
+                q.put(x, y, c, 1.0);
             }
         }
-        bevel(q, 0, 0, 15, 15, Rgb(1.0, 0.60, 0.88), Rgb(0.40, 0.05, 0.26));
+        bevel(q, 0, 0, 15, 15, Rgb(1.0, 0.66, 0.90), Rgb(0.42, 0.05, 0.27));
     }));
     l.add(ISKRIT_TORCH, "iskrit_torch", p(|q| {
+        // Wooden stick with a glowing iskrit head and a soft halo round it.
         q.clear();
-        for y in 6..16u32 {
-            q.put(7, y, Rgb(0.45, 0.30, 0.16), 1.0);
-            q.put(8, y, Rgb(0.36, 0.24, 0.12), 1.0);
+        for y in 7..16u32 {
+            q.put(7, y, Rgb(0.50, 0.34, 0.18), 1.0);
+            q.put(8, y, Rgb(0.38, 0.25, 0.13), 1.0);
         }
-        for (x, y, c) in [(7u32, 4u32, isk), (8, 4, isk), (7, 5, Rgb(0.70, 0.12, 0.45)), (8, 5, Rgb(0.70, 0.12, 0.45)), (7, 3, Rgb(1.0, 0.70, 0.92)), (8, 3, Rgb(1.0, 0.55, 0.85)), (6, 4, Rgb(0.60, 0.10, 0.40)), (9, 4, Rgb(0.60, 0.10, 0.40))] {
-            q.put(x, y, c, 1.0);
+        for y in 2..7u32 {
+            for x in 5..11u32 {
+                let (fx, fy) = (x as f32 - 7.5, y as f32 - 4.5);
+                let d = (fx * fx + fy * fy).sqrt();
+                if d > 2.8 {
+                    continue;
+                }
+                let c = if d < 1.0 { Rgb(1.0, 0.90, 0.97) } else if d < 1.9 { Rgb(1.0, 0.40, 0.80) } else { Rgb(0.80, 0.14, 0.52) };
+                q.put(x, y, c, 1.0);
+            }
         }
     }));
+    // Iskrit lamp: a dark frame holding four crystal panes; lit, the crystals glow pink-white.
     let isk_lamp = |on: bool| {
         p(|q| {
             for y in 0..S {
                 for x in 0..S {
-                    let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt() / 8.0;
-                    let c = if on { Rgb(1.0, 0.92, 0.98).lerp(Rgb(1.0, 0.45, 0.80), d.min(1.0)) } else { Rgb(0.42, 0.20, 0.34).lerp(Rgb(0.26, 0.12, 0.22), d.min(1.0)) };
-                    let cell = (x % 5 == 0) || (y % 5 == 0);
-                    q.put(x, y, if cell { if on { Rgb(0.80, 0.30, 0.62) } else { Rgb(0.18, 0.10, 0.16) } } else { c }, 1.0);
+                    let frame = x == 0 || y == 0 || x == 15 || y == 15 || x == 7 || x == 8 || y == 7 || y == 8;
+                    let c = if frame {
+                        if on { Rgb(0.62, 0.40, 0.30) } else { Rgb(0.34, 0.22, 0.16) }
+                    } else {
+                        // Each pane: brighter towards its centre, crystal grain.
+                        let (cx, cy) = (if x < 8 { 3.5 } else { 11.5 }, if y < 8 { 3.5 } else { 11.5 });
+                        let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt() / 4.0;
+                        let grain = (rnd(x, y, 198) - 0.5) * 0.12;
+                        if on {
+                            Rgb(1.0, 0.95, 0.88).lerp(Rgb(1.0, 0.42, 0.78), d.min(1.0)).add(grain)
+                        } else {
+                            Rgb(0.46, 0.22, 0.34).lerp(Rgb(0.24, 0.10, 0.18), d.min(1.0)).add(grain)
+                        }
+                    };
+                    q.put(x, y, c, 1.0);
                 }
             }
-            bevel(q, 0, 0, 15, 15, Rgb(0.55, 0.40, 0.30), Rgb(0.30, 0.20, 0.14));
+            bevel(q, 0, 0, 15, 15, if on { Rgb(0.80, 0.56, 0.42) } else { Rgb(0.48, 0.32, 0.24) }, Rgb(0.20, 0.12, 0.09));
         })
     };
     l.add(ISKRIT_LAMP, "iskrit_lamp", isk_lamp(false));
