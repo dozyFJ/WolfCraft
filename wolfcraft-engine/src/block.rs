@@ -199,7 +199,8 @@ blocks! {
     // Was the machine casing: now the forge (repair and upgrade tools).
     75 MachineCasing => needs_pick(info("Кузница", Opaque, 5.0, Pickaxe, column(t::MACHINE_CASING, t::GENERATOR_FRONT, t::COBBLESTONE))),
     76 Generator => needs_pick(info("Генератор", Opaque, 8.0, Pickaxe, [t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::MACHINE_CASING, t::GENERATOR_FRONT, t::MACHINE_CASING])),
-    77 Cable => needs_pick(info("Медный кабель", Opaque, 2.0, Pickaxe, all(t::CABLE))),
+    // A heap of bones left where a creature or a player died (was the copper cable).
+    77 Bones => needs_pick(info("Кости", Shape, 1.5, Pickaxe, all(t::BONES))),
     // Was the battery: now a wooden barrel (storage like a chest).
     78 Battery => info("Бочка", Opaque, 2.5, Axe, column(t::BATTERY_SIDE, t::BATTERY_TOP, t::BATTERY_TOP)),
     79 ElectricLamp => emissive(info("Электролампа", Opaque, 0.5, Hand, all(t::ELECTRIC_LAMP))),
@@ -494,6 +495,13 @@ impl Block {
         const DOOR_OPEN: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 0.19, 1.0];
         const WIRE: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.0625];
         const BUTTON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.14];
+        // A heap of bones: two long bones crossed, a skull and a small piece.
+        const BONES: [[f32; 6]; 4] = [
+            [0.08, 0.40, 0.0, 0.84, 0.52, 0.11],
+            [0.32, 0.08, 0.0, 0.44, 0.82, 0.10],
+            [0.54, 0.54, 0.0, 0.88, 0.88, 0.30],
+            [0.14, 0.62, 0.0, 0.30, 0.80, 0.08],
+        ];
         // Repeater / comparator: a thin slab like the dust, a little thicker.
         const GATE: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.125];
         // Piston heads per direction: a plate on the far side and a rod back to the base.
@@ -555,6 +563,7 @@ impl Block {
                 _ => &[],
             },
             Button => std::slice::from_ref(&BUTTON),
+            Bones => &BONES,
             ButtonOn => std::slice::from_ref(&BUTTON_ON),
             SwitchOff => &LEVER_OFF,
             SwitchOn => &LEVER_ON,

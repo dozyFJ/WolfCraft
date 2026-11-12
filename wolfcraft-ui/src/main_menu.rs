@@ -50,7 +50,7 @@ pub struct WorldEntry {
 /// Former top bar: the header is gone, its title and version are shown in the centre of the
 /// bottom bar instead. Always returns false (settings open from the main menu).
 pub fn top_bar(ctx: &egui::Context, _icons: &GuiIcons, title: &str, version: &str, _show_settings: bool) -> bool {
-    let text = if title.is_empty() { format!("Кубикс · v{version}") } else { format!("{title} · v{version}") };
+    let text = if title.is_empty() { format!("WolfCraft · v{version}") } else { format!("{title} · v{version}") };
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("menu-bar-title"), text));
     false
 }
@@ -120,8 +120,8 @@ pub fn splash_screen(ctx: &egui::Context, icons: &GuiIcons, progress: f32, versi
             painter.circle_filled(c - Vec2::new(0.0, 56.0), *r, Color32::from_rgba_unmultiplied(38, 198, 218, (6.0 + glow * 6.0 + i as f32 * 4.0) as u8));
         }
         icons.paint(painter, Rect::from_center_size(c - Vec2::new(0.0, 56.0), Vec2::splat(110.0)), icon::LOGO, Color32::WHITE.gamma_multiply(fade));
-        painter.text(c + Vec2::new(0.0, 36.0), Align2::CENTER_CENTER, "КУБИКС", bold_font(46.0), Color32::from_rgb(240, 240, 232).gamma_multiply(fade));
-        painter.text(c + Vec2::new(0.0, 76.0), Align2::CENTER_CENTER, "П Л А Н Е Т Ы   И З   Б Л О К О В", FontId::proportional(14.0), Color32::from_rgb(38, 198, 218).gamma_multiply(fade));
+        painter.text(c + Vec2::new(0.0, 36.0), Align2::CENTER_CENTER, "WOLFCRAFT", bold_font(46.0), Color32::from_rgb(240, 240, 232).gamma_multiply(fade));
+        painter.text(c + Vec2::new(0.0, 76.0), Align2::CENTER_CENTER, "S T U D I O S", FontId::proportional(14.0), Color32::from_rgb(38, 198, 218).gamma_multiply(fade));
         // Loading bar.
         let w = (rect.width() * 0.45).clamp(240.0, 520.0);
         let bar = Rect::from_center_size(Pos2::new(rect.center().x, c.y + 130.0), Vec2::new(w, 14.0));
@@ -1133,101 +1133,71 @@ pub struct LoadingView<'a> {
     pub grid: &'a [u8],
 }
 
-/// World loading, styled after the classic "loading terrain" screen: a dark tiled earth
-/// backdrop, the percentage on top, a big chunk map in the middle and the current step below.
+/// World loading, in the style of the studio splash: the same dark backdrop, an outlined
+/// ring in the middle that fills with small outlined circles as the world gets ready, the
+/// percentage in its centre, and the splash's loading bar with the current step below.
 pub fn loading_screen(ctx: &egui::Context, icons: &GuiIcons, v: &LoadingView) {
-    let p = palette(ctx);
-    egui::CentralPanel::default().frame(Frame::none().fill(Color32::from_rgb(14, 12, 10))).show(ctx, |ui| {
+    let _ = icons;
+    let accent = Color32::from_rgb(38, 198, 218);
+    egui::CentralPanel::default().frame(Frame::none().fill(Color32::from_rgb(10, 12, 18))).show(ctx, |ui| {
         let rect = ui.max_rect();
         let painter = ui.painter().clone();
-        // Backdrop: dirt blocks, darkened.
-        let tile = 64.0;
-        let (nx, ny) = ((rect.width() / tile).ceil() as i32, (rect.height() / tile).ceil() as i32);
-        for y in 0..ny {
-            for x in 0..nx {
-                let r = Rect::from_min_size(rect.min + Vec2::new(x as f32 * tile, y as f32 * tile), Vec2::splat(tile));
-                icons.paint_block_tile(&painter, r, wolfcraft_assets::tiles::DIRT);
-            }
-        }
-        painter.rect_filled(rect, Rounding::ZERO, Color32::from_black_alpha(200));
         ui.ctx().request_repaint();
-
-        // A square vessel that fills with liquid: the level is the progress, the colour
-        // follows the current stage, the surface waves and bubbles rise.
-        let size = (rect.height() * 0.5).clamp(140.0, 300.0);
-        let r = Rect::from_center_size(Pos2::new(rect.center().x, rect.center().y + 6.0), Vec2::splat(size));
         let t = ui.input(|i| i.time) as f32;
-        let pct = format!("{:.0}%", v.fraction * 100.0);
-        painter.text(Pos2::new(r.center().x + 2.0, r.top() - 20.0 + 2.0), Align2::CENTER_BOTTOM, &pct, bold_font(30.0), Color32::from_black_alpha(180));
-        painter.text(Pos2::new(r.center().x, r.top() - 20.0), Align2::CENTER_BOTTOM, &pct, bold_font(30.0), Color32::from_rgb(236, 232, 210));
-        painter.rect_filled(r.expand(6.0).translate(Vec2::splat(6.0)), Rounding::ZERO, Color32::from_black_alpha(160));
-        painter.rect_filled(r.expand(6.0), Rounding::ZERO, Color32::from_rgb(20, 22, 28));
-        let inner = r;
-        painter.rect_filled(inner, Rounding::ZERO, Color32::from_rgb(12, 14, 19));
-        // Stage colours: seed, continents, climate, spawn, structures, chunks.
-        const COLS: [[u8; 3]; 7] = [[90, 110, 220], [40, 140, 230], [38, 198, 218], [60, 200, 140], [150, 210, 70], [240, 190, 60], [92, 200, 110]];
-        let stage_f = if v.stages.is_empty() { 0.0 } else { v.current as f32 + 0.5 };
-        let i0 = (stage_f.floor() as usize).min(COLS.len() - 1);
-        let i1 = (i0 + 1).min(COLS.len() - 1);
-        let k = (stage_f - stage_f.floor()).clamp(0.0, 1.0) * 0.6;
-        let mixc = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * k) as u8;
-        let col = Color32::from_rgb(mixc(COLS[i0][0], COLS[i1][0]), mixc(COLS[i0][1], COLS[i1][1]), mixc(COLS[i0][2], COLS[i1][2]));
-        let level = inner.bottom() - inner.height() * v.fraction.clamp(0.0, 1.0);
-        if v.fraction > 0.001 {
-            let painter_c = painter.with_clip_rect(inner);
-            let wave = |x: f32, ph: f32, amp: f32| level + (x * 0.045 + t * 2.4 + ph).sin() * amp + (x * 0.11 - t * 1.7 + ph).sin() * amp * 0.4;
-            let n = 48;
-            // Back wave (darker), then the front liquid body.
-            for (ph, amp, shade) in [(1.7f32, 5.0f32, 0.65f32), (0.0, 4.0, 1.0)] {
-                let mut pts = Vec::with_capacity(n + 3);
-                for i in 0..=n {
-                    let x = inner.left() + inner.width() * i as f32 / n as f32;
-                    pts.push(Pos2::new(x, wave(x - inner.left(), ph, amp)));
+        let frac = v.fraction.clamp(0.0, 1.0);
+        let radius = (rect.height() * 0.24).clamp(70.0, 150.0);
+        let c = Pos2::new(rect.center().x, rect.center().y - radius * 0.25);
+        // Soft glow behind the ring, like the splash logo.
+        let glow = 0.5 + 0.5 * (t * 2.2).sin();
+        for (i, r) in [1.35f32, 1.18, 1.05].iter().enumerate() {
+            painter.circle_filled(c, radius * r, Color32::from_rgba_unmultiplied(38, 198, 218, (4.0 + glow * 5.0 + i as f32 * 3.0) as u8));
+        }
+        painter.circle_filled(c, radius, Color32::from_rgb(14, 17, 25));
+        painter.circle_stroke(c, radius, Stroke::new(3.0_f32, accent));
+        // Two rings of small outlined circles; they fill one by one with the progress.
+        let rings: [(f32, usize, f32); 2] = [(0.80, 28, 0.075), (0.58, 18, 0.07)];
+        let total: usize = rings.iter().map(|r| r.1).sum();
+        let lit = frac * total as f32;
+        let mut n = 0usize;
+        for (rr, count, dot) in rings {
+            for i in 0..count {
+                // Clockwise from the top.
+                let a = -std::f32::consts::FRAC_PI_2 + i as f32 / count as f32 * std::f32::consts::TAU;
+                let p = c + Vec2::new(a.cos(), a.sin()) * radius * rr;
+                let d = radius * dot;
+                let fill = (lit - n as f32).clamp(0.0, 1.0);
+                if fill >= 1.0 {
+                    painter.circle_filled(p, d, accent);
+                } else if fill > 0.0 {
+                    // The circle being filled: grows and pulses.
+                    let pulse = 0.75 + 0.25 * (t * 8.0).sin();
+                    painter.circle_filled(p, d * fill.max(0.3) * pulse, accent.gamma_multiply(0.85));
                 }
-                let c = Color32::from_rgb((col.r() as f32 * shade) as u8, (col.g() as f32 * shade) as u8, (col.b() as f32 * shade) as u8);
-                // One triangle mesh under the wave (no anti-aliased seams between strips).
-                let mut mesh = egui::Mesh::default();
-                for (i, pt) in pts.iter().enumerate() {
-                    mesh.colored_vertex(*pt, c);
-                    mesh.colored_vertex(Pos2::new(pt.x, inner.bottom()), c);
-                    if i > 0 {
-                        let b = (i as u32 - 1) * 2;
-                        mesh.add_triangle(b, b + 1, b + 2);
-                        mesh.add_triangle(b + 1, b + 3, b + 2);
-                    }
-                }
-                painter_c.add(egui::Shape::mesh(mesh));
-                if shade == 1.0 {
-                    painter_c.add(egui::Shape::line(pts, Stroke::new(2.0_f32, Color32::from_white_alpha(110))));
-                }
-            }
-            // Bubbles rising through the liquid.
-            for b in 0..10u32 {
-                let speed = 18.0 + (b * 7 % 11) as f32 * 3.0;
-                let bx = inner.left() + inner.width() * (((b * 37) % 97) as f32 / 97.0);
-                let y = inner.bottom() - ((t * speed + b as f32 * 31.0) % (inner.bottom() - level + 10.0).max(1.0));
-                if y > level + 4.0 {
-                    painter_c.circle_stroke(Pos2::new(bx + (t * 3.0 + b as f32).sin() * 3.0, y), 2.0 + (b % 3) as f32, Stroke::new(1.5_f32, Color32::from_white_alpha(90)));
-                }
+                painter.circle_stroke(p, d, Stroke::new(1.5_f32, if fill >= 1.0 { Color32::from_rgb(170, 240, 248) } else { Color32::from_rgb(70, 78, 96) }));
+                n += 1;
             }
         }
-        // Frame of the vessel.
-        painter.rect_stroke(r.expand(6.0), Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
-        painter.rect_stroke(inner, Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
-        let _ = v.grid;
-        // Below: world name and the current step with a spinner.
-        let y = r.bottom() + 22.0;
+        // Percentage in the centre.
+        let pct = format!("{:.0}%", frac * 100.0);
+        painter.text(c, Align2::CENTER_CENTER, &pct, bold_font(radius * 0.32), Color32::from_rgb(240, 240, 232));
+        // World name, then the splash loading bar with a running shine.
+        let y = c.y + radius + 26.0;
+        painter.text(Pos2::new(rect.center().x, y), Align2::CENTER_TOP, v.title, bold_font(18.0), Color32::from_rgb(240, 240, 232));
+        let w = (rect.width() * 0.45).clamp(240.0, 520.0);
+        let bar = Rect::from_center_size(Pos2::new(rect.center().x, y + 44.0), Vec2::new(w, 12.0));
+        painter.rect_filled(bar, Rounding::ZERO, Color32::from_rgb(28, 32, 42));
+        painter.rect_stroke(bar.expand(3.0), Rounding::ZERO, Stroke::new(2.0_f32, Color32::from_rgb(70, 78, 96)));
+        let fill = Rect::from_min_size(bar.min, Vec2::new(bar.width() * frac, bar.height()));
+        painter.rect_filled(fill, Rounding::ZERO, accent);
+        if fill.width() > 1.0 {
+            let sx = fill.left() + (t * 180.0) % fill.width();
+            painter.rect_filled(Rect::from_min_max(Pos2::new(sx, bar.top()), Pos2::new((sx + 24.0).min(fill.right()), bar.bottom())), Rounding::ZERO, Color32::from_white_alpha(50));
+        }
+        // Current step under the bar.
         let step = v.stages.get(v.current).map(|s| s.as_str()).unwrap_or("Готово");
-        painter.text(Pos2::new(r.center().x, y), Align2::CENTER_TOP, v.title, bold_font(16.0), Color32::from_rgb(236, 232, 210));
         let line = if v.detail.is_empty() { step.to_string() } else { format!("{step} · {}", v.detail) };
-        let g = painter.layout_no_wrap(line, FontId::proportional(13.5), Color32::from_gray(170));
-        let w = g.size().x + 22.0;
-        let x0 = r.center().x - w / 2.0;
-        let c = Pos2::new(x0 + 7.0, y + 30.0);
-        painter.circle_stroke(c, 6.0, Stroke::new(2.0_f32, Color32::from_gray(80)));
-        painter.circle_filled(c + Vec2::new((t * 6.0).cos(), (t * 6.0).sin()) * 6.0, 2.5, p.accent);
-        painter.galley(Pos2::new(x0 + 22.0, y + 30.0 - g.size().y / 2.0), g, Color32::from_gray(170));
-        let _ = icon::LOGO;
+        painter.text(Pos2::new(rect.center().x, bar.bottom() + 18.0), Align2::CENTER_TOP, line, FontId::proportional(14.0), Color32::from_gray(170));
+        let _ = v.grid;
     });
 }
 

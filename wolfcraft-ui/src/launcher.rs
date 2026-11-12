@@ -83,7 +83,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::hover());
                 icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new("Кубикс").font(bold_font(20.0)).color(p.text));
+                ui.label(egui::RichText::new("WolfCraft").font(bold_font(20.0)).color(p.text));
                 // Upright phone: room only for the name and the two buttons.
                 let wide = ui.ctx().screen_rect().width() > 480.0;
                 if wide {
@@ -292,7 +292,7 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
         // Text on the left, over a soft shade.
         let text_w = if r.width() > 480.0 { r.width() * 0.62 } else { r.width() - 40.0 };
         let x = r.left() + 20.0;
-        clip.text(Pos2::new(x, r.top() + 22.0), Align2::LEFT_TOP, "КУБИКС", FontId::proportional(11.0), Color32::from_white_alpha(170));
+        clip.text(Pos2::new(x, r.top() + 22.0), Align2::LEFT_TOP, "WOLFCRAFT", FontId::proportional(11.0), Color32::from_white_alpha(170));
         let title = clip.layout(b.title.to_string(), bold_font(22.0), Color32::WHITE, text_w);
         let th = title.size().y;
         clip.galley(Pos2::new(x, r.top() + 40.0), title, Color32::WHITE);
@@ -383,7 +383,7 @@ fn game(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
         let d = h * 1.5;
         clip.image(tex.id(), Rect::from_center_size(Pos2::new(rect.right() - d * 0.3, rect.bottom() + d * 0.05), Vec2::splat(d)), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
     }
-    clip.text(Pos2::new(rect.left() + 20.0, rect.top() + 22.0), Align2::LEFT_TOP, "Кубикс", bold_font(30.0), Color32::WHITE);
+    clip.text(Pos2::new(rect.left() + 20.0, rect.top() + 22.0), Align2::LEFT_TOP, "WolfCraft", bold_font(30.0), Color32::WHITE);
     clip.text(Pos2::new(rect.left() + 20.0, rect.top() + 62.0), Align2::LEFT_TOP, "Исследуйте целую планету из блоков", FontId::proportional(14.0), Color32::from_white_alpha(210));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(Pos2::new(rect.left() + 20.0, rect.bottom() - 58.0), Vec2::new(220.0, 44.0))));
     if pill_button(&mut child, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 200.0, true).clicked() {
@@ -435,7 +435,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
             icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
             ui.add_space(8.0);
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new("Кубикс Студия").font(bold_font(22.0)).color(p.text));
+                ui.label(egui::RichText::new("WolfCraft Студия").font(bold_font(22.0)).color(p.text));
                 ui.label(egui::RichText::new("Создавайте свои игровые серверы: карта, скрипты на Luau, свои правила").size(13.5).color(p.text_muted));
                 ui.label(egui::RichText::new(format!("Версия игры {version}")).size(13.0).color(p.accent));
             });

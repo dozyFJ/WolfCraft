@@ -14,11 +14,11 @@ use std::path::{Path, PathBuf};
 
 /// Built-in packs: (id, name, upscale factor).
 pub const BUILTIN: [(&str, &str, u32); 5] = [
-    (TOON_PACK, "Мультяшный Low Poly", 4),
-    ("builtin:16", "Классика 16×", 1),
-    ("builtin:32", "Гладкий HD 32×", 2),
-    ("builtin:64", "Гладкий Full HD 64×", 4),
-    ("builtin:128", "Гладкий 4K 128×", 8),
+    (TOON_PACK, "Мультяшный (основной)", 4),
+    ("builtin:16", "Старый пак 16×", 1),
+    ("builtin:32", "Старый пак HD 32×", 2),
+    ("builtin:64", "Старый пак Full HD 64×", 4),
+    ("builtin:128", "Старый пак 4K 128×", 8),
 ];
 
 pub const DEFAULT_PACK: &str = TOON_PACK;
@@ -40,7 +40,7 @@ pub struct PackInfo {
 pub fn list(dirs: &[PathBuf]) -> Vec<PackInfo> {
     let mut v: Vec<PackInfo> = BUILTIN
         .iter()
-        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == TOON_PACK { "Основной стиль игры: сочные плоские цвета, гранёные блоки в стиле low poly, чёткие детали".into() } else if *f == 1 { "Стандартные текстуры игры".into() } else { format!("Встроенный, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
+        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == TOON_PACK { "Основной стиль игры: мультяшные блоки, персонажи и мобы, сочные плоские цвета".into() } else if *f == 1 { "Дополнение: старые пиксельные текстуры".into() } else { format!("Дополнение: старые текстуры, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
         .collect();
     let mut users = Vec::new();
     for dir in dirs {
@@ -217,11 +217,17 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
             }
             // Roblox low-poly look: nearly solid colour; only strong shapes (ore gems, windows,
             // mortar, seams) survive, and those a little softened toward the block's colour.
-            let feature = (lum(&o) - lum(&b)).abs() > 0.10 || (lum(&o) - mean_l).abs() > 0.24;
+            // Natural ground and foliage (faint bevel) is calmed much harder: big soft patches
+            // of colour, no pixel noise; built blocks keep their mortar and seams.
+            let natural = bevel < 0.3;
+            // Rock and logs (bevel between): speckles go, ore gems and bark lines stay.
+            let rock = !natural && bevel < 0.95;
+            let (thr, dev, calm) = if natural { (0.24, 0.34, 0.25) } else if rock { (0.20, 0.24, 0.32) } else { (0.12, 0.26, 0.45) };
+            let feature = (lum(&o) - lum(&b)).abs() > thr || (lum(&o) - mean_l).abs() > dev;
             let base = if feature {
                 [mean[0] + (o[0] - mean[0]) * 0.85, mean[1] + (o[1] - mean[1]) * 0.85, mean[2] + (o[2] - mean[2]) * 0.85, 1.0]
             } else {
-                [mean[0] + (b[0] - mean[0]) * 0.6, mean[1] + (b[1] - mean[1]) * 0.6, mean[2] + (b[2] - mean[2]) * 0.6, 1.0]
+                [mean[0] + (b[0] - mean[0]) * calm, mean[1] + (b[1] - mean[1]) * calm, mean[2] + (b[2] - mean[2]) * calm, 1.0]
             };
             // Posterize around the mean: a few clean colour steps.
             let step = if feature { 0.10 } else { 0.07 };
@@ -292,6 +298,9 @@ pub fn toon_bevel(name: &str) -> f32 {
         0.12
     } else if name.contains("log") || name.contains("cactus") || name.contains("pumpkin") || name.contains("melon") {
         0.5
+    } else if (name.contains("stone") && !name.contains("smooth") && !name.contains("polished") && !name.contains("ore")) || name.contains("cobble") || ["granite", "marble", "slate", "limestone", "basalt", "andesite", "obsidian"].iter().any(|r| name.contains(r)) {
+        // Rock: the full chunky bevel, a little softer, no ink outline.
+        0.9
     } else {
         1.0
     }

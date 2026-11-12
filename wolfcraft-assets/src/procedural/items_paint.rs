@@ -47,7 +47,9 @@ pub mod items {
     pub const SLIME: u16 = 69;
     /// Spawn souls, one per creature (order of `SOUL_COLORS`).
     pub const SOUL_BASE: u16 = 70;
-    pub const COUNT: u16 = 78;
+    pub const BONE: u16 = 78;
+    pub const BONE_MEAL: u16 = 79;
+    pub const COUNT: u16 = 80;
     /// Glow of each spawn soul: ghoul, crawler, boar, sheep, cow, chicken, wolf, slime.
     pub const SOUL_COLORS: [[f32; 3]; 8] = [
         [0.55, 0.80, 0.45], [0.62, 0.35, 0.85], [0.80, 0.55, 0.45], [0.95, 0.95, 0.92],
@@ -442,6 +444,38 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }));
     }
+    l.add(BONE, "bone", p(|q| {
+        // A bone lying diagonally: a shaft with two round knobs at each end.
+        let ivory = Rgb(0.95, 0.92, 0.82);
+        for i in 3..13u32 {
+            q.put(i, 15 - i, ivory.add(-0.04), 1.0);
+            q.put(i, 14 - i, ivory, 1.0);
+        }
+        for (cx, cy) in [(2.5f32, 12.0f32), (4.0, 13.5), (12.0, 2.5), (13.5, 4.0)] {
+            for y in 0..16u32 {
+                for x in 0..16u32 {
+                    let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+                    if dx * dx + dy * dy < 2.3 {
+                        q.put(x, y, ivory.add(-(dx + dy) * 0.03), 1.0);
+                    }
+                }
+            }
+        }
+    }));
+    l.add(BONE_MEAL, "bone_meal", p(|q| {
+        // A small heap of white powder.
+        for y in 6..15u32 {
+            for x in 2..14u32 {
+                let dx = (x as f32 - 7.5) / 6.0;
+                let top = 15.0 - 8.0 * (1.0 - dx * dx).max(0.0);
+                if (y as f32) < top {
+                    continue;
+                }
+                let c = Rgb(0.97, 0.96, 0.92).add((rnd(x, y, 181) - 0.5) * 0.10 - (y as f32 - 10.0) * 0.012);
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

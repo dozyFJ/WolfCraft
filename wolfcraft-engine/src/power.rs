@@ -1,7 +1,7 @@
 //! Redstone-style power network.
 //!
 //! * `Generator` is a power source.
-//! * `Cable` and `Battery` conduct power between face-adjacent blocks.
+//! * `Battery` conducts power between face-adjacent blocks.
 //! * `ElectricLamp` / `ElectricLampOn` are consumers: lit while touching a powered conductor
 //!   or generator.
 //!
@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const MAX_NODES: usize = 4096;
 
 fn conducts(b: Block) -> bool {
-    matches!(b, Block::Cable | Block::Generator | Block::SwitchOn)
+    matches!(b, Block::Generator | Block::SwitchOn)
 }
 
 fn is_lamp(b: Block) -> bool {
