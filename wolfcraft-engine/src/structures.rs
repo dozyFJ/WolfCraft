@@ -110,6 +110,18 @@ impl Builder {
     fn set(&mut self, u: i32, w: i32, v: i32, block: Block) {
         self.bx(u, u, w, w, v, v, block, Mode::Set);
     }
+    /// One of the four stair blocks of `family` (its base id) whose high half points along
+    /// the local direction `(du, dv)`.
+    fn stair(&self, family: Block, du: i32, dv: i32) -> Block {
+        let d = self.f.u * du + self.f.v * dv;
+        let idx = match (d.x, d.y) {
+            (1, _) => 0,
+            (-1, _) => 1,
+            (_, 1) => 2,
+            _ => 3,
+        };
+        Block::from_u8(family as u8 + idx)
+    }
     fn rnd(&self, u: i32, w: i32, v: i32) -> f64 {
         to01(hash3(self.seed, u, w + 1000, v))
     }
@@ -133,6 +145,10 @@ impl Builder {
 #[derive(Clone, Copy)]
 struct Materials {
     wall: Block,
+    /// Lowest wall row (a stone plinth).
+    base: Block,
+    /// Stair family of the pitched roof (`None`: flat roof).
+    roof_stairs: Option<Block>,
     corner: Block,
     floor: Block,
     roof: Block,
@@ -143,13 +159,15 @@ struct Materials {
 
 fn materials(b: Biome, ruined: bool) -> Materials {
     let mut m = match b {
-        Biome::Desert | Biome::Badlands => Materials { wall: Block::Sandstone, corner: Block::StoneBricks, floor: Block::Sandstone, roof: Block::Sandstone, path: Block::Sandstone, top: Block::Sand, filler: Block::Sand },
-        Biome::Taiga | Biome::Tundra | Biome::SnowyPlains => Materials { wall: Block::SprucePlanks, corner: Block::SpruceLog, floor: Block::OakPlanks, roof: Block::StoneBricks, path: Block::Gravel, top: Block::Grass, filler: Block::Dirt },
-        Biome::Savanna => Materials { wall: Block::AcaciaPlanks, corner: Block::AcaciaLog, floor: Block::Cobblestone, roof: Block::OakPlanks, path: Block::Gravel, top: Block::DryGrass, filler: Block::Dirt },
-        _ => Materials { wall: Block::OakPlanks, corner: Block::OakLog, floor: Block::Cobblestone, roof: Block::OakPlanks, path: Block::Gravel, top: Block::Grass, filler: Block::Dirt },
+        Biome::Desert | Biome::Badlands => Materials { wall: Block::Sandstone, base: Block::Sandstone, roof_stairs: None, corner: Block::StoneBricks, floor: Block::Sandstone, roof: Block::SandstoneSlab, path: Block::Sandstone, top: Block::Sand, filler: Block::Sand },
+        Biome::Taiga | Biome::Tundra | Biome::SnowyPlains => Materials { wall: Block::SprucePlanks, base: Block::Cobblestone, roof_stairs: Some(Block::StoneBrickStairs), corner: Block::SpruceLog, floor: Block::OakPlanks, roof: Block::StoneBricks, path: Block::Gravel, top: Block::Grass, filler: Block::Dirt },
+        Biome::Savanna => Materials { wall: Block::AcaciaPlanks, base: Block::Cobblestone, roof_stairs: Some(Block::PlankStairs), corner: Block::AcaciaLog, floor: Block::Cobblestone, roof: Block::OakPlanks, path: Block::Gravel, top: Block::DryGrass, filler: Block::Dirt },
+        _ => Materials { wall: Block::BirchPlanks, base: Block::Cobblestone, roof_stairs: Some(Block::PlankStairs), corner: Block::OakLog, floor: Block::OakPlanks, roof: Block::OakPlanks, path: Block::Gravel, top: Block::Grass, filler: Block::Dirt },
     };
     if ruined {
         m.wall = Block::MossyCobblestone;
+        m.base = Block::MossyCobblestone;
+        m.roof_stairs = None;
         m.floor = Block::MossyCobblestone;
         m.roof = Block::CrackedStoneBricks;
     }
@@ -159,16 +177,22 @@ fn materials(b: Biome, ruined: bool) -> Materials {
 fn house(b: &mut Builder, m: &Materials, u0: i32, v0: i32, su: i32, sv: i32, door_side: i32, ruined: bool, kind: i32) {
     let (u1, v1) = (u0 + su - 1, v0 + sv - 1);
     b.bx(u0, u1, 0, 0, v0, v1, m.floor, Mode::Set);
-    for h in 1..=3 {
-        b.walls(u0, u1, v0, v1, h, h, m.wall);
-    }
-    // Corner posts.
+    // Stone plinth, then the walls.
+    b.walls(u0, u1, v0, v1, 1, 1, m.base);
+    b.walls(u0, u1, v0, v1, 2, 3, m.wall);
+    // Corner posts up to the eaves.
     for (cu, cv) in [(u0, v0), (u0, v1), (u1, v0), (u1, v1)] {
         b.bx(cu, cu, 1, 3, cv, cv, m.corner, Mode::Set);
     }
-    // Windows.
+    // Windows: one per short wall, two per long wall.
     let (mu, mv) = ((u0 + u1) / 2, (v0 + v1) / 2);
-    for (wu, wv) in [(mu, v0), (mu, v1), (u0, mv), (u1, mv)] {
+    let mut windows = vec![(u0, mv), (u1, mv)];
+    if su >= 6 {
+        windows.extend([(u0 + 1 + (su - 2) / 4, v0), (u1 - 1 - (su - 2) / 4, v0), (u0 + 1 + (su - 2) / 4, v1), (u1 - 1 - (su - 2) / 4, v1)]);
+    } else {
+        windows.extend([(mu, v0), (mu, v1)]);
+    }
+    for (wu, wv) in windows {
         b.set(wu, 2, wv, Block::Glass);
     }
     // Door (side 0:-v, 1:+v, 2:-u, 3:+u).
@@ -178,6 +202,7 @@ fn house(b: &mut Builder, m: &Materials, u0: i32, v0: i32, su: i32, sv: i32, doo
         2 => (u0, mv),
         _ => (u1, mv),
     };
+    // The door never takes a window's place: clear the cell above the door too.
     b.bx(du, du, 1, 2, dv, dv, Block::Air, Mode::Set);
     if !ruined {
         // A real door, flat along the wall it sits in (spruce in the north).
@@ -191,12 +216,69 @@ fn house(b: &mut Builder, m: &Materials, u0: i32, v0: i32, su: i32, sv: i32, doo
         // Two-block door: lower half with the handle, upper half with the window.
         b.bx(du, du, 1, 1, dv, dv, door, Mode::Set);
         b.bx(du, du, 2, 2, dv, dv, door.door_top().unwrap_or(door), Mode::Set);
+        // A log lintel over the door.
+        b.set(du, 3, dv, m.corner);
     }
     if !ruined {
-        b.bx(u0 - 1, u1 + 1, 4, 4, v0 - 1, v1 + 1, b_roof(m), Mode::Set);
-        b.bx(u0, u1, 5, 5, v0, v1, b_roof(m), Mode::Set);
-        if su > 4 && sv > 4 {
-            b.bx(u0 + 1, u1 - 1, 6, 6, v0 + 1, v1 - 1, b_roof(m), Mode::Set);
+        // Ceiling, then the roof.
+        b.bx(u0, u1, 4, 4, v0, v1, m.roof, Mode::Set);
+        match m.roof_stairs {
+            Some(st) => {
+                // Pitched (gable) roof with eaves: the ridge runs along the longer side.
+                let along_u = su >= sv;
+                let (a0, a1, c0, c1) = if along_u { (u0 - 1, u1 + 1, v0 - 1, v1 + 1) } else { (v0 - 1, v1 + 1, u0 - 1, u1 + 1) };
+                let put = |b: &mut Builder, a0: i32, a1: i32, c: i32, w: i32, blk: Block| {
+                    if along_u {
+                        b.bx(a0, a1, w, w, c, c, blk, Mode::Set);
+                    } else {
+                        b.bx(c, c, w, w, a0, a1, blk, Mode::Set);
+                    }
+                };
+                let (mut lo, mut hi, mut w) = (c0, c1, 4);
+                while lo < hi {
+                    let (up_lo, up_hi) = if along_u { (b.stair(st, 0, 1), b.stair(st, 0, -1)) } else { (b.stair(st, 1, 0), b.stair(st, -1, 0)) };
+                    put(b, a0, a1, lo, w, up_lo);
+                    put(b, a0, a1, hi, w, up_hi);
+                    // Gable ends: wall fill between the two slopes.
+                    if lo + 1 <= hi - 1 && w > 4 {
+                        for gable in [a0 + 1, a1 - 1] {
+                            if along_u {
+                                b.bx(gable, gable, w, w, lo + 1, hi - 1, m.wall, Mode::Set);
+                            } else {
+                                b.bx(lo + 1, hi - 1, w, w, gable, gable, m.wall, Mode::Set);
+                            }
+                        }
+                    }
+                    lo += 1;
+                    hi -= 1;
+                    w += 1;
+                }
+                if lo == hi {
+                    // Odd width: a ridge of full blocks.
+                    put(b, a0, a1, lo, w, m.roof);
+                }
+            }
+            None => {
+                // Flat roof with a low parapet.
+                b.bx(u0 - 1, u1 + 1, 4, 4, v0 - 1, v1 + 1, m.wall, Mode::Set);
+                b.walls(u0 - 1, u1 + 1, v0 - 1, v1 + 1, 5, 5, m.roof);
+            }
+        }
+        // A doorstep path.
+        let (pu, pv) = match door_side {
+            0 => (du, dv - 1),
+            1 => (du, dv + 1),
+            2 => (du - 1, dv),
+            _ => (du + 1, dv),
+        };
+        b.set(pu, 0, pv, m.path);
+        // Flowers along the front.
+        for (i, flower) in [Block::FlowerRed, Block::FlowerYellow, Block::FlowerBlue].into_iter().enumerate() {
+            let off = i as i32 + 1;
+            let (fu, fv) = if door_side < 2 { (du - off - 1, pv) } else { (pu, dv - off - 1) };
+            if b.rnd(fu, 7, fv) < 0.7 {
+                b.set(fu, 1, fv, flower);
+            }
         }
     }
     // Interior.
@@ -228,10 +310,6 @@ fn house(b: &mut Builder, m: &Materials, u0: i32, v0: i32, su: i32, sv: i32, doo
     }
 }
 
-fn b_roof(m: &Materials) -> Block {
-    m.roof
-}
-
 fn build_village(b: &mut Builder, biome: Biome, ruined: bool) {
     let m = materials(biome, ruined);
     b.terrace(-26, 26, -26, 26, 10, m.top, m.filler);
@@ -256,8 +334,8 @@ fn build_village(b: &mut Builder, biome: Biome, ruined: bool) {
     // Street lamps.
     if !ruined {
         for (u, v) in [(-10, -3), (10, 3), (3, -10), (-3, 10)] {
-            b.bx(u, u, 1, 3, v, v, Block::OakLog, Mode::Set);
-            b.set(u, 4, v, Block::Lamp);
+            b.bx(u, u, 1, 2, v, v, Block::Fence, Mode::Set);
+            b.set(u, 3, v, Block::Lantern);
         }
     }
 }
