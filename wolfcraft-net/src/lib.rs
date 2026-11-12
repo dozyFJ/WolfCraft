@@ -111,7 +111,7 @@ impl Client {
         let (id, world_toml, motd) = match read_msg::<S2C>(&mut reader).map_err(|e| format!("сервер не ответил: {e}"))? {
             Some(S2C::Welcome { id, world_toml, motd }) => (id, world_toml, motd),
             Some(S2C::Kick(reason)) => return Err(format!("сервер отказал: {reason}")),
-            _ => return Err("сервер ответил не по протоколу WolfCraft".into()),
+            _ => return Err("сервер ответил не по протоколу Кубикс: Планеты".into()),
         };
         let _ = stream.set_read_timeout(None);
         let (tx, rx) = channel();

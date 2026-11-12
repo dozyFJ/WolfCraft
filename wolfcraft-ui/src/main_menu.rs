@@ -50,7 +50,7 @@ pub struct WorldEntry {
 /// Former top bar: the header is gone, its title and version are shown in the centre of the
 /// bottom bar instead. Always returns false (settings open from the main menu).
 pub fn top_bar(ctx: &egui::Context, _icons: &GuiIcons, title: &str, version: &str, _show_settings: bool) -> bool {
-    let text = if title.is_empty() { format!("WolfCraft · v{version}") } else { format!("{title} · v{version}") };
+    let text = if title.is_empty() { format!("Кубикс: Планеты · v{version}") } else { format!("{title} · v{version}") };
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("menu-bar-title"), text));
     false
 }
@@ -120,8 +120,8 @@ pub fn splash_screen(ctx: &egui::Context, icons: &GuiIcons, progress: f32, versi
             painter.circle_filled(c - Vec2::new(0.0, 56.0), *r, Color32::from_rgba_unmultiplied(38, 198, 218, (6.0 + glow * 6.0 + i as f32 * 4.0) as u8));
         }
         icons.paint(painter, Rect::from_center_size(c - Vec2::new(0.0, 56.0), Vec2::splat(110.0)), icon::LOGO, Color32::WHITE.gamma_multiply(fade));
-        painter.text(c + Vec2::new(0.0, 36.0), Align2::CENTER_CENTER, "WOLFCRAFT", bold_font(46.0), Color32::from_rgb(240, 240, 232).gamma_multiply(fade));
-        painter.text(c + Vec2::new(0.0, 76.0), Align2::CENTER_CENTER, "S T U D I O S", FontId::proportional(16.0), Color32::from_rgb(38, 198, 218).gamma_multiply(fade));
+        painter.text(c + Vec2::new(0.0, 36.0), Align2::CENTER_CENTER, "КУБИКС", bold_font(46.0), Color32::from_rgb(240, 240, 232).gamma_multiply(fade));
+        painter.text(c + Vec2::new(0.0, 76.0), Align2::CENTER_CENTER, "П Л А Н Е Т Ы", bold_font(18.0), Color32::from_rgb(38, 198, 218).gamma_multiply(fade));
         // Loading bar.
         let w = (rect.width() * 0.45).clamp(240.0, 520.0);
         let bar = Rect::from_center_size(Pos2::new(rect.center().x, c.y + 130.0), Vec2::new(w, 14.0));

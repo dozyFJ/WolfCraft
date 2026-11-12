@@ -35,7 +35,7 @@ oboe = { version = "0.6", features = ["shared-stdcxx"] }
 
 [package.metadata.android]
 package = "com.wolfcraft.mobile"
-apk_name = "WolfCraft"
+apk_name = "CubixPlanets"
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android", "i686-linux-android"]
 
 [package.metadata.android.sdk]
@@ -55,7 +55,7 @@ name = "android.permission.ACCESS_WIFI_STATE"
 name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
 
 [package.metadata.android.application]
-label = "WolfCraft"
+label = "Кубикс: Планеты"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
 
 [package.metadata.android.application.activity]
