@@ -394,9 +394,12 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     let content_h = 30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + 10.0 + cell;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
-        ui.allocate_ui(Vec2::new(tab + 6.0, content_h), |ui| {
-            egui::ScrollArea::vertical().id_salt("creative-tabs").max_height(content_h).auto_shrink([true, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
+        // Top-down column (a plain child of the horizontal row would lay the tabs out in a row).
+        ui.allocate_ui_with_layout(Vec2::new(tab + 6.0, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_width(tab + 6.0);
+            egui::ScrollArea::vertical().id_salt("creative-tabs").max_height(content_h).auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+                ui.set_width(tab + 6.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
                 for (i, name) in CREATIVE_TABS.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
                     let sel = state.tab == i;
