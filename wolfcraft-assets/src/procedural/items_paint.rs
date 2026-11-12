@@ -205,18 +205,31 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(COAL, "coal", blob(Rgb(0.15, 0.15, 0.17), 5.0, 51));
     l.add(RAW_IRON, "raw_iron", blob(Rgb(0.78, 0.60, 0.46), 5.0, 52));
     l.add(IRON_INGOT, "iron_ingot", ingot(Rgb(0.78, 0.78, 0.80)));
-    l.add(DIAMOND, "diamond", blob(Rgb(0.45, 0.95, 0.90), 4.5, 53));
-    l.add(
-        BREAD,
-        "bread",
-        p(|q| {
-            for y in 6..12u32 {
-                for x in 2..14u32 {
-                    q.put(x, y, Rgb(0.80, 0.58, 0.30).add((rnd(x, y, 54) - 0.5) * 0.08), 1.0);
-                }
+    l.add(DIAMOND, "diamond", p(|q| {
+        // Cut crystal with distinct facets instead of a round blue blob.
+        for y in 3..14u32 {
+            let half = if y < 6 { y - 1 } else { (14 - y) / 2 + 1 };
+            for x in (8 - half)..(8 + half) {
+                let c = if y < 6 { Rgb(0.65, 0.83, 0.81) }
+                    else if x < 8 { Rgb(0.28, 0.57, 0.58) }
+                    else { Rgb(0.39, 0.69, 0.68) };
+                q.put(x, y, c, 1.0);
             }
-        }),
-    );
+        }
+    }));
+    l.add(BREAD, "bread", p(|q| {
+        for y in 5..13u32 {
+            let inset = if y == 5 || y == 12 { 2 } else { 0 };
+            for x in (2 + inset)..(14 - inset) {
+                let crust = y >= 10 || x == 2 || x == 13;
+                let score = y < 9 && (x + y) % 5 == 0;
+                let c = if score { Rgb(0.79, 0.65, 0.42) }
+                    else if crust { Rgb(0.48, 0.30, 0.15) }
+                    else { Rgb(0.66, 0.47, 0.25) };
+                q.put(x, y, c.add((rnd(x, y, 54) - 0.5) * 0.045), 1.0);
+            }
+        }
+    }));
     l.add(GOLD_INGOT, "gold_ingot", ingot(Rgb(0.95, 0.80, 0.25)));
     l.add(RAW_GOLD, "raw_gold", blob(Rgb(0.92, 0.75, 0.25), 5.0, 55));
     l.add(
@@ -624,3 +637,4 @@ fn shade_edges(img: &mut Image) {
         img.set(x, y, px);
     }
 }
+

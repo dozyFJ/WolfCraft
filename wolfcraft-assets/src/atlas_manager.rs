@@ -193,6 +193,7 @@ pub struct AtlasManager {
     scale: u32,
     /// Cartoon pack: water frames go through the toon filter too.
     toon: bool,
+    animate_water: bool,
 }
 
 impl AtlasManager {
@@ -208,6 +209,7 @@ impl AtlasManager {
         let scale = crate::packs::base_scale(pack_id);
         let toon = crate::packs::is_toon(pack_id);
         let mut atlases = Vec::new();
+        let mut animate_water = true;
         for kind in AtlasKind::ALL {
             let mut sprites = procedural::sprites(kind);
             // Item and particle icons are 16-px pixel art: more than 32 px per sprite only costs
@@ -224,7 +226,6 @@ impl AtlasManager {
                             let seed = name.bytes().fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
                             *img = crate::packs::toon_seeded(img, 16 * kscale, crate::packs::toon_bevel(name), seed);
                         } else {
-                            crate::packs::vibrant(img);
                             crate::packs::vibrant(img);
                             *img = crate::packs::upscale(img, kscale);
                         }
@@ -253,7 +254,10 @@ impl AtlasManager {
                 });
             }
             if let Some(pack) = user_pack {
-                crate::packs::apply_user_pack(pack, kind, &mut sprites);
+                let applied = crate::packs::apply_user_pack(pack, kind, &mut sprites);
+                if kind == AtlasKind::Blocks && applied.iter().any(|name| name == "water") {
+                    animate_water = false;
+                }
             }
             if let Some(dir) = override_dir {
                 for (name, img) in sprites.iter_mut() {
@@ -262,6 +266,7 @@ impl AtlasManager {
                         match Image::load_png(&p) {
                             Ok(o) => {
                                 log::info!("texture override: {}", p.display());
+                                if kind == AtlasKind::Blocks && name == "water" { animate_water = false; }
                                 *img = o;
                             }
                             Err(e) => log::warn!("override failed: {e}"),
@@ -271,7 +276,7 @@ impl AtlasManager {
             }
             atlases.push(TextureAtlas::build(kind, sprites)?);
         }
-        Ok(Self { atlases, relief: std::sync::OnceLock::new(), water_frame: 0, water_frames: vec![None; 16], scale, toon })
+        Ok(Self { atlases, relief: std::sync::OnceLock::new(), water_frame: 0, water_frames: vec![None; 16], scale, toon, animate_water })
     }
 
     /// Height maps of the block textures, packed exactly like the blocks atlas.
@@ -305,6 +310,7 @@ impl AtlasManager {
 
     /// Advances texture animations (water). Returns true if anything changed.
     pub fn animate(&mut self, time_s: f32) -> bool {
+        if !self.animate_water { return false; }
         let frame = (time_s * 6.0) as u32 % 16;
         if frame == self.water_frame {
             return false;
@@ -336,6 +342,23 @@ impl AtlasManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_water_override_survives_animation() {
+        let dir = std::env::temp_dir().join(format!("wolfcraft_water_{}", std::process::id()));
+        let mut water = Image::new(16, 16);
+        for pixel in water.pixels.chunks_exact_mut(4) { pixel.copy_from_slice(&[30, 80, 120, 184]); }
+        water.save_png(&dir.join("blocks/water.png")).unwrap();
+        for legacy in [false, true] {
+            let mut m = if legacy { AtlasManager::load(crate::packs::DEFAULT_PACK, None, Some(&dir)) }
+                else { AtlasManager::load(crate::packs::DEFAULT_PACK, Some(&dir), None) }.unwrap();
+            assert!(!m.animate(1.0));
+            let atlas = m.get(AtlasKind::Blocks);
+            let rect = atlas.rect(procedural::tiles::WATER as usize);
+            assert_eq!(atlas.image().crop(rect.x, rect.y, rect.w, rect.h), water);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn relief_atlas_matches_the_blocks_atlas() {
@@ -415,3 +438,4 @@ mod pack_tests {
         }
     }
 }
+

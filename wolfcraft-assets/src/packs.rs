@@ -99,15 +99,17 @@ fn read_file(pack: &Path, rel: &str) -> Option<Vec<u8>> {
 }
 
 /// Replaces sprites with the pack's PNGs where present.
-pub fn apply_user_pack(pack: &Path, kind: AtlasKind, sprites: &mut [(String, Image)]) {
+pub fn apply_user_pack(pack: &Path, kind: AtlasKind, sprites: &mut [(String, Image)]) -> Vec<String> {
+    let mut applied = Vec::new();
     for (name, img) in sprites.iter_mut() {
         if let Some(bytes) = read_file(pack, &format!("{}/{name}.png", kind.folder())) {
             match Image::load_png_bytes(&bytes) {
-                Ok(o) => *img = o,
+                Ok(o) => { *img = o; applied.push(name.clone()); },
                 Err(e) => log::warn!("pack {}: {name}: {e}", pack.display()),
             }
         }
     }
+    applied
 }
 
 /// The built-in look: rich, bright colours (saturation +25 % and more light) over the procedural art.
@@ -181,14 +183,14 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
         for y in 0..n {
             for x in 0..n {
                 let o = get(x * w / n, y * h / n);
-                if o[3] < 0.5 {
+                if o[3] == 0.0 {
                     out.set(x as u32, y as u32, [0, 0, 0, 0]);
                     continue;
                 }
                 let o = [m[0] + (o[0] - m[0]) * keep, m[1] + (o[1] - m[1]) * keep, m[2] + (o[2] - m[2]) * keep, o[3]];
                 let c = juicy(o);
                 let px = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-                out.set(x as u32, y as u32, [px(c[0]), px(c[1]), px(c[2]), 255]);
+                out.set(x as u32, y as u32, [px(c[0]), px(c[1]), px(c[2]), px(o[3])]);
             }
         }
         return out;
@@ -232,7 +234,8 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
             // Rock and logs (bevel between): speckles go, ore gems and bark lines stay.
             let rock = !natural && bevel < 0.95;
             let (thr, dev, calm) = if natural { (0.12, 0.30, 0.75) } else if rock { (0.10, 0.24, 0.75) } else { (0.08, 0.24, 0.85) };
-            let feature = (lum(&o) - lum(&b)).abs() > thr || (lum(&o) - mean_l).abs() > dev;
+            let chroma = (0..3).map(|i| (o[i] - b[i]).abs()).fold(0.0f32, f32::max);
+            let feature = chroma > 0.16 || (lum(&o) - lum(&b)).abs() > thr || (lum(&o) - mean_l).abs() > dev;
             let base = if feature {
                 [mean[0] + (o[0] - mean[0]) * 0.85, mean[1] + (o[1] - mean[1]) * 0.85, mean[2] + (o[2] - mean[2]) * 0.85, 1.0]
             } else {
@@ -474,6 +477,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cartoon_keeps_translucent_alpha_at_every_resolution() {
+        let mut src = Image::new(16, 16);
+        for y in 0..16 { for x in 0..16 {
+            src.set(x, y, [40, 110, 190, if x == 0 { 0 } else if x == 1 { 64 } else { 184 }]);
+        }}
+        for size in [16, 32, 64, 128] {
+            let out = toon(&src, size, 0.0);
+            for y in 0..size { for x in 0..size {
+                assert_eq!(out.get(x, y)[3], src.get(x * 16 / size, y * 16 / size)[3]);
+            }}
+        }
+    }
+
+    #[test]
     fn upscale_sizes_and_builtins_listed() {
         let mut img = Image::new(16, 16);
         img.set(3, 3, [255, 0, 0, 255]);
@@ -503,3 +520,4 @@ mod tests {
         assert_eq!(sprites[0].1.width, 32);
     }
 }
+

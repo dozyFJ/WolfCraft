@@ -1,6 +1,5 @@
 //! Mobile launcher: the game's home screen. A toolbar on top, the page in the middle and a
-//! bottom navigation bar with four tabs: Главная (banner slider, releases, news), Игра,
-//! Студия and Скины.
+//! bottom navigation bar with tabs: Главная, Студия, Скины and Настройки. Launch controls live on Home.
 
 use crate::gui_renderer::GuiIcons;
 use crate::main_menu::MenuAction;
@@ -15,12 +14,12 @@ const NAV_H: f32 = 64.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Home,
-    Game,
+    Settings,
     Studio,
     Skins,
 }
 
-const TABS: [(Tab, &str); 4] = [(Tab::Home, "Главная"), (Tab::Game, "Игра"), (Tab::Studio, "Студия"), (Tab::Skins, "Скины")];
+const TABS: [(Tab, &str); 4] = [(Tab::Home, "Главная"), (Tab::Studio, "Студия"), (Tab::Skins, "Скины"), (Tab::Settings, "Настройки")];
 
 struct Banner {
     title: &'static str,
@@ -45,7 +44,8 @@ struct Release {
     points: &'static [&'static str],
 }
 
-const RELEASES: [Release; 4] = [
+const RELEASES: [Release; 5] = [
+    Release { version: "0.2.1", name: "Лаунчер и мультяшные текстуры", date: "ноябрь 2026", points: &["Запуск с главной", "Ник под выбором версии", "Прозрачная вода", "Обновления в настройках"] },
     Release { version: "0.2.0", name: "Кубы и луки", date: "ноябрь 2026", points: &["Кубические планеты", "Лук, стрелы, доспехи", "Новые блоки и двери", "Лаунчер и новый чат"] },
     Release { version: "0.1.9", name: "Новый HUD", date: "октябрь 2026", points: &["Островок паузы и чата", "Миникарта и карта мира", "Компас вокруг карты"] },
     Release { version: "0.1.8", name: "Текстурпаки", date: "октябрь 2026", points: &["Паки 16×–128×", "Загрузка своих паков", "Быстрый полёт в космосе"] },
@@ -68,11 +68,12 @@ const NEWS: [News; 4] = [
 ];
 
 /// The launcher. `skin` is the selected skin preset.
-pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8, worlds: &[crate::main_menu::WorldEntry]) -> MenuAction {
+pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8, nickname: &str, worlds: &[crate::main_menu::WorldEntry]) -> MenuAction {
     let p = palette(ctx);
     let mut action = MenuAction::None;
-    let tab_id = Id::new("launcher-tab");
+    let tab_id = Id::new("launcher-tab-v2");
     let mut tab: usize = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
+    tab = tab.min(2);
 
     // ---- Toolbar ----
     egui::TopBottomPanel::top("launcher-toolbar")
@@ -126,11 +127,38 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 nav_icon(ui, icons, *t, ic, col);
                 ui.painter().text(Pos2::new(r.center().x, r.bottom() - 13.0), Align2::CENTER_CENTER, *label, FontId::proportional(12.5), col);
                 if resp.clicked() {
-                    tab = i;
+                    if *t == Tab::Settings {
+                        action = MenuAction::OpenSettings;
+                    } else {
+                        tab = i;
+                    }
                 }
             }
         });
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
+
+    // Account and launch controls stay visible while Home scrolls.
+    if TABS[tab].0 == Tab::Home {
+        egui::TopBottomPanel::bottom("launcher-launch")
+            .exact_height(100.0)
+            .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(16.0, 10.0)))
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new(format!("Ник: {nickname}")).color(p.text));
+                ui.horizontal(|ui| {
+                    let width = (ui.available_width() - 118.0).max(100.0);
+                    egui::ComboBox::from_id_salt("launcher-version")
+                        .width(width).selected_text(format!("WolfCraft {version}"))
+                        .show_ui(ui, |ui| {
+                            ui.label(format!("{version} — установлена"));
+                            ui.separator();
+                            ui.label("Другие версии доступны через обновление APK");
+                        });
+                    if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 108.0, true).clicked() {
+                        action = MenuAction::LaunchVersion(version.to_string());
+                    }
+                });
+            });
+    }
 
     // ---- Page ----
     egui::CentralPanel::default().frame(Frame::none().fill(p.bg).inner_margin(Margin::symmetric(16.0, 14.0))).show(ctx, |ui| {
@@ -138,7 +166,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
             ui.spacing_mut().item_spacing.y = 10.0;
             match TABS[tab].0 {
                 Tab::Home => home(ui, icons, &p, planet, &mut action),
-                Tab::Game => game(ui, icons, &p, planet, &mut action),
+                Tab::Settings => {}
                 Tab::Studio => studio(ui, icons, &p, version, worlds, &mut action),
                 Tab::Skins => skins(ui, &p, skin, &mut action),
             }
@@ -168,7 +196,7 @@ fn nav_icon(ui: &Ui, icons: &GuiIcons, t: Tab, r: Rect, col: Color32) {
             pt.rect_stroke(body, Rounding::same(1.0), Stroke::new(2.2_f32, col));
             pt.rect_filled(Rect::from_min_max(Pos2::new(c.x - 2.5, c.y + s * 0.3), Pos2::new(c.x + 2.5, c.y + s)), Rounding::ZERO, col);
         }
-        Tab::Game => icons.paint(pt, r, icon::PLAY, col),
+        Tab::Settings => icons.paint(pt, r, icon::GEAR, col),
         Tab::Studio => icons.paint(pt, r, icon::HAMMER, col),
         Tab::Skins => {
             // A small figure: head and shoulders.
@@ -318,7 +346,7 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
         *action = match cur {
             2 => MenuAction::OpenNetwork,
             3 => MenuAction::OpenSettings,
-            _ => MenuAction::OpenWorldSelect,
+            _ => MenuAction::LaunchVersion(wolfcraft_common::VERSION.to_string()),
         };
     }
 }
@@ -372,6 +400,23 @@ fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
 
 // ---------------------------------------------------------------------------------------------
 // Игра
+
+pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: Option<&TextureHandle>) -> MenuAction {
+    let p = palette(ctx);
+    let mut action = MenuAction::None;
+    egui::TopBottomPanel::bottom("game-menu-back").show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if pill_button(ui, icons, Some(icon::ARROW_LEFT), "В лаунчер", ButtonKind::Secondary, 150.0, true).clicked() {
+                action = MenuAction::Back;
+            }
+            ui.label(format!("WolfCraft {version}"));
+        });
+    });
+    egui::CentralPanel::default().frame(Frame::none().fill(p.bg).inner_margin(Margin::same(16.0))).show(ctx, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| game(ui, icons, &p, planet, &mut action));
+    });
+    action
+}
 
 fn game(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandle>, action: &mut MenuAction) {
     let w = ui.available_width();
@@ -553,4 +598,41 @@ fn figure(ui: &Ui, r: Rect, (skin, hair, jacket, sleeve, trousers): ([f32; 3], [
     b(4.0, 10.0, 2.0, 5.0, c(trousers));
     b(2.0, 15.0, 2.0, 1.0, Color32::from_rgb(66, 44, 28));
     b(4.0, 15.0, 2.0, 1.0, Color32::from_rgb(66, 44, 28));
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wolfcraft_engine::config::ThemeMode;
+
+    #[test]
+    fn portrait_home_launches_installed_version_and_shows_nickname() {
+        let ctx = egui::Context::default();
+        crate::theme_manager::install(&ctx);
+        crate::theme_manager::apply(&ctx, ThemeMode::Dark);
+        let atlas = wolfcraft_assets::AtlasManager::new(None).unwrap();
+        let icons = GuiIcons::new(&ctx, &atlas);
+        let mut action = MenuAction::None;
+        let mut run = |events: Vec<egui::Event>| {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(390.0, 844.0))),
+                events, ..Default::default()
+            };
+            ctx.run(raw, |ctx| {
+                action = show(ctx, &icons, "0.2.1", true, None, 0, "dozyFJ", &[]);
+            })
+        };
+        let out = run(vec![]);
+        let texts: Vec<_> = out.shapes.iter().filter_map(|s| {
+            if let egui::epaint::Shape::Text(t) = &s.shape { Some(t) } else { None }
+        }).collect();
+        assert!(texts.iter().any(|t| t.galley.job.text.contains("dozyFJ")));
+        assert!(!texts.iter().any(|t| t.galley.job.text == "Игра"));
+        let play = texts.iter().find(|t| t.galley.job.text == "Играть" && t.pos.y > 650.0).expect("Home launch button");
+        let pos = play.pos + play.galley.size() * 0.5;
+        run(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+        run(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+        assert_eq!(action, MenuAction::LaunchVersion("0.2.1".into()));
+    }
 }
