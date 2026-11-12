@@ -202,15 +202,11 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     }
     var rgb = color.rgb * lit * ao * face_k;
     if (toon && emit == 0u) {
-        // Roblox-style low poly: light from the sky dome (cool from above, a warm bounce from
-        // below) and a soft plastic sheen where the sun glances off a face.
+        // Light from the sky dome: cool from above, a warm bounce from below.
         let ny = dot(n, up);
         let hemi = mix(vec3<f32>(1.05, 0.98, 0.92), vec3<f32>(0.96, 1.0, 1.06), ny * 0.5 + 0.5);
         rgb = rgb * hemi;
-        let v = normalize(-in.rel);
-        let hv = normalize(sun + v);
-        let spec = pow(max(dot(n, hv), 0.0), 20.0) * 0.05 * day * in.light.y * ao;
-        rgb = rgb + vec3<f32>(1.0, 0.97, 0.90) * spec;
+        // (No plastic sheen: blocks stay matte, like painted voxels.)
     }
     if (emit == 1u) {
         rgb = color.rgb * (0.85 + 0.15 * in.light.x);
@@ -517,16 +513,14 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     var light = max(mix(0.11, 0.58 + 0.38 * diffuse, day), 0.16);
     var rim = 0.0;
     if (toon) {
-        // Cartoon creatures: two-tone soft light and a bright rim around the silhouette.
+        // Cartoon creatures: two-tone soft light.
         diffuse = smoothstep(0.05, 0.30, diffuse) * 0.8 + diffuse * 0.2;
         light = max(mix(0.20, 0.70 + 0.30 * diffuse, day), 0.24);
         let bl = dot(base, vec3<f32>(0.2126, 0.7152, 0.0722));
         base = max(mix(vec3<f32>(bl), base, 1.1), vec3<f32>(0.0));
         let v = normalize(-in.rel);
-        rim = pow(1.0 - max(dot(nn, v), 0.0), 3.0) * mix(0.12, 0.38, day);
-        // Plastic sheen, like Roblox characters.
-        let hv = normalize(sun + v);
-        rim = rim + pow(max(dot(nn, hv), 0.0), 16.0) * 0.06 * day;
+        // A faint rim only (matte voxels, no plastic sheen).
+        rim = pow(1.0 - max(dot(nn, v), 0.0), 3.0) * mix(0.04, 0.12, day);
     }
     if (in.tex > 2.5 && in.tex < 3.5) {
         light = 1.25; // glowing particles: embers, sparks

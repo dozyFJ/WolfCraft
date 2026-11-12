@@ -132,7 +132,7 @@ pub fn vibrant(img: &mut Image) {
 /// * Shapes that matter (mortar, planks seams, ore gems, door windows) stay crisp: pixels that
 ///   differ clearly from their surroundings keep their own (posterized) colour, sharp-edged.
 /// * No low-poly facets: a cartoon cushion instead (ink outline, light rim top-left, shade
-///   bottom-right, a small glossy sheen), so blocks read like drawn cartoon tiles.
+///   bottom-right, one texel wide), so blocks read like crisp cartoon pixel art.
 /// * A soft bevel on the rim (`bevel` 0 = none, for liquids; natural ground gets little).
 ///
 /// Sprites with transparent pixels (plants, torches, glass) keep their exact shape, upscaled
@@ -153,7 +153,7 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
     let lum = |c: &[f32; 4]| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
     let juicy = |c: [f32; 4]| -> [f32; 4] {
         let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-        let f = |v: f32| ((l + (v - l) * 1.38).max(0.0) * 0.9 + 0.09).min(1.0);
+        let f = |v: f32| ((l + (v - l) * 1.25).max(0.0) * 0.92 + 0.07).min(1.0);
         [f(c[0]), f(c[1]), f(c[2]), c[3]]
     };
     let n = size as i32;
@@ -231,12 +231,14 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
             let natural = bevel < 0.3;
             // Rock and logs (bevel between): speckles go, ore gems and bark lines stay.
             let rock = !natural && bevel < 0.95;
-            let (thr, dev, calm) = if natural { (0.24, 0.34, 0.25) } else if rock { (0.20, 0.24, 0.32) } else { (0.12, 0.26, 0.45) };
+            let (thr, dev, calm) = if natural { (0.12, 0.30, 0.75) } else if rock { (0.10, 0.24, 0.75) } else { (0.08, 0.24, 0.85) };
             let feature = (lum(&o) - lum(&b)).abs() > thr || (lum(&o) - mean_l).abs() > dev;
             let base = if feature {
                 [mean[0] + (o[0] - mean[0]) * 0.85, mean[1] + (o[1] - mean[1]) * 0.85, mean[2] + (o[2] - mean[2]) * 0.85, 1.0]
             } else {
-                [mean[0] + (b[0] - mean[0]) * calm, mean[1] + (b[1] - mean[1]) * calm, mean[2] + (b[2] - mean[2]) * calm, 1.0]
+                // Mostly the texel's own colour (pixel grain stays), a little of the blur.
+                let q = [o[0] * 0.65 + b[0] * 0.35, o[1] * 0.65 + b[1] * 0.35, o[2] * 0.65 + b[2] * 0.35];
+                [mean[0] + (q[0] - mean[0]) * calm, mean[1] + (q[1] - mean[1]) * calm, mean[2] + (q[2] - mean[2]) * calm, 1.0]
             };
             // Posterize around the mean: a few clean colour steps.
             let step = if feature { 0.10 } else { 0.07 };
@@ -255,30 +257,22 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
             // Natural ground and foliage stay seamless: facets or a bevel repeat on every
             // block and make a visible grid over a meadow.
             if bevel >= 0.3 {
-                // Cartoon block (no low-poly facets): a bold dark ink outline, then a soft
-                // cushion — a light rim along the top and left, a shaded rim along the bottom
-                // and right — so each block reads like a drawn tile.
+                // Pixel-art block edge (crisp, one texel wide, no smooth plastic shading):
+                // a dark ink line on built blocks, then a light texel row on the top and left
+                // and a dark one on the bottom and right.
+                let texel = n as f32 / w as f32;
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                 let (l_, t_, r_, b_) = (fx, fy, n as f32 - fx, n as f32 - fy);
                 let edge = l_.min(t_).min(r_).min(b_);
-                let ink = (n as f32 / 22.0).max(1.0);
-                let rim = (n as f32 / 7.0).max(2.0);
-                if bevel >= 1.0 && edge < ink {
+                let ink = if bevel >= 1.0 { texel } else { 0.0 };
+                if edge < ink {
                     for v in c.iter_mut().take(3) {
-                        *v *= 0.55;
+                        *v *= 0.58;
                     }
-                } else if edge < ink + rim {
-                    let k = 1.0 - (edge - ink).max(0.0) / rim;
-                    let lit = if l_.min(t_) <= r_.min(b_) { 0.22 * bevel * k } else { -0.20 * bevel * k };
+                } else if edge < ink + texel {
+                    let lit = if l_.min(t_) <= r_.min(b_) { 0.16 * bevel } else { -0.16 * bevel };
                     for i in 0..3 {
                         c[i] = if lit > 0.0 { c[i] + (1.0 - c[i]) * lit } else { c[i] * (1.0 + lit) };
-                    }
-                }
-                // A small glossy highlight near the top-left corner, like a cartoon sheen.
-                let (hx, hy) = (fx / n as f32 - 0.27, fy / n as f32 - 0.22);
-                if bevel >= 0.9 && hx * hx * 3.0 + hy * hy * 12.0 < 0.012 {
-                    for v in c.iter_mut().take(3) {
-                        *v += (1.0 - *v) * 0.30;
                     }
                 }
             }
