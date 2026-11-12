@@ -105,8 +105,8 @@ pub fn vibrant(img: &mut Image) {
         }
         let (r, g, b) = (px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0);
         let l = 0.299 * r + 0.587 * g + 0.114 * b;
-        let sat = |c: f32| l + (c - l) * 1.25;
-        let tone = |c: f32| (((sat(c) - 0.5) * 1.04 + 0.5) * 1.07).clamp(0.0, 1.0);
+        let sat = |c: f32| l + (c - l) * 1.18;
+        let tone = |c: f32| (((sat(c) - 0.5) * 1.04 + 0.5) * 1.03).clamp(0.0, 1.0);
         px[0] = (tone(r) * 255.0) as u8;
         px[1] = (tone(g) * 255.0) as u8;
         px[2] = (tone(b) * 255.0) as u8;

@@ -118,7 +118,7 @@ fn dirt(x: f32, y: f32, seed: u32) -> Rgb {
 }
 
 fn grass(x: f32, y: f32, seed: u32) -> Rgb {
-    grass_c(x, y, rgb(98, 160, 62), seed)
+    grass_c(x, y, rgb(78, 140, 50), seed)
 }
 
 fn grass_c(x: f32, y: f32, base: Rgb, seed: u32) -> Rgb {
@@ -228,11 +228,12 @@ fn bark(x: f32, y: f32, base: Rgb, seed: u32, birch: bool) -> Rgb {
         }
         return c;
     }
-    // Vertical ridges with dark crevices.
-    let ridge = fbm(x * 3.0, y, 2, 4, seed);
-    let crev = ((x * 9.0 + ridge * 3.0) * std::f32::consts::TAU).sin();
-    let k = if crev > 0.6 { 0.55 } else { 0.85 + 0.25 * (crev * 0.5 + 0.5) };
-    base.scale(k * (0.85 + 0.3 * fbm(x, y, 16, 2, seed + 4)))
+    // Straight vertical ridges with dark crevices, broken up a little along their length.
+    let wobble = fbm(x, y * 2.0, 4, 2, seed) - 0.5;
+    let crev = ((x * 8.0 + wobble * 0.5) * std::f32::consts::TAU).sin();
+    let breaks = fbm(x * 8.0, y * 2.0, 2, 2, seed + 2);
+    let k = if crev > 0.55 && breaks > 0.35 { 0.55 } else { 0.82 + 0.22 * (crev * 0.5 + 0.5) };
+    base.scale(k * (0.9 + 0.2 * fbm(x * 4.0, y, 4, 2, seed + 4)))
 }
 
 fn log_top(x: f32, y: f32, wood: Rgb, bark_c: Rgb, seed: u32) -> Rgb {
