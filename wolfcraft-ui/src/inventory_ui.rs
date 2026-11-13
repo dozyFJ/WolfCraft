@@ -45,6 +45,8 @@ pub struct InventoryUiState {
     caption: Option<(String, Rect, f32)>,
     /// Creative: the search line is open (the magnifier in the sidebar).
     search_open: bool,
+    /// Creative: the building-piece group (a form: slab, arc, chair…) that is expanded.
+    open_group: Option<usize>,
 }
 
 /// Shows the item's name over its slot while it is pressed (and a moment after), as on
@@ -692,6 +694,38 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         // doors…), plants, items and tools, alphabetically inside each group so related
         // things sit together (all oak, all diamond…).
         list.sort_by_cached_key(|id| sort_key(*id));
+        // Building pieces come in a dozen materials each: like on Bedrock, every form is one
+        // cell with a "+" that unfolds its materials in place (a search shows them all).
+        #[derive(Clone, Copy)]
+        enum Cell {
+            Item(ItemId),
+            Group(usize, ItemId, usize, bool),
+            Member(ItemId),
+        }
+        let grouped = state.search.trim().is_empty();
+        let mut cells: Vec<Cell> = Vec::with_capacity(list.len());
+        if grouped {
+            let form_of = |id: ItemId| wolfcraft_engine::construction::entry(id).map(|(e, _)| e.form as usize);
+            let mut seen: Vec<usize> = Vec::new();
+            for id in &list {
+                match form_of(*id) {
+                    None => cells.push(Cell::Item(*id)),
+                    Some(f) if !seen.contains(&f) => {
+                        seen.push(f);
+                        let members: Vec<ItemId> = list.iter().copied().filter(|m| form_of(*m) == Some(f)).collect();
+                        let open = state.open_group == Some(f);
+                        cells.push(Cell::Group(f, *id, members.len(), open));
+                        if open {
+                            cells.extend(members.into_iter().map(Cell::Member));
+                        }
+                    }
+                    Some(_) => {}
+                }
+            }
+        } else {
+            cells.extend(list.iter().copied().map(Cell::Item));
+        }
+        let list = cells;
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
         // Swipe scrolls the list (a slot only reacts to a tap, so the finger drag goes to the
@@ -705,8 +739,32 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             for chunk in list.chunks(cols).skip(visible.start).take(visible.end-visible.start) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-                    for id in chunk {
+                    for entry in chunk {
                         let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
+                        let id = match entry {
+                            Cell::Group(form, head, count, open) => {
+                                // The group's cell: its first piece, a "+" (or "−") badge and
+                                // how many materials are inside. A tap folds or unfolds it.
+                                let stack = ItemStack::new(*head, 1);
+                                let resp = slot_widget(ui, icons, p, rect, Some(&stack), *open, Id::new(("pal-group", *form)), Sense::click());
+                                let badge = Rect::from_min_size(rect.right_top() + Vec2::new(-20.0, 2.0), Vec2::splat(18.0));
+                                ui.painter().rect_filled(badge, Rounding::same(4.0), p.accent);
+                                ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, if *open { "−" } else { "+" }, bold_font(15.0), p.on_accent);
+                                ui.painter().text(rect.left_bottom() + Vec2::new(4.0, -3.0), egui::Align2::LEFT_BOTTOM, count.to_string(), egui::FontId::proportional(11.0), p.text_muted);
+                                if resp.clicked() {
+                                    state.open_group = if *open { None } else { Some(*form) };
+                                }
+                                let name = items::info(*head).name;
+                                note(state, &resp, rect, name.split_once(" · ").map(|n| n.1).unwrap_or(name));
+                                continue;
+                            }
+                            Cell::Member(id) => {
+                                // Pieces of the open group sit on a tinted strip.
+                                ui.painter().rect_filled(rect.expand(GAP / 2.0), Rounding::ZERO, p.accent.gamma_multiply(0.18));
+                                id
+                            }
+                            Cell::Item(id) => id,
+                        };
                         let stack = ItemStack::new(*id, 1);
                         let resp = slot_widget(ui, icons, p, rect, Some(&stack), false, Id::new(("pal", *id)), Sense::click());
                         if resp.clicked() {
@@ -718,7 +776,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
                                 inv.slots[inv.selected] = Some(full);
                             }
                         }
-                        if items::is_new(*id) {
+                        if items::is_new(*id) && *id < 1024 {
                             let tag = Rect::from_min_size(rect.left_top() + Vec2::new(2.0, 2.0), Vec2::new(22.0, 10.0));
                             ui.painter().rect_filled(tag, Rounding::same(2.0), p.success);
                             ui.painter().text(tag.center(), egui::Align2::CENTER_CENTER, "NEW", egui::FontId::proportional(7.5), egui::Color32::BLACK);
