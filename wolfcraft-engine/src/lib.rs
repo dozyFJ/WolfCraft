@@ -6,6 +6,7 @@ pub mod chunk;
 pub mod chunk_manager;
 pub mod config;
 pub mod cubesphere;
+pub mod explosives;
 pub mod interaction;
 pub mod inventory;
 pub mod items;

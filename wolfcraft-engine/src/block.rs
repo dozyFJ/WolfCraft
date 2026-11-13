@@ -206,6 +206,8 @@ blocks! {
     95 StoneWall => needs_pick(info("Каменная стена", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
     96 Door => info("Дверь", Shape, 2.0, Axe, all(t::PLANKS)),
     97 DoorOpen => info("Дверь (открыта)", Shape, 2.0, Axe, all(t::PLANKS)),
+    // Lit with a lighter (or by another blast): see `explosives`.
+    98 Dynamite => info("Динамит", Opaque, 0.1, Hand, column(t::DYNAMITE_SIDE, t::DYNAMITE_TOP, t::DYNAMITE_TOP)),
 }
 
 impl Block {

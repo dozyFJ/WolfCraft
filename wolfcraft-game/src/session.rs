@@ -96,6 +96,8 @@ pub struct GameSession {
     /// Smoothed third-person distance.
     tp_dist: f64,
     pub mobs: wolfcraft_engine::mobs::MobManager,
+    /// Lit dynamite and grenades / rockets in flight.
+    pub explosives: wolfcraft_engine::explosives::Explosives,
     attack_cd: f32,
     death_burst_done: bool,
     /// Contents of chests (27 slots) and electric furnaces (0 input, 1 output) by block cell.
@@ -142,6 +144,7 @@ impl GameSession {
             eye_r: 0.0,
             tp_dist: 4.2,
             mobs: wolfcraft_engine::mobs::MobManager::new(seed),
+            explosives: wolfcraft_engine::explosives::Explosives::new(seed),
             attack_cd: 0.0,
             death_burst_done: false,
             containers: Default::default(),
@@ -227,7 +230,7 @@ impl GameSession {
         // Shield up while RMB is held, unless the main hand has its own right-click use.
         let main_use = self.player.inventory.held().is_some_and(|s| {
             let i = s.info();
-            i.place.is_some() || i.food.is_some()
+            i.place.is_some() || i.food.is_some() || wolfcraft_engine::explosives::weapon(s.id).is_some() || s.id == wolfcraft_engine::items::ids::LIGHTER
         });
         self.player.blocking = input.use_held && self.player.inventory.has_shield() && !main_use && !self.player.survival.dead;
         if let Some(i) = input.hotbar_set {
@@ -339,6 +342,8 @@ impl GameSession {
                 }
             }
         }
+        // Explosives: light dynamite, fire weapons, then fuses, flight and blasts.
+        self.explosives_step(&mut events, dt);
         // Containers: broken chests spill into the inventory; furnaces smelt while powered.
         for e in &events {
             if let InteractionEvent::Broken { pos, .. } = e {
@@ -353,8 +358,15 @@ impl GameSession {
         self.tick_furnaces(dt);
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
-            if let InteractionEvent::Placed { pos, .. } | InteractionEvent::Broken { pos, .. } = e {
-                wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
+            match e {
+                InteractionEvent::Placed { pos, .. } | InteractionEvent::Broken { pos, .. } => {
+                    wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
+                }
+                // A crater can cut a cable: re-check only blocks that are part of a network.
+                InteractionEvent::Blasted { pos, block } if is_power_block(*block) => {
+                    wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
+                }
+                _ => {}
             }
         }
         self.near_table = false;
@@ -374,7 +386,85 @@ impl GameSession {
         events
     }
 
-    /// Slots for a container block, created on first use.
+    /// Lighting, firing, fuses, projectiles and blast damage. Request events (`Ignite`, `Fire`)
+    /// stay in `events` only if they actually happened; blasts add `Exploded` and `Blasted`.
+    fn explosives_step(&mut self, events: &mut Vec<InteractionEvent>, dt: f32) {
+        use wolfcraft_engine::explosives::{DYNAMITE_FUSE, blast_damage, weapon};
+        let creative = self.player.is_creative();
+        let eye = self.player.eye_pos();
+        let look = self.player.look_dir();
+        let mut keep = Vec::with_capacity(events.len());
+        for e in events.drain(..) {
+            match e {
+                InteractionEvent::Ignite { pos } => {
+                    if self.explosives.light(&mut self.chunks, pos, DYNAMITE_FUSE) {
+                        keep.push(e);
+                    }
+                }
+                InteractionEvent::Fire { weapon: id } => {
+                    let Some((ammo, kind, speed, cooldown)) = weapon(id) else { continue };
+                    if !self.explosives.ready() {
+                        continue;
+                    }
+                    let has_ammo = creative || self.player.inventory.count(ammo) > 0;
+                    if !has_ammo {
+                        self.item_name = Some((format!("Нет боеприпасов: {}", wolfcraft_engine::items::info(ammo).name), 1.5));
+                        continue;
+                    }
+                    if !creative {
+                        self.player.inventory.take(ammo, 1);
+                    }
+                    self.explosives.fire(kind, eye, look, speed, cooldown);
+                    keep.push(e);
+                }
+                other => keep.push(other),
+            }
+        }
+        *events = keep;
+
+        let targets: Vec<glam::DVec3> = self.mobs.mobs.iter().map(|m| m.centre()).collect();
+        let (blasts, broken) = self.explosives.update(&mut self.chunks, &targets, dt);
+        // Smoke behind rockets.
+        let rockets: Vec<glam::DVec3> = self.explosives.rockets().collect();
+        for p in rockets {
+            self.mobs.chips(p, &[[0.55, 0.55, 0.55], [0.75, 0.75, 0.72]], 1, 0.4);
+        }
+        for (pos, block) in broken {
+            // Chests and furnaces caught in a blast lose their contents.
+            self.containers.remove(&pos);
+            self.furnace_t.remove(&pos);
+            events.push(InteractionEvent::Blasted { pos, block });
+        }
+        for b in blasts {
+            events.push(InteractionEvent::Exploded { at: b.pos, power: b.power });
+            self.mobs.chips(b.pos, &[[1.0, 0.78, 0.25], [0.95, 0.45, 0.12], [0.35, 0.33, 0.32], [0.20, 0.19, 0.19]], 40, 9.0);
+            // The player: damage through armor, and a push away from the blast.
+            if !self.player.survival.dead {
+                let centre = self.player.body.pos + self.player.up() * 0.9;
+                let dist = (centre - b.pos).length();
+                let dmg = blast_damage(b.power, dist);
+                if dmg > 0.0 {
+                    let armor = self.player.armor_points();
+                    self.player.damage(dmg * (1.0 - (armor as f32 * 0.04).min(0.8)), self.cfg.difficulty);
+                    let push = (centre - b.pos).normalize_or_zero() * (dmg as f64 * 0.8).min(14.0);
+                    self.player.body.vel += push;
+                    self.player.body.on_ground = false;
+                }
+            }
+            for i in 0..self.mobs.mobs.len() {
+                if self.mobs.mobs[i].hp <= 0.0 {
+                    continue;
+                }
+                let dist = (self.mobs.mobs[i].centre() - b.pos).length();
+                let dmg = blast_damage(b.power, dist);
+                if dmg > 0.0 && self.mobs.hurt(i, dmg, b.pos).is_some() {
+                    self.player.survival.add_xp(1);
+                }
+            }
+        }
+    }
+
+    /// Slots for a container block, created on first use.    /// Slots for a container block, created on first use.
     pub fn container_slots(&mut self, pos: wolfcraft_engine::cubesphere::Cell, block: wolfcraft_engine::block::Block) -> &mut Vec<Option<wolfcraft_engine::items::ItemStack>> {
         let n = if block == wolfcraft_engine::block::Block::ElectricFurnace { 2 } else { 27 };
         self.containers.entry(pos).or_insert_with(|| vec![None; n])
@@ -449,6 +539,7 @@ impl GameSession {
         self.planet = planet.clone();
         self.chunks = ChunkManager::new(planet, Arc::new(storage));
         self.mobs = wolfcraft_engine::mobs::MobManager::new(self.cfg.seed);
+        self.explosives = wolfcraft_engine::explosives::Explosives::new(self.cfg.seed);
         self.hell = hell;
         self.dimension_changed = true;
     }
@@ -797,4 +888,10 @@ mod tests {
         // The player sits somewhere on the planet: at least the sun position differs.
         assert!((noon - midnight).abs() > 0.5 || s.player.up().dot(s.sun()).abs() < 0.3);
     }
+}
+
+/// Blocks that belong to an electric network.
+fn is_power_block(b: wolfcraft_engine::block::Block) -> bool {
+    use wolfcraft_engine::block::Block;
+    matches!(b, Block::Cable | Block::Generator | Block::Battery | Block::ElectricLamp | Block::ElectricLampOn | Block::ElectricFurnace | Block::SwitchOff | Block::SwitchOn)
 }

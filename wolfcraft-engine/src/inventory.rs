@@ -277,6 +277,14 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::OakPlanks), 2), (ids::STICK, 2)], (b(Block::Fence), 3), true, "Строительство"));
         v.push(r(&[(b(Block::Cobblestone), 3)], (b(Block::StoneWall), 6), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 3)], (b(Block::Door), 2), true, "Строительство"));
+        // Explosives and weapons: gunpowder from coal and sand.
+        v.push(r(&[(ids::COAL, 1), (b(Block::Sand), 1)], (ids::GUNPOWDER, 2), false, "Взрывчатка"));
+        v.push(r(&[(ids::GUNPOWDER, 5), (b(Block::Sand), 4)], (b(Block::Dynamite), 1), true, "Взрывчатка"));
+        v.push(r(&[(ids::IRON_INGOT, 1), (ids::COAL, 1)], (ids::LIGHTER, 1), true, "Взрывчатка"));
+        v.push(r(&[(ids::GUNPOWDER, 2), (ids::IRON_INGOT, 1)], (ids::GRENADE, 2), true, "Взрывчатка"));
+        v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::OakPlanks), 2), (ids::GUNPOWDER, 1)], (ids::GRENADE_LAUNCHER, 1), true, "Взрывчатка"));
+        v.push(r(&[(ids::GUNPOWDER, 3), (ids::IRON_INGOT, 1), (ids::COPPER_INGOT, 1)], (ids::ROCKET, 2), true, "Взрывчатка"));
+        v.push(r(&[(ids::IRON_INGOT, 8), (ids::BRONZE_INGOT, 2), (ids::GUNPOWDER, 2)], (ids::BAZOOKA, 1), true, "Взрывчатка"));
         // Food and armor.
         v.push(r(&[(ids::RAW_MEAT, 1), (ids::COAL, 1)], (ids::COOKED_MEAT, 1), true, "Плавка"));
         let armor_mats: [ItemId; 4] = [ids::STICK, ids::BRONZE_INGOT, ids::IRON_INGOT, ids::DIAMOND];
