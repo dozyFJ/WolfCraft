@@ -1390,6 +1390,12 @@ impl App {
                     for e in events {
                         match e {
                             InteractionEvent::FrameUse{..}|InteractionEvent::ActivateBoss{..}=>{},
+                            InteractionEvent::Slept { night } => {
+                                s.item_name = Some((if night { "Доброе утро! Точка возрождения — здесь".to_string() } else { "Точка возрождения установлена. Спать можно ночью".to_string() }, 3.0));
+                                if night {
+                                    s.player.survival.health = (s.player.survival.health + 4.0).min(wolfcraft_engine::player::MAX_HEALTH);
+                                }
+                            }
                             InteractionEvent::OpenCrafting => {
                                 self.inv_ui = InventoryUiState::default();
                                 self.screen = Screen::Inventory;

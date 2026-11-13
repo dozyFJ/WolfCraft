@@ -29,6 +29,8 @@ pub enum InteractionEvent {
     Ate { hunger: f32 },
     OpenCrafting,
     FrameUse {pos:Cell},
+    /// A bed was used: the spawn point is set; `night` = slept through to the morning.
+    Slept { night: bool },
     ActivateBoss {pos:Cell,kind:crate::bosses::BossKind},
     /// Right click on a chest or electric furnace.
     OpenContainer { pos: Cell, block: Block },
@@ -174,6 +176,20 @@ impl Interaction {
     pub fn use_item(&mut self, world: &mut impl WorldEdit, player: &mut Player, hit: Option<Hit>) -> Vec<InteractionEvent> {
         let mut events = Vec::new();
         if let Some(h) = hit {
+            if !player.sneaking && crate::construction::entry(h.block as u16).is_some_and(|(e,_)|e.form==crate::construction::Form::Bed) {
+                // Bed: the spawn point moves here; at night you sleep till the morning.
+                let c = world.grid().cell_center(h.cell);
+                player.spawn = c + crate::physics::up_at(c) * 0.6;
+                let f = crate::player::day_fraction(player.world_time);
+                let night = !(0.24..0.76).contains(&f);
+                if night {
+                    let len = crate::player::DAY_LENGTH;
+                    let day = (player.world_time / len).floor() + if f >= 0.76 { 1.0 } else { 0.0 };
+                    player.world_time = (day + 0.27) * len;
+                }
+                events.push(InteractionEvent::Slept { night });
+                return events;
+            }
             if !player.sneaking {
                 if crate::construction::entry(h.block as u16).is_some_and(|(e,_)|e.form==crate::construction::Form::ItemFrame) {events.push(InteractionEvent::FrameUse{pos:h.cell});return events;}
                 if let Some(kind)=crate::construction::altar(h.block){events.push(InteractionEvent::ActivateBoss{pos:h.cell,kind});return events;}

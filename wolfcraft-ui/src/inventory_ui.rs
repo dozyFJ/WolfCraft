@@ -21,7 +21,7 @@ const ARMOR: usize = 95;
 
 /// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
 // "Техника" is put away for now (its items are still under "Все" and in the search).
-const CREATIVE_TABS: [&str; 17] = ["Все", "Конструктор", "Мебель", "Стекло", "Двери", "Декор", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "Инвентарь"];
+const CREATIVE_TABS: [&str; 18] = ["Все", "Конструктор", "Мебель", "Стекло", "Двери", "Декор", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Хранилища", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "Инвентарь"];
 const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 
 
@@ -594,7 +594,7 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     let palette_all = items::creative_palette();
     // ---- Categories: a vertical sidebar on the left (scrolls if the screen is short) ----
     let tab = (cell * 0.92).floor();
-    let content_h = 30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + 10.0 + cell;
+    let content_h = ui.available_height().max(30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + 10.0 + cell);
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         // Top-down column (a plain child of the horizontal row would lay the tabs out in a row).
@@ -657,6 +657,43 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     });
 }
 
+/// One cell of the creative grid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Cell {
+    Item(ItemId),
+    /// A folded or unfolded group of building pieces: form, its first piece, how many
+    /// materials, unfolded.
+    Group(usize, ItemId, usize, bool),
+    /// A piece of the unfolded group.
+    Member(ItemId),
+}
+
+/// Folds the building pieces of `list` into one cell per form (`grouped`), unfolding `open`.
+fn group_cells(list: &[ItemId], open: Option<usize>, grouped: bool) -> Vec<Cell> {
+    if !grouped {
+        return list.iter().copied().map(Cell::Item).collect();
+    }
+    let form_of = |id: ItemId| wolfcraft_engine::construction::entry(id).map(|(e, _)| e.form as usize);
+    let mut cells = Vec::with_capacity(list.len());
+    let mut seen: Vec<usize> = Vec::new();
+    for id in list {
+        match form_of(*id) {
+            None => cells.push(Cell::Item(*id)),
+            Some(f) if !seen.contains(&f) => {
+                seen.push(f);
+                let members: Vec<ItemId> = list.iter().copied().filter(|m| form_of(*m) == Some(f)).collect();
+                let is_open = open == Some(f);
+                cells.push(Cell::Group(f, *id, members.len(), is_open));
+                if is_open {
+                    cells.extend(members.into_iter().map(Cell::Member));
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    cells
+}
+
 /// Right part of the creative inventory: category title and search, the item grid, the hotbar.
 #[allow(clippy::too_many_arguments)]
 fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, cols: usize, grid_w: f32, palette_all: Vec<ItemId>, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
@@ -672,7 +709,10 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
     });
     ui.add_space(6.0);
     // ---- Grid ----
-    let grid_h = rows as f32 * (cell + GAP) - GAP;
+    // The grid takes all the height left above the hotbar (a cut-off last row shows there
+    // is more to scroll), so no empty band stays under the hotbar.
+    let _ = rows;
+    let grid_h = (ui.available_height() - 10.0 - cell - 6.0).max(cell);
     if state.tab == BACKPACK_TAB {
         // The survival inventory inside the creative one: armor, second hand, 2x2 crafting,
         // backpack and hotbar (scrolls on small screens).
@@ -696,35 +736,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         list.sort_by_cached_key(|id| sort_key(*id));
         // Building pieces come in a dozen materials each: like on Bedrock, every form is one
         // cell with a "+" that unfolds its materials in place (a search shows them all).
-        #[derive(Clone, Copy)]
-        enum Cell {
-            Item(ItemId),
-            Group(usize, ItemId, usize, bool),
-            Member(ItemId),
-        }
-        let grouped = state.search.trim().is_empty();
-        let mut cells: Vec<Cell> = Vec::with_capacity(list.len());
-        if grouped {
-            let form_of = |id: ItemId| wolfcraft_engine::construction::entry(id).map(|(e, _)| e.form as usize);
-            let mut seen: Vec<usize> = Vec::new();
-            for id in &list {
-                match form_of(*id) {
-                    None => cells.push(Cell::Item(*id)),
-                    Some(f) if !seen.contains(&f) => {
-                        seen.push(f);
-                        let members: Vec<ItemId> = list.iter().copied().filter(|m| form_of(*m) == Some(f)).collect();
-                        let open = state.open_group == Some(f);
-                        cells.push(Cell::Group(f, *id, members.len(), open));
-                        if open {
-                            cells.extend(members.into_iter().map(Cell::Member));
-                        }
-                    }
-                    Some(_) => {}
-                }
-            }
-        } else {
-            cells.extend(list.iter().copied().map(Cell::Item));
-        }
+        let cells = group_cells(&list, state.open_group, state.search.trim().is_empty());
         let list = cells;
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
@@ -905,6 +917,78 @@ mod tests {
         let mut raw = egui::RawInput::default();
         raw.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1400.0, 800.0)));
         let _ = ctx.run(raw, |c| f(c));
+    }
+
+    #[test]
+    fn building_pieces_fold_into_one_cell_per_form() {
+        use wolfcraft_engine::construction as c;
+        let mut list = items::creative_palette();
+        list.sort_by_cached_key(|id| sort_key(*id));
+        let pieces = list.iter().filter(|id| c::entry(**id).is_some()).count();
+        assert!(pieces > 200, "the catalogue is in the palette: {pieces}");
+        let folded = group_cells(&list, None, true);
+        let groups: Vec<_> = folded.iter().filter_map(|x| if let Cell::Group(f, _, n, open) = x { Some((*f, *n, *open)) } else { None }).collect();
+        assert!(!folded.iter().any(|x| matches!(x, Cell::Member(_))), "nothing unfolded");
+        assert!(groups.len() >= 40 && groups.len() <= c::FORMS.len(), "one cell per form: {}", groups.len());
+        assert_eq!(groups.iter().map(|g| g.1).sum::<usize>(), pieces, "every piece is in a group");
+        assert_eq!(folded.len(), list.len() - pieces + groups.len());
+        // No form twice.
+        let mut forms: Vec<usize> = groups.iter().map(|g| g.0).collect();
+        forms.sort();
+        forms.dedup();
+        assert_eq!(forms.len(), groups.len());
+        // Unfolding one group shows exactly its pieces right after its cell.
+        let (form, n, _) = groups[3];
+        let open = group_cells(&list, Some(form), true);
+        let at = open.iter().position(|x| matches!(x, Cell::Group(f, ..) if *f == form)).unwrap();
+        assert!(matches!(open[at], Cell::Group(_, _, _, true)));
+        assert!(open[at + 1..=at + n].iter().all(|x| matches!(x, Cell::Member(id) if c::entry(*id).is_some_and(|(e, _)| e.form as usize == form))));
+        assert_eq!(open.len(), folded.len() + n);
+        // A search lists pieces one by one.
+        assert_eq!(group_cells(&list, None, false).len(), list.len());
+    }
+
+    #[test]
+    fn every_item_has_a_tab_and_every_tab_has_items() {
+        let all = items::creative_palette();
+        for (i, name) in CREATIVE_TABS.iter().enumerate().skip(1).take(BACKPACK_TAB - 1) {
+            if *name == "Конструктор" {
+                continue;
+            }
+            assert!(all.iter().any(|id| in_tab(*id, i)), "tab «{name}» is empty");
+        }
+        // Items of put-away categories are still reachable under "Все" and by search.
+        let orphans: Vec<&str> = all.iter().filter(|id| !(1..BACKPACK_TAB).any(|t| in_tab(**id, t))).map(|id| items::category(*id)).collect();
+        assert!(orphans.iter().all(|c| *c == "Техника"), "items without a tab: {orphans:?}");
+        // Names are unique enough to search: no empty or placeholder names.
+        assert!(all.iter().all(|id| !items::info(*id).name.is_empty() && items::info(*id).name != "???"));
+    }
+
+    #[test]
+    fn creative_inventory_fits_phone_screens_on_every_tab() {
+        let (ctx, icons) = ctx_with_icons();
+        let mut inv = Inventory::default();
+        for (w, h) in [(802.0f32, 360.0f32), (640.0, 360.0), (960.0, 432.0), (1400.0, 800.0)] {
+            let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(w, h));
+            for tab in 0..CREATIVE_TABS.len() {
+                let mut st = InventoryUiState { tab, ..Default::default() };
+                for pass in 0..3 {
+                    if pass == 2 {
+                        st.open_group = Some(wolfcraft_engine::construction::Form::Chair as usize);
+                    }
+                    let mut raw = egui::RawInput::default();
+                    raw.screen_rect = Some(screen);
+                    let mut slots = 0;
+                    let _ = ctx.run(raw, |c| {
+                        show(c, &icons, &mut st, &mut inv, true, false, 0.016);
+                        slots += 1;
+                    });
+                    assert!(slots > 0);
+                }
+                let used = ctx.used_rect();
+                assert!(used.right() <= w + 1.0 && used.bottom() <= h + 1.0 && used.left() >= -1.0 && used.top() >= -1.0, "tab {} at {w}x{h} spills: {used:?}", CREATIVE_TABS[tab]);
+            }
+        }
     }
 
     #[test]
