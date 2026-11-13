@@ -28,6 +28,7 @@ pub const HELP: &[&str] = &[
     "/pos  /biome  /seed  /save  /say <текст>",
     "/season [весна|лето|осень|зима] — узнать или сменить время года",
     "/month [январь…декабрь|1–12] — узнать дату или перейти к месяцу",
+    "/arena <камень|лес|вулкан> — построить арену босса с алтарём прямо перед собой",
     "/enchant <чары> [уровень] — зачаровать предмет в руке (острота, сноровка, крепость, защита…)",
     "/effect <эффект> [секунды] — наложить эффект (скорость, сила, регенерация…); /effect clear",
     "/demo — построить перед собой выставку искрита: схемы, автодвери, ферма, потайной проход",
@@ -245,6 +246,19 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
             Ok(m) => vec![sys(m)],
             Err(e) => vec![err(e)],
         },
+        "arena" | "арена" => {
+            use wolfcraft_engine::bosses::BossKind;
+            let kind = match args.first().map(|a| a.to_lowercase()) {
+                Some(a) if a.starts_with("кам") || a.starts_with("stone") || a == "1" => BossKind::Stone,
+                Some(a) if a.starts_with("лес") || a.starts_with("чащ") || a.starts_with("root") || a == "2" => BossKind::Root,
+                Some(a) if a.starts_with("вулк") || a.starts_with("пеп") || a.starts_with("ember") || a == "3" => BossKind::Ember,
+                _ => return vec![sys("Арены боссов: /arena камень (Каменный страж) · /arena лес (Хранитель чащи) · /arena вулкан (Сердце вулкана)")],
+            };
+            match s.build_arena(kind) {
+                Ok(_) => vec![sys(format!("Арена готова впереди: «{}». Подойдите к алтарю в центре и тапните по нему (Печать древних выдана). Убрать арену: //undo", kind.name()))],
+                Err(e) => vec![err(e)],
+            }
+        }
         "enchant" | "чары" => {
             use wolfcraft_engine::magic::{self, ALL_ENCH};
             let Some(q) = args.first().map(|a| a.to_lowercase()) else {
