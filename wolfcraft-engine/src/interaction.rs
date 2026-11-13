@@ -30,7 +30,9 @@ pub enum InteractionEvent {
     OpenCrafting,
     FrameUse {pos:Cell},
     /// A bed was used: the spawn point is set; `night` = slept through to the morning.
-    Slept { night: bool },
+    Slept { night: bool, pos: Cell },
+    /// A chair or sofa was used: the player sits down on it.
+    Sat { pos: Cell },
     ActivateBoss {pos:Cell,kind:crate::bosses::BossKind},
     /// Right click on a chest or electric furnace.
     OpenContainer { pos: Cell, block: Block },
@@ -182,12 +184,12 @@ impl Interaction {
                 player.spawn = c + crate::physics::up_at(c) * 0.6;
                 let f = crate::player::day_fraction(player.world_time);
                 let night = !(0.24..0.76).contains(&f);
-                if night {
-                    let len = crate::player::DAY_LENGTH;
-                    let day = (player.world_time / len).floor() + if f >= 0.76 { 1.0 } else { 0.0 };
-                    player.world_time = (day + 0.27) * len;
-                }
-                events.push(InteractionEvent::Slept { night });
+                // (The game lays the player down and lets the night pass.)
+                events.push(InteractionEvent::Slept { night, pos: h.cell });
+                return events;
+            }
+            if !player.sneaking && crate::construction::entry(h.block as u16).is_some_and(|(e,_)|matches!(e.form,crate::construction::Form::Chair|crate::construction::Form::Sofa|crate::construction::Form::SofaCorner)) {
+                events.push(InteractionEvent::Sat { pos: h.cell });
                 return events;
             }
             if !player.sneaking {

@@ -1390,12 +1390,7 @@ impl App {
                     for e in events {
                         match e {
                             InteractionEvent::FrameUse{..}|InteractionEvent::ActivateBoss{..}=>{},
-                            InteractionEvent::Slept { night } => {
-                                s.item_name = Some((if night { "Доброе утро! Точка возрождения — здесь".to_string() } else { "Точка возрождения установлена. Спать можно ночью".to_string() }, 3.0));
-                                if night {
-                                    s.player.survival.health = (s.player.survival.health + 4.0).min(wolfcraft_engine::player::MAX_HEALTH);
-                                }
-                            }
+                            InteractionEvent::Slept { .. } | InteractionEvent::Sat { .. } => {}
                             InteractionEvent::OpenCrafting => {
                                 self.inv_ui = InventoryUiState::default();
                                 self.screen = Screen::Inventory;
@@ -1751,6 +1746,21 @@ impl App {
                             studio_cover = cover;
                         }
                         let _ = &studio_world;
+                        // Asleep: the screen goes dark and "Zzz" floats up, then the morning fades in.
+                        let fade = s.sleep_fade();
+                        if fade > 0.0 {
+                            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("sleep")));
+                            let r = ctx.screen_rect();
+                            painter.rect_filled(r, 0.0, egui::Color32::from_rgba_unmultiplied(4, 6, 18, (fade * 255.0) as u8));
+                            let t = time.elapsed();
+                            for i in 0..3 {
+                                let k = ((t * 0.5 + i as f32 * 0.33) % 1.0) as f32;
+                                let pos = r.center() + egui::vec2(20.0 + k * 50.0 + i as f32 * 6.0, -10.0 - k * 80.0);
+                                let a = ((1.0 - k) * fade * 255.0) as u8;
+                                painter.text(pos, egui::Align2::CENTER_CENTER, "Z", egui::FontId::proportional(18.0 + k * 22.0), egui::Color32::from_rgba_unmultiplied(200, 215, 255, a));
+                            }
+                            painter.text(r.center() + egui::vec2(0.0, 60.0), egui::Align2::CENTER_CENTER, format!("Ночь проходит… {}", s.clock()), egui::FontId::proportional(16.0), egui::Color32::from_rgba_unmultiplied(220, 225, 240, (fade * 255.0) as u8));
+                        }
                         if s.saved_notice > 0.0 {
                             ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("saved")))
                                 .text(egui::pos2(ctx.screen_rect().center().x, 28.0), egui::Align2::CENTER_CENTER, "Сохранено", egui::FontId::proportional(14.0), theme_manager::palette(ctx).success);
@@ -2055,15 +2065,20 @@ impl App {
                 let arrows: Vec<(glam::DVec3, glam::DVec3)> = s.arrows.list.iter().map(|a| (a.pos, a.dir)).collect();
                 model_verts.extend(wolfcraft_engine::renderer::model::build_arrow_models(&arrows, cam.eye));
                 if s.camera_mode != crate::session::CameraMode::First && !s.player.survival.dead {
+                    let (rest_at, rest_dir) = match s.rest {
+                        Some(crate::session::Rest::Sleep { at, dir, .. }) | Some(crate::session::Rest::Sit { at, dir, .. }) => (Some(at), Some(dir)),
+                        None => (None, None),
+                    };
                     let pose = PlayerPose {
-                        feet: s.player.body.pos,
-                        heading: s.player.heading,
+                        feet: rest_at.unwrap_or(s.player.body.pos),
+                        heading: rest_dir.unwrap_or(s.player.heading),
                         up: s.player.up(),
                         pitch: s.player.pitch as f32,
-                        phase: s.player.anim_phase,
+                        phase: if s.rest.is_some() { self.time.elapsed() * 2.0 } else { s.player.anim_phase },
                         amount: s.player.anim_amount,
                         sneaking: s.player.sneaking,
-                        swimming: s.player.body.in_water && !s.player.body.on_ground && !s.player.body.flying,
+                        swimming: s.rest.is_none() && s.player.body.in_water && !s.player.body.on_ground && !s.player.body.flying,
+                        rest: match s.rest { Some(crate::session::Rest::Sleep { .. }) => 1, Some(crate::session::Rest::Sit { .. }) => 2, None => 0 },
                         skin: self.settings.skin,
                         // Mining/attacking swings; placing a block is a short push of the arm.
                         attack: if self.hand_cycle > 0.0 { self.hand_cycle } else if self.hand_place > 0.0 { (1.0 - self.hand_place) * 0.5 } else { 0.0 },
@@ -2079,7 +2094,7 @@ impl App {
                     if pos.length_squared() < 1.0 {
                         continue;
                     }
-                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, skin: rp.skin, attack: 0.0, held: Default::default(), armor: [None; 4] };
+                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, rest: 0, skin: rp.skin, attack: 0.0, held: Default::default(), armor: [None; 4] };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));

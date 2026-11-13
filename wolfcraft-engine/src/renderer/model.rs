@@ -71,6 +71,9 @@ pub struct PlayerPose {
     pub sneaking: bool,
     /// Swimming (in water, off the ground): the body lies flat and crawls.
     pub swimming: bool,
+    /// Resting: 0 no, 1 lying on the back (asleep in a bed; `feet` is the middle of the bed
+    /// top, `heading` points to the pillow), 2 sitting (`feet` is the seat top).
+    pub rest: u8,
     /// Skin preset (see `SKIN_NAMES`).
     pub skin: u8,
     /// Swing of the right arm 0..1 (0 = none); the motion depends on what is held.
@@ -81,6 +84,9 @@ pub struct PlayerPose {
     /// 1 bronze, 2 iron, 3 diamond.
     pub armor: [Option<u8>; 4],
 }
+
+/// Leg angle while sitting (forward from the hips).
+const SIT_LEG: f32 = -1.45;
 
 /// Item in the character's right hand.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -359,8 +365,18 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
         // Lie face-down along the heading, centred on the old body centre.
         frame = Frame { origin: pose.feet - camera + up * 0.9 - fwd * 0.9, right, up: fwd, fwd: -up };
     }
+    let asleep = pose.rest == 1;
+    let sitting = pose.rest == 2;
+    if asleep {
+        // On the back: the head towards the pillow, the face to the sky, breathing slowly.
+        let breath = (pose.phase * 0.5).sin() as f64 * 0.012;
+        frame = Frame { origin: pose.feet - camera - fwd * 0.9 + up * (0.24 + breath), right: -right, up: fwd, fwd: up };
+    } else if sitting {
+        // The hips rest on the seat.
+        frame.origin = pose.feet - camera - up * 0.62;
+    }
     let swim = pose.swimming;
-    let swing = if swim { 0.5 * (pose.phase * 0.8).sin() } else { pose.phase.sin() * 0.85 * pose.amount };
+    let swing = if asleep || sitting { 0.0 } else if swim { 0.5 * (pose.phase * 0.8).sin() } else { pose.phase.sin() * 0.85 * pose.amount };
     let crouch = if pose.sneaking { 0.12 } else { 0.0 };
     let lean = if pose.sneaking { 0.0 } else { 0.0 };
     let _ = lean;
@@ -372,6 +388,8 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
     // Legs (pivot at the hip): trousers and sneakers with a white sole.
     let hip = 0.68;
     for (side, ang) in [(-1.0f32, swing), (1.0, -swing)] {
+        // Sitting: the legs point forward from the hips.
+        let ang = if sitting { SIT_LEG } else { ang };
         let x0 = if side < 0.0 { -0.25 } else { 0.0 };
         let lp = Vec3::new(x0 + 0.125, hip, 0.0);
         add_char_box(&mut v, &frame, Vec3::new(x0 + 0.01, 0.12, -0.12), Vec3::new(x0 + 0.24, hip, 0.12), lp, ang, trousers_c);
@@ -420,6 +438,7 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
     }
     if pose.armor[2].is_some() || pose.armor[3].is_some() {
         for (side, lang) in [(-1.0f32, swing), (1.0, -swing)] {
+            let lang = if sitting { SIT_LEG } else { lang };
             let x0 = if side < 0.0 { -0.25 } else { 0.0 };
             let lp = Vec3::new(x0 + 0.125, hip, 0.0);
             if let Some(m) = pose.armor[2] {
@@ -1766,7 +1785,7 @@ mod tests {
 
     fn pose(up: DVec3) -> PlayerPose {
         let heading = if up.y.abs() > 0.9 { DVec3::X } else { DVec3::Y.cross(up).normalize() };
-        PlayerPose { feet: up * 1000.0, heading, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, skin: 0, attack: 0.0, held: Held::Nothing, armor: [None; 4] }
+        PlayerPose { feet: up * 1000.0, heading, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, rest: 0, skin: 0, attack: 0.0, held: Held::Nothing, armor: [None; 4] }
     }
 
     #[test]

@@ -95,6 +95,8 @@ pub struct GameSession {
     last_selected: usize,
     pub saved_notice: f32,
     pub camera_mode: CameraMode,
+    /// Camera mode to return to after resting.
+    rest_camera: Option<CameraMode>,
     /// Vertical camera lag (blocks along up) that smooths automatic steps.
     cam_lag: f64,
     prev_radius: f64,
@@ -106,6 +108,8 @@ pub struct GameSession {
     /// Arrows in flight or stuck in blocks.
     pub arrows: wolfcraft_engine::projectiles::Arrows,
     /// Bow draw 0..1 while the use button is held with a bow.
+    /// The player is asleep in a bed or sits on a chair (drawn in third person, cannot walk).
+    pub rest: Option<Rest>,
     pub bow_charge: f32,
     /// The arrow the bow would shoot now (drawn on the string, tinted if tipped).
     pub bow_arrow: Option<wolfcraft_engine::items::ItemId>,
@@ -194,6 +198,7 @@ impl GameSession {
             last_selected: usize::MAX,
             saved_notice: 0.0,
             camera_mode: CameraMode::First,
+            rest_camera: None,
             cam_lag: 0.0,
             prev_radius: 0.0,
             eye_r: 0.0,
@@ -202,6 +207,7 @@ impl GameSession {
             attack_cd: 0.0,
             death_burst_done: false,
             arrows: Default::default(),
+            rest: None,
             bow_charge: 0.0,
             bow_arrow: None,
             ench_seed: 1,
@@ -409,8 +415,10 @@ impl GameSession {
             }
         }
 
+        // Resting: asleep (the night passes in a few seconds) or sitting until you move.
+        let resting = self.tick_rest(input, dt);
         // Physics, split into steps of at most 1/30 s.
-        if self.ground_ready() && !self.player.survival.dead {
+        if self.ground_ready() && !self.player.survival.dead && !resting {
             let controls = Controls { forward: input.forward, strafe: input.strafe, jump: input.jump, sprint: input.sprint, sneak: input.sneak };
             let mut left = dt.min(0.25) as f64;
             while left > 1e-6 {
@@ -747,6 +755,15 @@ impl GameSession {
         let copy=events.clone();
         for event in copy {match event {
             InteractionEvent::Placed{pos,block} if c::is_portable(block)=>{if let Some(item)=used_stack.filter(|s|s.damage>0&&s.info().place.is_some_and(c::is_portable)){if let Some(slots)=self.storage_bank.unpack(item.damage){self.containers.insert(pos,slots);}}},
+            InteractionEvent::Slept { night, pos } => self.lie_down(pos, night),
+            InteractionEvent::Sat { pos } => {
+                let c = self.chunks.grid().cell_center(pos);
+                let up = wolfcraft_engine::physics::up_at(c);
+                // Face away from where the player came from? Simpler and natural: keep looking
+                // the way you look.
+                self.start_rest(Rest::Sit { at: c - up * 0.02, dir: self.player.heading, back: self.player.body.pos });
+                self.item_name = Some(("Вы сели. Двиньтесь или прыгните, чтобы встать".into(), 2.5));
+            }
             InteractionEvent::FrameUse{pos}=>{
                 let old=self.storage_bank.frames.remove(&(self.hell,pos));
                 if let Some(mut item)=self.player.inventory.held() {
@@ -1237,6 +1254,106 @@ impl GameSession {
     /// Hits the creature in the crosshair if there is one within reach and nothing solid in
     /// front of it. Returns true when a creature was targeted (even during the cooldown, so a
     /// tap on a mob never places a block on it).
+    fn start_rest(&mut self, r: Rest) {
+        if self.rest.is_none() {
+            self.rest_camera = Some(self.camera_mode);
+        }
+        self.camera_mode = CameraMode::ThirdBack;
+        self.player.body.vel = DVec3::ZERO;
+        self.rest = Some(r);
+    }
+
+    fn end_rest(&mut self) {
+        if let Some(r) = self.rest.take() {
+            let back = match r {
+                Rest::Sleep { back, .. } | Rest::Sit { back, .. } => back,
+            };
+            self.player.body.pos = back;
+            self.player.body.vel = DVec3::ZERO;
+        }
+        if let Some(m) = self.rest_camera.take() {
+            self.camera_mode = m;
+        }
+    }
+
+    /// Lies the player down on the bed at `pos`: the spawn point is already set; at night
+    /// the sleep runs the clock to the morning.
+    fn lie_down(&mut self, pos: wolfcraft_engine::cubesphere::Cell, night: bool) {
+        if !night {
+            self.item_name = Some(("Точка возрождения установлена. Спать можно ночью".into(), 3.0));
+            return;
+        }
+        let g = self.chunks.grid();
+        let c = g.cell_center(pos);
+        let up = wolfcraft_engine::physics::up_at(c);
+        // The bed reaches one cell towards its pillow (see the bed's geometry and rotation).
+        let rot = wolfcraft_engine::construction::entry(self.chunks.get_block(pos).map(|b| b as u16).unwrap_or(0)).map(|e| e.1).unwrap_or(0);
+        let (di, dj) = [(0, 1), (-1, 0), (0, -1), (1, 0)][rot as usize % 4];
+        let head = g.offset(pos, di, dj, 0).map(|n| g.cell_center(n)).unwrap_or(c);
+        let dir = (head - c).normalize_or_zero();
+        let dir = if dir.length_squared() > 0.5 { dir } else { self.player.heading };
+        let len = wolfcraft_engine::player::DAY_LENGTH;
+        let t0 = self.player.world_time;
+        let f = wolfcraft_engine::player::day_fraction(t0);
+        let day = (t0 / len).floor() + if f >= 0.76 { 1.0 } else { 0.0 };
+        let at = (c + head) * 0.5 + up * 0.1;
+        self.start_rest(Rest::Sleep { at, dir, back: self.player.body.pos, t: 0.0, t0, t1: (day + 0.27) * len });
+    }
+
+    /// Seconds a night's sleep takes on screen.
+    pub const SLEEP_SECS: f32 = 5.0;
+
+    /// How dark the screen is while sleeping (0..1): fades in, stays, fades out.
+    pub fn sleep_fade(&self) -> f32 {
+        match self.rest {
+            Some(Rest::Sleep { t, .. }) => {
+                let k = t / Self::SLEEP_SECS;
+                ((k / 0.25).min(1.0).min((1.0 - k) / 0.2)).clamp(0.0, 1.0) * 0.92
+            }
+            _ => 0.0,
+        }
+    }
+
+    /// Advances sleeping and sitting. Returns true while the player rests (no walking).
+    fn tick_rest(&mut self, input: &InputFrame, dt: f32) -> bool {
+        let Some(r) = self.rest else { return false };
+        let moved = input.jump || input.jump_pressed || input.forward.abs() > 0.3 || input.strafe.abs() > 0.3;
+        match r {
+            Rest::Sit { at, .. } => {
+                if moved || self.player.survival.dead {
+                    self.end_rest();
+                    return false;
+                }
+                self.player.body.pos = at;
+                self.player.body.vel = DVec3::ZERO;
+            }
+            Rest::Sleep { at, dir, back, t, t0, t1 } => {
+                let t = t + dt;
+                let hurt = self.player.survival.hurt_flash > 0.0;
+                if t >= Self::SLEEP_SECS || self.player.survival.dead || hurt || (moved && t > 0.6) {
+                    let done = t >= Self::SLEEP_SECS;
+                    self.end_rest();
+                    if done {
+                        self.player.world_time = t1;
+                        self.player.survival.health = (self.player.survival.health + 4.0).min(wolfcraft_engine::player::MAX_HEALTH);
+                        self.item_name = Some(("Доброе утро!".into(), 3.0));
+                    } else {
+                        self.item_name = Some(("Сон прерван".into(), 2.0));
+                    }
+                    return false;
+                }
+                // The night runs by while the eyes are closed (eased in and out).
+                let k = (t / Self::SLEEP_SECS).clamp(0.0, 1.0);
+                let e = k * k * (3.0 - 2.0 * k);
+                self.player.world_time = t0 + (t1 - t0) * e as f64;
+                self.player.body.pos = at;
+                self.player.body.vel = DVec3::ZERO;
+                self.rest = Some(Rest::Sleep { at, dir, back, t, t0, t1 });
+            }
+        }
+        true
+    }
+
     /// First arrow in the bag (plain or tipped), in slot order.
     fn next_arrow(&self) -> Option<wolfcraft_engine::items::ItemId> {
         use wolfcraft_engine::items::ids;
@@ -2355,6 +2472,16 @@ mod tests {
         // The player sits somewhere on the planet: at least the sun position differs.
         assert!((noon - midnight).abs() > 0.5 || s.player.up().dot(s.sun()).abs() < 0.3);
     }
+}
+
+/// The player rests: asleep in a bed or sitting.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Rest {
+    /// `at`: middle of the bed top, `dir`: towards the pillow, `back`: where the player
+    /// stood, `t`: seconds asleep, `t0..t1`: the world time the sleep runs through.
+    Sleep { at: DVec3, dir: DVec3, back: DVec3, t: f32, t0: f64, t1: f64 },
+    /// `at`: the seat, `dir`: where the sitter faces, `back`: where the player stood.
+    Sit { at: DVec3, dir: DVec3, back: DVec3 },
 }
 
 /// Effect of a tipped arrow item.
