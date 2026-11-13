@@ -1762,6 +1762,80 @@ impl GameSession {
     /// Builds an iskrit showcase in front of the player: a stone floor with signed stands —
     /// torch → dust → lamp, a button, a switch, an iskrit block, the 15-block reach (15 dust
     /// lights the lamp, 16 does not) and dust climbing a staircase. Returns a chat message.
+    /// Builds a boss arena 16 blocks ahead of the player, so the guardians need not be
+    /// searched for: a round floor 11 blocks in radius, a low wall with four gates, four
+    /// lantern pillars and the guardian's altar in the middle. One `//undo` removes it.
+    /// Returns the altar's cell.
+    pub fn build_arena(&mut self, kind: wolfcraft_engine::bosses::BossKind) -> Result<wolfcraft_engine::cubesphere::Cell, String> {
+        use wolfcraft_engine::block::Block as B;
+        use wolfcraft_engine::bosses::BossKind;
+        use wolfcraft_engine::construction::{self as c, Form};
+        if self.hell {
+            return Err("Арены строятся только на родной планете".into());
+        }
+        let g = self.chunks.grid();
+        let feet = g.world_to_cell(self.player.body.pos);
+        let centre = g.cell_center(feet);
+        let ax = |di: i32, dj: i32| g.offset(feet, di, dj, 0).map(|c| (g.cell_center(c) - centre).normalize()).unwrap_or(DVec3::ZERO);
+        let (ei, ej) = (ax(1, 0), ax(0, 1));
+        let h = self.player.heading;
+        let fwd = if h.dot(ei).abs() >= h.dot(ej).abs() { (h.dot(ei).signum() as i32, 0) } else { (0, h.dot(ej).signum() as i32) };
+        const R: i32 = 11;
+        let (floor, wall, altar) = match kind {
+            BossKind::Stone => (B::StoneBricks, B::Cobblestone, c::block(Form::StoneAltar, 3, 0)),
+            BossKind::Root => (B::MossBlock, B::OakLog, c::block(Form::RootAltar, 0, 0)),
+            BossKind::Ember => (B::Obsidian, B::Netherrack, c::block(Form::EmberAltar, 6, 0)),
+        };
+        let altar = altar.ok_or("Алтарь не найден в каталоге")?;
+        let mid = g.offset(feet, fwd.0 * (R + 5), fwd.1 * (R + 5), 0).ok_or("Слишком близко к краю грани планеты, отойдите чуть в сторону")?;
+        let mut cells = Vec::new();
+        for di in -R..=R {
+            for dj in -R..=R {
+                let d2 = di * di + dj * dj;
+                if d2 > R * R + R {
+                    continue;
+                }
+                let Some(col) = g.offset(mid, di, dj, 0) else { return Err("Слишком близко к краю грани планеты, отойдите чуть в сторону".into()) };
+                let rim = d2 >= (R - 1) * (R - 1);
+                // Floor at the player's feet level − 1, a few blocks of fill under it, air above.
+                for dk in -3..=7 {
+                    let Some(cell) = g.offset(col, 0, 0, dk) else { continue };
+                    let gate = di.abs() <= 1 || dj.abs() <= 1;
+                    let b = if dk < -1 {
+                        match self.chunks.get_block(cell) {
+                            Some(b) if b.is_solid() && !b.is_fluid() => continue,
+                            _ => wall,
+                        }
+                    } else if dk == -1 {
+                        floor
+                    } else if rim && dk <= 1 && !gate {
+                        wall
+                    } else {
+                        B::Air
+                    };
+                    cells.push((cell, b));
+                }
+            }
+        }
+        // Four pillars with lanterns half-way out, the altar in the centre.
+        for (di, dj) in [(6, 6), (6, -6), (-6, 6), (-6, -6)] {
+            for dk in 0..=3 {
+                if let Some(cell) = g.offset(mid, di, dj, dk) {
+                    cells.push((cell, if dk == 3 { B::Lantern } else { wall }));
+                }
+            }
+        }
+        cells.push((mid, altar));
+        let (n, missed) = crate::worldedit::apply(self, cells);
+        if n == 0 || missed > 0 && self.chunks.get_block(mid) != Some(altar) {
+            return Err("Мир вокруг ещё не загрузился, подойдите ближе или попробуйте через пару секунд".into());
+        }
+        if !self.is_creative() && self.player.inventory.count(wolfcraft_engine::items::ids::RITUAL_SEAL) == 0 {
+            self.player.inventory.add(wolfcraft_engine::items::ItemStack::new(wolfcraft_engine::items::ids::RITUAL_SEAL, 1));
+        }
+        Ok(mid)
+    }
+
     pub fn build_iskrit_demo(&mut self) -> Result<String, String> {
         use wolfcraft_engine::block::Block as B;
         let g = self.chunks.grid();
@@ -2326,6 +2400,120 @@ mod tests {
         assert!(s.player.body.on_ground, "stands on the new face");
         assert!(s.player.up().y > 0.95, "up is now the +Y face normal: {:?}", s.player.up());
         wolfcraft_engine::cubesphere::set_cube_world(false);
+    }
+
+    #[test]
+    fn arena_summons_a_guardian_that_fights_dies_once_and_pays_once() {
+        use wolfcraft_engine::bosses::BossKind;
+        use wolfcraft_engine::items::ids;
+        let mut s = load("arena", 33, false);
+        settle(&mut s);
+        for _ in 0..60 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        }
+        s.cfg.difficulty = wolfcraft_engine::config::Difficulty::Normal;
+        let altar = s.build_arena(BossKind::Stone).expect("arena builds on loaded ground");
+        assert!(wolfcraft_engine::construction::altar(s.chunks.get_block(altar).unwrap()).is_some(), "the altar stands in the middle");
+        assert_eq!(s.player.inventory.count(ids::RITUAL_SEAL), 1, "a seal is handed out");
+        let g = s.chunks.grid();
+        // The floor is solid and the air above it is clear.
+        let under = g.offset(altar, 3, 0, -1).unwrap();
+        assert!(s.chunks.get_block(under).unwrap().is_solid());
+        assert_eq!(s.chunks.get_block(g.offset(altar, 3, 0, 2).unwrap()), Some(wolfcraft_engine::block::Block::Air));
+        // Stand four blocks from the altar and wake the guardian.
+        let stand = g.cell_center(g.offset(altar, 4, 0, 0).unwrap());
+        s.player.body.pos = stand - wolfcraft_engine::physics::up_at(stand) * 0.45;
+        s.player.body.vel = DVec3::ZERO;
+        let mut ev = vec![InteractionEvent::ActivateBoss { pos: altar, kind: BossKind::Stone }];
+        s.handle_building_events(&mut ev, None);
+        let boss_hp = |s: &GameSession| s.mobs.mobs.iter().find(|m| m.boss.is_some()).map(|m| m.hp);
+        assert_eq!(boss_hp(&s), Some(180.0), "the guardian wakes with full health");
+        assert_eq!(s.player.inventory.count(ids::RITUAL_SEAL), 0, "the seal is spent");
+        // A second tap does not wake another one.
+        let mut ev = vec![InteractionEvent::ActivateBoss { pos: altar, kind: BossKind::Stone }];
+        s.handle_building_events(&mut ev, None);
+        assert_eq!(s.mobs.mobs.iter().filter(|m| m.boss.is_some()).count(), 1);
+        // It attacks: standing next to it costs health within a quarter of a minute.
+        let mut hurt = false;
+        for _ in 0..900 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+            if s.player.survival.health < 19.5 {
+                hurt = true;
+                break;
+            }
+        }
+        assert!(hurt, "the guardian's blow reaches a player standing near it");
+        s.player.survival.health = 20.0;
+        s.player.survival.dead = false;
+        // Phases follow its health; the first phase shrugs off part of the damage.
+        let i = s.mobs.mobs.iter().position(|m| m.boss.is_some()).unwrap();
+        let from = s.player.body.pos;
+        s.mobs.hurt(i, 10.0, from);
+        assert_eq!(boss_hp(&s), Some(173.0), "phase one takes 30 % less");
+        while boss_hp(&s).is_some_and(|hp| hp > 0.0) {
+            let i = s.mobs.mobs.iter().position(|m| m.boss.is_some()).unwrap();
+            s.mobs.hurt(i, 40.0, from);
+        }
+        s.player.survival.health = 20.0;
+        s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        assert_eq!(s.player.inventory.count(ids::REVIVAL_HEART), 1, "the rare reward is paid");
+        assert_eq!(s.player.inventory.count(ids::RESONANCE_RUNE), 1);
+        assert!(s.boss_book.records.values().any(|r| r.defeated));
+        // Defeated for good: the altar stays quiet, no second reward.
+        for _ in 0..30 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        }
+        s.player.inventory.add(wolfcraft_engine::items::ItemStack::new(ids::RITUAL_SEAL, 1));
+        let mut ev = vec![InteractionEvent::ActivateBoss { pos: altar, kind: BossKind::Stone }];
+        s.handle_building_events(&mut ev, None);
+        assert!(s.mobs.mobs.iter().all(|m| m.boss.is_none()), "a defeated guardian does not come back");
+        assert_eq!(s.player.inventory.count(ids::RITUAL_SEAL), 1, "and the seal is kept");
+        assert_eq!(s.player.inventory.count(ids::REVIVAL_HEART), 1);
+    }
+
+    #[test]
+    fn a_bed_sleeps_through_the_night_and_a_chair_seats_the_player() {
+        use wolfcraft_engine::construction::{self as c, Form};
+        use wolfcraft_engine::player::{DAY_LENGTH, day_fraction};
+        let mut s = load("sleep", 34, false);
+        settle(&mut s);
+        for _ in 0..60 {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        }
+        let g = s.chunks.grid();
+        let feet = g.world_to_cell(s.player.body.pos + s.player.up() * 0.5);
+        let bed_cell = g.offset(feet, 2, 0, 0).unwrap();
+        assert!(s.chunks.set_block(bed_cell, c::block(Form::Bed, 0, 0).unwrap()));
+        // Midnight: a tap on the bed lays the player down and the night runs by.
+        s.player.world_time = 3.0 * DAY_LENGTH;
+        let stood = s.player.body.pos;
+        let mut ev = vec![InteractionEvent::Slept { night: true, pos: bed_cell }];
+        s.handle_building_events(&mut ev, None);
+        assert!(matches!(s.rest, Some(Rest::Sleep { .. })));
+        assert_eq!(s.camera_mode, CameraMode::ThirdBack);
+        let mut darkest = 0.0f32;
+        for _ in 0..(GameSession::SLEEP_SECS * 60.0) as usize + 30 {
+            s.update(&InputFrame { forward: 0.0, ..Default::default() }, 1.0 / 60.0, 4, false);
+            darkest = darkest.max(s.sleep_fade());
+        }
+        assert!(darkest > 0.8, "the screen goes dark while asleep");
+        assert!(s.rest.is_none(), "awake again");
+        assert_eq!(s.camera_mode, CameraMode::First, "the camera is back");
+        let f = day_fraction(s.player.world_time);
+        assert!((0.26..0.30).contains(&f), "it is morning: {f}");
+        assert!((s.player.body.pos - stood).length() < 1.5, "back beside the bed");
+        // By day a bed only sets the spawn point.
+        let mut ev = vec![InteractionEvent::Slept { night: false, pos: bed_cell }];
+        s.handle_building_events(&mut ev, None);
+        assert!(s.rest.is_none());
+        // A chair: sit, then stand up by moving.
+        let mut ev = vec![InteractionEvent::Sat { pos: bed_cell }];
+        s.handle_building_events(&mut ev, None);
+        assert!(matches!(s.rest, Some(Rest::Sit { .. })));
+        s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+        assert!(s.rest.is_some(), "stays seated while still");
+        s.update(&InputFrame { forward: 1.0, ..Default::default() }, 1.0 / 60.0, 4, false);
+        assert!(s.rest.is_none(), "moving stands up");
     }
 
     #[test]

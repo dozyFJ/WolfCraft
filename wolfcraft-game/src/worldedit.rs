@@ -79,7 +79,7 @@ fn volume(lo: [i32; 3], hi: [i32; 3]) -> i64 {
 
 /// Sets blocks, recording what was there for undo. Returns how many changed and how many
 /// could not be set (chunk not loaded).
-fn apply(s: &mut GameSession, cells: impl IntoIterator<Item = (Cell, Block)>) -> (usize, usize) {
+pub(crate) fn apply(s: &mut GameSession, cells: impl IntoIterator<Item = (Cell, Block)>) -> (usize, usize) {
     let mut log = Vec::new();
     let mut missed = 0;
     for (c, b) in cells {

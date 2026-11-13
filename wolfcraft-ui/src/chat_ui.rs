@@ -137,7 +137,7 @@ fn line_job(l: &ChatLine, size: f32, alpha: f32, wrap: f32) -> egui::text::Layou
 
 /// Quick commands in the open chat: (button text, command). A command ending in a space
 /// needs an argument and goes into the field; the rest run at once.
-const QUICK: [(&str, &str); 20] = [
+const QUICK: [(&str, &str); 22] = [
     ("Творческий", "/gamemode creative"),
     ("Выживание", "/gamemode survival"),
     ("День", "/time set day"),
@@ -154,6 +154,8 @@ const QUICK: [(&str, &str); 20] = [
     ("Телепорт…", "/tp "),
     ("Сложность…", "/difficulty "),
     ("Сезон…", "/season "),
+    ("Арена босса…", "/arena "),
+    ("Арены", "/arena"),
     ("Дата", "/month"),
     ("Месяц…", "/month "),
     ("WorldEdit", "//help"),
