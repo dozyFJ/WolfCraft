@@ -1,0 +1,21 @@
+name: UI tap test
+
+on:
+  push:
+    branches: [mobile-explosives]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ui-test
+      - name: Tap on a nearby server joins it
+        run: cargo test -p wolfcraft-ui --lib tap_on_nearby_server_joins_it -- --nocapture
