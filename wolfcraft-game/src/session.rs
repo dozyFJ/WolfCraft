@@ -209,7 +209,7 @@ impl GameSession {
             attack_cd: 0.0,
             death_burst_done: false,
             arrows: Default::default(),
-            explosives: wolfcraft_engine::explosives::Explosives::new(l.cfg.seed),
+            explosives: wolfcraft_engine::explosives::Explosives::new(seed),
             rest: None,
             bow_charge: 0.0,
             bow_arrow: None,
