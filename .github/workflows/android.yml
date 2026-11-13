@@ -2,6 +2,7 @@ name: Android APK
 
 on:
   push:
+    branches: [mobile-explosives]
   workflow_dispatch:
 
 permissions:
@@ -9,7 +10,7 @@ permissions:
 
 # One build at a time: two runs publishing "latest" together can clobber each other.
 concurrency:
-  group: android-apk
+  group: android-apk-test
   cancel-in-progress: false
 
 jobs:
@@ -68,7 +69,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete latest -y --cleanup-tag || true
-          gh release create latest WolfCraft.apk --prerelease --target "$GITHUB_SHA" \
-            --title "WolfCraft (сборка #${{ github.run_number }})" \
+          gh release delete test -y --cleanup-tag || true
+          gh release create test WolfCraft.apk --prerelease --target "$GITHUB_SHA" \
+            --title "WolfCraft ТЕСТ: взрывчатка (сборка #${{ github.run_number }})" \
             --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай WolfCraft.apk ниже."

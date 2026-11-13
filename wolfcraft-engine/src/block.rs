@@ -1820,6 +1820,9 @@ blocks! {
     2441 MoreBuild30R1 => crate::construction::block_info("Железо · Пепельный алтарь", 6, crate::construction::Form::EmberAltar),
     2442 MoreBuild30R2 => crate::construction::block_info("Железо · Пепельный алтарь", 6, crate::construction::Form::EmberAltar),
     2443 MoreBuild30R3 => crate::construction::block_info("Железо · Пепельный алтарь", 6, crate::construction::Form::EmberAltar),
+    // Lit with a lighter (or by another blast): see `explosives`. Not a catalogue piece:
+    // `construction::entry` has nothing for this id.
+    2444 Dynamite => info("Динамит", Opaque, 0.1, Hand, column(t::DYNAMITE_SIDE, t::DYNAMITE_TOP, t::DYNAMITE_TOP)),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a

@@ -107,6 +107,8 @@ pub struct GameSession {
     pub mobs: wolfcraft_engine::mobs::MobManager,
     /// Arrows in flight or stuck in blocks.
     pub arrows: wolfcraft_engine::projectiles::Arrows,
+    /// Lit dynamite and grenades / rockets in flight.
+    pub explosives: wolfcraft_engine::explosives::Explosives,
     /// Bow draw 0..1 while the use button is held with a bow.
     /// The player is asleep in a bed or sits on a chair (drawn in third person, cannot walk).
     pub rest: Option<Rest>,
@@ -207,6 +209,7 @@ impl GameSession {
             attack_cd: 0.0,
             death_burst_done: false,
             arrows: Default::default(),
+            explosives: wolfcraft_engine::explosives::Explosives::new(l.cfg.seed),
             rest: None,
             bow_charge: 0.0,
             bow_arrow: None,
@@ -342,7 +345,7 @@ impl GameSession {
         let main_use = holding_bow
             || self.player.inventory.held().is_some_and(|s| {
                 let i = s.info();
-                i.place.is_some() || i.food.is_some()
+                i.place.is_some() || i.food.is_some() || wolfcraft_engine::explosives::weapon(s.id).is_some() || s.id == wolfcraft_engine::items::ids::LIGHTER
             });
         // Bow: hold to draw (one second for full power), release to shoot.
         // The arrow the bow will shoot: the first arrow in the bag (tipped ones included).
@@ -588,6 +591,8 @@ impl GameSession {
                 self.player.inventory.add(wolfcraft_engine::items::ItemStack::new(wolfcraft_engine::items::ids::ARROW, ev.picked as u8));
             }
         }
+        // Explosives: light dynamite, fire weapons, then fuses, flight and blasts.
+        self.explosives_step(&mut events, dt);
         // Spawn souls bring creatures to life (standing on the bottom of the cell).
         for e in &events {
             if let InteractionEvent::SpawnMob { pos, kind } = e {
@@ -643,7 +648,7 @@ impl GameSession {
             if let InteractionEvent::Broken { pos, block } = e {
                 wolfcraft_engine::power::piston_broken(&mut self.chunks, *pos, *block);
             }
-            if let InteractionEvent::Placed { pos, .. } | InteractionEvent::Broken { pos, .. } = e {
+            if let InteractionEvent::Placed { pos, .. } | InteractionEvent::Broken { pos, .. } | InteractionEvent::Blasted { pos, .. } = e {
                 self.fluids.changed(&self.chunks, *pos);
                 wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, *pos);
@@ -751,6 +756,128 @@ impl GameSession {
             self.save();
         }
         events
+    }
+
+    /// Lighting, firing, fuses, projectiles and blast damage. Request events (`Ignite`, `Fire`)
+    /// stay in `events` only if they actually happened; blasts add `Exploded` and `Blasted`.
+    fn explosives_step(&mut self, events: &mut Vec<InteractionEvent>, dt: f32) {
+        use wolfcraft_engine::explosives::{DYNAMITE_FUSE, blast_damage, weapon};
+        let creative = self.player.is_creative();
+        let eye = self.player.eye_pos();
+        // On a phone the shot goes where the finger points, like every other "use".
+        let look = self.aim_dir.unwrap_or_else(|| self.player.look_dir());
+        let mut keep = Vec::with_capacity(events.len());
+        for e in events.drain(..) {
+            match e {
+                InteractionEvent::Ignite { pos } => {
+                    if self.explosives.light(&mut self.chunks, pos, DYNAMITE_FUSE) {
+                        keep.push(e);
+                    }
+                }
+                InteractionEvent::Fire { weapon: id } => {
+                    let Some((ammo, kind, speed, cooldown)) = weapon(id) else { continue };
+                    if !self.explosives.ready() {
+                        continue;
+                    }
+                    if !creative && self.player.inventory.count(ammo) == 0 {
+                        self.item_name = Some((format!("Нет боеприпасов: {}", wolfcraft_engine::items::info(ammo).name), 1.5));
+                        continue;
+                    }
+                    if !creative {
+                        self.player.inventory.take(ammo, 1);
+                    }
+                    self.explosives.fire(kind, eye, look, speed, cooldown);
+                    keep.push(e);
+                }
+                other => keep.push(other),
+            }
+        }
+        *events = keep;
+
+        let targets: Vec<DVec3> = self.mobs.mobs.iter().map(|m| m.centre()).collect();
+        let (blasts, broken) = self.explosives.update(&mut self.chunks, &targets, dt);
+        // Smoke behind rockets.
+        let rockets: Vec<DVec3> = self.explosives.rockets().collect();
+        for p in rockets {
+            let up = wolfcraft_engine::physics::up_at(p);
+            self.mobs.fx(p, up * 0.4, [0.62, 0.62, 0.60], 0.12, 0.9, wolfcraft_engine::mobs::FxKind::Rise);
+            self.mobs.fx_glow(p, DVec3::ZERO, [1.0, 0.65, 0.20], 0.06, 0.2, wolfcraft_engine::mobs::FxKind::Rise);
+        }
+        let mut n_broken = 0u32;
+        for (pos, block) in broken {
+            let centre = self.chunks.grid().cell_center(pos);
+            // Chests and furnaces caught in a blast spill what they held.
+            if let Some(slots) = self.containers.remove(&pos) {
+                for st in slots.into_iter().flatten() {
+                    self.drops.pop_from_block(st, centre);
+                }
+            }
+            self.furnace_t.remove(&pos);
+            // About a third of the blocks fall out as loot (not in creative).
+            if !creative && block != wolfcraft_engine::block::Block::Dynamite && self.mobs.rand() < 0.33 {
+                let ip = glam::IVec3::new(pos.i, pos.j, pos.k ^ ((pos.f as i32) << 24));
+                for d in wolfcraft_engine::items::drops(block, true, ip, self.cfg.seed) {
+                    self.drops.pop_from_block(d, centre);
+                }
+            }
+            n_broken += 1;
+            events.push(InteractionEvent::Blasted { pos, block });
+        }
+        let _ = n_broken;
+        for b in blasts {
+            events.push(InteractionEvent::Exploded { at: b.pos, power: b.power });
+            // Fireball, sparks and a cloud of smoke.
+            {
+                use wolfcraft_engine::mobs::FxKind;
+                let up = wolfcraft_engine::physics::up_at(b.pos);
+                for i in 0..36 {
+                    let a = i as f64 * 2.399;
+                    let side = DVec3::new(a.cos(), (a * 1.3).sin(), a.sin());
+                    let speed = 3.0 + (i % 5) as f64 * 1.6;
+                    let col = [[1.0, 0.92, 0.55], [1.0, 0.62, 0.18], [0.95, 0.35, 0.10]][i % 3];
+                    self.mobs.fx_glow(b.pos, side * speed + up * 2.0, col, 0.10 + (i % 3) as f32 * 0.05, 0.7, FxKind::Rise);
+                }
+                for i in 0..20 {
+                    let a = i as f64 * 1.7;
+                    let side = DVec3::new(a.cos(), (a * 0.9).sin(), a.sin());
+                    let shade = 0.25 + (i % 4) as f32 * 0.08;
+                    self.mobs.fx(b.pos + side * 0.8, side * 1.2 + up * 1.4, [shade, shade, shade * 0.95], 0.35 + (i % 3) as f32 * 0.12, 2.2, FxKind::Rise);
+                }
+                self.mobs.chips(b.pos, &[[0.35, 0.33, 0.32], [0.20, 0.19, 0.19]], 20, 9.0);
+            }
+            // The player: damage through armor, and a push away from the blast.
+            if !self.player.survival.dead {
+                let centre = self.player.body.pos + self.player.up() * 0.9;
+                let dist = (centre - b.pos).length();
+                let dmg = blast_damage(b.power, dist);
+                if dmg > 0.0 {
+                    let armor = self.player.armor_points();
+                    self.player.damage(dmg * (1.0 - (armor as f32 * 0.04).min(0.8)), self.cfg.difficulty);
+                    let push = (centre - b.pos).normalize_or_zero() * (dmg as f64 * 0.8).min(14.0);
+                    if !self.player.body.flying {
+                        self.player.body.vel += push;
+                        self.player.body.on_ground = false;
+                    }
+                }
+            }
+            for i in 0..self.mobs.mobs.len() {
+                if self.mobs.mobs[i].hp <= 0.0 {
+                    continue;
+                }
+                let dist = (self.mobs.mobs[i].centre() - b.pos).length();
+                let dmg = blast_damage(b.power, dist);
+                if dmg <= 0.0 {
+                    continue;
+                }
+                if let Some(kind) = self.mobs.hurt(i, dmg, b.pos) {
+                    let at = self.mobs.mobs[i].body.pos;
+                    for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64 ^ i as u64) {
+                        self.drops.pop_from_block(drop, at);
+                    }
+                    self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
+                }
+            }
+        }
     }
 
     fn handle_building_events(&mut self, events:&mut Vec<InteractionEvent>, used_stack:Option<wolfcraft_engine::items::ItemStack>) {
@@ -944,6 +1071,7 @@ impl GameSession {
         self.planet = planet.clone();
         self.chunks = ChunkManager::new(planet, Arc::new(storage));
         self.mobs = wolfcraft_engine::mobs::MobManager::new(self.cfg.seed);
+        self.explosives = wolfcraft_engine::explosives::Explosives::new(self.cfg.seed);
         self.hell = hell;
         self.load_containers();
         self.dimension_changed = true;
