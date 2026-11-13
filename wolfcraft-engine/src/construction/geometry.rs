@@ -118,16 +118,26 @@ fn build(form: Form, joined: u8) -> Geometry {
         Panel => g.cuboid([0.,0.,0.,1.,0.08,1.],Main),
         Grille => {for n in 0..4 {let x=0.05+n as f32*0.3;g.cuboid([x,0.44,0.,x+0.05,0.56,1.],Main);}for z in [0.2,0.7] {g.cuboid([0.,0.44,z,1.,0.56,z+0.05],Main);}},
         Arch|HalfArch => {
-            let end=if form==HalfArch {8}else{16};
+            // A doorway arch the player walks through: thin posts on both sides of the cell
+            // and a round top 2 blocks high (the part above the cell is drawn only; the
+            // posts block in their own cell). The half arch has one post and a quarter top.
+            const LEG: f32 = 0.12;
+            const SPRING: f32 = 1.5;
+            let (ro, ri) = (0.5f32, 0.5 - LEG);
+            let end = if form == HalfArch { 8 } else { 16 };
             for n in 0..end {
-                let a=n as f32*std::f32::consts::PI/16.;let b=(n+1) as f32*std::f32::consts::PI/16.;
-                let p=|r:f32,t:f32,y:f32|[0.5+r*t.cos(),y,0.5+r*t.sin()];
-                let points=[p(0.5,a,0.25),p(0.5,b,0.25),p(0.3,b,0.25),p(0.3,a,0.25),p(0.5,a,0.75),p(0.5,b,0.75),p(0.3,b,0.75),p(0.3,a,0.75)];
-                for f in [[0,1,2,3],[4,7,6,5],[0,4,5,1],[3,2,6,7]] {g.face(f.map(|i|points[i]),Main);}
-                g.boxes.push(bounds(&points));
+                let a = n as f32 * std::f32::consts::PI / 16.;
+                let b = (n + 1) as f32 * std::f32::consts::PI / 16.;
+                let p = |r: f32, t: f32, y: f32| [0.5 + r * t.cos(), y, SPRING + r * t.sin()];
+                let points = [p(ro, a, 0.25), p(ro, b, 0.25), p(ri, b, 0.25), p(ri, a, 0.25), p(ro, a, 0.75), p(ro, b, 0.75), p(ri, b, 0.75), p(ri, a, 0.75)];
+                for f in [[0, 1, 2, 3], [4, 7, 6, 5], [0, 4, 5, 1], [3, 2, 6, 7]] {
+                    g.face(f.map(|i| points[i]), Main);
+                }
             }
-            g.cuboid([0.8,0.25,0.,1.,0.75,0.5],Main);
-            if form==Arch {g.cuboid([0.,0.25,0.,0.2,0.75,0.5],Main);}
+            for x in if form == HalfArch { vec![1.0 - LEG] } else { vec![0.0, 1.0 - LEG] } {
+                g.cuboid([x, 0.25, 0., x + LEG, 0.75, 1.], Main);
+                g.visual([x, 0.25, 1., x + LEG, 0.75, SPRING], Main);
+            }
         }
         Arc15Small=>g.arc(0.5,15.),Arc30Small=>g.arc(0.5,30.),Arc45Small=>g.arc(0.5,45.),Arc90Small=>g.arc(0.5,90.),
         Arc15Medium=>g.arc(0.75,15.),Arc30Medium=>g.arc(0.75,30.),Arc45Medium=>g.arc(0.75,45.),Arc90Medium=>g.arc(0.75,90.),
@@ -213,7 +223,7 @@ mod tests {
                 assert!(!g.faces.is_empty()&&!g.boxes.is_empty(),"{}",entry.name);
                 for b in &g.boxes {for a in 0..3 {assert!(b[a]>=-1e-5&&b[a+3]<=1.00001&&b[a]<b[a+3],"{} {:?}",entry.name,b);}}
                 // Big furniture (bed, wardrobe, floor lamp) is drawn up to one cell beyond its own.
-                let big=matches!(entry.form,Form::Bed|Form::Wardrobe|Form::FloorLamp);
+                let big=matches!(entry.form,Form::Bed|Form::Wardrobe|Form::FloorLamp|Form::Arch|Form::HalfArch);
                 let (lo,hi)=if big {(-1.00001,2.00001)} else {(-1e-5,1.00001)};
                 for face in &g.faces {for p in face.points {assert!(p.iter().all(|v|v.is_finite()&&*v>=lo&&*v<=hi),"{} {:?}",entry.name,p);}}
             }
