@@ -39,6 +39,11 @@ impl Inventory {
     /// Returns true if something was equipped.
     pub fn equip_selected(&mut self) -> bool {
         let Some(s) = self.slots[self.selected] else { return false };
+        // A shield goes into the second hand (phones have no swap key).
+        if s.id == ids::SHIELD {
+            std::mem::swap(&mut self.slots[self.selected], &mut self.offhand);
+            return true;
+        }
         let Some(slot) = crate::items::armor_slot(s.id) else { return false };
         std::mem::swap(&mut self.slots[self.selected], &mut self.armor[slot]);
         true

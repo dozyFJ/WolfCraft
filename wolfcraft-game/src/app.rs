@@ -2119,6 +2119,7 @@ impl App {
                         attack: if self.hand_cycle > 0.0 { self.hand_cycle } else if self.hand_place > 0.0 { (1.0 - self.hand_place) * 0.5 } else { 0.0 },
                         held: held_visual(&s.player.inventory, &self.tile_colors),
                         armor: worn_armor(&s.player.inventory),
+                        shield: s.player.inventory.has_shield(),
                     };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                     if s.player.inventory.armor[1].is_some_and(|w|w.id==wolfcraft_engine::items::ids::WINGS) {model_verts.extend(wolfcraft_engine::renderer::model::build_wings(&pose,cam.eye,s.player.gliding));}
@@ -2129,7 +2130,7 @@ impl App {
                     if pos.length_squared() < 1.0 {
                         continue;
                     }
-                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, rest: 0, skin: rp.skin, attack: 0.0, held: Default::default(), armor: [None; 4] };
+                    let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, rest: 0, skin: rp.skin, attack: 0.0, held: Default::default(), armor: [None; 4], shield: false };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));

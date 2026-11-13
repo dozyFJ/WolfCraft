@@ -83,6 +83,8 @@ pub struct PlayerPose {
     /// Worn armour per slot (helmet, chestplate, leggings, boots): material 0 leather,
     /// 1 bronze, 2 iron, 3 diamond.
     pub armor: [Option<u8>; 4],
+    /// Shield in the second hand (drawn on the left forearm).
+    pub shield: bool,
 }
 
 /// Leg angle while sitting (forward from the hips).
@@ -430,6 +432,14 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
         }
         if side > 0.0 && !swim {
             add_held(&mut v, &frame, Vec3::new(x0 + 0.115, ty0 + 0.02, 0.0), pivot, ang, pose.held);
+        }
+        if side < 0.0 && pose.shield && !swim {
+            // Shield strapped to the left forearm, its face to the front: planks, iron rim
+            // and boss.
+            let cx = x0 + 0.115;
+            add_box(&mut v, &frame, Vec3::new(cx - 0.21, ty0 - 0.20, 0.13), Vec3::new(cx + 0.21, ty0 + 0.44, 0.18), pivot, ang, IRON);
+            add_box(&mut v, &frame, Vec3::new(cx - 0.19, ty0 - 0.18, 0.125), Vec3::new(cx + 0.19, ty0 + 0.42, 0.185), pivot, ang, PLANK);
+            add_box(&mut v, &frame, Vec3::new(cx - 0.05, ty0 + 0.07, 0.18), Vec3::new(cx + 0.05, ty0 + 0.17, 0.21), pivot, ang, IRON);
         }
     }
     // Armour over the body.
@@ -1203,8 +1213,8 @@ fn arm_place(pose: &HandsPose, side: f32) -> ArmPlace {
     if pose.shield {
         let b = pose.blocking.clamp(0.0, 1.0);
         // Raised shield stays left of the crosshair so the target remains visible.
-        let x = lerp(-0.34, -0.19, b);
-        let y = lerp(-0.36, -0.25, b);
+        let x = lerp(-0.38, -0.22, b);
+        let y = lerp(-0.42, -0.24, b);
         return ArmPlace { pos: Vec3::new(x, y, 0.42) + off, tilt: lerp(0.25, -0.05, b) + btilt * (1.0 - b), yaw: -byaw * (1.0 - b), roll: -broll * (1.0 - b) };
     }
     ArmPlace { pos: Vec3::new(-0.34, -0.80, 0.40), tilt: 0.25, yaw: 0.0, roll: 0.0 }
@@ -1364,9 +1374,14 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
             // Square arm like the third-person body: sleeve with a slightly wider hand.
             // Sleeve, a darker cuff and the hand: clean flat colours (no skin patches).
             let cuff = [sleeve_c[0] * 0.72, sleeve_c[1] * 0.72, sleeve_c[2] * 0.72];
-            add_hand_box(&mut v, &frame, Vec3::new(x - 0.07, y - 0.07, z), Vec3::new(x + 0.07, y + 0.07, z + 0.15), pivot, angle, sleeve_c);
-            add_hand_box(&mut v, &frame, Vec3::new(x - 0.074, y - 0.074, z + 0.14), Vec3::new(x + 0.074, y + 0.074, z + 0.18), pivot, angle, cuff);
-            add_hand_box(&mut v, &frame, Vec3::new(x - 0.066, y - 0.066, z + 0.175), Vec3::new(x + 0.066, y + 0.066, z + 0.36), pivot, angle, skin_c);
+            // Like Minecraft: an item in the right hand is shown on its own, without the arm
+            // (bows keep the arm: it draws the string).
+            let hide_arm = (side > 0.0 && pose.holding && pose.bow.is_none()) || (side < 0.0 && pose.shield);
+            if !hide_arm {
+                add_hand_box(&mut v, &frame, Vec3::new(x - 0.07, y - 0.07, z), Vec3::new(x + 0.07, y + 0.07, z + 0.15), pivot, angle, sleeve_c);
+                add_hand_box(&mut v, &frame, Vec3::new(x - 0.074, y - 0.074, z + 0.14), Vec3::new(x + 0.074, y + 0.074, z + 0.18), pivot, angle, cuff);
+                add_hand_box(&mut v, &frame, Vec3::new(x - 0.066, y - 0.066, z + 0.175), Vec3::new(x + 0.066, y + 0.066, z + 0.36), pivot, angle, skin_c);
+            }
         }
         let f = Vec3::new(x, y, z + 0.29); // fist centre before the tilt
         let held_start = v.len();
@@ -1380,7 +1395,7 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
                 let a = 0.55f32;
                 let u = Vec3::new(-a.cos(), 0.0, a.sin());
                 let n = u.cross(Vec3::Y).normalize();
-                add_voxel_icon(&mut v, &frame, &px, f + Vec3::new(0.08, -0.06, 0.0), u, Vec3::Y, n, 0.24, pivot, angle);
+                add_voxel_icon(&mut v, &frame, &px, f + Vec3::new(0.04, -0.10, 0.0), u, Vec3::Y, n, 0.32, pivot, angle);
             }
         } else if pose.shield {
             add_shield(&mut v, &frame, f, pivot, angle);
@@ -1520,7 +1535,7 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         let u = (d * sx + e * sy).normalize();
         let w = (d * sy - e * sx).normalize();
         let n = u.cross(w).normalize();
-        let s = 0.46;
+        let s = 0.56;
         // The grip pixel (12.5, 12.5 from the top-left) sits in the fist.
         let o = f + Vec3::new(-0.01, 0.03, 0.02) - u * (s * 0.78) - w * (s * 0.22);
         add_voxel_icon(v, frame, &px, o, u, w, n, s, pivot, angle);
@@ -1638,18 +1653,21 @@ fn add_bow(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle:
     }
 }
 
-/// Wooden shield with an iron rim and boss, facing away from the camera.
+/// Wooden shield with an iron rim and boss, facing away from the camera. Minecraft size: a
+/// tall board that covers a good part of the left of the screen when raised.
 fn add_shield(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle: f32) {
     let b = |v: &mut Vec<ModelVertex>, lo: Vec3, hi: Vec3, c: [f32; 3]| add_box(v, frame, f + lo, f + hi, pivot, angle, c);
-    b(v, Vec3::new(-0.11, -0.10, 0.045), Vec3::new(0.11, 0.19, 0.06), IRON);
-    b(v, Vec3::new(-0.10, -0.09, 0.04), Vec3::new(0.10, 0.18, 0.065), PLANK);
-    b(v, Vec3::new(-0.022, 0.02, 0.035), Vec3::new(0.022, 0.065, 0.04), IRON);
-    if let Some(r) = textures().and_then(|t| t.items.get(wolfcraft_assets::items::SHIELD as usize).copied()) {
-        // Painted front (towards the camera) from the shield icon.
-        let z = 0.034;
-        let p = |x: f32, y: f32| f + Vec3::new(x, y, z);
-        add_card(v, frame, [p(-0.11, -0.10), p(0.11, -0.10), p(0.11, 0.19), p(-0.11, 0.19)], [[r[0], r[3]], [r[2], r[3]], [r[2], r[1]], [r[0], r[1]]], pivot, angle);
+    let plank_d = [PLANK[0] * 0.82, PLANK[1] * 0.82, PLANK[2] * 0.82];
+    // Iron rim, then the boards (alternating shades), the boss and a band across.
+    b(v, Vec3::new(-0.17, -0.20, 0.04), Vec3::new(0.17, 0.32, 0.075), IRON);
+    for i in 0..4 {
+        let x = -0.155 + i as f32 * 0.0775;
+        b(v, Vec3::new(x, -0.185, 0.035), Vec3::new(x + 0.0775, 0.305, 0.08), if i % 2 == 0 { PLANK } else { plank_d });
     }
+    b(v, Vec3::new(-0.16, 0.04, 0.03), Vec3::new(0.16, 0.07, 0.085), IRON);
+    b(v, Vec3::new(-0.04, 0.02, 0.025), Vec3::new(0.04, 0.10, 0.09), IRON);
+    // Grip behind the board, in the fist.
+    b(v, Vec3::new(-0.02, -0.04, -0.01), Vec3::new(0.02, 0.12, 0.035), [0.30, 0.22, 0.14]);
 }
 
 /// Extrudes a 16x16 icon into pixel boxes in the plane (`u` right, `w` up), one pixel deep
@@ -1890,7 +1908,7 @@ mod tests {
 
     fn pose(up: DVec3) -> PlayerPose {
         let heading = if up.y.abs() > 0.9 { DVec3::X } else { DVec3::Y.cross(up).normalize() };
-        PlayerPose { feet: up * 1000.0, heading, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, rest: 0, skin: 0, attack: 0.0, held: Held::Nothing, armor: [None; 4] }
+        PlayerPose { feet: up * 1000.0, heading, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, rest: 0, skin: 0, attack: 0.0, held: Held::Nothing, armor: [None; 4], shield: false }
     }
 
     #[test]
