@@ -22,6 +22,58 @@ pub struct ContainerView<'a> {
     pub accepts: &'a dyn Fn(usize, &ItemStack) -> bool,
     /// Optional status line with progress 0..1 (furnace).
     pub status: Option<(&'a str, f32)>,
+    /// How the block's own slots are laid out.
+    pub layout: Layout,
+    /// The furnace is burning (its flame is lit).
+    pub working: bool,
+}
+
+/// Layout of a block's slots.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Layout {
+    /// A plain grid (chest, barrel, wardrobe).
+    #[default]
+    Grid,
+    /// Slots 0 input, 1 fuel, 2 result: input over the flame over the fuel, an arrow that
+    /// fills with the progress, the result.
+    Furnace,
+    /// Slots 0 item, 1 material or book, 2 result: item + material → result.
+    Forge,
+    /// Slots 0 item or book, 1 iskrit; the offers follow below.
+    Enchant,
+}
+
+/// Where each of the block's slots sits, in cells from the top-left of the slot area
+/// (x, y), the caption under it, and the area's height in cells.
+fn slot_places(layout: Layout, n: usize, cols: usize) -> (Vec<(f32, f32, &'static str)>, f32) {
+    match layout {
+        Layout::Furnace if n == 3 => (vec![(2.0, 0.0, "Сырьё"), (2.0, 1.7, "Топливо"), (6.0, 0.85, "Результат")], 3.1),
+        Layout::Forge if n == 3 => (vec![(1.0, 0.0, "Предмет"), (3.0, 0.0, "Материал / книга"), (7.0, 0.0, "Результат")], 1.4),
+        Layout::Enchant if n == 2 => (vec![(3.0, 0.0, "Предмет / книга"), (5.0, 0.0, "Искрит")], 1.4),
+        _ => {
+            let rows = n.div_ceil(cols);
+            let x0 = (9usize.max(cols) - cols) as f32 / 2.0;
+            ((0..n).map(|i| (x0 + (i % cols) as f32, (i / cols) as f32, "")).collect(), rows as f32)
+        }
+    }
+}
+
+/// An arrow from `a` to `b` that fills with `f` (0..1) in the accent colour.
+fn arrow(ui: &Ui, a: egui::Pos2, b: egui::Pos2, f: f32, p: &crate::theme_manager::Palette) {
+    let h = 10.0;
+    let body = Rect::from_min_max(egui::pos2(a.x, a.y - h / 2.0), egui::pos2(b.x - 12.0, a.y + h / 2.0));
+    let head = vec![egui::pos2(b.x - 12.0, a.y - 11.0), egui::pos2(b.x, a.y), egui::pos2(b.x - 12.0, a.y + 11.0)];
+    ui.painter().rect_filled(body, Rounding::same(2.0), p.outline);
+    ui.painter().add(egui::Shape::convex_polygon(head.clone(), p.outline, Stroke::NONE));
+    let f = f.clamp(0.0, 1.0);
+    if f > 0.0 {
+        let total = b.x - a.x;
+        let fx = a.x + total * f;
+        ui.painter().rect_filled(Rect::from_min_max(body.min, egui::pos2(fx.min(body.right()), body.bottom())), Rounding::same(2.0), p.accent);
+        if fx > body.right() {
+            ui.painter().with_clip_rect(Rect::from_min_max(egui::pos2(body.right(), a.y - 12.0), egui::pos2(fx, a.y + 12.0))).add(egui::Shape::convex_polygon(head, p.accent, Stroke::NONE));
+        }
+    }
 }
 
 /// A slot of the window: the container's or the player's.
@@ -137,16 +189,46 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
         icons.paint_panel(ui.painter(),banner,view.skin,Color32::WHITE);
         ui.painter().text(banner.center(),Align2::CENTER_CENTER,view.title,FontId::proportional(16.),Color32::WHITE);
         ui.add_space(8.);
-        // Container slots.
-        let rows = slots.len().div_ceil(cols);
-        let (area, _) = ui.allocate_exact_size(Vec2::new(width, rows as f32 * (CELL + GAP) - GAP), Sense::hover());
+        // The block's own slots, laid out by what the block does.
+        let (places, rows_h) = slot_places(view.layout, slots.len(), cols);
+        let step = CELL + GAP;
+        let (area, _) = ui.allocate_exact_size(Vec2::new(width, rows_h * step - GAP), Sense::hover());
         icons.paint_panel(ui.painter(),area.expand(4.),view.skin,Color32::WHITE);
-        let grid_w = cols as f32 * (CELL + GAP) - GAP;
-        let x0 = area.left() + (width - grid_w) / 2.0;
+        let at = |x: f32, y: f32| Rect::from_min_size(egui::pos2(area.left() + x * step, area.top() + y * step), Vec2::splat(CELL));
+        match view.layout {
+            Layout::Furnace if slots.len() == 3 => {
+                // Flame between the input and the fuel (lit while burning), arrow to the result.
+                let (inp, fuel, out) = (at(places[0].0, places[0].1), at(places[1].0, places[1].1), at(places[2].0, places[2].1));
+                let c = egui::pos2(inp.center().x, (inp.bottom() + fuel.top()) / 2.0 + 5.0);
+                let t = ui.input(|i| i.time) as f32;
+                let flick = if view.working { 1.0 + 0.12 * (t * 9.0).sin() } else { 1.0 };
+                let (hot, core) = if view.working { (Color32::from_rgb(255, 120, 30), Color32::from_rgb(255, 220, 90)) } else { (p.outline, p.surface_hi) };
+                ui.painter().add(egui::Shape::convex_polygon(vec![c + Vec2::new(-9.0, 9.0), c + Vec2::new(0.0, -13.0 * flick), c + Vec2::new(9.0, 9.0)], hot, Stroke::NONE));
+                ui.painter().add(egui::Shape::convex_polygon(vec![c + Vec2::new(-4.5, 9.0), c + Vec2::new(0.0, -4.0 * flick), c + Vec2::new(4.5, 9.0)], core, Stroke::NONE));
+                if view.working {
+                    ui.ctx().request_repaint();
+                }
+                let f = view.status.map(|s| s.1).unwrap_or(0.0);
+                arrow(ui, egui::pos2(inp.right() + 14.0, out.center().y), egui::pos2(out.left() - 10.0, out.center().y), f, &p);
+            }
+            Layout::Forge if slots.len() == 3 => {
+                let (a, b, out) = (at(places[0].0, places[0].1), at(places[1].0, places[1].1), at(places[2].0, places[2].1));
+                ui.painter().text(egui::pos2((a.right() + b.left()) / 2.0, a.center().y), Align2::CENTER_CENTER, "+", FontId::proportional(26.0), p.text);
+                arrow(ui, egui::pos2(b.right() + 14.0, b.center().y), egui::pos2(out.left() - 10.0, b.center().y), if slots[2].is_some() { 1.0 } else { 0.0 }, &p);
+            }
+            Layout::Enchant if slots.len() == 2 => {
+                let (a, b) = (at(places[0].0, places[0].1), at(places[1].0, places[1].1));
+                ui.painter().text(egui::pos2((a.right() + b.left()) / 2.0, a.center().y), Align2::CENTER_CENTER, "+", FontId::proportional(26.0), Color32::from_rgb(255, 110, 100));
+            }
+            _ => {}
+        }
         let mut to_player: Option<usize> = None;
         for i in 0..slots.len() {
-            let (r, c) = (i / cols, i % cols);
-            let rect = Rect::from_min_size(egui::pos2(x0 + c as f32 * (CELL + GAP), area.top() + r as f32 * (CELL + GAP)), Vec2::splat(CELL));
+            let (px, py, caption) = places[i];
+            let rect = at(px, py);
+            if !caption.is_empty() {
+                ui.painter().text(egui::pos2(rect.center().x, rect.bottom() + 3.0), Align2::CENTER_TOP, caption, FontId::proportional(11.0), p.text_muted);
+            }
             rects.push((Src::Box(i), rect));
             let shown = if drag == Some(Src::Box(i)) { None } else { slots[i].as_ref() };
             let resp = paint_slot(ui, icons, rect, shown, true);
@@ -161,9 +243,20 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
                 slots[i] = inv.add(s);
             }
         }
+        // Slots are placed freely, so the layout cursor is wherever the last one ended:
+        // put it back under the whole slot area (else the hint and the bag overlap it).
+        ui.allocate_rect(Rect::from_min_max(egui::pos2(area.left(), area.bottom() - 1.0), area.right_bottom()), Sense::hover());
         if let Some((text, f)) = view.status {
             ui.add_space(8.0);
-            progress_bar(ui, f, text, width);
+            if view.layout == Layout::Grid {
+                progress_bar(ui, f, text, width);
+            } else {
+                // The arrow shows the progress: here only the hint, wrapped to the window.
+                ui.allocate_ui(Vec2::new(width, 0.0), |ui| {
+                    ui.set_width(width);
+                    ui.label(egui::RichText::new(text).font(FontId::proportional(12.5)).color(p.text_muted));
+                });
+            }
         }
         extra(ui, slots, inv);
         ui.add_space(10.0);
@@ -246,9 +339,19 @@ mod tests {
         let atlases = wolfcraft_assets::AtlasManager::new(None).unwrap();
         let icons = GuiIcons::new(&ctx, &atlases);
         let any = |_: usize, _: &ItemStack| true;
-        let view = ContainerView { title: "Сундук", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 9, accepts: &any, status: Some(("Статус", 0.3)) };
+        let view = ContainerView { title: "Сундук", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 9, accepts: &any, status: Some(("Статус", 0.3)), layout: Layout::Grid, working: false };
         let mut inv = Inventory::default();
         for (w, h, scaled) in [(802.0f32, 360.0f32, true), (420.0, 800.0, true), (1400.0, 900.0, false)] {
+            // A small window first: the big one after it must still be measured in full.
+            let small = ContainerView { title: "Кузница", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 3, accepts: &any, status: None, layout: Layout::Forge, working: false };
+            let mut three = vec![None; 3];
+            for _ in 0..3 {
+                let mut raw = egui::RawInput::default();
+                raw.screen_rect = Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(w, h)));
+                let _ = ctx.run(raw, |c| {
+                    show(c, &icons, &small, &mut three, &mut inv);
+                });
+            }
             let mut slots = vec![None; 27];
             for _ in 0..3 {
                 let mut raw = egui::RawInput::default();
@@ -258,7 +361,12 @@ mod tests {
                 });
             }
             let (s, t) = ctx.data(|d| d.get_temp::<(f32, Vec2)>(egui::Id::new("container").with("fit"))).expect("fit stored");
+            let body = ctx.memory(|m| m.area_rect(egui::Id::new("container").with("body"))).unwrap();
             assert_eq!(s < 0.999, scaled, "{w}x{h}: scale {s}");
+            if h < 400.0 {
+                // The whole window (title, 3 + 4 rows of slots) is on screen, not cut off.
+                assert!(body.height() > 400.0 && s < 0.9, "{w}x{h}: the window is scaled, not clipped: body {} scale {s}", body.height());
+            }
             let body = ctx.memory(|m| m.area_rect(egui::Id::new("container").with("body"))).unwrap();
             let on_screen = Rect::from_min_max((body.min.to_vec2() * s + t).to_pos2(), (body.max.to_vec2() * s + t).to_pos2());
             assert!(on_screen.left() >= 0.0 && on_screen.top() >= 0.0 && on_screen.right() <= w + 0.5 && on_screen.bottom() <= h + 0.5, "{w}x{h}: {on_screen:?} (scale {s})");
@@ -266,6 +374,64 @@ mod tests {
             let back = crate::ui_components::to_body(&ctx, "container", on_screen.center());
             assert!((back - body.center()).length() < 1.0);
         }
+    }
+
+    #[test]
+    fn every_block_layout_keeps_its_slots_apart_and_inside_the_window() {
+        for (layout, n, cols) in [(Layout::Grid, 27, 9), (Layout::Grid, 3, 3), (Layout::Furnace, 3, 3), (Layout::Forge, 3, 3), (Layout::Enchant, 2, 2)] {
+            let (places, rows) = slot_places(layout, n, cols);
+            assert_eq!(places.len(), n, "{layout:?}");
+            for (i, a) in places.iter().enumerate() {
+                assert!(a.0 >= 0.0 && a.0 <= 8.0 && a.1 >= 0.0 && a.1 + 1.0 <= rows + 0.01, "{layout:?} slot {i} is outside: {a:?} (rows {rows})");
+                for b in &places[i + 1..] {
+                    assert!((a.0 - b.0).abs() >= 1.0 || (a.1 - b.1).abs() >= 1.0, "{layout:?}: slots overlap {a:?} {b:?}");
+                }
+            }
+            // Special layouts name every slot.
+            if layout != Layout::Grid {
+                assert!(places.iter().all(|p| !p.2.is_empty()));
+            }
+        }
+        // A furnace with a wrong slot count falls back to the grid instead of panicking.
+        assert_eq!(slot_places(Layout::Furnace, 2, 2).0.len(), 2);
+    }
+
+    /// Writes the furnace, forge and Чаровальня windows as coloured triangles, for a look.
+    #[test]
+    #[ignore]
+    fn dump_block_windows() {
+        let ctx = egui::Context::default();
+        crate::theme_manager::install(&ctx);
+        crate::theme_manager::apply(&ctx, wolfcraft_engine::config::ThemeMode::Dark);
+        let atlases = wolfcraft_assets::AtlasManager::new(None).unwrap();
+        let icons = GuiIcons::new(&ctx, &atlases);
+        let any = |_: usize, _: &ItemStack| true;
+        let mut inv = Inventory::default();
+        let mut out = String::new();
+        for (k, (layout, n)) in [(Layout::Forge, 3), (Layout::Furnace, 3), (Layout::Enchant, 2)].into_iter().enumerate() {
+            let view = ContainerView { title: "Блок", skin: wolfcraft_assets::gui::PANEL_STONE, columns: n, accepts: &any, status: Some(("Подсказка", 0.6)), layout, working: true };
+            let mut slots = vec![None; n];
+            let mut shapes = Vec::new();
+            for _ in 0..8 {
+                let mut raw = egui::RawInput::default();
+                raw.screen_rect = Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(802.0, 360.0)));
+                let o = ctx.run(raw, |c| {
+                    show(c, &icons, &view, &mut slots, &mut inv);
+                });
+                shapes = ctx.tessellate(o.shapes, 1.0);
+            }
+            out += &format!("# {k}\n");
+            for cp in shapes {
+                if let egui::epaint::Primitive::Mesh(m) = cp.primitive {
+                    for t in m.indices.chunks(3) {
+                        let v: Vec<_> = t.iter().map(|i| m.vertices[*i as usize]).collect();
+                        let c = v[0].color;
+                        out += &format!("{} {} {} {} {} {} {} {} {}\n", v[0].pos.x, v[0].pos.y, v[1].pos.x, v[1].pos.y, v[2].pos.x, v[2].pos.y, c.r(), c.g(), c.b());
+                    }
+                }
+            }
+        }
+        std::fs::write(std::env::var("WIN_OUT").unwrap(), out).unwrap();
     }
 
     #[test]

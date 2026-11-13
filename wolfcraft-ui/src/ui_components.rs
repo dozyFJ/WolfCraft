@@ -360,7 +360,13 @@ pub fn game_screen(ctx: &egui::Context, id: &str, title: &str, width: f32, add: 
     });
     let body_centre = Vec2::new(0.0, SCREEN_BAR * 0.5);
     let fit_area = Rect::from_min_max(screen.min + Vec2::new(8.0, SCREEN_BAR + 6.0), screen.max - Vec2::splat(8.0));
-    let body = egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, body_centre).fade_in(false).show(ctx, |ui| {
+    let body = egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, body_centre).fade_in(false).constrain(false).default_height(4000.0).show(ctx, |ui| {
+        // The body may be taller than the screen before it is scaled to fit: do not clip it
+        // to the screen in its own (unscaled) coordinates.
+        ui.set_clip_rect(Rect::EVERYTHING);
+        // (And let it grow to its natural height: the area would otherwise keep the height
+        // of whatever it showed last.)
+        ui.set_max_height(4000.0);
         Frame::none()
             .fill(p.surface)
             .rounding(Rounding::ZERO)
@@ -429,7 +435,13 @@ pub fn block_screen(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(
         ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(110));
         resp.clicked()
     });
-    let body = egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, Vec2::ZERO).fade_in(false).show(ctx, |ui| {
+    let body = egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, Vec2::ZERO).fade_in(false).constrain(false).default_height(4000.0).show(ctx, |ui| {
+        // The body may be taller than the screen before it is scaled to fit: do not clip it
+        // to the screen in its own (unscaled) coordinates.
+        ui.set_clip_rect(Rect::EVERYTHING);
+        // (And let it grow to its natural height: the area would otherwise keep the height
+        // of whatever it showed last.)
+        ui.set_max_height(4000.0);
         Frame::none()
             .fill(p.surface)
             .rounding(Rounding::same(10.0))

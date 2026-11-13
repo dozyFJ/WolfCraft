@@ -2004,7 +2004,9 @@ impl Block {
     /// vertical slabs and signs stand across the view.
     pub fn oriented(self, dir_i: f64, dir_j: f64) -> Block {
         use crate::construction::{self,Form};
-        let legacy = match self { Self::Chest=>Some((Form::StorageChest,0)),Self::Door=>Some((Form::Door,0)),Self::BirchDoor=>Some((Form::Door,1)),Self::SpruceDoor=>Some((Form::Door,2)),Self::IronDoor=>Some((Form::Door,6)),Self::CraftingTable=>Some((Form::Workbench,0)),Self::ElectricFurnace=>Some((Form::Furnace,6)),Self::Terminal=>Some((Form::Terminal,6)),Self::CommandBlock=>Some((Form::Command,6)),_=>None };
+        // Our doors, crafting table and furnace stay our own blocks (own textures, double doors
+        // that part like in the classic game); only these use the catalogue models.
+        let legacy = match self { Self::Chest=>Some((Form::StorageChest,0)),Self::Terminal=>Some((Form::Terminal,6)),Self::CommandBlock=>Some((Form::Command,6)),_=>None };
         if let Some((f,m))=legacy {return construction::block(f,m,0).unwrap().oriented(dir_i,dir_j);}
         if let Some((e, _)) = crate::construction::entry(self as u16) {
             let r = if dir_i.abs() >= dir_j.abs() { if dir_i > 0.0 { 3 } else { 1 } } else if dir_j > 0.0 { 0 } else { 2 };
@@ -2347,9 +2349,15 @@ mod tests {
  use super::*;
  #[test]fn fronts_face_the_player_on_all_four_sides(){
   for (i,j,r) in [(1.,0.,3),(-1.,0.,1),(0.,1.,0),(0.,-1.,2)] {
-   for b in [Block::Chest,Block::CraftingTable,Block::ElectricFurnace,Block::Door,Block::IronDoor] {
-    let placed=b.oriented(i,j);let (e,rotation)=crate::construction::entry(placed as u16).unwrap();assert_eq!(rotation,r);if b==Block::Door||b==Block::IronDoor{assert_eq!(e.form,crate::construction::Form::Door);}
-    if b==Block::CraftingTable{assert_eq!(placed.base_kind(),b);}
+   // Our own doors, crafting table and furnace stay our blocks (textures, double doors).
+   for b in [Block::Door,Block::BirchDoor,Block::SpruceDoor,Block::IronDoor,Block::CraftingTable,Block::ElectricFurnace] {
+    let placed=b.oriented(i,j);
+    assert!(crate::construction::entry(placed as u16).is_none(),"{:?} must not turn into a catalogue piece",b);
+    assert_eq!(placed.base_item(),b);
+    if b!=Block::CraftingTable&&b!=Block::ElectricFurnace {assert!(placed.door_toggle().is_some()&&placed.door_top().is_some(),"{:?} is still a two-block door",b);}
+   }
+   for b in [Block::Chest] {
+    let placed=b.oriented(i,j);let (e,rotation)=crate::construction::entry(placed as u16).unwrap();assert_eq!(rotation,r);
     assert_eq!(crate::items::info(placed.base_item() as u16).place.unwrap().oriented(i,j),placed,"{}",e.name);
    }
   }
