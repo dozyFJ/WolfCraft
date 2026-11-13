@@ -1828,6 +1828,12 @@ blocks! {
     2446 IncubatorCommon => info("Инкубатор: обычное яйцо", Opaque, 2.0, Hand, column(t::INCUBATOR_SIDE, t::INCUBATOR_TOP, t::INCUBATOR_TOP)),
     2447 IncubatorRare => info("Инкубатор: редкое яйцо", Opaque, 2.0, Hand, column(t::INCUBATOR_SIDE + 1, t::INCUBATOR_TOP, t::INCUBATOR_TOP)),
     2448 IncubatorLegendary => info("Инкубатор: легендарное яйцо", Opaque, 2.0, Hand, column(t::INCUBATOR_SIDE + 2, t::INCUBATOR_TOP, t::INCUBATOR_TOP)),
+    // «Кнопки» mini-game (see `buttonsim`): floor buttons, stand on them to buy.
+    2449 ButtonMult1 => emissive(info("Кнопка: +1 множитель", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD, t::BUTTON_PAD_SIDE))),
+    2450 ButtonMult2 => emissive(info("Кнопка: +10 множитель", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD + 1, t::BUTTON_PAD_SIDE))),
+    2451 ButtonMult3 => emissive(info("Кнопка: +120 множитель", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD + 2, t::BUTTON_PAD_SIDE))),
+    2452 ButtonMult4 => emissive(info("Кнопка: +1500 множитель", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD + 3, t::BUTTON_PAD_SIDE))),
+    2453 ButtonRebirth => emissive(info("Кнопка перерождения", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD + 4, t::BUTTON_PAD_SIDE))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a

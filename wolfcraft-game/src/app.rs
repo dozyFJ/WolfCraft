@@ -1546,6 +1546,7 @@ impl App {
                                     net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: 0, hell: s.hell });
                                 }
                             }
+                            InteractionEvent::BuyEgg { .. } => self.audio.play(crate::audio::Sfx::Pop, 1.0),
                             InteractionEvent::Hatch { .. } => self.audio.play(crate::audio::Sfx::Launch, 0.6),
                             InteractionEvent::WorldSet { pos, block } => {
                                 if let Some(net) = &mut self.net {
@@ -1774,6 +1775,7 @@ impl App {
                         if screen != Screen::Map {
                             hud::draw(ctx, &icons, &hud);
                             petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
+                            buttonsim_overlay(ctx, &s.buttonsim);
                             if let Some(mob)=s.mobs.mobs.iter().find(|m|m.boss.is_some()&&m.hp>0.0) {
                                 let role=mob.boss.as_ref().unwrap();
                                 egui::Area::new(egui::Id::new("guardian_health")).anchor(egui::Align2::CENTER_TOP,egui::vec2(0.,10.)).interactable(false).show(ctx,|ui|{
@@ -3454,4 +3456,23 @@ fn petsim_overlay(ctx: &egui::Context, p: &wolfcraft_engine::petsim::PetSim, lob
         painter.text(c + Vec2::new(0.0, 124.0), Align2::CENTER_CENTER, kind.name, FontId::proportional(30.0), Color32::from_white_alpha((dim * 255.0) as u8));
         painter.text(c + Vec2::new(0.0, 152.0), Align2::CENTER_CENTER, format!("сила копания ×{:.0}", kind.power), FontId::proportional(15.0), Color32::from_white_alpha((dim * 200.0) as u8));
     }
+}
+
+/// «Кнопки» on screen: money, income per second, multiplier and rebirths (top right).
+fn buttonsim_overlay(ctx: &egui::Context, b: &wolfcraft_engine::buttonsim::ButtonSim) {
+    use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
+    use wolfcraft_engine::buttonsim::short;
+    if !b.active {
+        return;
+    }
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("buttonsim")));
+    let screen = ctx.screen_rect();
+    let w = 210.0;
+    let r = Rect::from_min_size(Pos2::new(screen.center().x - w / 2.0, screen.top() + 12.0), Vec2::new(w, 86.0));
+    painter.rect_filled(r, Rounding::same(14.0), Color32::from_black_alpha(150));
+    painter.rect_stroke(r, Rounding::same(14.0), Stroke::new(1.0, Color32::from_white_alpha(40)));
+    painter.text(Pos2::new(r.center().x, r.top() + 22.0), Align2::CENTER_CENTER, format!("$ {}", short(b.money)), FontId::proportional(24.0), Color32::from_rgb(120, 230, 120));
+    painter.text(Pos2::new(r.center().x, r.top() + 46.0), Align2::CENTER_CENTER, format!("+{}/с", short(b.income())), FontId::proportional(13.0), Color32::from_white_alpha(200));
+    painter.text(Pos2::new(r.left() + 14.0, r.bottom() - 16.0), Align2::LEFT_CENTER, format!("×{}", short(b.multiplier)), FontId::proportional(15.0), Color32::from_rgb(110, 170, 255));
+    painter.text(Pos2::new(r.right() - 14.0, r.bottom() - 16.0), Align2::RIGHT_CENTER, format!("перерожд. {}", b.rebirths), FontId::proportional(15.0), Color32::from_rgb(190, 140, 255));
 }

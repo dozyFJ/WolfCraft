@@ -83,7 +83,12 @@ pub mod ids {
     pub const GRENADE_LAUNCHER: ItemId = 359;
     pub const ROCKET: ItemId = 360;
     pub const BAZOOKA: ItemId = 361;
-    pub const LAST: ItemId = 361;
+    /// «Питомник»: capsule eggs (common, rare, legendary) and pets (index in `petsim::PETS`).
+    pub const EGG_BASE: ItemId = 362;
+    pub const EGG_LAST: ItemId = 364;
+    pub const PET_BASE: ItemId = 365;
+    pub const PET_LAST: ItemId = 374;
+    pub const LAST: ItemId = 374;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -189,6 +194,15 @@ pub fn info(id: ItemId) -> ItemInfo {
         }
         ids::SHIELD => ItemInfo { max_stack: 1, durability: 336, ..plain("Щит", sp::SHIELD) },
         ids::GUNPOWDER => plain("Порох", sp::GUNPOWDER),
+        e if (ids::EGG_BASE..=ids::EGG_LAST).contains(&e) => {
+            const NAMES: [&str; 3] = ["Капсула-яйцо: обычное", "Капсула-яйцо: редкое", "Капсула-яйцо: легендарное"];
+            let i = (e - ids::EGG_BASE) as usize;
+            ItemInfo { max_stack: 16, ..plain(NAMES[i], sp::EGG_BASE + i as u16) }
+        }
+        p if (ids::PET_BASE..=ids::PET_LAST).contains(&p) => {
+            let i = (p - ids::PET_BASE) as usize;
+            ItemInfo { max_stack: 1, ..plain(crate::petsim::PETS[i].name, sp::PET_BASE + i as u16) }
+        }
         ids::LIGHTER => ItemInfo { max_stack: 1, durability: 64, ..plain("Зажигалка", sp::LIGHTER) },
         ids::GRENADE => ItemInfo { max_stack: 16, ..plain("Граната", sp::GRENADE) },
         ids::GRENADE_LAUNCHER => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Гранатомёт", sp::GRENADE_LAUNCHER) },
@@ -527,7 +541,7 @@ pub fn category(id: ItemId) -> &'static str {
         if (ids::HOE_BASE..=ids::HOE_LAST).contains(&id) {
             return "Инструменты";
         }
-        if (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&id) {
+        if (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&id) || (ids::EGG_BASE..=ids::PET_LAST).contains(&id) {
             return "Мобы";
         }
         if matches!(id, ids::WHEAT_SEEDS | ids::WHEAT | ids::CARROT | ids::POTATO) {
@@ -562,6 +576,7 @@ pub fn category(id: ItemId) -> &'static str {
             Block::Pumpkin | Block::Melon => "Растения",
             Block::EnchantTable => "Предметы",
             Block::Bones | Block::CoinBlock | Block::IncubatorCommon | Block::IncubatorRare | Block::IncubatorLegendary => "Мобы",
+            Block::ButtonMult1 | Block::ButtonMult2 | Block::ButtonMult3 | Block::ButtonMult4 | Block::ButtonRebirth => "Мобы",
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Battery | Block::ElectricFurnace => "Строительство",

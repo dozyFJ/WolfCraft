@@ -2,6 +2,7 @@
 
 pub mod biome;
 pub mod block;
+pub mod buttonsim;
 pub mod chunk;
 pub mod fluids;
 pub mod chunk_manager;

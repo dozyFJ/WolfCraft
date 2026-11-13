@@ -48,8 +48,10 @@ pub enum InteractionEvent {
     Exploded { at: glam::DVec3, power: f32 },
     /// A block destroyed by a blast (sync, chips), without the usual break sound.
     Blasted { pos: Cell, block: Block },
-    /// Tap on an incubator: buy a capsule egg of this tier (0 common … 2 legendary). The session
-    /// keeps the event only if the egg was bought.
+    /// Tap on an incubator: buy a capsule egg of this tier (0 common … 2 legendary) into the
+    /// inventory. The session keeps the event only if the egg was bought.
+    BuyEgg { tier: u8 },
+    /// A capsule egg used from the hand: it hatches (the session takes the egg and adds the pet).
     Hatch { tier: u8 },
     /// A block set by the game itself (coin blocks appearing): only needs syncing.
     WorldSet { pos: Cell, block: Block },
@@ -209,7 +211,7 @@ impl Interaction {
                     _ => None,
                 };
                 if let Some(tier) = tier {
-                    events.push(InteractionEvent::Hatch { tier });
+                    events.push(InteractionEvent::BuyEgg { tier });
                     return events;
                 }
             }
@@ -288,6 +290,11 @@ impl Interaction {
             }
         }
         let Some(stack) = player.inventory.held() else { return events };
+        // Capsule egg in hand: hatch it.
+        if (items::ids::EGG_BASE..=items::ids::EGG_LAST).contains(&stack.id) {
+            events.push(InteractionEvent::Hatch { tier: (stack.id - items::ids::EGG_BASE) as u8 });
+            return events;
+        }
         // Grenade launcher, bazooka, grenade: the session fires (if there is ammo).
         if crate::explosives::weapon(stack.id).is_some() {
             events.push(InteractionEvent::Fire { weapon: stack.id });

@@ -187,6 +187,9 @@ pub mod tiles {
     pub const INCUBATOR_TOP: u16 = 186;
     /// Incubator sides: common, rare, legendary egg.
     pub const INCUBATOR_SIDE: u16 = 187;
+    /// «Кнопки»: multiplier buttons (4 tiers) and the rebirth button, then their side.
+    pub const BUTTON_PAD: u16 = 190;
+    pub const BUTTON_PAD_SIDE: u16 = 195;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -1987,6 +1990,48 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }));
     }
+    // Floor buttons: a bevelled plate, a «+» and 1–4 dots for multipliers, a ring arrow for
+    // the rebirth button.
+    let pad_cols = [Rgb(0.30, 0.78, 0.40), Rgb(0.20, 0.62, 0.95), Rgb(0.95, 0.62, 0.15), Rgb(0.92, 0.28, 0.35), Rgb(0.62, 0.36, 0.95)];
+    for (i, c) in pad_cols.into_iter().enumerate() {
+        let name = ["button_mult_1", "button_mult_2", "button_mult_3", "button_mult_4", "button_rebirth"][i];
+        l.add(BUTTON_PAD + i as u16, name, p(move |q| {
+            for y in 0..S {
+                for x in 0..S {
+                    let edge = x == 0 || y == 0 || x == S - 1 || y == S - 1;
+                    let bevel_hi = x == 1 || y == 1;
+                    let bevel_lo = x == S - 2 || y == S - 2;
+                    let col = if edge { Rgb(0.16, 0.17, 0.19) } else if bevel_hi { c.add(0.18) } else if bevel_lo { c.scale(0.65) } else { c.add((rnd(x, y, 190) - 0.5) * 0.04) };
+                    q.put(x, y, col, 1.0);
+                }
+            }
+            let white = Rgb(0.98, 0.98, 0.96);
+            if i < 4 {
+                for k in 4..11u32 {
+                    q.put(k, 6, white, 1.0);
+                    q.put(7, k - 1, white, 1.0);
+                }
+                for d in 0..=i as u32 {
+                    q.put(4 + d * 2 + (3 - i as u32), 11, white, 1.0);
+                }
+            } else {
+                for a in 0..28 {
+                    let t = a as f32 / 28.0 * std::f32::consts::TAU * 0.8;
+                    let (x, y) = (7.5 + t.cos() * 4.0, 7.5 + t.sin() * 4.0);
+                    q.put(x as u32, y as u32, white, 1.0);
+                }
+                for (x, y) in [(11u32, 4u32), (12, 5), (10, 5), (11, 6)] {
+                    q.put(x, y, white, 1.0);
+                }
+            }
+        }));
+    }
+    l.add(BUTTON_PAD_SIDE, "button_pad_side", p(|q| {
+        q.noisy(Rgb(0.22, 0.23, 0.26), 0.03, 196);
+        for x in 0..S {
+            q.put(x, 0, Rgb(0.40, 0.42, 0.46), 1.0);
+        }
+    }));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);
