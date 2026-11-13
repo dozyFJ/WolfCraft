@@ -1831,7 +1831,7 @@ impl App {
                                     let forge = block == B::MachineCasing;
                                     let magic = block == B::EnchantTable;
                                     let (prog, working) = s.furnace_status(pos);
-                                    let status_text = if working { "Горит: вход · топливо · результат" } else { "Положите руду и топливо (уголь, дрова)" };
+                                    let status_text = if working { "Плавится…" } else { "Положите руду и топливо (уголь, дрова)" };
                                     let accepts = |slot: usize, st: &wolfcraft_engine::items::ItemStack| {
                                         if wolfcraft_engine::construction::is_portable(block)&&st.info().place.is_some_and(wolfcraft_engine::construction::is_portable){return false;}
                                         if furnace {
@@ -1849,6 +1849,8 @@ impl App {
                                         title: if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else if wolfcraft_engine::construction::entry(block as u16).is_some() { block.info().name } else { "Сундук" },
                                         columns: if furnace || forge { 3 } else if magic { 2 } else { 9 },
                                         accepts: &accepts,
+                                        layout: if furnace { wolfcraft_ui::container_ui::Layout::Furnace } else if forge { wolfcraft_ui::container_ui::Layout::Forge } else if magic { wolfcraft_ui::container_ui::Layout::Enchant } else { wolfcraft_ui::container_ui::Layout::Grid },
+                                        working: furnace && working,
                                         status: if furnace {
                                             Some((status_text, prog))
                                         } else if forge {
