@@ -1324,3 +1324,24 @@ mod hand_preview {
     }
 }
 
+
+#[cfg(test)]
+mod pose_preview {
+    /// Writes the character standing, sitting and asleep, for a look at the poses.
+    #[test]
+    #[ignore]
+    fn dump_poses() {
+        use super::model::*;
+        let mut s = String::new();
+        for rest in 0..3u8 {
+            let up = glam::DVec3::Y;
+            let pose = PlayerPose { feet: glam::DVec3::ZERO, heading: glam::DVec3::X, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, rest, skin: 0, attack: 0.0, held: Default::default(), armor: [None; 4] };
+            s += &format!("# {rest}\n");
+            for t in build_player_model(&pose, glam::DVec3::ZERO).chunks(3) {
+                let p: Vec<String> = t.iter().map(|q| format!("{} {} {}", q.pos[0], q.pos[1], q.pos[2])).collect();
+                s += &format!("{} {} {} {}\n", p.join(" "), t[0].color[0], t[0].color[1], t[0].color[2]);
+            }
+        }
+        std::fs::write(std::env::var("POSE_OUT").unwrap(), s).unwrap();
+    }
+}
