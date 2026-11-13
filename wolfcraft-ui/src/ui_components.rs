@@ -359,7 +359,8 @@ pub fn game_screen(ctx: &egui::Context, id: &str, title: &str, width: f32, add: 
         }
     });
     let body_centre = Vec2::new(0.0, SCREEN_BAR * 0.5);
-    egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, body_centre).fade_in(false).show(ctx, |ui| {
+    let fit_area = Rect::from_min_max(screen.min + Vec2::new(8.0, SCREEN_BAR + 6.0), screen.max - Vec2::splat(8.0));
+    let body = egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, body_centre).fade_in(false).show(ctx, |ui| {
         Frame::none()
             .fill(p.surface)
             .rounding(Rounding::ZERO)
@@ -369,16 +370,51 @@ pub fn game_screen(ctx: &egui::Context, id: &str, title: &str, width: f32, add: 
                 ui.set_width(width);
                 // On a short phone screen the content scrolls instead of running under the
                 // header bar or off the bottom.
-                let max_h = screen.height() - SCREEN_BAR - 2.0 * 14.0 - 16.0;
+                // The window is scaled down to fit the screen (see `fit_body`); it scrolls
+                // only when it would still not fit at the smallest scale.
+                let max_h = (screen.height() - SCREEN_BAR - 2.0 * 14.0 - 16.0) / MIN_FIT;
                 egui::ScrollArea::vertical().id_salt(Id::new(id).with("scroll")).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
                     add(ui);
                 });
             });
     });
+    fit_body(ctx, id, &body.response, fit_area);
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         dismissed = true;
     }
     dismissed
+}
+
+/// Smallest scale a window is shrunk to before it starts to scroll instead.
+const MIN_FIT: f32 = 0.55;
+
+/// Auto-fit of a window to the screen, by width and by height: when the body `resp` is
+/// larger than `avail`, its layer is scaled down about the body's centre (never up, never
+/// below `MIN_FIT`). The scale is remembered under `id` for `to_body`. Returns the
+/// transform in use this frame.
+fn fit_body(ctx: &egui::Context, id: &str, resp: &egui::Response, avail: Rect) -> egui::emath::TSTransform {
+    let r = resp.rect;
+    let s = (avail.width() / r.width().max(1.0)).min(avail.height() / r.height().max(1.0)).clamp(MIN_FIT, 1.0);
+    // Keep the centre in place, then pull the scaled window inside the free area.
+    let c = r.center();
+    let mut t = c.to_vec2() * (1.0 - s);
+    let top = c.y - r.height() * s / 2.0;
+    if top < avail.top() {
+        t.y += avail.top() - top;
+    }
+    let tf = egui::emath::TSTransform::new(t, s);
+    ctx.set_transform_layer(resp.layer_id, tf);
+    ctx.data_mut(|d| d.insert_temp(Id::new(id).with("fit"), (s, t)));
+    tf
+}
+
+/// A screen position (the finger) in the coordinates of the auto-fitted window `id`: use it
+/// to test slot rectangles recorded inside the window.
+pub fn to_body(ctx: &egui::Context, id: &str, pos: Pos2) -> Pos2 {
+    match ctx.data(|d| d.get_temp::<(f32, Vec2)>(Id::new(id).with("fit"))) {
+        Some((s, t)) if s > 0.0 => ((pos.to_vec2() - t) / s).to_pos2(),
+        _ => pos,
+    }
 }
 
 /// A block's own window (chest, furnace, forge…): no top bar, just a slightly rounded card
@@ -401,13 +437,15 @@ pub fn block_screen(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(
             .inner_margin(Margin::same(14.0))
             .show(ui, |ui| {
                 ui.set_width(width);
-                let max_h = screen.height() - 2.0 * 14.0 - 20.0;
+                let max_h = (screen.height() - 2.0 * 14.0 - 20.0) / MIN_FIT;
                 egui::ScrollArea::vertical().id_salt(Id::new(id).with("scroll")).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
                     add(ui);
                 });
             });
     });
-    let card = body.response.rect;
+    // Sized to the screen: scaled down when the window is taller or wider than it.
+    let fit = fit_body(ctx, id, &body.response, screen.shrink(10.0));
+    let card = Rect::from_min_max(fit * body.response.rect.min, fit * body.response.rect.max);
     // Round close button riding on the card's top-right corner.
     let c = Pos2::new((card.right() + 4.0).min(screen.right() - 20.0), (card.top() - 4.0).max(screen.top() + 20.0));
     egui::Area::new(Id::new(id).with("close")).order(egui::Order::Tooltip).fixed_pos(c - Vec2::splat(17.0)).fade_in(false).show(ctx, |ui| {

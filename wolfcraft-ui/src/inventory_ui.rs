@@ -227,6 +227,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
             }
         }
         if ctx.input(|i| i.pointer.any_released()) {
+            // Slots are recorded in the window's own coordinates (it may be scaled to fit).
+            let pointer = if creative { pointer } else { pointer.map(|q| crate::ui_components::to_body(ctx, "inventory", q)) };
             let target = pointer.and_then(|pos| slot_rects.iter().find(|(_, r)| r.contains(pos)).map(|(s, _)| *s));
             if let Some(src) = state.drag_slot.take() {
                 if let Some(dst) = target {

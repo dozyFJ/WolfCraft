@@ -210,7 +210,7 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
             icons.paint_item(&layer, ghost.shrink(6.0), s.id);
         }
         if ctx.input(|i| i.pointer.any_released()) {
-            if let Some(pos) = pointer {
+            if let Some(pos) = pointer.map(|q| crate::ui_components::to_body(ctx, "container", q)) {
                 if let Some((dst, _)) = rects.iter().find(|(_, r)| r.contains(pos)) {
                     drop_on(slots, inv, src, *dst, view.accepts);
                 } else {
@@ -237,6 +237,36 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_scales_to_fit_small_screens_by_width_and_height() {
+        let ctx = egui::Context::default();
+        crate::theme_manager::install(&ctx);
+        crate::theme_manager::apply(&ctx, wolfcraft_engine::config::ThemeMode::Dark);
+        let atlases = wolfcraft_assets::AtlasManager::new(None).unwrap();
+        let icons = GuiIcons::new(&ctx, &atlases);
+        let any = |_: usize, _: &ItemStack| true;
+        let view = ContainerView { title: "Сундук", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 9, accepts: &any, status: Some(("Статус", 0.3)) };
+        let mut inv = Inventory::default();
+        for (w, h, scaled) in [(802.0f32, 360.0f32, true), (420.0, 800.0, true), (1400.0, 900.0, false)] {
+            let mut slots = vec![None; 27];
+            for _ in 0..3 {
+                let mut raw = egui::RawInput::default();
+                raw.screen_rect = Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(w, h)));
+                let _ = ctx.run(raw, |c| {
+                    show(c, &icons, &view, &mut slots, &mut inv);
+                });
+            }
+            let (s, t) = ctx.data(|d| d.get_temp::<(f32, Vec2)>(egui::Id::new("container").with("fit"))).expect("fit stored");
+            assert_eq!(s < 0.999, scaled, "{w}x{h}: scale {s}");
+            let body = ctx.memory(|m| m.area_rect(egui::Id::new("container").with("body"))).unwrap();
+            let on_screen = Rect::from_min_max((body.min.to_vec2() * s + t).to_pos2(), (body.max.to_vec2() * s + t).to_pos2());
+            assert!(on_screen.left() >= 0.0 && on_screen.top() >= 0.0 && on_screen.right() <= w + 0.5 && on_screen.bottom() <= h + 0.5, "{w}x{h}: {on_screen:?} (scale {s})");
+            // A finger on the window's centre maps back to the centre of the unscaled body.
+            let back = crate::ui_components::to_body(&ctx, "container", on_screen.center());
+            assert!((back - body.center()).length() < 1.0);
+        }
+    }
 
     #[test]
     fn dragging_merges_swaps_and_respects_what_the_container_accepts() {
