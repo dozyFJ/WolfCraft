@@ -195,7 +195,7 @@ fn nav_icon(ui: &Ui, icons: &GuiIcons, t: Tab, r: Rect, col: Color32) {
             pt.add(egui::Shape::line(roof, Stroke::new(2.2_f32, col)));
             let body = Rect::from_min_max(Pos2::new(c.x - s * 0.7, c.y - 1.0), Pos2::new(c.x + s * 0.7, c.y + s));
             pt.rect_stroke(body, Rounding::same(1.0), Stroke::new(2.2_f32, col));
-            pt.rect_filled(Rect::from_min_max(Pos2::new(c.x - 2.5, c.y + s * 0.3), Pos2::new(c.x + 2.5, c.y + s)), Rounding::ZERO, col);
+            pt.rect_filled(Rect::from_min_max(Pos2::new(c.x - 2.5, c.y + s * 0.3), Pos2::new(c.x + 2.5, c.y + s)), Rounding::same(10.0), col);
         }
         Tab::Settings => icons.paint(pt, r, icon::GEAR, col),
         Tab::Studio => icons.paint(pt, r, icon::HAMMER, col),
@@ -516,7 +516,7 @@ fn figure(ui: &Ui, r: Rect, (skin, hair, jacket, sleeve, trousers): ([f32; 3], [
     let x0 = r.center().x - 4.0 * u;
     let y0 = r.center().y - 8.0 * u;
     let pt = ui.painter();
-    let b = |x: f32, y: f32, w: f32, h: f32, col: Color32| pt.rect_filled(Rect::from_min_size(Pos2::new(x0 + x * u, y0 + y * u), Vec2::new(w * u, h * u)), Rounding::ZERO, col);
+    let b = |x: f32, y: f32, w: f32, h: f32, col: Color32| pt.rect_filled(Rect::from_min_size(Pos2::new(x0 + x * u, y0 + y * u), Vec2::new(w * u, h * u)), Rounding::same(10.0), col);
     b(2.0, 0.0, 4.0, 4.0, c(skin));
     b(2.0, 0.0, 4.0, 1.2, c(hair));
     b(2.7, 1.9, 0.8, 0.7, Color32::from_rgb(24, 28, 40));

@@ -40,10 +40,11 @@ pub fn pill_button(ui: &mut Ui, icons: &GuiIcons, icon_id: Option<u16>, text: &s
     };
     let (fill, fg) = if enabled { (fill, fg) } else { (p.surface_hi.gamma_multiply(0.6), p.text_muted.gamma_multiply(0.7)) };
     let painter = ui.painter();
-    let r = Rounding::ZERO;
+    // Material pill: fully rounded ends.
+    let r = Rounding::same(rect.height() / 2.0);
     painter.rect_filled(rect, r, fill);
     if stroke != Color32::TRANSPARENT {
-        painter.rect_stroke(rect, r, Stroke::new(2.0_f32, stroke));
+        painter.rect_stroke(rect, r, Stroke::new(1.0_f32, stroke));
     }
     let content_w = galley.size().x + icon_w;
     let mut x = rect.center().x - content_w / 2.0;
@@ -69,7 +70,7 @@ pub fn icon_button(ui: &mut Ui, icons: &GuiIcons, icon_id: u16, size: f32, kind:
         ButtonKind::Primary => (mix(p.accent, p.accent_hover, t), p.on_accent),
         _ => (mix(Color32::TRANSPARENT, p.surface_hover, t), mix(p.text_muted, p.text, t)),
     };
-    ui.painter().rect_filled(rect, Rounding::ZERO, fill);
+    ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
     icons.paint(ui.painter(), centered_square(rect, size * 0.58), icon_id, fg);
     resp.on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -85,11 +86,11 @@ pub fn toggle_switch(ui: &mut Ui, on: &mut bool) -> Response {
     let t = ui.ctx().animate_bool_with_time(resp.id.with("on"), *on, ANIM_TIME);
     let hover = ui.ctx().animate_bool_with_time(resp.id.with("hv"), resp.hovered(), ANIM_TIME);
     let track = mix(mix(p.surface_hover, p.outline, 0.5), p.accent, t);
-    ui.painter().rect_filled(rect, Rounding::ZERO, track);
-    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, mix(p.outline, p.accent, hover.max(t))));
+    ui.painter().rect_filled(rect, Rounding::same(10.0), track);
+    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(1.0_f32, mix(p.outline, p.accent, hover.max(t))));
     let knob_x = egui::lerp((rect.left() + 13.0)..=(rect.right() - 13.0), t);
     let knob = mix(p.text_muted, p.on_accent, t);
-    ui.painter().rect_filled(Rect::from_center_size(Pos2::new(knob_x, rect.center().y), Vec2::splat(16.0 + hover * 2.0)), Rounding::ZERO, if p.dark { knob } else { Color32::WHITE });
+    ui.painter().rect_filled(Rect::from_center_size(Pos2::new(knob_x, rect.center().y), Vec2::splat(16.0 + hover * 2.0)), Rounding::same(10.0), if p.dark { knob } else { Color32::WHITE });
     resp.on_hover_cursor(CursorIcon::PointingHand)
 }
 
@@ -100,8 +101,8 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, id: &str, options: &[(T, &str
     let widths: Vec<f32> = options.iter().map(|(_, l)| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::WHITE).size().x + 26.0).collect();
     let total: f32 = widths.iter().sum::<f32>() + 8.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(total, 34.0), Sense::hover());
-    ui.painter().rect_filled(rect, Rounding::ZERO, p.surface_hi);
-    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+    ui.painter().rect_filled(rect, Rounding::same(10.0), p.surface_hi);
+    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(1.0_f32, p.outline));
     let mut changed = false;
     let mut x = rect.left() + 4.0;
     // Animated highlight position.
@@ -112,7 +113,7 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, id: &str, options: &[(T, &str
     }
     let ax = ui.ctx().animate_value_with_time(Id::new(id).with("hx"), sel_x, ANIM_TIME);
     let aw = ui.ctx().animate_value_with_time(Id::new(id).with("hw"), widths[sel_idx], ANIM_TIME);
-    ui.painter().rect_filled(Rect::from_min_size(Pos2::new(ax, rect.top() + 4.0), Vec2::new(aw, 26.0)), Rounding::ZERO, p.accent);
+    ui.painter().rect_filled(Rect::from_min_size(Pos2::new(ax, rect.top() + 4.0), Vec2::new(aw, 26.0)), Rounding::same(10.0), p.accent);
     for (i, (v, label)) in options.iter().enumerate() {
         let seg = Rect::from_min_size(Pos2::new(x, rect.top() + 4.0), Vec2::new(widths[i], 26.0));
         let resp = ui.interact(seg, Id::new(id).with(i), Sense::click());
@@ -136,9 +137,9 @@ pub fn dropdown(ui: &mut Ui, icons: &GuiIcons, id: &str, options: &[String], sel
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 38.0), Sense::click());
     let open = ui.memory(|m| m.is_popup_open(popup_id));
     let t = ui.ctx().animate_bool_with_time(resp.id.with("hv"), resp.hovered() || open, ANIM_TIME);
-    let r = Rounding::ZERO;
+    let r = Rounding::same(10.0);
     ui.painter().rect_filled(rect, r, mix(p.surface_hi, p.surface_hover, t));
-    ui.painter().rect_stroke(rect, r, Stroke::new(2.0_f32, mix(p.outline, p.accent, t)));
+    ui.painter().rect_stroke(rect, r, Stroke::new(1.0_f32, mix(p.outline, p.accent, t)));
     let label = options.get(*selected).map(String::as_str).unwrap_or("—");
     ui.painter().text(Pos2::new(rect.left() + 14.0, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(15.0), p.text);
     // Arrow rotates when open.
@@ -155,7 +156,7 @@ pub fn dropdown(ui: &mut Ui, icons: &GuiIcons, id: &str, options: &[String], sel
             let sel = i == *selected;
             let (r, rr) = ui.allocate_exact_size(Vec2::new(ui.available_width().max(width - 16.0), 32.0), Sense::click());
             let hv = ui.ctx().animate_bool_with_time(rr.id.with("hv"), rr.hovered(), ANIM_TIME);
-            ui.painter().rect_filled(r, Rounding::ZERO, mix(if sel { p.accent.gamma_multiply(0.18) } else { Color32::TRANSPARENT }, p.surface_hover, hv));
+            ui.painter().rect_filled(r, Rounding::same(10.0), mix(if sel { p.accent.gamma_multiply(0.18) } else { Color32::TRANSPARENT }, p.surface_hover, hv));
             ui.painter().text(Pos2::new(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, o, FontId::proportional(15.0), if sel { p.accent } else { p.text });
             if sel {
                 icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(r.right() - 16.0, r.center().y), Vec2::splat(16.0)), icon::CHECK, p.accent);
@@ -180,7 +181,7 @@ pub fn text_input(ui: &mut Ui, icons: &GuiIcons, text: &mut String, hint: &str, 
     let id = ui.make_persistent_id(("text_input", hint));
     let focused = ui.memory(|m| m.has_focus(id.with("edit")));
     let t = ui.ctx().animate_bool_with_time(id.with("focus"), focused, ANIM_TIME);
-    let frame = Frame::none().fill(p.surface_hi).rounding(Rounding::ZERO).stroke(Stroke::new(2.0_f32, mix(p.outline, p.accent, t))).inner_margin(Margin::symmetric(12.0, 7.0));
+    let frame = Frame::none().fill(p.surface_hi).rounding(Rounding::same(10.0)).stroke(Stroke::new(1.0_f32, mix(p.outline, p.accent, t))).inner_margin(Margin::symmetric(12.0, 7.0));
     let inner = frame.show(ui, |ui| {
         ui.set_width(width - 26.0);
         ui.horizontal(|ui| {
@@ -198,7 +199,7 @@ pub fn text_input(ui: &mut Ui, icons: &GuiIcons, text: &mut String, hint: &str, 
 /// Rounded surface container.
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let p = palette(ui.ctx());
-    Frame::none().fill(p.surface).rounding(Rounding::ZERO).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::same(14.0)).show(ui, add).inner
+    Frame::none().fill(p.surface).rounding(Rounding::same(10.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(14.0)).show(ui, add).inner
 }
 
 /// Hoverable card (used for list rows). Returns the response of the whole row.
@@ -214,7 +215,7 @@ pub fn row_card(ui: &mut Ui, selected: bool, add: impl FnOnce(&mut Ui)) -> Respo
     let rect_key = id.with("row_rect");
     let prev: Option<Rect> = ui.ctx().data(|d| d.get_temp(rect_key));
     let bg = prev.map(|r| ui.interact(r, id, Sense::click()));
-    let out = Frame::none().fill(fill).rounding(Rounding::ZERO).stroke(Stroke::new(if selected { 1.5_f32 } else { 1.0 }, stroke)).inner_margin(Margin::same(12.0)).show(ui, add);
+    let out = Frame::none().fill(fill).rounding(Rounding::same(10.0)).stroke(Stroke::new(if selected { 1.5_f32 } else { 1.0 }, stroke)).inner_margin(Margin::same(12.0)).show(ui, add);
     let rect = out.response.rect;
     ui.ctx().data_mut(|d| d.insert_temp(rect_key, rect));
     match bg {
@@ -262,11 +263,11 @@ pub fn progress_bar(ui: &mut Ui, fraction: f32, label: &str, width: f32) {
     let p = palette(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
     let f = ui.ctx().animate_value_with_time(resp.id.with("p"), fraction.clamp(0.0, 1.0), ANIM_TIME);
-    ui.painter().rect_filled(rect, Rounding::ZERO, p.surface_hi);
-    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+    ui.painter().rect_filled(rect, Rounding::same(10.0), p.surface_hi);
+    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(1.0_f32, p.outline));
     if f > 0.0 {
         let w = (rect.width() * f).max(24.0);
-        ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(w, rect.height())), Rounding::ZERO, p.accent);
+        ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(w, rect.height())), Rounding::same(10.0), p.accent);
     }
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, FontId::proportional(13.0), if f > 0.55 { p.on_accent } else { p.text });
 }
@@ -284,11 +285,11 @@ pub fn tab_bar(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize) -> bo
             let sel = *selected == i;
             let a = ui.ctx().animate_bool_with_time(Id::new(id).with(i), sel, ANIM_TIME);
             let hv = ui.ctx().animate_bool_with_time(Id::new(id).with(("h", i)), resp.hovered(), ANIM_TIME);
-            ui.painter().rect_filled(rect, Rounding::ZERO, mix(Color32::TRANSPARENT, p.surface_hover, hv * (1.0 - a)));
+            ui.painter().rect_filled(rect, Rounding::same(10.0), mix(Color32::TRANSPARENT, p.surface_hover, hv * (1.0 - a)));
             let col = mix(p.text_muted, p.accent, a).lerp_to_gamma(p.text, hv * (1.0 - a));
             ui.painter().galley_with_override_text_color(Pos2::new(rect.center().x - galley.size().x / 2.0, rect.center().y - galley.size().y / 2.0), galley, col);
             let w = (rect.width() - 16.0) * a;
-            ui.painter().rect_filled(Rect::from_center_size(Pos2::new(rect.center().x, rect.bottom() - 2.0), Vec2::new(w, 3.0)), Rounding::ZERO, p.accent);
+            ui.painter().rect_filled(Rect::from_center_size(Pos2::new(rect.center().x, rect.bottom() - 2.0), Vec2::new(w, 3.0)), Rounding::same(10.0), p.accent);
             if resp.clicked() && !sel {
                 *selected = i;
                 changed = true;
@@ -304,8 +305,8 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) {
     let font = FontId::proportional(12.0);
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(galley.size().x + 16.0, 22.0), Sense::hover());
-    ui.painter().rect_filled(rect, Rounding::ZERO, color.gamma_multiply(0.16));
-    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, color.gamma_multiply(0.5)));
+    ui.painter().rect_filled(rect, Rounding::same(10.0), color.gamma_multiply(0.16));
+    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, color.gamma_multiply(0.5)));
     ui.painter().galley_with_override_text_color(Pos2::new(rect.center().x - galley.size().x / 2.0, rect.center().y - galley.size().y / 2.0), galley, color);
 }
 
@@ -384,7 +385,7 @@ pub fn game_screen(ctx: &egui::Context, id: &str, title: &str, width: f32, add: 
         ui.set_max_height(4000.0);
         Frame::none()
             .fill(p.surface)
-            .rounding(Rounding::ZERO)
+            .rounding(Rounding::same(10.0))
             .stroke(Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22)))
             .inner_margin(Margin::same(14.0))
             .show(ui, |ui| {
@@ -514,8 +515,8 @@ fn modal_opts(ctx: &egui::Context, id: &str, title: &str, width: f32, scrim: boo
     egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
         Frame::none()
             .fill(p.surface)
-            .rounding(Rounding::ZERO)
-            .stroke(Stroke::new(2.0_f32, p.outline))
+            .rounding(Rounding::same(10.0))
+            .stroke(Stroke::new(1.0_f32, p.outline))
             .shadow(egui::Shadow { offset: Vec2::new(6.0, 6.0), blur: 0.0, spread: 0.0, color: Color32::from_black_alpha(120) })
             .inner_margin(Margin::same(18.0))
             .show(ui, |ui| {

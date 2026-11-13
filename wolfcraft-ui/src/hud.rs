@@ -88,8 +88,8 @@ pub struct HudState<'a> {
 }
 
 fn pill(painter: &Painter, rect: Rect, p: &Palette) {
-    painter.rect_filled(rect, Rounding::ZERO, p.surface.gamma_multiply(0.82));
-    painter.rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+    painter.rect_filled(rect, Rounding::same(6.0), p.surface.gamma_multiply(0.82));
+    painter.rect_stroke(rect, Rounding::same(6.0), Stroke::new(2.0_f32, p.outline));
 }
 
 pub const SLOT: f32 = 46.0;
@@ -107,9 +107,9 @@ pub fn draw_stack(painter: &Painter, icons: &GuiIcons, rect: Rect, s: &ItemStack
     if dur > 0 && s.damage > 0 {
         let f = 1.0 - s.damage as f32 / dur as f32;
         let bar = Rect::from_min_size(Pos2::new(rect.left() + 6.0, rect.bottom() - 7.0), Vec2::new(rect.width() - 12.0, 3.0));
-        painter.rect_filled(bar, Rounding::ZERO, Color32::from_black_alpha(160));
+        painter.rect_filled(bar, Rounding::same(6.0), Color32::from_black_alpha(160));
         let col = Color32::from_rgb(((1.0 - f) * 255.0) as u8, (f * 220.0) as u8, 60);
-        painter.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * f, 3.0)), Rounding::ZERO, col);
+        painter.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * f, 3.0)), Rounding::same(6.0), col);
     }
     let _ = p;
 }
@@ -155,7 +155,7 @@ fn pixel_heart(painter: &Painter, origin: Pos2, px: f32, fill: f32, flash: bool)
                 _ => continue,
             };
             let r = Rect::from_min_size(Pos2::new(origin.x + x as f32 * px, origin.y + y as f32 * px), Vec2::splat(px));
-            painter.rect_filled(r, Rounding::ZERO, col);
+            painter.rect_filled(r, Rounding::same(6.0), col);
         }
     }
 }
@@ -268,10 +268,10 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     // Bow draw: a small bar under the crosshair, turning gold when fully drawn.
     if s.bow_charge > 0.0 {
         let r = Rect::from_center_size(c + Vec2::new(0.0, 22.0), Vec2::new(44.0, 5.0));
-        painter.rect_filled(r, Rounding::ZERO, Color32::from_black_alpha(150));
+        painter.rect_filled(r, Rounding::same(6.0), Color32::from_black_alpha(150));
         let full = s.bow_charge >= 1.0;
         let col = if full { Color32::from_rgb(250, 200, 60) } else { Color32::from_white_alpha(230) };
-        painter.rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width() * s.bow_charge.clamp(0.0, 1.0), r.height())), Rounding::ZERO, col);
+        painter.rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width() * s.bow_charge.clamp(0.0, 1.0), r.height())), Rounding::same(6.0), col);
     }
     if let Some(t) = &s.sign_text {
         let g = painter.layout(t.clone(), FontId::proportional(16.0), Color32::from_rgb(40, 28, 16), 360.0);
@@ -305,8 +305,8 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         let sel = i == s.inventory.selected;
         let t = ctx.animate_bool_with_time(egui::Id::new(("hb", i)), sel, 0.12);
         let rr = r.expand(t * 2.0);
-        painter.rect_filled(rr, Rounding::ZERO, tile);
-        painter.rect_stroke(rr, Rounding::ZERO, Stroke::new(1.5 + t * 1.5, if sel { p.accent } else { Color32::from_white_alpha(40) }));
+        painter.rect_filled(rr, Rounding::same(6.0), tile);
+        painter.rect_stroke(rr, Rounding::same(6.0), Stroke::new(1.5 + t * 1.5, if sel { p.accent } else { Color32::from_white_alpha(40) }));
         if let Some(st) = &s.inventory.slots[i] {
             draw_stack(&painter, icons, rr, st, &p);
         }
@@ -314,8 +314,8 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     }
     if s.compact {
         let r = Rect::from_min_size(Pos2::new(hotbar.right() + inv_gap, hotbar.top()), Vec2::splat(slot_sz));
-        painter.rect_filled(r, Rounding::ZERO, tile);
-        painter.rect_stroke(r, Rounding::ZERO, Stroke::new(1.5, Color32::from_white_alpha(70)));
+        painter.rect_filled(r, Rounding::same(6.0), tile);
+        painter.rect_stroke(r, Rounding::same(6.0), Stroke::new(1.5, Color32::from_white_alpha(70)));
         icons.paint(&painter, r.shrink(slot_sz * 0.22), icon::BACKPACK, Color32::WHITE);
         if let Ok(mut h) = INV_RECT.write() {
             *h = [r.min.x, r.min.y, r.max.x, r.max.y];
@@ -328,8 +328,8 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     // Top edge of everything drawn above the hotbar; compass / item name go above it.
     let mut stack_top = hotbar.top() - 10.0;
     if !s.creative {
-        painter.rect_filled(xp, Rounding::ZERO, p.surface_hi.gamma_multiply(0.9));
-        painter.rect_filled(Rect::from_min_size(xp.min, Vec2::new(xp.width() * s.xp_progress.clamp(0.0, 1.0), 6.0)), Rounding::ZERO, Color32::from_rgb(150, 230, 60));
+        painter.rect_filled(xp, Rounding::same(6.0), p.surface_hi.gamma_multiply(0.9));
+        painter.rect_filled(Rect::from_min_size(xp.min, Vec2::new(xp.width() * s.xp_progress.clamp(0.0, 1.0), 6.0)), Rounding::same(6.0), Color32::from_rgb(150, 230, 60));
         if s.xp_level > 0 {
             // Level number at the right end, so it never overlaps the left-aligned rows.
             painter.text(Pos2::new(xp.right(), xp.top() - 3.0), Align2::RIGHT_BOTTOM, s.xp_level.to_string(), bold_font(15.0), Color32::from_rgb(170, 245, 80));
@@ -410,10 +410,10 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         // Compass frame around the map: a wide border with the four cardinal letters riding
         // on it (the map turns with the view, so the letters move around the frame).
         let frame = r.expand(13.0);
-        painter.rect_filled(frame, Rounding::ZERO, Color32::from_rgba_unmultiplied(14, 16, 22, 215));
+        painter.rect_filled(frame, Rounding::same(6.0), Color32::from_rgba_unmultiplied(14, 16, 22, 215));
         painter.image(tex, r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-        painter.rect_stroke(r, Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
-        painter.rect_stroke(frame, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+        painter.rect_stroke(r, Rounding::same(6.0), Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
+        painter.rect_stroke(frame, Rounding::same(6.0), Stroke::new(2.0_f32, p.outline));
         if s.compass.is_some() {
             // North is always up: the letters stay put.
             let half = frame.width() / 2.0 - 6.5;
@@ -517,7 +517,7 @@ fn draw_debug(painter: &Painter, p: &Palette, d: &DebugInfo) {
             let y = screen.top() + 6.0 + i as f32 * line_h;
             let (x, anchor) = if right_side { (screen.right() - 8.0, Align2::RIGHT_TOP) } else { (screen.left() + 8.0, Align2::LEFT_TOP) };
             let bx = if right_side { x - w - 3.0 } else { x - 3.0 };
-            painter.rect_filled(Rect::from_min_size(Pos2::new(bx, y - 1.0), Vec2::new(w + 6.0, line_h)), Rounding::ZERO, Color32::from_black_alpha(120));
+            painter.rect_filled(Rect::from_min_size(Pos2::new(bx, y - 1.0), Vec2::new(w + 6.0, line_h)), Rounding::same(6.0), Color32::from_black_alpha(120));
             let col = if i == 0 && !right_side { p.accent } else { Color32::from_gray(235) };
             painter.text(Pos2::new(x, y), anchor, l, font.clone(), col);
         }
