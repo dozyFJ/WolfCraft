@@ -48,7 +48,7 @@ impl Geometry {
     }
     fn arc(&mut self, radius: f32, angle: f32) {
         let steps=(angle/7.5).ceil() as usize;
-        let inner=radius-0.035;
+        let inner=radius-0.14;
         let p=|r:f32,a:f32,z:f32|[r*a.cos(),r*a.sin(),z];
         for n in 0..steps {
             let a=(angle*n as f32/steps as f32).to_radians(); let b=(angle*(n+1) as f32/steps as f32).to_radians();
@@ -66,7 +66,7 @@ impl Geometry {
             let a=(span*x as f32/nx as f32).to_radians();let A=(span*(x+1) as f32/nx as f32).to_radians();
             let b=(y as f32*15.).to_radians();let B=((y+1) as f32*15.).to_radians();
             let outer=[p(radius,a,b),p(radius,A,b),p(radius,A,B),p(radius,a,B)];
-            let inner=[p(radius-0.035,a,b),p(radius-0.035,A,b),p(radius-0.035,A,B),p(radius-0.035,a,B)];
+            let inner=[p(radius-0.14,a,b),p(radius-0.14,A,b),p(radius-0.14,A,B),p(radius-0.14,a,B)];
             self.face(outer,Surface::Main);self.face([inner[3],inner[2],inner[1],inner[0]],Surface::Main);
             if y==0 { self.face([outer[0],inner[0],inner[1],outer[1]],Surface::Main); }
             if x==0 { self.face([outer[0],outer[3],inner[3],inner[0]],Surface::Main); }
