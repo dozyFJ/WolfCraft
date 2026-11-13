@@ -117,6 +117,8 @@ pub struct GameSession {
     coin_cells: Vec<(wolfcraft_engine::cubesphere::Cell, DVec3)>,
     /// The lobby was built here (coin blocks keep appearing near it).
     pub petsim_home: Option<DVec3>,
+    /// «Кнопки» mini-game: money, multiplier, rebirths.
+    pub buttonsim: wolfcraft_engine::buttonsim::ButtonSim,
     /// Bow draw 0..1 while the use button is held with a bow.
     /// The player is asleep in a bed or sits on a chair (drawn in third person, cannot walk).
     pub rest: Option<Rest>,
@@ -222,6 +224,7 @@ impl GameSession {
             coin_scan: 0.0,
             coin_cells: Vec::new(),
             petsim_home: None,
+            buttonsim: Default::default(),
             rest: None,
             bow_charge: 0.0,
             bow_arrow: None,
@@ -267,6 +270,11 @@ impl GameSession {
         s.boss_book=wolfcraft_engine::bosses::BossBook::load(&s.dir.join("bosses.txt"));
         s.load_containers();
         s.petsim = wolfcraft_engine::petsim::PetSim::from_text(&std::fs::read_to_string(s.dir.join("petsim.txt")).unwrap_or_default());
+        // Old saves kept the pets in petsim.txt: they move into the inventory once.
+        for k in std::mem::take(&mut s.petsim.owned) {
+            s.player.inventory.add(wolfcraft_engine::items::ItemStack::new(wolfcraft_engine::items::ids::PET_BASE + k as u16, 1));
+        }
+        s.buttonsim = wolfcraft_engine::buttonsim::ButtonSim::from_text(&std::fs::read_to_string(s.dir.join("buttonsim.txt")).unwrap_or_default());
         s.petsim_home = std::fs::read_to_string(s.dir.join("petsim_home.txt")).ok().and_then(|t| {
             let v: Vec<f64> = t.split_whitespace().filter_map(|x| x.parse().ok()).collect();
             (v.len() == 3).then(|| DVec3::new(v[0], v[1], v[2]))
@@ -612,6 +620,24 @@ impl GameSession {
         self.explosives_step(&mut events, dt);
         // «Питомник»: eggs, pets, coin blocks.
         self.petsim_step(&mut events, dt);
+        // «Кнопки»: income, and buying by standing on a floor button.
+        self.buttonsim.tick(dt);
+        if !self.player.survival.dead && self.player.body.on_ground {
+            let under = self.chunks.block_at_world(self.player.body.pos - self.player.up() * 0.3);
+            if let Some(pad) = wolfcraft_engine::buttonsim::pad(under) {
+                match self.buttonsim.stand_on(under) {
+                    Some(msg) => {
+                        self.item_name = Some((msg, 1.5));
+                        self.picked_up += 1;
+                    }
+                    None => {
+                        if self.item_name.as_ref().is_none_or(|(_, t)| *t < 0.4) {
+                            self.item_name = Some((wolfcraft_engine::buttonsim::describe(pad), 0.6));
+                        }
+                    }
+                }
+            }
+        }
         // Spawn souls bring creatures to life (standing on the bottom of the cell).
         for e in &events {
             if let InteractionEvent::SpawnMob { pos, kind } = e {
@@ -906,14 +932,16 @@ impl GameSession {
         use wolfcraft_engine::block::Block;
         use wolfcraft_engine::petsim::{COIN_REWARD, EGGS, PETS, Rarity, hatch};
         let creative = self.player.is_creative();
+        use wolfcraft_engine::items::{ItemStack, ids};
+        // The pets are the pet items in the inventory (and the second hand).
+        let inv = &self.player.inventory;
+        self.petsim.owned = inv.slots.iter().chain(std::iter::once(&inv.offhand)).flatten().filter(|s| (ids::PET_BASE..=ids::PET_LAST).contains(&s.id)).map(|s| (s.id - ids::PET_BASE) as usize).collect();
         let mut keep = Vec::with_capacity(events.len());
         for e in events.drain(..) {
             match e {
-                InteractionEvent::Hatch { tier } => {
+                InteractionEvent::BuyEgg { tier } => {
+                    // The incubator sells a capsule egg into the inventory.
                     let egg = &EGGS[(tier as usize).min(EGGS.len() - 1)];
-                    if self.petsim.hatching.is_some() {
-                        continue;
-                    }
                     if !creative && self.petsim.coins < egg.price {
                         self.item_name = Some((format!("{}: нужно {} монет (у вас {})", egg.name, egg.price, self.petsim.coins), 2.5));
                         continue;
@@ -921,8 +949,23 @@ impl GameSession {
                     if !creative {
                         self.petsim.coins -= egg.price;
                     }
+                    let stack = ItemStack::new(ids::EGG_BASE + tier as u16, 1);
+                    if let Some(rest) = self.player.inventory.add(stack) {
+                        let at = self.player.body.pos + self.player.up() * 1.0;
+                        self.drops.pop_from_block(rest, at);
+                    }
+                    self.item_name = Some((format!("+ {} — возьмите её в руку и тапните, чтобы вылупить", egg.name), 3.0));
+                    keep.push(e);
+                }
+                InteractionEvent::Hatch { tier } => {
+                    // The capsule egg in the hand opens.
+                    if self.petsim.hatching.is_some() {
+                        continue;
+                    }
+                    if !creative {
+                        self.player.inventory.consume_selected();
+                    }
                     let kind = hatch(tier as usize, self.mobs.rand(), self.mobs.rand());
-                    self.petsim.owned.push(kind);
                     self.petsim.hatching = Some((0.0, kind));
                     keep.push(e);
                 }
@@ -940,8 +983,14 @@ impl GameSession {
             let before = *t;
             *t += dt;
             if before < 1.8 && *t >= 1.8 {
-                self.item_name = Some((format!("{} {}!", PETS[*kind].rarity.name(), PETS[*kind].name), 3.0));
+                let k = *kind;
+                self.item_name = Some((format!("{} {}!", PETS[k].rarity.name(), PETS[k].name), 3.0));
                 self.picked_up += 1;
+                // The pet joins the inventory (or falls at the feet if it is full).
+                if let Some(rest) = self.player.inventory.add(ItemStack::new(ids::PET_BASE + k as u16, 1)) {
+                    let at = self.player.body.pos + self.player.up() * 1.0;
+                    self.drops.pop_from_block(rest, at);
+                }
             }
             if *t > 3.2 {
                 self.petsim.hatching = None;
@@ -1092,6 +1141,51 @@ impl GameSession {
         }
         self.petsim_home = Some(g.cell_center(mid));
         self.coin_scan = 0.0;
+        Ok(n)
+    }
+
+    /// Builds the «Кнопки» lobby ahead of the player: a floor with a row of buttons (four
+    /// multiplier buttons and the rebirth button) and lanterns.
+    pub fn build_button_lobby(&mut self) -> Result<usize, String> {
+        use wolfcraft_engine::block::Block as B;
+        let g = self.chunks.grid();
+        let feet = g.world_to_cell(self.player.body.pos);
+        let centre = g.cell_center(feet);
+        let ax = |di: i32, dj: i32| g.offset(feet, di, dj, 0).map(|c| (g.cell_center(c) - centre).normalize()).unwrap_or(DVec3::ZERO);
+        let (ei, ej) = (ax(1, 0), ax(0, 1));
+        let h = self.player.heading;
+        let fwd = if h.dot(ei).abs() >= h.dot(ej).abs() { (h.dot(ei).signum() as i32, 0) } else { (0, h.dot(ej).signum() as i32) };
+        let side = (fwd.1, fwd.0);
+        let mid = g.offset(feet, fwd.0 * 7, fwd.1 * 7, 0).ok_or("Слишком близко к краю грани планеты, отойдите чуть в сторону")?;
+        let mut cells = Vec::new();
+        for a in -6..=6 {
+            for b in -4..=4 {
+                let Some(col) = g.offset(mid, side.0 * a + fwd.0 * b, side.1 * a + fwd.1 * b, 0) else { continue };
+                for dk in -2..=4 {
+                    let Some(cell) = g.offset(col, 0, 0, dk) else { continue };
+                    let bl = if dk == -2 { B::StoneBricks } else if dk == -1 { if (a + b).rem_euclid(2) == 0 { B::SmoothStone } else { B::PolishedMarble } } else { B::Air };
+                    cells.push((cell, bl));
+                }
+            }
+        }
+        // The buttons sit in the floor in a row, two blocks apart, cheapest on the left.
+        let pads = [B::ButtonMult1, B::ButtonMult2, B::ButtonMult3, B::ButtonMult4, B::ButtonRebirth];
+        for (n, pad) in pads.iter().enumerate() {
+            let a = -4 + n as i32 * 2;
+            if let Some(c) = g.offset(mid, side.0 * a, side.1 * a, -1) {
+                cells.push((c, *pad));
+            }
+        }
+        for a in [-6, 6] {
+            if let Some(c) = g.offset(mid, side.0 * a + fwd.0 * 4, side.1 * a + fwd.1 * 4, 0) {
+                cells.push((c, B::Lantern));
+            }
+        }
+        let (n, missed) = crate::worldedit::apply(self, cells);
+        if n == 0 || missed > 0 {
+            return Err("Мир вокруг ещё не загрузился, подойдите ближе или попробуйте через пару секунд".into());
+        }
+        self.buttonsim.active = true;
         Ok(n)
     }
 
@@ -1391,6 +1485,11 @@ impl GameSession {
         if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}
         self.save_containers();
         self.save_block_commands();
+        if self.buttonsim.active {
+            if let Err(e) = std::fs::write(self.dir.join("buttonsim.txt"), self.buttonsim.to_text()) {
+                log::error!("buttonsim: {e}");
+            }
+        }
         if !self.petsim.owned.is_empty() || self.petsim.coins > 0 {
             if let Err(e) = std::fs::write(self.dir.join("petsim.txt"), self.petsim.to_text()) {
                 log::error!("petsim: {e}");

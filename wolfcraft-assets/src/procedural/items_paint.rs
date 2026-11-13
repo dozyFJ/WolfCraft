@@ -67,7 +67,10 @@ pub mod items {
     pub const GRENADE_LAUNCHER: u16 = 103;
     pub const ROCKET: u16 = 104;
     pub const BAZOOKA: u16 = 105;
-    pub const COUNT: u16 = 106;
+    /// «Питомник»: capsule eggs (common, rare, legendary) and the ten pets.
+    pub const EGG_BASE: u16 = 106;
+    pub const PET_BASE: u16 = 109;
+    pub const COUNT: u16 = 119;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -751,6 +754,76 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(GRENADE_LAUNCHER, "grenade_launcher", p(|q| q.template(&LAUNCHER_TPL[..], &pal)));
     l.add(ROCKET, "rocket", p(|q| q.template(&ROCKET_TPL[..], &pal)));
     l.add(BAZOOKA, "bazooka", p(|q| q.template(&BAZOOKA_TPL[..], &pal)));
+    // Capsule eggs: an egg with a coloured capsule band and a shine.
+    for (i, band) in [Rgb(0.62, 0.66, 0.74), Rgb(0.30, 0.55, 0.98), Rgb(1.0, 0.75, 0.15)].into_iter().enumerate() {
+        let shell = [Rgb(0.96, 0.94, 0.88), Rgb(0.82, 0.90, 1.0), Rgb(1.0, 0.93, 0.70)][i];
+        l.add(EGG_BASE + i as u16, ["egg_common", "egg_rare", "egg_legendary"][i], p(move |q| {
+            q.shape(shell, &|u, v| {
+                let (x, y) = ((u - 0.5) / 0.36, (v - 0.55) / if v < 0.55 { 0.46 } else { 0.38 });
+                x * x + y * y < 1.0
+            });
+            for y in 0..16u32 {
+                for x in 0..16u32 {
+                    let (u, v) = ((x as f32 + 0.5) / 16.0, (y as f32 + 0.5) / 16.0);
+                    let (ex, ey) = ((u - 0.5) / 0.36, (v - 0.55) / if v < 0.55 { 0.46 } else { 0.38 });
+                    if ex * ex + ey * ey < 1.0 && (7..=9).contains(&y) {
+                        q.put(x, y, if y == 8 { band } else { band.scale(0.75) }, 1.0);
+                    }
+                }
+            }
+            q.put(5, 4, Rgb(1.0, 1.0, 1.0), 1.0);
+            q.put(5, 5, Rgb(1.0, 1.0, 1.0), 1.0);
+            q.put(6, 3, Rgb(1.0, 1.0, 1.0), 1.0);
+        }));
+    }
+    // Pets: a round little creature in its colours, ears or comb, eyes; a rarity gem.
+    let pets: [(&str, Rgb, Rgb, u8, Rgb); 10] = [
+        ("pet_chick", Rgb(0.98, 0.96, 0.90), Rgb(0.95, 0.25, 0.20), 0, Rgb(0.85, 0.87, 0.90)),
+        ("pet_sheep", Rgb(0.93, 0.91, 0.84), Rgb(0.40, 0.34, 0.30), 1, Rgb(0.85, 0.87, 0.90)),
+        ("pet_boar", Rgb(0.80, 0.56, 0.48), Rgb(0.55, 0.36, 0.30), 1, Rgb(0.85, 0.87, 0.90)),
+        ("pet_slime", Rgb(0.45, 0.88, 0.40), Rgb(0.30, 0.70, 0.28), 2, Rgb(0.35, 0.65, 1.0)),
+        ("pet_wolf", Rgb(0.62, 0.64, 0.68), Rgb(0.40, 0.42, 0.46), 3, Rgb(0.35, 0.65, 1.0)),
+        ("pet_cow", Rgb(0.96, 0.95, 0.92), Rgb(0.20, 0.18, 0.18), 1, Rgb(0.35, 0.65, 1.0)),
+        ("pet_fire_chick", Rgb(1.0, 0.60, 0.20), Rgb(1.0, 0.25, 0.10), 0, Rgb(0.75, 0.40, 1.0)),
+        ("pet_moon_wolf", Rgb(0.45, 0.55, 0.95), Rgb(0.85, 0.90, 1.0), 3, Rgb(0.75, 0.40, 1.0)),
+        ("pet_gold_slime", Rgb(1.0, 0.82, 0.25), Rgb(0.85, 0.62, 0.10), 2, Rgb(1.0, 0.78, 0.20)),
+        ("pet_ghost_wolf", Rgb(0.80, 0.95, 0.98), Rgb(0.55, 0.85, 0.95), 3, Rgb(1.0, 0.78, 0.20)),
+    ];
+    for (i, (name, body, accent, ears, gem)) in pets.into_iter().enumerate() {
+        l.add(PET_BASE + i as u16, name, p(move |q| {
+            q.shape(body, &|u, v| ((u - 0.5) / 0.38).powi(2) + ((v - 0.60) / 0.34).powi(2) < 1.0);
+            match ears {
+                0 => {
+                    for (x, y) in [(7u32, 2u32), (8, 2), (8, 3), (7, 3), (9, 3)] {
+                        q.put(x, y, accent, 1.0);
+                    }
+                }
+                1 => {
+                    for (x, y) in [(3u32, 5u32), (4, 5), (11, 5), (12, 5), (3, 6), (12, 6)] {
+                        q.put(x, y, accent, 1.0);
+                    }
+                }
+                2 => {
+                    for (x, y) in [(6u32, 6u32), (10, 7), (5, 10)] {
+                        q.put(x, y, body.add(0.15), 1.0);
+                    }
+                }
+                _ => {
+                    for (x, y) in [(4u32, 2u32), (4, 3), (5, 3), (11, 2), (11, 3), (10, 3)] {
+                        q.put(x, y, accent, 1.0);
+                    }
+                }
+            }
+            for (x, y) in [(6u32, 8u32), (9, 8)] {
+                q.put(x, y, Rgb(0.08, 0.08, 0.10), 1.0);
+            }
+            q.put(7, 10, accent.scale(0.8), 1.0);
+            q.put(8, 10, accent.scale(0.8), 1.0);
+            for (x, y) in [(13u32, 12u32), (14, 13), (13, 14), (12, 13), (13, 13)] {
+                q.put(x, y, gem, 1.0);
+            }
+        }));
+    }
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

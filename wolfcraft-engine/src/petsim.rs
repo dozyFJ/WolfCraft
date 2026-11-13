@@ -113,12 +113,15 @@ pub struct Pet {
 #[derive(Default)]
 pub struct PetSim {
     pub coins: u64,
-    /// Every pet hatched so far (indices into `PETS`).
+    /// Pets the player has (indices into `PETS`): the pet items in the inventory, refreshed by
+    /// the game every frame. Old saves listed them here; they move into the inventory once.
     pub owned: Vec<usize>,
     /// The active pets in the world (the strongest owned ones).
     pub pets: Vec<Pet>,
     /// Hatch animation: (seconds since it started, pet index).
     pub hatching: Option<(f32, usize)>,
+    /// Angle of the pets' circle round the player.
+    pub orbit: f64,
 }
 
 impl PetSim {
@@ -149,6 +152,7 @@ impl PetSim {
     pub fn update(&mut self, player: DVec3, heading: DVec3, coins: &[(Cell, DVec3)], dt: f32) -> Vec<Cell> {
         let up = up_at(player);
         let right = heading.cross(up).normalize_or_zero();
+        self.orbit = (self.orbit + dt as f64 * 0.7) % std::f64::consts::TAU;
         let mut done = Vec::new();
         let n = self.pets.len();
         for i in 0..n {
@@ -170,9 +174,9 @@ impl PetSim {
             let goal = match p.target.and_then(|t| coins.iter().find(|(c, _)| *c == t)) {
                 Some((_, at)) => *at + up_at(*at) * 0.8,
                 None => {
-                    // Slot behind the player: one in the middle, the others to the sides.
-                    let side = [0.0, -1.3, 1.3][i % 3];
-                    player - heading * 2.2 + right * side + up * 0.2
+                    // Round the player: the pets circle slowly at waist height, evenly spaced.
+                    let a = self.orbit + i as f64 / n.max(1) as f64 * std::f64::consts::TAU;
+                    player + (heading * a.cos() + right * a.sin()) * 1.9 + up * 0.7
                 }
             };
             let to = goal - p.pos;
@@ -209,9 +213,9 @@ impl PetSim {
         (p.anim.sin().abs() * if p.moving { 0.25 } else { 0.08 }) as f64
     }
 
+    /// Only the coins: the pets live in the inventory (saved with the player).
     pub fn to_text(&self) -> String {
-        let pets: Vec<String> = self.owned.iter().map(|p| p.to_string()).collect();
-        format!("coins {}\npets {}\n", self.coins, pets.join(" "))
+        format!("coins {}\n", self.coins)
     }
 
     pub fn from_text(t: &str) -> Self {
@@ -249,7 +253,8 @@ mod tests {
         let mut s = PetSim { coins: 42, owned: vec![0, 9, 3, 1], ..Default::default() };
         let back = PetSim::from_text(&s.to_text());
         assert_eq!(back.coins, 42);
-        assert_eq!(back.owned, vec![0, 9, 3, 1]);
+        assert!(back.owned.is_empty(), "pets are saved in the inventory now");
+        assert_eq!(PetSim::from_text("coins 1\npets 0 9").owned, vec![0, 9], "old saves still load");
         assert_eq!(s.best(), vec![9, 3, 1]);
         s.refresh(DVec3::new(0.0, 1000.0, 0.0), DVec3::X);
         assert_eq!(s.pets.len(), 3);
