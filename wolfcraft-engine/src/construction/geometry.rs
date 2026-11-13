@@ -203,3 +203,22 @@ mod tests {
         assert!(model(Form::Sofa,0,3).faces.len()<model(Form::Sofa,0,0).faces.len());
     }
 }
+
+#[cfg(test)]
+mod preview {
+    /// Writes every form's faces for a contact sheet.
+    #[test]
+    #[ignore]
+    fn dump_forms() {
+        let mut s = String::new();
+        for (i, (form, name)) in super::super::FORMS.iter().enumerate() {
+            let g = super::model(*form, 0, 0);
+            s += &format!("# {i} {name}\n");
+            for f in &g.faces {
+                let p: Vec<String> = f.points.iter().map(|p| format!("{} {} {}", p[0], p[1], p[2])).collect();
+                s += &format!("{} {}\n", p.join(" "), f.surface as u8);
+            }
+        }
+        std::fs::write(std::env::var("FORMS_OUT").unwrap(), s).unwrap();
+    }
+}

@@ -670,7 +670,7 @@ impl App {
         let s = self.session.as_ref()?;
         use wolfcraft_engine::player as pl;
         let (m, day) = pl::month(s.player.world_time);
-        let held_block = s.player.inventory.held().filter(|h| h.id < wolfcraft_engine::items::ITEM_BASE && h.info().place.is_some()).map(|h| (h.id, h.info().name.to_string()));
+        let held_block = s.player.inventory.held().filter(|h| h.info().place.is_some()).map(|h| (h.id, h.info().name.to_string()));
         let mut players = vec![(s.nickname.clone(), s.player.body.pos.to_array(), s.player.survival.health)];
         for rp in &self.net_players {
             players.push((rp.nick.clone(), rp.pos, 20.0));
