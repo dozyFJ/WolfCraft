@@ -1,4 +1,4 @@
-name: WolfServer (Pocket APK + PC)
+name: WolfStudio app (studio + server) + WolfServer PC
 
 on:
   push:
@@ -50,7 +50,22 @@ jobs:
           cargo build -p wolfserver --release --target aarch64-linux-android
           mkdir -p wolfserver-pocket/app/src/main/jniLibs/arm64-v8a
           cp target/aarch64-linux-android/release/WolfServer wolfserver-pocket/app/src/main/jniLibs/arm64-v8a/libwolfserver.so
-          ls -lh wolfserver-pocket/app/src/main/jniLibs/arm64-v8a/
+
+      - name: Studio library for Android (arm64)
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/27.2.12479018"
+          NDK="$ANDROID_NDK_ROOT"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android26-clang"
+          export CC_aarch64_linux_android="$BIN/aarch64-linux-android26-clang"
+          export CXX_aarch64_linux_android="$BIN/aarch64-linux-android26-clang++"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          cargo build -p wolfstudio --lib --release --target aarch64-linux-android
+          J=wolfserver-pocket/app/src/main/jniLibs/arm64-v8a
+          cp target/aarch64-linux-android/release/libwolfstudio.so $J/
+          cp "$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" $J/
+          ls -lh $J/
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -60,8 +75,8 @@ jobs:
         working-directory: wolfserver-pocket
         run: |
           gradle --no-daemon assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk ../WolfServerPocket.apk
-          ls -lh ../WolfServerPocket.apk
+          cp app/build/outputs/apk/release/app-release.apk ../WolfStudio.apk
+          ls -lh ../WolfStudio.apk
 
       - name: WolfServer for Windows (PC)
         continue-on-error: true
@@ -75,7 +90,7 @@ jobs:
         with:
           name: WolfServer
           path: |
-            WolfServerPocket.apk
+            WolfStudio.apk
             WolfServer.exe
           if-no-files-found: ignore
 
@@ -83,9 +98,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="WolfServerPocket.apk"
+          files="WolfStudio.apk"
           [ -f WolfServer.exe ] && files="$files WolfServer.exe"
           gh release delete server-test -y --cleanup-tag || true
           gh release create server-test $files --prerelease --target "$GITHUB_SHA" \
-            --title "WolfServer ТЕСТ (сборка #${{ github.run_number }})" \
-            --notes "WolfServerPocket.apk — сервер на телефоне; WolfServer.exe — тот же сервер для ПК. Из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."
+            --title "WolfStudio + WolfServer ТЕСТ (сборка #${{ github.run_number }})" \
+            --notes "WolfStudio.apk — студия и сервер на телефоне в одном приложении; WolfServer.exe — тот же сервер для ПК. Из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."

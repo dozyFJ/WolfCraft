@@ -55,10 +55,6 @@ jobs:
           ls -l target/release/apk/
           # Only the signed, aligned APK (never the "-unaligned" intermediate).
           cp target/release/apk/WolfCraft.apk WolfCraft.apk
-          # WolfStudio: the studio as its own app (same signing key).
-          cargo apk build -p wolfstudio --lib --release --target aarch64-linux-android
-          cp target/release/apk/WolfStudio.apk WolfStudio.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify WolfStudio.apk
           ls -lh WolfCraft.apk
           # Refuse to publish a package Android would reject.
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs WolfCraft.apk
@@ -67,15 +63,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: WolfCraft-apk
-          path: |
-            WolfCraft.apk
-            WolfStudio.apk
+          path: WolfCraft.apk
 
       - name: Publish "latest" release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete test -y --cleanup-tag || true
-          gh release create test WolfCraft.apk WolfStudio.apk --prerelease --target "$GITHUB_SHA" \
+          gh release create test WolfCraft.apk --prerelease --target "$GITHUB_SHA" \
             --title "WolfCraft ТЕСТ: взрывчатка (сборка #${{ github.run_number }})" \
             --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай WolfCraft.apk ниже."

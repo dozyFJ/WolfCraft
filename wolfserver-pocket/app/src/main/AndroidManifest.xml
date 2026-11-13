@@ -13,7 +13,7 @@
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:icon="@drawable/ic_launcher"
-        android:label="WolfServer Pocket"
+        android:label="WolfStudio"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:usesCleartextTraffic="true">
 
@@ -26,6 +26,21 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!-- The studio: the WolfCraft engine (libwolfstudio.so) in its own process. -->
+        <activity
+            android:name="android.app.NativeActivity"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode"
+            android:exported="false"
+            android:label="WolfStudio"
+            android:launchMode="singleTask"
+            android:process=":studio"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="wolfstudio" />
         </activity>
 
         <service

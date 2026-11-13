@@ -1288,6 +1288,17 @@ impl App {
         } else {
             self.main_worlds_fresh = false;
         }
+        // WolfStudio app: «Открыть в студии» on the server dashboard leaves the address here.
+        if wolfcraft_ui::launcher::is_studio_app() && self.screen == Screen::Main {
+            let f = self.data_dir.join("open_server.txt");
+            if let Ok(addr) = std::fs::read_to_string(&f) {
+                let _ = std::fs::remove_file(&f);
+                let addr = addr.trim().to_string();
+                if !addr.is_empty() {
+                    self.handle_action(MenuAction::EditServerInStudio(addr), gfx);
+                }
+            }
+        }
         // "Рядом": hear servers on Wi-Fi / hotspot while the world list is open.
         // The studio app also hears servers on its home screen (their worlds open in the studio).
         let studio_home = wolfcraft_ui::launcher::is_studio_app() && self.screen == Screen::Main;
