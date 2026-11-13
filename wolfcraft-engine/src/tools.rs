@@ -7,9 +7,8 @@
 //! * **Топор** — logs, planks and everything wooden, pumpkins and melons. A strong blow.
 //! * **Лопата** — dirt, grass, sand, gravel, clay, snow.
 //! * **Меч** — the weapon: the strongest blow, wears 1 per hit. Cuts leaves, plants, wool and
-//!   cobweb-like soft blocks quickly. Not for mining: on other blocks it is as slow as a hand
-//!   and wears 2. In creative mode a sword does not break blocks at all (no accidents in a
-//!   fight).
+//!   cobweb-like soft blocks quickly. It does not break other blocks at all (no digging
+//!   holes in a fight), and in creative mode none.
 //! * **Мотыга** — tills dirt and grass into farmland; harvests leaves, crops and moss quickly.
 //! * **Лук** — only shoots; as a club it is a bare hand and does not wear.
 //! * Any tool on a block that is not its own works like a bare hand and wears 2.
@@ -89,9 +88,13 @@ pub fn speed(id: Option<ItemId>, b: Block) -> f32 {
     }
 }
 
-/// Can the held item break `b` at all? (Creative swords do not break blocks.)
-pub fn may_break(id: Option<ItemId>, creative: bool) -> bool {
-    !(creative && matches!(role(id), Role::Sword(_)))
+/// Can the held item break `b` at all? A sword is a weapon: it only cuts soft blocks
+/// (leaves, plants, wool) and never breaks anything in creative.
+pub fn may_break(id: Option<ItemId>, b: Block, creative: bool) -> bool {
+    match role(id) {
+        Role::Sword(_) => !creative && sword_cuts(b),
+        _ => true,
+    }
 }
 
 /// Wear for breaking `b`: 0 for instant blocks and non-tools, 1 on the tool's own blocks, 2
@@ -127,7 +130,7 @@ pub fn describe(id: ItemId) -> Option<String> {
         Role::Pickaxe(m) => format!("Копает: камень, руды, кирпич, металл · добывает: {}", ores(m)),
         Role::Axe(_) => "Рубит: брёвна, доски, деревянное, тыквы · сильный удар".into(),
         Role::Shovel(_) => "Копает: землю, траву, песок, гравий, глину, снег".into(),
-        Role::Sword(_) => "Оружие: самый сильный удар · режет листву, растения, шерсть · блоки не копает (износ ×2)".into(),
+        Role::Sword(_) => "Оружие: самый сильный удар · режет листву, растения, шерсть · другие блоки не ломает".into(),
         Role::Hoe(_) => "Вспахивает землю и траву · быстро собирает урожай, листву, мох".into(),
         Role::Bow => "Только стреляет: держите, чтобы натянуть".into(),
         Role::Other => return None,
@@ -154,11 +157,11 @@ mod tests {
         assert_eq!(speed(shovel, Block::OakLog), 1.0);
         // A sword is a weapon: fast on leaves and plants, a hand on stone, wears double there.
         assert!(speed(sword, Block::OakLeaves) > 1.0);
-        assert_eq!(speed(sword, Block::Stone), 1.0);
-        assert_eq!(wear_for_block(sword, Block::Stone), 2);
+        assert!(!may_break(sword, Block::Stone, false) && !may_break(sword, Block::Dirt, false), "a sword digs nothing");
+        assert!(may_break(sword, Block::OakLeaves, false), "but cuts leaves");
         assert_eq!(wear_for_block(sword, Block::OakLeaves), 1);
-        assert!(!may_break(sword, true), "no block breaking with a sword in creative");
-        assert!(may_break(sword, false) && may_break(pick(0), true));
+        assert!(!may_break(sword, Block::OakLeaves, true), "no block breaking with a sword in creative");
+        assert!(may_break(pick(0), Block::Stone, true) && may_break(None, Block::Dirt, false));
         // A hoe harvests crops and leaves fast.
         assert!(speed(hoe, Block::Wheat) > 1.0 && speed(hoe, Block::OakLeaves) > 1.0);
         assert_eq!(speed(hoe, Block::Stone), 1.0);

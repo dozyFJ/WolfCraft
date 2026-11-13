@@ -454,7 +454,7 @@ pub fn break_time(held: Option<ItemInfo>, block: Block, creative: bool) -> Optio
 pub fn break_time_for(held: Option<ItemStack>, block: Block, creative: bool) -> Option<f32> {
     let bi = block.info();
     let id = held.map(|s| s.id);
-    if bi.hardness < 0.0 || block.is_fluid() || !crate::tools::may_break(id, creative) {
+    if bi.hardness < 0.0 || block.is_fluid() || !crate::tools::may_break(id, block, creative) {
         return None;
     }
     if creative {

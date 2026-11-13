@@ -107,6 +107,10 @@ impl Mob {
 pub struct MobManager {
     pub mobs: Vec<Mob>,
     pub boss_deaths: Vec<crate::bosses::BossDeath>,
+    /// Effects the guardians' attacks put on the player (the game applies them).
+    pub boss_effects: Vec<(crate::magic::Effect,f32)>,
+    /// A push the guardians' attacks gave the player (velocity to add).
+    pub boss_knock: DVec3,
     /// New creatures appear (off in Studio baseplate worlds).
     pub spawning: bool,
     spawn_timer: f32,
@@ -129,7 +133,7 @@ fn tangent(v: DVec3, up: DVec3) -> DVec3 {
 
 impl MobManager {
     pub fn new(seed: u64) -> Self {
-        Self { mobs: Vec::new(), boss_deaths: Vec::new(), spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
+        Self { mobs: Vec::new(), boss_deaths: Vec::new(), boss_effects: Vec::new(), boss_knock: DVec3::ZERO, spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
     }
 
     pub fn rand(&mut self) -> f64 {
@@ -323,6 +327,11 @@ impl MobManager {
         }
         let mut dealt = 0.0;
         let mut boss_fx: Vec<(DVec3,[f32;3],f64,f32)> = Vec::new();
+        // Things the guardians' attacks do besides damage: effects on the player, a push,
+        // wolves called in.
+        let mut effects: Vec<(crate::magic::Effect,f32)> = Vec::new();
+        let mut knock = DVec3::ZERO;
+        let mut spawns: Vec<DVec3> = Vec::new();
         let mut rolls: Vec<f64> = (0..self.mobs.len() * 2).map(|_| self.rand()).collect();
         for (i, m) in self.mobs.iter_mut().enumerate() {
             if m.hp<=0. {continue;}
@@ -331,25 +340,94 @@ impl MobManager {
             let flat = tangent(to_player, up);
             let dist = to_player.length();
             if let Some(boss)=&mut m.boss {
-                let phase=boss.kind.phase(m.hp);let at_home=(m.body.pos-boss.anchor).length();
-                if at_home>25. {m.body.pos=boss.anchor;m.body.vel=DVec3::ZERO;}
+                use crate::bosses::{Attack,BossKind};
+                let phase=boss.kind.phase(m.hp);
+                if (m.body.pos-boss.anchor).length()>25. {m.body.pos=boss.anchor;m.body.vel=DVec3::ZERO;}
                 boss.cooldown=(boss.cooldown-dt as f32).max(0.0);
-                let mut wish=if targetable&&dist<36. {flat.normalize_or_zero()}else{tangent(boss.anchor-m.body.pos,up).normalize_or_zero()};
-                if boss.casting>0. {
-                    boss.casting-=dt as f32;wish=DVec3::ZERO;
-                    if boss.casting<=0. {
-                        let radius=if boss.kind==crate::bosses::BossKind::Stone{6.0}else{3.0};
-                        if targetable&&(player-boss.target).length()<radius+0.8&&Self::line_clear(world,m.body.pos+up*1.6,player+up) {dealt+=if phase==3{10.0}else{6.0};}
-                        boss_fx.push((boss.target,boss.kind.color(),radius,0.5));
-                        boss.cooldown=if phase==3{2.4}else{4.5};
+                let near=targetable&&dist<36.;
+                // Movement: the stone guardian walks at you; the ranged ones keep their
+                // distance and circle round you (changing direction now and then).
+                let mut wish=if !near {tangent(boss.anchor-m.body.pos,up).normalize_or_zero()} else {
+                    let to=flat.normalize_or_zero();
+                    let keep=boss.kind.keep_away();
+                    if keep<=0.0 {if dist>1.6 {to} else {DVec3::ZERO}} else {
+                        boss.orbit_t-=dt as f32;
+                        if boss.orbit_t<=0.0 {boss.orbit=-boss.orbit;boss.orbit_t=2.5+rolls[i*2] as f32*3.0;}
+                        let side=to.cross(up).normalize_or_zero()*boss.orbit;
+                        let radial=if dist<keep-1.5 {-1.0} else if dist>keep+2.0 {1.0} else {0.0};
+                        (to*radial+side*0.8).normalize_or_zero()
                     }
-                }else if boss.cooldown<=0.0&&targetable&&dist<22. {
-                    boss.target=if boss.kind==crate::bosses::BossKind::Stone{m.body.pos}else{player};
-                    boss.casting=if phase==3{0.9}else{1.5};
-                    boss_fx.push((boss.target,boss.kind.color(),if boss.kind==crate::bosses::BossKind::Stone{6.0}else{3.0},boss.casting));
+                };
+                let mut speed=if phase==3{3.0}else{2.2};
+                // A charge: fast and straight; hits on contact.
+                if boss.charge>0.0 {
+                    boss.charge-=dt as f32;wish=boss.charge_dir;speed=9.0;
+                    if targetable&&dist<1.8 {dealt+=Attack::Charge.damage(phase);boss.charge=0.0;}
+                }
+                if boss.casting>0. {
+                    boss.casting-=dt as f32;
+                    if boss.attack!=Attack::Heal {wish=DVec3::ZERO;}
+                    if boss.attack==Attack::Heal {m.hp=(m.hp+6.0*dt as f32).min(boss.kind.max_hp());boss_fx.push((m.body.pos,[0.5,1.0,0.4],1.2,0.15));}
+                    if boss.casting<=0. {
+                        let a=boss.attack;
+                        let r=a.radius();
+                        let hits=|spot:DVec3|targetable&&(player-spot).length()<r+0.6;
+                        match a {
+                            Attack::Charge => {boss.charge=1.2;boss.charge_dir=flat.normalize_or_zero();}
+                            Attack::Summon => {
+                                for k in 0..2 {
+                                    let side=flat.normalize_or_zero().cross(up).normalize_or_zero()*if k==0{2.5}else{-2.5};
+                                    spawns.push(m.body.pos+side+up*0.5);
+                                }
+                            }
+                            Attack::Heal => {}
+                            _ => {
+                                let spots:Vec<DVec3>=if boss.targets.is_empty(){vec![boss.target]}else{boss.targets.clone()};
+                                let line=Self::line_clear(world,m.body.pos+up*1.6,player+up);
+                                if spots.iter().any(|s|hits(*s))&&(line||a==Attack::Slam||a==Attack::Roots) {
+                                    dealt+=a.damage(phase);
+                                    match a {
+                                        Attack::Roots => effects.push((crate::magic::Effect::Slowness,4.0)),
+                                        Attack::Slam => knock+=up*7.0,
+                                        Attack::FireRing|Attack::Fireballs => effects.push((crate::magic::Effect::Harm,0.0)),
+                                        _ => {}
+                                    }
+                                }
+                                for s in spots {boss_fx.push((s,boss.kind.color(),r,0.6));}
+                                boss.targets.clear();
+                            }
+                        }
+                        boss.cooldown=if phase==3{1.6}else if phase==2{2.6}else{3.4};
+                    }
+                }else if boss.cooldown<=0.0&&boss.charge<=0.0&&targetable&&dist<24. {
+                    let a=boss.kind.next_attack(phase,boss.count,dist);
+                    boss.count+=1;
+                    boss.attack=a;
+                    boss.casting=a.cast_time(phase);
+                    boss.targets.clear();
+                    boss.target=if matches!(a,Attack::Slam|Attack::FireRing) {m.body.pos} else {player};
+                    match a {
+                        Attack::Roots => {
+                            // Under the player and beside it, where it would step.
+                            let side=flat.normalize_or_zero().cross(up).normalize_or_zero();
+                            boss.targets=vec![player,player+side*3.0,player-side*3.0];
+                        }
+                        Attack::Fireballs => {
+                            let n=phase as usize;let side=flat.normalize_or_zero().cross(up).normalize_or_zero();let fwd=flat.normalize_or_zero();
+                            boss.targets=(0..n*2-1).map(|k|{let o=k as f64-(n-1) as f64;player+side*o*2.6+fwd*((k%2) as f64*2.0)}).collect();
+                        }
+                        _ => {}
+                    }
+                    let warn=if boss.targets.is_empty(){vec![boss.target]}else{boss.targets.clone()};
+                    if a.radius()>0.0 {for s in warn {boss_fx.push((s,boss.kind.color(),a.radius(),boss.casting));}}
                 }
                 if wish.length_squared()>0.1 {m.heading=wish;}
-                step(world,&mut m.body,&MoveInput{wish,speed:if phase==3{3.2}else{2.2},jump:false,up:false,down:false},dt);
+                // Stuck against a block while trying to walk: jump over it.
+                let before=m.body.pos;
+                let jump=boss.stuck>0.4&&m.body.on_ground;
+                if jump {boss.stuck=0.0;}
+                step(world,&mut m.body,&MoveInput{wish,speed,jump,up:false,down:false},dt);
+                if wish.length_squared()>0.1&&(m.body.pos-before).length()<speed*dt*0.25 {boss.stuck+=dt as f32;} else {boss.stuck=0.0;}
                 m.anim+=dt as f32*4.;m.amount=wish.length() as f32;m.hurt=(m.hurt-dt as f32).max(0.);
                 continue;
             }
@@ -441,6 +519,14 @@ impl MobManager {
             for n in 0..24 {let t=n as f64*std::f64::consts::TAU/24.;let dir=a*t.cos()+b*t.sin();self.fx_glow(at+dir*radius+up*0.12,up*0.05,color,0.14,life,FxKind::Rise);}
         }
         rolls.clear();
+        for at in spawns {
+            let h=tangent(player-at,up_at(at)).normalize_or_zero();
+            let mut w=Mob::new(MobKind::Wolf,at,h);
+            w.alert=30.0;
+            self.mobs.push(w);
+        }
+        self.boss_effects.extend(effects);
+        self.boss_knock+=knock;
         // Dead creatures fall apart into coloured cubes.
         let dead: Vec<(DVec3, MobKind)> = self.mobs.iter().filter(|m| m.hp <= 0.0).map(|m| (m.body.pos, m.kind)).collect();
         for (pos, kind) in dead {

@@ -570,17 +570,7 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3
         };
         let z = Vec3::ZERO;
         if let Some(role)=&m.boss {
-            let c=tint(role.kind.color());
-            let glow=match role.kind {crate::bosses::BossKind::Root=>[0.7,1.,0.35],crate::bosses::BossKind::Ember=>[1.,0.8,0.15],_=>[0.3,0.95,1.]};
-            add_box(&mut v,&f,Vec3::new(-0.6,0.7,-0.4),Vec3::new(0.6,2.3,0.4),z,0.,c);
-            add_box(&mut v,&f,Vec3::new(-0.45,2.3,-0.35),Vec3::new(0.45,3.0,0.35),z,0.,c);
-            for side in [-1.0,1.0] {
-                add_box(&mut v,&f,Vec3::new(side*0.32-0.22,0.,-0.25),Vec3::new(side*0.32+0.22,0.8,0.25),Vec3::new(side*0.32,0.8,0.),swing*side,c);
-                add_box(&mut v,&f,Vec3::new(side*0.88-0.22,0.9,-0.28),Vec3::new(side*0.88+0.22,2.25,0.28),Vec3::new(side*0.88,2.25,0.),-swing*side,c);
-                add_box(&mut v,&f,Vec3::new(side*0.20-0.10,2.62,0.35),Vec3::new(side*0.20+0.10,2.75,0.38),z,0.,glow);
-                if role.kind==crate::bosses::BossKind::Root {for h in 0..3 {add_box(&mut v,&f,Vec3::new(side*(0.4+h as f32*0.18)-0.14,2.8+h as f32*0.15,-0.1),Vec3::new(side*(0.4+h as f32*0.18)+0.14,3.05+h as f32*0.15,0.15),z,0.,c);}}
-            }
-            add_box(&mut v,&f,Vec3::new(-0.18,1.3,0.4),Vec3::new(0.18,1.8,0.44),z,0.,glow);
+            add_guardian(&mut v,&f,role,m.anim,m.amount,m.hp,&tint);
             continue;
         }
         match m.kind {
@@ -1931,4 +1921,131 @@ pub fn build_frame_models(grid:&crate::cubesphere::Grid,frames:&[(crate::cubesph
         let uv=[[0.,1.],[1.,1.],[1.,0.],[0.,0.]];
         for i in [0usize,1,2,0,2,3,0,2,1,0,3,2] {out.push(ModelVertex{pos:points[i].as_vec3().to_array(),normal,color:[tile as f32,0.,0.],uv:uv[i],tex});}
     }out
+}
+
+/// The three guardians, each its own figure (built in the mob's frame: x right, y up, z
+/// forward). Arms rise while an attack is cast; cracks glow brighter in later phases.
+fn add_guardian(v:&mut Vec<ModelVertex>,f:&Frame,role:&crate::bosses::BossRole,anim:f32,amount:f32,hp:f32,tint:&dyn Fn([f32;3])->[f32;3]) {
+    use crate::bosses::{Attack,BossKind};
+    let z=Vec3::ZERO;
+    let swing=anim.sin()*0.5*amount;
+    let phase=role.kind.phase(hp);
+    let casting=role.casting>0.0;
+    let raise=if casting {match role.attack {Attack::Slam|Attack::Boulder=>-2.6,Attack::Heal|Attack::Summon=>-1.9,_=>-1.3}} else if role.charge>0.0 {-1.4} else {0.0};
+    let glow_k=0.75+0.25*phase as f32;
+    let mut b=|lo:Vec3,hi:Vec3,pivot:Vec3,angle:f32,c:[f32;3]|add_box(v,f,lo,hi,pivot,angle,tint(c));
+    match role.kind {
+        BossKind::Stone => {
+            // A hulking stone golem: pillar legs, a broad cracked chest with glowing runes,
+            // moss on the shoulders, a small sunken head and great boulder fists.
+            let (st,st_d,st_l)=([0.50,0.54,0.58],[0.36,0.39,0.43],[0.62,0.66,0.70]);
+            let moss=[0.30,0.55,0.25];
+            let rune=[0.35*glow_k,0.95*glow_k,1.0];
+            for side in [-1.0f32,1.0] {
+                let hip=Vec3::new(side*0.42,1.0,0.0);
+                b(Vec3::new(side*0.42-0.30,0.0,-0.32),Vec3::new(side*0.42+0.30,1.05,0.32),hip,swing*side,st_d);
+                b(Vec3::new(side*0.42-0.34,0.0,-0.36),Vec3::new(side*0.42+0.34,0.22,0.40),hip,swing*side,st);
+            }
+            b(Vec3::new(-0.80,1.0,-0.50),Vec3::new(0.80,2.55,0.50),z,0.0,st);
+            b(Vec3::new(-0.62,1.15,0.48),Vec3::new(0.62,2.35,0.56),z,0.0,st_l);
+            // Runes and cracks on the chest.
+            b(Vec3::new(-0.05,1.35,0.55),Vec3::new(0.05,2.20,0.60),z,0.0,rune);
+            b(Vec3::new(-0.40,1.95,0.55),Vec3::new(0.40,2.03,0.60),z,0.0,rune);
+            b(Vec3::new(-0.30,1.50,0.55),Vec3::new(-0.22,1.85,0.60),z,0.0,rune);
+            b(Vec3::new(0.22,1.50,0.55),Vec3::new(0.30,1.85,0.60),z,0.0,rune);
+            // Head, sunk between the shoulders, with a brow and two glowing eyes.
+            b(Vec3::new(-0.34,2.45,-0.20),Vec3::new(0.34,3.05,0.40),z,0.0,st_l);
+            b(Vec3::new(-0.38,2.85,0.30),Vec3::new(0.38,2.97,0.46),z,0.0,st_d);
+            for side in [-1.0f32,1.0] {
+                b(Vec3::new(side*0.17-0.08,2.68,0.40),Vec3::new(side*0.17+0.08,2.80,0.44),z,0.0,rune);
+                // Shoulder boulders with moss, then the arm and a huge fist.
+                let sh=Vec3::new(side*1.05,2.35,0.0);
+                b(Vec3::new(side*1.05-0.38,2.15,-0.38),Vec3::new(side*1.05+0.38,2.75,0.38),z,0.0,st_d);
+                b(Vec3::new(side*1.05-0.30,2.75,-0.25),Vec3::new(side*1.05+0.30,2.85,0.25),z,0.0,moss);
+                let arm=raise-swing*side*0.6;
+                b(Vec3::new(side*1.05-0.26,1.05,-0.26),Vec3::new(side*1.05+0.26,2.25,0.26),sh,arm,st);
+                b(Vec3::new(side*1.05-0.40,0.55,-0.40),Vec3::new(side*1.05+0.40,1.15,0.40),sh,arm,st_d);
+                b(Vec3::new(side*1.05-0.12,0.80,0.40),Vec3::new(side*1.05+0.12,0.92,0.44),sh,arm,rune);
+            }
+        }
+        BossKind::Root => {
+            // A walking tree: root legs, a bark trunk with a hollow glowing face, long branch
+            // arms with leaf tufts and a leafy crown with flowers.
+            let (bark,bark_d)=([0.42,0.28,0.17],[0.30,0.20,0.12]);
+            let (leaf,leaf_l)=([0.22,0.55,0.22],[0.36,0.70,0.30]);
+            let eye=[0.75*glow_k,1.0,0.35];
+            for side in [-1.0f32,1.0] {
+                let hip=Vec3::new(side*0.30,1.0,0.0);
+                b(Vec3::new(side*0.30-0.20,0.15,-0.20),Vec3::new(side*0.30+0.20,1.05,0.20),hip,swing*side,bark);
+                // Roots splaying out at the foot.
+                for (dx,dz) in [(0.30,0.10),(-0.05,0.35),(0.05,-0.35)] {
+                    b(Vec3::new(side*0.30+side*dx-0.08,0.0,dz-0.08),Vec3::new(side*0.30+side*dx+0.08,0.20,dz+0.08),hip,swing*side,bark_d);
+                }
+            }
+            b(Vec3::new(-0.50,1.0,-0.42),Vec3::new(0.50,2.75,0.42),z,0.0,bark);
+            for x in [-0.32f32,0.0,0.30] {b(Vec3::new(x-0.04,1.05,0.42),Vec3::new(x+0.04,2.70,0.46),z,0.0,bark_d);}
+            // Hollow face: dark sockets with glowing eyes and a crooked mouth.
+            for side in [-1.0f32,1.0] {
+                b(Vec3::new(side*0.20-0.12,2.25,0.40),Vec3::new(side*0.20+0.12,2.45,0.47),z,0.0,[0.08,0.06,0.04]);
+                b(Vec3::new(side*0.20-0.06,2.30,0.46),Vec3::new(side*0.20+0.06,2.40,0.49),z,0.0,eye);
+            }
+            b(Vec3::new(-0.18,1.95,0.42),Vec3::new(0.18,2.03,0.47),z,0.0,[0.08,0.06,0.04]);
+            // Crown.
+            for (x,y,zz,s) in [(0.0f32,3.05f32,0.0f32,0.65f32),(-0.55,2.85,0.10,0.45),(0.55,2.90,-0.10,0.45),(0.10,3.45,-0.15,0.42),(-0.25,3.30,0.30,0.35)] {
+                b(Vec3::new(x-s,y-s*0.6,zz-s),Vec3::new(x+s,y+s*0.6,zz+s),z,0.0,if (x+zz)>0.0 {leaf_l} else {leaf});
+            }
+            for (x,zz) in [(-0.40f32,0.45f32),(0.35,0.40),(0.0,0.60)] {
+                b(Vec3::new(x-0.07,3.0,zz),Vec3::new(x+0.07,3.14,zz+0.10),z,0.0,[0.95,0.45,0.70]);
+            }
+            for side in [-1.0f32,1.0] {
+                // Branch arm with twigs and a leaf tuft at the hand.
+                let sh=Vec3::new(side*0.62,2.50,0.0);
+                let arm=raise-swing*side*0.7;
+                b(Vec3::new(side*0.62-0.13,1.05,-0.13),Vec3::new(side*0.62+0.13,2.55,0.13),sh,arm,bark);
+                b(Vec3::new(side*0.62+side*0.10,1.55,-0.06),Vec3::new(side*0.62+side*0.40,1.65,0.06),sh,arm,bark_d);
+                b(Vec3::new(side*0.62-0.28,0.75,-0.28),Vec3::new(side*0.62+0.28,1.15,0.28),sh,arm,leaf);
+            }
+        }
+        BossKind::Ember => {
+            // A floating molten heart: a glowing core inside cracked basalt plates, rock
+            // shards circling it, flames on top. No legs: it hovers and bobs.
+            let bob=(anim*0.8).sin()*0.12;
+            let core=[1.0,0.48+0.12*glow_k,0.10];
+            let hot=[1.0,0.85,0.30];
+            let (rock,rock_d)=([0.22,0.18,0.17],[0.13,0.11,0.11]);
+            let y0=1.0+bob;
+            b(Vec3::new(-0.58,y0+0.30,-0.58),Vec3::new(0.58,y0+1.50,0.58),z,0.0,core);
+            b(Vec3::new(-0.30,y0+0.60,-0.30),Vec3::new(0.30,y0+1.20,0.30),z,0.0,hot);
+            // Basalt shell broken into corner chunks: wide glowing cracks between them show the
+            // core on every side.
+            for sx in [-1.0f32,1.0] {
+                for sz in [-1.0f32,1.0] {
+                    for (y_lo,y_hi,c) in [(0.20f32,0.75f32,rock),(1.05,1.60,rock_d)] {
+                        b(Vec3::new(sx*0.18,y0+y_lo,sz*0.18).min(Vec3::new(sx*0.66,y0+y_hi,sz*0.66)),Vec3::new(sx*0.18,y0+y_lo,sz*0.18).max(Vec3::new(sx*0.66,y0+y_hi,sz*0.66)),z,0.0,c);
+                    }
+                }
+            }
+            // Eyes in the front gap, a slit mouth of fire.
+            for side in [-1.0f32,1.0] {b(Vec3::new(side*0.09-0.06,y0+0.82,0.66),Vec3::new(side*0.09+0.06,y0+0.98,0.70),z,0.0,[0.15,0.05,0.02]);}
+            // Flames on top.
+            for (x,zz,h) in [(0.0f32,0.0f32,0.55f32),(-0.28,0.15,0.35),(0.30,-0.12,0.40),(0.10,0.30,0.30)] {
+                let fl=h*(0.85+0.15*(anim*3.0+x*7.0).sin());
+                b(Vec3::new(x-0.10,y0+1.55,zz-0.10),Vec3::new(x+0.10,y0+1.55+fl,zz+0.10),z,0.0,if h>0.4 {core} else {hot});
+            }
+            // Rock shards circling (faster while casting).
+            let spin=anim*if casting {1.6} else {0.6};
+            for k in 0..5 {
+                let a=spin+k as f32*std::f32::consts::TAU/5.0;
+                let (sx,sz)=(a.cos()*1.25,a.sin()*1.25);
+                let y=y0+0.6+(a*2.0).sin()*0.25;
+                b(Vec3::new(sx-0.15,y,sz-0.15),Vec3::new(sx+0.15,y+0.30,sz+0.15),z,0.0,if k%2==0 {rock} else {rock_d});
+            }
+            // Short stubby arms that lift when it casts.
+            for side in [-1.0f32,1.0] {
+                let sh=Vec3::new(side*0.80,y0+1.25,0.0);
+                b(Vec3::new(side*0.80-0.15,y0+0.55,-0.15),Vec3::new(side*0.80+0.15,y0+1.30,0.15),sh,raise*0.7,rock);
+                b(Vec3::new(side*0.80-0.12,y0+0.45,-0.12),Vec3::new(side*0.80+0.12,y0+0.60,0.12),sh,raise*0.7,core);
+            }
+        }
+    }
 }
