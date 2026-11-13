@@ -4,7 +4,7 @@
 //! between clients, and serves a local control panel in the browser.
 //!
 //! Usage: `WolfServer [--name <мир>] [--seed <число>] [--port <порт>] [--creative]
-//!                    [--background] [--no-browser] [--data <папка>]`
+//!                    [--background] [--no-browser] [--data <папка>] [--token <ключ>]`
 //!
 //! The same server runs on a PC and, inside the WolfServer Pocket app, on an Android phone.
 
@@ -230,7 +230,8 @@ fn main() {
     }
 
     // Control panel (this computer only).
-    let token = format!("{:016x}", wolfcraft_common::platform::unix_now().wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((std::process::id() as u64) << 32) ^ Instant::now().elapsed().subsec_nanos() as u64);
+    // `--token`: the WolfServer Pocket app passes its own, so its dashboard can use the API.
+    let token = arg_value(&args, "--token").filter(|t| t.len() >= 8).unwrap_or_else(|| format!("{:016x}", wolfcraft_common::platform::unix_now().wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((std::process::id() as u64) << 32) ^ Instant::now().elapsed().subsec_nanos() as u64));
     match TcpListener::bind(("127.0.0.1", PANEL_PORT)) {
         Ok(panel) => {
             let (server2, cfg2, token2) = (server.clone(), cfg.clone(), token.clone());
