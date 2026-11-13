@@ -1289,13 +1289,18 @@ impl App {
             self.main_worlds_fresh = false;
         }
         // "Рядом": hear servers on Wi-Fi / hotspot while the world list is open.
-        if self.screen == Screen::WorldSelect {
+        // The studio app also hears servers on its home screen (their worlds open in the studio).
+        let studio_home = wolfcraft_ui::launcher::is_studio_app() && self.screen == Screen::Main;
+        if self.screen == Screen::WorldSelect || studio_home {
             if self.discovery.is_none() {
                 crate::orientation::acquire_multicast_lock();
                 self.discovery = wolfcraft_net::lan::Discovery::start();
             }
             if let Some(d) = &self.discovery {
                 self.world_select.nearby = d.servers().into_iter().map(|f| (f.name, f.addr, f.players, f.max)).collect();
+                if studio_home {
+                    wolfcraft_ui::launcher::set_nearby(self.world_select.nearby.clone());
+                }
             }
         } else if self.discovery.is_some() {
             self.discovery = None;
@@ -2571,6 +2576,22 @@ impl App {
                 self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, script_open: true, script: crate::lua::TEMPLATE.to_string(), ..Default::default() });
                 self.studio_world = Some(cfg.id.clone());
                 self.start_load(cfg, true);
+            }
+            MenuAction::EditServerInStudio(addr) => {
+                // A server's world with the studio tools: creative, flying, brush and WorldEdit;
+                // every edit is sent to the server, so all players see it at once.
+                self.host = None;
+                self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, ..Default::default() });
+                self.studio_world = None;
+                self.join_server(&addr);
+                if self.net.is_none() {
+                    // Could not connect: no studio left behind.
+                    self.studio = None;
+                    if let Some(e) = self.world_select.net_error.clone() {
+                        let now = self.time.elapsed() as f64;
+                        self.chat.push(ChatKind::System, format!("Не удалось открыть мир сервера: {e}"), now);
+                    }
+                }
             }
             MenuAction::OpenStudio(id) => {
                 self.net = None;

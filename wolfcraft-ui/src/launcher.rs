@@ -32,6 +32,16 @@ pub fn is_studio_app() -> bool {
     STUDIO_APP.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// WolfServer worlds heard on the local network (name, address, players, max), kept fresh by
+/// the app while the studio's launcher is open.
+static NEARBY: std::sync::Mutex<Vec<(String, String, usize, usize)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn set_nearby(list: Vec<(String, String, usize, usize)>) {
+    if let Ok(mut n) = NEARBY.lock() {
+        *n = list;
+    }
+}
+
 /// Tabs of the bottom bar: the game has no studio tab any more, the studio app only has its
 /// projects and settings.
 fn tabs() -> &'static [(Tab, &'static str)] {
@@ -473,6 +483,37 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
                             *action = MenuAction::HostServer(Some(w.cfg.id.clone()));
                         }
                     });
+                });
+            });
+        });
+    }
+    // Worlds of WolfServer (phone or PC) in this network: they appear here by themselves as
+    // soon as a server starts, and open with the studio tools — edits go straight to the server.
+    section(ui, p, "Миры на серверах", "");
+    let nearby = NEARBY.lock().map(|n| n.clone()).unwrap_or_default();
+    ui.horizontal(|ui| {
+        let t = ui.ctx().input(|i| i.time) as f32;
+        let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+        ui.painter().circle_stroke(r.center(), 3.0 + (t * 1.5).fract() * 6.0, Stroke::new(1.5_f32, p.accent.gamma_multiply(1.0 - (t * 1.5).fract())));
+        ui.painter().circle_filled(r.center(), 2.5, p.accent);
+        ui.label(egui::RichText::new("Миры WolfServer в вашей сети появляются здесь сами").size(13.0).color(p.text_muted));
+    });
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+    if nearby.is_empty() {
+        ui.label(egui::RichText::new("Пока нет. Запустите WolfServer Pocket на телефоне или WolfServer.exe на ПК.").size(13.0).color(p.text_muted));
+    }
+    for (name, addr, players, max) in &nearby {
+        Frame::none().fill(p.surface).rounding(Rounding::same(12.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(12.0)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+                icons.paint(ui.painter(), r, icon::GLOBE, p.success);
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(name).font(bold_font(15.0)).color(p.text));
+                    ui.label(egui::RichText::new(format!("{addr} · игроков {players}/{max}")).size(12.0).color(p.text_muted));
+                    if pill_button(ui, icons, Some(icon::HAMMER), "Открыть в студии", ButtonKind::Primary, 170.0, players < max).clicked() {
+                        *action = MenuAction::EditServerInStudio(addr.clone());
+                    }
                 });
             });
         });

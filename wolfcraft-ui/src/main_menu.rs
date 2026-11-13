@@ -35,6 +35,8 @@ pub enum MenuAction {
     SetSkin(u8),
     /// Open this world in the studio (editor).
     OpenStudio(String),
+    /// Join a server's world (address) with the studio tools: edits go straight to the server.
+    EditServerInStudio(String),
     /// Studio: a new empty project (a baseplate world) opened right away.
     NewStudioProject,
     /// World list opened straight on "Игра по сети → Рядом".
