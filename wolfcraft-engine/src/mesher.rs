@@ -480,7 +480,7 @@ fn mesh_construction(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32;3])->
         let full=face.surface==construction::geometry::Surface::Picture;
         for (p,uv0) in face.points.iter().zip([[0.,0.],[1.,0.],[1.,1.],[0.,1.]]) {
             let uv=if full {uv0} else {match la {2=>[p[0],p[1]],0=>[p[1],1.-p[2]],_=>[p[0],1.-p[2]]}};
-            let uv=[uv[0].clamp(0.,1.),uv[1].clamp(0.,1.)];
+            // (No clamp: the shader repeats the tile, so parts beyond the cell keep texturing.)
             verts.push(Vertex {pos:inp.to_local(x as f32+p[1],y as f32+p[2],z as f32+p[0]),uv,flags:tile as u32|((emissive as u32)<<16)|((f as u32)<<17)|((alpha as u32)<<27)|lit,light:[if emissive{1.}else{0.9},if emissive{1.}else{sky}]});
         }
         idx.extend_from_slice(&[base,base+1,base+2,base,base+2,base+3]);

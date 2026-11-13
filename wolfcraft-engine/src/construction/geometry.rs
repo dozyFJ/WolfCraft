@@ -37,6 +37,12 @@ impl Geometry {
         let p=[[x,y,z],[X,y,z],[X,Y,z],[x,Y,z],[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]];
         for f in [[0,3,2,1],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]] { self.face(f.map(|i|p[i]),surface); }
     }
+    /// A box that is only drawn (no collision box): the part of big furniture that reaches
+    /// out of its own cell (the far half of a bed, the top of a wardrobe).
+    fn visual(&mut self, b: [f32;6], surface: Surface) {
+        self.cuboid(b, surface);
+        self.boxes.pop();
+    }
     fn wedge(&mut self) {
         use Surface::Main;
         self.face([[0.,0.,0.],[1.,0.,0.],[1.,1.,0.],[0.,1.,0.]], Main);
@@ -153,11 +159,26 @@ fn build(form: Form, joined: u8) -> Geometry {
             if joined&1==0||form==SofaCorner {g.cuboid([0.,0.03,0.35,0.13,0.78,0.78],Surface::Fabric);}
             if joined&2==0 {g.cuboid([0.87,0.03,0.35,1.,0.78,0.78],Surface::Fabric);}
         }
-        Bed => {legs(&mut g,0.28);g.cuboid([0.,0.,0.25,1.,1.,0.42],Main);g.cuboid([0.02,0.02,0.42,0.98,0.78,0.58],Surface::Fabric);g.cuboid([0.1,0.80,0.42,0.9,0.98,0.62],Surface::Ceramic);},
+        Bed => {
+            // Two blocks long (a player lies on it): the foot half is this cell, the head
+            // half with the pillow and the headboard reaches into the next one.
+            for x in [0.04,0.84] {g.cuboid([x,0.04,0.,x+0.12,0.16,0.28],Main);g.visual([x,1.84,0.,x+0.12,1.96,0.28],Main);}
+            g.cuboid([0.,0.,0.25,1.,1.,0.42],Main);g.visual([0.,1.,0.25,1.,2.,0.42],Main);
+            g.cuboid([0.02,0.02,0.42,0.98,1.,0.58],Surface::Fabric);g.visual([0.02,1.,0.42,0.98,1.45,0.58],Surface::Fabric);
+            g.visual([0.1,1.50,0.42,0.9,1.90,0.64],Surface::Ceramic);
+            g.visual([0.,1.94,0.25,1.,2.,0.95],Main);
+        },
         Wardrobe|KitchenBase|Nightstand => {
             let h=if form==Wardrobe{1.}else if form==KitchenBase{0.88}else{0.62};
             g.cuboid([0.02,0.12,0.,0.98,0.96,h],Main);
-            for x in [0.44,0.54] {g.cuboid([x,0.06,h*0.45,x+0.03,0.12,h*0.65],Surface::Metal);}
+            if form==Wardrobe {
+                // As tall as a player: the upper half is drawn above the cell.
+                g.visual([0.02,0.12,1.,0.98,0.96,1.9],Main);
+                g.visual([0.49,0.10,0.06,0.51,0.12,1.84],Surface::Metal);
+                for x in [0.42,0.55] {g.visual([x,0.06,0.85,x+0.03,0.12,1.15],Surface::Metal);}
+            } else {
+                for x in [0.44,0.54] {g.cuboid([x,0.06,h*0.45,x+0.03,0.12,h*0.65],Surface::Metal);}
+            }
         }
         Shelf => {
             for x in [0.02,0.91] {g.cuboid([x,0.15,0.,x+0.07,0.9,1.],Main);}
@@ -171,7 +192,7 @@ fn build(form: Form, joined: u8) -> Geometry {
                 g.cuboid([0.46,0.84,0.9,0.54,0.92,1.],Surface::Metal);
             }
         }
-        FloorLamp => {g.cuboid([0.25,0.25,0.,0.75,0.75,0.08],Surface::Metal);g.cuboid([0.47,0.47,0.08,0.53,0.53,0.73],Surface::Metal);g.cuboid([0.2,0.2,0.73,0.8,0.8,1.],Surface::Light);},
+        FloorLamp => {g.cuboid([0.25,0.25,0.,0.75,0.75,0.08],Surface::Metal);g.cuboid([0.47,0.47,0.08,0.53,0.53,1.],Surface::Metal);g.visual([0.47,0.47,1.,0.53,0.53,1.3],Surface::Metal);g.visual([0.2,0.2,1.3,0.8,0.8,1.65],Surface::Light);},
         Curtain => {for n in 0..8 {let x=n as f32/8.;let y=if n%2==0{0.08}else{0.16};g.cuboid([x,y,0.,x+0.125,y+0.04,1.],Surface::Fabric);}},
         Rug=>g.cuboid([0.,0.,0.,1.,1.,0.025],Surface::Fabric),
         Mirror=>{g.cuboid([0.05,0.04,0.05,0.95,0.12,0.95],Main);g.cuboid([0.11,0.01,0.11,0.89,0.04,0.89],Surface::Mirror);},
@@ -191,7 +212,10 @@ mod tests {
                 let g=model(entry.form,rotation,0);
                 assert!(!g.faces.is_empty()&&!g.boxes.is_empty(),"{}",entry.name);
                 for b in &g.boxes {for a in 0..3 {assert!(b[a]>=-1e-5&&b[a+3]<=1.00001&&b[a]<b[a+3],"{} {:?}",entry.name,b);}}
-                for face in &g.faces {for p in face.points {assert!(p.iter().all(|v|v.is_finite()&&*v>=-1e-5&&*v<=1.00001),"{} {:?}",entry.name,p);}}
+                // Big furniture (bed, wardrobe, floor lamp) is drawn up to one cell beyond its own.
+                let big=matches!(entry.form,Form::Bed|Form::Wardrobe|Form::FloorLamp);
+                let (lo,hi)=if big {(-1.00001,2.00001)} else {(-1e-5,1.00001)};
+                for face in &g.faces {for p in face.points {assert!(p.iter().all(|v|v.is_finite()&&*v>=lo&&*v<=hi),"{} {:?}",entry.name,p);}}
             }
         }
     }

@@ -211,7 +211,12 @@ impl GuiIcons {
         use wolfcraft_engine::construction;
         let model=construction::geometry::model(entry.form,rotation,0);
         let s=rect.width().min(rect.height());let c=rect.center();
-        let project=|p:[f32;3]|egui::pos2(c.x+(p[0]-p[1])*s*0.42,c.y+(p[0]+p[1]-1.)*s*0.22+(0.5-p[2])*s*0.46);
+        // Big furniture (a two-block bed, a tall wardrobe) is fitted into the slot whole.
+        let (mut lo,mut hi)=([0.0f32;3],[1.0f32;3]);
+        for f in &model.faces {for p in &f.points {for a in 0..3 {lo[a]=lo[a].min(p[a]);hi[a]=hi[a].max(p[a]);}}}
+        let ext=(0..3).map(|a|hi[a]-lo[a]).fold(1.0f32,f32::max);
+        let mid=[(lo[0]+hi[0])/2.,(lo[1]+hi[1])/2.,(lo[2]+hi[2])/2.];
+        let project=|p:[f32;3]|{let p=[(p[0]-mid[0])/ext+0.5,(p[1]-mid[1])/ext+0.5,(p[2]-mid[2])/ext+0.5];egui::pos2(c.x+(p[0]-p[1])*s*0.42,c.y+(p[0]+p[1]-1.)*s*0.22+(0.5-p[2])*s*0.46)};
         let mut faces:Vec<_>=model.faces.iter().collect();
         let depth=|f: &construction::geometry::Quad|f.points.iter().map(|p|p[0]+p[1]+p[2]).sum::<f32>();
         faces.sort_by(|a,b|depth(a).total_cmp(&depth(b)));
@@ -234,7 +239,7 @@ impl GuiIcons {
             for (p,t) in face.points.iter().zip([uv.left_top(),uv.right_top(),uv.right_bottom(),uv.left_bottom()]) {
                 let t=if full {t} else {
                     let (u,v)=match axis {2=>(p[0],p[1]),0=>(p[1],1.-p[2]),_=>(p[0],1.-p[2])};
-                    egui::pos2(uv.left()+uv.width()*u.clamp(0.,1.),uv.top()+uv.height()*v.clamp(0.,1.))
+                    egui::pos2(uv.left()+uv.width()*(u-u.floor().min(u.ceil()-1.)).clamp(0.,1.),uv.top()+uv.height()*(v-v.floor().min(v.ceil()-1.)).clamp(0.,1.))
                 };
                 mesh.vertices.push(epaint::Vertex{pos:project(*p),uv:t,color:tint});
             }
