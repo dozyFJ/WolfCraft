@@ -46,12 +46,20 @@ pub fn run_desktop() {
     }
 }
 
-#[cfg(target_os = "android")]
+/// The game APK's entry point (off in the WolfStudio APK, which has its own).
+#[cfg(all(target_os = "android", feature = "game-entry"))]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    android_entry(app, false);
+}
+
+/// Starts the game (`studio` = false) or the WolfStudio app on Android.
+#[cfg(target_os = "android")]
+pub fn android_entry(app: winit::platform::android::activity::AndroidApp, studio: bool) {
     use winit::event_loop::EventLoopBuilder;
     use winit::platform::android::EventLoopBuilderExtAndroid;
-    android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("WolfCraft"));
+    android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag(if studio { "WolfStudio" } else { "WolfCraft" }));
+    wolfcraft_ui::launcher::set_studio_app(studio);
     orientation::set_app(app.clone());
     let data_dir = app.internal_data_path().unwrap_or_else(|| std::path::PathBuf::from("/data/local/tmp/WolfCraft"));
     let args = LaunchArgs { data_dir: Some(data_dir), game_version: None, from_launcher: false };
