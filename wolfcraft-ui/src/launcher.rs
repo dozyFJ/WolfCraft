@@ -1,5 +1,7 @@
 //! Mobile launcher: the game's home screen. A toolbar on top, the page in the middle and a
-//! bottom navigation bar with tabs: Главная, Студия, Скины and Настройки. Launch controls live on Home.
+//! bottom navigation bar with tabs: Главная, Скины and Настройки. Launch controls live on Home.
+//! The studio is a separate app (WolfStudio): the same code started with `set_studio_app`,
+//! whose launcher shows Проекты and Настройки only.
 
 use crate::gui_renderer::GuiIcons;
 use crate::main_menu::MenuAction;
@@ -19,7 +21,26 @@ enum Tab {
     Skins,
 }
 
-const TABS: [(Tab, &str); 4] = [(Tab::Home, "Главная"), (Tab::Studio, "Студия"), (Tab::Skins, "Скины"), (Tab::Settings, "Настройки")];
+static STUDIO_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Runs this build as the WolfStudio app (set once at start-up, before the first frame).
+pub fn set_studio_app(on: bool) {
+    STUDIO_APP.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn is_studio_app() -> bool {
+    STUDIO_APP.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Tabs of the bottom bar: the game has no studio tab any more, the studio app only has its
+/// projects and settings.
+fn tabs() -> &'static [(Tab, &'static str)] {
+    if is_studio_app() {
+        &[(Tab::Studio, "Проекты"), (Tab::Settings, "Настройки")]
+    } else {
+        &[(Tab::Home, "Главная"), (Tab::Skins, "Скины"), (Tab::Settings, "Настройки")]
+    }
+}
 
 struct Banner {
     title: &'static str,
@@ -74,7 +95,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     let mut action = MenuAction::None;
     let tab_id = Id::new("launcher-tab-v2");
     let mut tab: usize = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
-    tab = tab.min(2);
+    let tabs = tabs();
+    tab = tab.min(tabs.len() - 2);
 
     // ---- Toolbar ----
     egui::TopBottomPanel::top("launcher-toolbar")
@@ -85,11 +107,11 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::hover());
                 icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new("WolfCraft").font(bold_font(20.0)).color(p.text));
+                ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
                 // Upright phone: room only for the name and the two buttons.
                 let wide = ui.ctx().screen_rect().width() > 480.0;
                 if wide {
-                    ui.label(egui::RichText::new(TABS[tab].1).size(14.0).color(p.text_muted));
+                    ui.label(egui::RichText::new(tabs[tab].1).size(14.0).color(p.text_muted));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
@@ -114,8 +136,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
         .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)))
         .show(ctx, |ui| {
             let rect = ui.max_rect();
-            let w = rect.width() / TABS.len() as f32;
-            for (i, (t, label)) in TABS.iter().enumerate() {
+            let w = rect.width() / tabs.len() as f32;
+            for (i, (t, label)) in tabs.iter().enumerate() {
                 let r = Rect::from_min_size(Pos2::new(rect.left() + w * i as f32, rect.top()), Vec2::new(w, rect.height()));
                 let resp = ui.interact(r, Id::new(("launcher-nav", i)), Sense::click());
                 let on = tab == i;
@@ -139,7 +161,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
 
     // Account and launch controls stay visible while Home scrolls.
-    if TABS[tab].0 == Tab::Home {
+    if tabs[tab].0 == Tab::Home {
         egui::TopBottomPanel::bottom("launcher-launch")
             .exact_height(100.0)
             .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(16.0, 10.0)))
@@ -165,7 +187,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     egui::CentralPanel::default().frame(Frame::none().fill(p.bg).inner_margin(Margin::symmetric(16.0, 14.0))).show(ctx, |ui| {
         egui::ScrollArea::vertical().id_salt(("launcher-page", tab)).auto_shrink([false, false]).drag_to_scroll(true).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 10.0;
-            match TABS[tab].0 {
+            match tabs[tab].0 {
                 Tab::Home => home(ui, icons, &p, planet, &mut action),
                 Tab::Settings => {}
                 Tab::Studio => studio(ui, icons, &p, version, worlds, &mut action),

@@ -1,0 +1,47 @@
+[package]
+name = "wolfstudio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# WolfStudio: the WolfCraft studio as its own Android app (the game no longer has a studio
+# tab). Same engine and UI as the game, started in studio mode.
+[lib]
+name = "wolfstudio"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+wolfcraft-game = { path = "../wolfcraft-game", default-features = false }
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { workspace = true, features = ["android-native-activity"] }
+
+[package.metadata.android]
+package = "com.wolfcraft.studio"
+apk_name = "WolfStudio"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_WIFI_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+
+[package.metadata.android.application]
+label = "WolfStudio"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+orientation = "portrait"
+config_changes = "orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode"

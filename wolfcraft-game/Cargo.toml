@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["game-entry"]
+# The Android `android_main` of the game APK (WolfStudio defines its own).
+game-entry = []
+
 [lib]
 name = "wolfcraft_game"
 path = "src/lib.rs"

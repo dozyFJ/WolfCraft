@@ -9,6 +9,7 @@ members = [
     "wolfcraft-launcher",
     "wolfcraft-net",
     "wolfserver",
+    "wolfstudio",
 ]
 
 [workspace.package]
