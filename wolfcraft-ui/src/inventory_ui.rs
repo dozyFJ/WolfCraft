@@ -79,8 +79,8 @@ fn slot_widget(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, stack: Op
     let resp = ui.interact(rect, id, sense);
     let hv = ui.ctx().animate_bool_with_time(id.with("hv"), resp.hovered(), ANIM_TIME);
     let fill = p.surface_hi.lerp_to_gamma(p.surface_hover, hv);
-    ui.painter().rect_filled(rect, Rounding::ZERO, fill);
-    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(if selected { 2.0_f32 } else { 1.0 }, if selected { p.accent } else { p.outline.lerp_to_gamma(p.accent, hv * 0.8) }));
+    ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
+    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(if selected { 2.0_f32 } else { 1.0 }, if selected { p.accent } else { p.outline.lerp_to_gamma(p.accent, hv * 0.8) }));
     if let Some(s) = stack {
         draw_stack(ui.painter(), icons, rect, s, p);
     }
@@ -222,7 +222,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
             let ghost = Rect::from_center_size(pos, Vec2::splat(CELL));
             let id = state.drag_slot.and_then(|s| get(inv, &state.grid, s)).map(|s| s.id).or(state.drag_item);
             if let Some(id) = id {
-                layer.rect_filled(ghost, Rounding::ZERO, p.surface.gamma_multiply(0.9));
+                layer.rect_filled(ghost, Rounding::same(10.0), p.surface.gamma_multiply(0.9));
                 icons.paint_item(&layer, ghost.shrink(6.0), id);
             }
         }
@@ -431,8 +431,8 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 ui.add_space(GAP);
                 let h = 3.0 * (CELL + GAP) - GAP;
                 let (r, _) = ui.allocate_exact_size(Vec2::new(h * 0.62, h), Sense::hover());
-                ui.painter().rect_filled(r, Rounding::ZERO, p.surface_hi);
-                ui.painter().rect_stroke(r, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+                ui.painter().rect_filled(r, Rounding::same(10.0), p.surface_hi);
+                ui.painter().rect_stroke(r, Rounding::same(10.0), Stroke::new(1.0_f32, p.outline));
                 let armor = inv.armor.map(|s| s.map(|s| (s.id.saturating_sub(items::ids::ARMOR_BASE) / 4) as u8));
                 paint_character(ui.painter(), r.shrink(10.0), inv.offhand.is_some_and(|s| s.id == items::ids::SHIELD), armor);
                 ui.add_space(GAP);
@@ -505,7 +505,7 @@ fn recipe_book(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inventory
                     let picked = state.grid.prefer == Some(r.output) && state.grid.matched().is_some_and(|m| m.output == r.output);
                     let resp = slot_widget(ui, icons, p, rect, Some(&out), picked, Id::new(("recipe", row_i, i)), Sense::click());
                     if !ok {
-                        ui.painter().rect_filled(rect, Rounding::ZERO, Color32::from_black_alpha(140));
+                        ui.painter().rect_filled(rect, Rounding::same(10.0), Color32::from_black_alpha(140));
                     }
                     let need: Vec<String> = CraftGrid::needs(r).iter().map(|(id, n)| format!("{} ×{n}", ItemStack::new(*id, 1).info().name)).collect();
                     let tip = format!("{}{}\n{}", r.name(), if r.output.1 > 1 { format!(" ×{}", r.output.1) } else { String::new() }, need.join(", "));
@@ -613,8 +613,8 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
                     let on = k == 1 && state.search_open;
                     let fill = if on { p.accent.gamma_multiply(0.35) } else if resp.hovered() || resp.is_pointer_button_down_on() { p.surface_hover } else { p.surface_hi };
-                    ui.painter().rect_filled(rect, Rounding::ZERO, fill);
-                    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if on { p.accent } else { p.outline }));
+                    ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
+                    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, if on { p.accent } else { p.outline }));
                     icons.paint(ui.painter(), rect.shrink(tab * 0.24), ic, if on { p.accent } else { p.text });
                     if resp.clicked() {
                         if k == 0 {
@@ -632,11 +632,11 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
                     let sel = state.tab == i;
                     let fill = if sel { p.surface_hover } else if resp.hovered() { p.surface_hi.lerp_to_gamma(p.surface_hover, 0.5) } else { p.surface_hi };
-                    ui.painter().rect_filled(rect, Rounding::ZERO, fill);
-                    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, if sel { p.accent } else { p.outline }));
+                    ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
+                    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, if sel { p.accent } else { p.outline }));
                     if sel {
                         // Selected category: an accent bar on its outer edge.
-                        ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), Rounding::ZERO, p.accent);
+                        ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), Rounding::same(10.0), p.accent);
                     }
                     let inner = rect.shrink(tab * 0.18);
                     match i {
@@ -777,7 +777,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
                             }
                             Cell::Member(id) => {
                                 // Pieces of the open group sit on a tinted strip.
-                                ui.painter().rect_filled(rect.expand(GAP / 2.0), Rounding::ZERO, p.accent.gamma_multiply(0.18));
+                                ui.painter().rect_filled(rect.expand(GAP / 2.0), Rounding::same(10.0), p.accent.gamma_multiply(0.18));
                                 id
                             }
                             Cell::Item(id) => id,
@@ -823,8 +823,8 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         ui.add_space((grid_w - used - cell - 14.0).max(14.0 - GAP));
         let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
         let hot = resp.hovered() || state.drag_slot.is_some();
-        ui.painter().rect_filled(rect, Rounding::ZERO, p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
-        ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, p.danger.gamma_multiply(0.7)));
+        ui.painter().rect_filled(rect, Rounding::same(10.0), p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
+        ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, p.danger.gamma_multiply(0.7)));
         icons.paint(ui.painter(), rect.shrink(cell * 0.24), icon::TRASH, p.danger);
         // Tap: delete the item in the selected hotbar slot. Or drag any slot here.
         if resp.clicked() {

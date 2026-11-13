@@ -1,4 +1,6 @@
-//! Themes: Pixel-art style: dark and light palettes, square corners, 2 px hard borders, hard offset\n//! shadows, nearest-neighbour icons, compact spacing and fast (≈150 ms) animations.
+//! Themes: modern Material-style UI with an industrial touch — Inter type, blue accent,
+//! rounded cards and pill buttons, 1 px hairline borders, soft shadows, letter-spaced
+//! uppercase section labels, dark and light palettes, fast (≈150 ms) animations.
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, Id, Margin, Rounding, Shadow, Stroke, TextStyle, Vec2};
 use wolfcraft_engine::config::ThemeMode;
@@ -23,9 +25,9 @@ pub struct Palette {
     pub scrim: Color32,
 }
 
-pub const RADIUS_SM: f32 = 0.0;
-pub const RADIUS_MD: f32 = 0.0;
-pub const RADIUS_LG: f32 = 0.0;
+pub const RADIUS_SM: f32 = 8.0;
+pub const RADIUS_MD: f32 = 12.0;
+pub const RADIUS_LG: f32 = 20.0;
 /// Animation duration (seconds); within the requested 120–200 ms.
 pub const ANIM_TIME: f32 = 0.15;
 
@@ -37,16 +39,16 @@ impl Palette {
     pub fn dark() -> Self {
         Self {
             dark: true,
-            bg: rgb(0x0E1114),
-            surface: rgb(0x161A1F),
-            surface_hi: rgb(0x1E242B),
-            surface_hover: rgb(0x262E37),
-            outline: rgb(0x2C353F),
-            text: rgb(0xE8ECF0),
-            text_muted: rgb(0x8E99A5),
-            accent: rgb(0x22C1CC),
-            accent_hover: rgb(0x4BD3DC),
-            on_accent: rgb(0x04181A),
+            bg: rgb(0x0E1014),
+            surface: rgb(0x171A20),
+            surface_hi: rgb(0x1F232B),
+            surface_hover: rgb(0x282D37),
+            outline: rgb(0x2D333E),
+            text: rgb(0xE6E9EF),
+            text_muted: rgb(0x9AA3B2),
+            accent: rgb(0x2563EB),
+            accent_hover: rgb(0x3B76F0),
+            on_accent: rgb(0xFFFFFF),
             secondary: rgb(0xFF9A3C),
             danger: rgb(0xF0545B),
             success: rgb(0x3DD68C),
@@ -58,15 +60,15 @@ impl Palette {
     pub fn light() -> Self {
         Self {
             dark: false,
-            bg: rgb(0xEEF1F5),
+            bg: rgb(0xF3F5F9),
             surface: rgb(0xFFFFFF),
-            surface_hi: rgb(0xF3F5F8),
-            surface_hover: rgb(0xE6EAF0),
-            outline: rgb(0xD3D9E1),
-            text: rgb(0x11161B),
-            text_muted: rgb(0x5B6672),
-            accent: rgb(0x07727B),
-            accent_hover: rgb(0x055E66),
+            surface_hi: rgb(0xF0F2F6),
+            surface_hover: rgb(0xE4E8EF),
+            outline: rgb(0xD6DCE5),
+            text: rgb(0x111418),
+            text_muted: rgb(0x5A6473),
+            accent: rgb(0x1D5FD6),
+            accent_hover: rgb(0x174FB4),
             on_accent: rgb(0xFFFFFF),
             secondary: rgb(0xE5760B),
             danger: rgb(0xD63A42),
@@ -93,29 +95,14 @@ pub fn palette(ctx: &egui::Context) -> Palette {
     ctx.data(|d| d.get_temp::<Palette>(palette_id())).unwrap_or_else(Palette::dark)
 }
 
-/// Loads Segoe UI (Windows system font, has Cyrillic) in front of egui's default fonts.
+/// Inter (OFL, Latin + Cyrillic) in front of egui's default fonts: regular for text, SemiBold
+/// for headings and buttons.
 fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    // Pixel font (OFL, Latin + Cyrillic) embedded in the binary; Segoe UI stays as a fallback.
-    fonts.font_data.insert("Pixel".to_string(), FontData::from_static(include_bytes!("../assets/PixelifySans.ttf")));
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
-    let candidates = [("SegoeUI", "segoeui.ttf"), ("SegoeUIBold", "segoeuib.ttf")];
-    let mut loaded = Vec::new();
-    for (name, file) in candidates {
-        let path = std::path::Path::new(&windir).join("Fonts").join(file);
-        if let Ok(bytes) = std::fs::read(&path) {
-            fonts.font_data.insert(name.to_string(), FontData::from_owned(bytes));
-            loaded.push(name.to_string());
-        }
-    }
-    if let Some(regular) = loaded.first() {
-        fonts.families.entry(FontFamily::Proportional).or_default().insert(0, regular.clone());
-    }
-    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "Pixel".to_string());
-    let mut bold = vec!["Pixel".to_string()];
-    bold.extend(loaded.get(1).cloned());
-    bold.push("Ubuntu-Light".into());
-    fonts.families.insert(FontFamily::Name("bold".into()), bold);
+    fonts.font_data.insert("Inter".to_string(), FontData::from_static(include_bytes!("../assets/Inter-Regular.otf")));
+    fonts.font_data.insert("InterSemi".to_string(), FontData::from_static(include_bytes!("../assets/Inter-SemiBold.otf")));
+    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "Inter".to_string());
+    fonts.families.insert(FontFamily::Name("bold".into()), vec!["InterSemi".to_string(), "Inter".to_string(), "Ubuntu-Light".into()]);
     ctx.set_fonts(fonts);
 }
 
@@ -154,10 +141,10 @@ pub fn apply(ctx: &egui::Context, mode: ThemeMode) {
     v.window_fill = p.surface;
     v.extreme_bg_color = p.surface_hi;
     v.faint_bg_color = p.surface_hi;
-    v.window_stroke = Stroke::new(2.0_f32, p.outline);
+    v.window_stroke = Stroke::new(1.0_f32, p.outline);
     v.window_rounding = Rounding::same(RADIUS_LG);
     v.menu_rounding = Rounding::same(RADIUS_MD);
-    v.window_shadow = Shadow { offset: Vec2::new(4.0, 4.0), blur: 0.0, spread: 0.0, color: Color32::from_black_alpha(if p.dark { 160 } else { 70 }) };
+    v.window_shadow = Shadow { offset: Vec2::new(0.0, 8.0), blur: 28.0, spread: 0.0, color: Color32::from_black_alpha(if p.dark { 120 } else { 40 }) };
     v.popup_shadow = v.window_shadow;
     v.hyperlink_color = p.accent;
     v.selection.bg_fill = p.accent.gamma_multiply(0.35);
@@ -174,11 +161,11 @@ pub fn apply(ctx: &egui::Context, mode: ThemeMode) {
         w.rounding = r;
         w.bg_fill = fill;
         w.weak_bg_fill = fill;
-        w.bg_stroke = Stroke::new(2.0_f32, p.outline);
-        w.fg_stroke = Stroke::new(2.0_f32, p.text);
+        w.bg_stroke = Stroke::new(1.0_f32, p.outline);
+        w.fg_stroke = Stroke::new(1.5_f32, p.text);
     }
-    v.widgets.hovered.bg_stroke = Stroke::new(2.0_f32, p.accent.gamma_multiply(0.7));
-    v.widgets.active.bg_stroke = Stroke::new(2.0_f32, p.accent);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, p.accent.gamma_multiply(0.7));
+    v.widgets.active.bg_stroke = Stroke::new(1.5_f32, p.accent);
     ctx.set_style(style);
 }
 
@@ -212,7 +199,7 @@ mod tests {
     #[test]
     fn animation_time_in_requested_range() {
         assert!((0.12..=0.2).contains(&ANIM_TIME));
-        assert!(RADIUS_SM == 0.0 && RADIUS_LG == 0.0, "pixel style: square corners");
+        assert!(RADIUS_SM > 0.0 && RADIUS_LG > RADIUS_MD, "modern style: rounded corners");
     }
 
     #[test]

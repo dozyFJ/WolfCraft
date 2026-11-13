@@ -65,7 +65,7 @@ fn bottom_bar<R>(ctx: &egui::Context, add: impl FnOnce(&mut Ui) -> R) -> R {
     let p = palette(ctx);
     egui::TopBottomPanel::bottom("menu-bottombar")
         .exact_height(66.0)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(24.0, 12.0)))
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(24.0, 12.0)))
         .show(ctx, |ui| {
             let title: Option<String> = ctx.data_mut(|d| d.remove_temp(egui::Id::new("menu-bar-title")));
             let rect = ui.max_rect();
@@ -82,7 +82,7 @@ fn decor(ui: &Ui, icons: &GuiIcons, p: &Palette) {
     let rect = ui.max_rect();
     let c = Pos2::new(rect.right() - rect.width() * 0.22, rect.center().y + 20.0);
     for (i, r) in [140.0, 210.0, 290.0, 380.0, 480.0].iter().enumerate() {
-        ui.painter().circle_stroke(c, *r, Stroke::new(2.0_f32, p.outline.gamma_multiply(0.55 - i as f32 * 0.08)));
+        ui.painter().circle_stroke(c, *r, Stroke::new(1.0_f32, p.outline.gamma_multiply(0.55 - i as f32 * 0.08)));
     }
     let size = 300.0;
     icons.paint(ui.painter(), Rect::from_center_size(c, Vec2::splat(size)), icon::LOGO, Color32::WHITE.gamma_multiply(if p.dark { 0.12 } else { 0.22 }));
@@ -145,7 +145,7 @@ pub fn splash_screen(ctx:&egui::Context,icons:&GuiIcons,progress:f32,version:&st
 fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
     let rect = ui.max_rect();
     let painter = ui.painter();
-    painter.rect_filled(rect, Rounding::ZERO, Color32::from_rgb(2, 7, 13));
+    painter.rect_filled(rect, Rounding::same(10.0), Color32::from_rgb(2, 7, 13));
     // Twinkling stars at fixed pseudo-random spots.
     let t = ui.input(|i| i.time) as f32;
     for i in 0..140u32 {
@@ -166,7 +166,7 @@ fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
     }
     // Soft shade so the menu stays readable, darker from the top down to the middle where the
     // logo and title sit.
-    painter.rect_filled(rect, Rounding::ZERO, p.bg.gamma_multiply(if p.dark { 0.25 } else { 0.15 }));
+    painter.rect_filled(rect, Rounding::same(10.0), p.bg.gamma_multiply(if p.dark { 0.25 } else { 0.15 }));
     let mut m = egui::Mesh::default();
     let dark = Color32::from_black_alpha(200);
     let clear = Color32::from_black_alpha(0);
@@ -392,7 +392,7 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
                     row_card(ui, false, |ui| {
                         ui.horizontal(|ui| {
                             let (r, _) = ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
-                            ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(8, 12, 22));
+                            ui.painter().rect_filled(r, Rounding::same(10.0), Color32::from_rgb(8, 12, 22));
                             if let Some(tex) = &w.preview {
                                 ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
                             }
@@ -467,8 +467,8 @@ fn square_button(ui: &mut Ui, icons: &GuiIcons, ic: u16, active: bool) -> egui::
     } else {
         (p.surface_hi, p.outline, p.text)
     };
-    ui.painter().rect_filled(rect, Rounding::ZERO, fill);
-    ui.painter().rect_stroke(rect, Rounding::ZERO, Stroke::new(2.0_f32, stroke));
+    ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
+    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(1.0_f32, stroke));
     icons.paint(ui.painter(), Rect::from_center_size(rect.center(), Vec2::splat(22.0)), ic, fg);
     resp
 }
@@ -578,7 +578,7 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
                         if let Some(tex) = &w.preview {
                             ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
                         } else {
-                            ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(8, 12, 22));
+                            ui.painter().rect_filled(r, Rounding::same(10.0), Color32::from_rgb(8, 12, 22));
                         }
                         let buttons = 130.0 + 2.0 * 40.0 + 2.0 * 12.0;
                         let text_w = (ui.available_width() - buttons).max(80.0);
@@ -762,7 +762,7 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
     egui::SidePanel::left("cw-side")
         .resizable(false)
         .exact_width(210.0)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 18.0)))
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 10.0;
             for (i, ic, label) in [(0usize, icon::EDIT, "Основное"), (1, icon::GLOBE, "Планета")] {
@@ -778,17 +778,17 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
     egui::SidePanel::right("cw-preview")
         .resizable(false)
         .exact_width(globe + 28.0)
-        .frame(Frame::none().fill(p.bg).stroke(Stroke::new(2.0_f32, p.outline)).inner_margin(Margin::same(14.0)))
+        .frame(Frame::none().fill(p.bg).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(14.0)))
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().id_salt("cw-preview-scroll").auto_shrink([false, false]).show(ui, |ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(globe), Sense::hover());
-                ui.painter().rect_filled(r, Rounding::ZERO, Color32::from_rgb(6, 9, 18));
+                ui.painter().rect_filled(r, Rounding::same(10.0), Color32::from_rgb(6, 9, 18));
                 if let Some(tex) = preview {
                     ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
                 } else {
                     ui.painter().text(r.center(), Align2::CENTER_CENTER, "Генерация…", FontId::proportional(15.0), p.text_muted);
                 }
-                ui.painter().rect_stroke(r, Rounding::ZERO, Stroke::new(2.0_f32, p.outline));
+                ui.painter().rect_stroke(r, Rounding::same(10.0), Stroke::new(1.0_f32, p.outline));
                 ui.add_space(8.0);
                 ui.label(egui::RichText::new(format!("Seed: {}", st.effective_seed() as i64)).size(13.0).color(p.text_muted));
                 let mins = st.size.circumference() as f32 / 4.3 / 60.0;
@@ -1201,8 +1201,8 @@ pub fn pause_menu(ctx: &egui::Context, icons: &GuiIcons, info: &PauseInfo) -> Me
     egui::Area::new(egui::Id::new("pause-card")).order(egui::Order::Foreground).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, (1.0 - t) * 18.0)).show(ctx, |ui| {
         Frame::none()
             .fill(p.surface)
-            .rounding(Rounding::ZERO)
-            .stroke(Stroke::new(2.0_f32, p.outline))
+            .rounding(Rounding::same(10.0))
+            .stroke(Stroke::new(1.0_f32, p.outline))
             .shadow(egui::Shadow { offset: Vec2::new(6.0, 6.0), blur: 0.0, spread: 0.0, color: Color32::from_black_alpha(150) })
             .inner_margin(Margin::same(22.0))
             .show(ui, |ui| {
