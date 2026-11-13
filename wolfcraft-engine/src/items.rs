@@ -316,7 +316,7 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
     }
     let roll = to01(hash3(seed ^ 0xD20, pos.x, pos.y, pos.z));
     match block {
-        Block::Air | Block::Bedrock | Block::Magma | Block::InnerCore => vec![],
+        Block::Air | Block::Bedrock | Block::Magma | Block::InnerCore | Block::CoinBlock => vec![],
         b if b.is_fluid() => vec![],
         Block::Stone => vec![ItemStack::of_block(Block::Cobblestone, 1)],
         Block::Grass | Block::SnowyGrass | Block::DryGrass | Block::SwampGrass => vec![ItemStack::of_block(Block::Dirt, 1)],
@@ -561,7 +561,7 @@ pub fn category(id: ItemId) -> &'static str {
             Block::Wool | Block::RedWool | Block::BlueWool | Block::YellowWool | Block::Torch | Block::PolishedGranite | Block::PolishedMarble | Block::SmoothStone | Block::SandstoneBricks | Block::Bookshelf | Block::Lantern => "Строительство",
             Block::Pumpkin | Block::Melon => "Растения",
             Block::EnchantTable => "Предметы",
-            Block::Bones => "Мобы",
+            Block::Bones | Block::CoinBlock | Block::IncubatorCommon | Block::IncubatorRare | Block::IncubatorLegendary => "Мобы",
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Battery | Block::ElectricFurnace => "Строительство",

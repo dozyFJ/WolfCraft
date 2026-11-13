@@ -48,6 +48,11 @@ pub enum InteractionEvent {
     Exploded { at: glam::DVec3, power: f32 },
     /// A block destroyed by a blast (sync, chips), without the usual break sound.
     Blasted { pos: Cell, block: Block },
+    /// Tap on an incubator: buy a capsule egg of this tier (0 common … 2 legendary). The session
+    /// keeps the event only if the egg was bought.
+    Hatch { tier: u8 },
+    /// A block set by the game itself (coin blocks appearing): only needs syncing.
+    WorldSet { pos: Cell, block: Block },
 }
 
 #[derive(Default)]
@@ -194,6 +199,19 @@ impl Interaction {
                 }
                 events.push(InteractionEvent::Ignite { pos: h.cell });
                 return events;
+            }
+            // Incubator: buy and hatch a capsule egg.
+            if !player.sneaking {
+                let tier = match h.block {
+                    Block::IncubatorCommon => Some(0),
+                    Block::IncubatorRare => Some(1),
+                    Block::IncubatorLegendary => Some(2),
+                    _ => None,
+                };
+                if let Some(tier) = tier {
+                    events.push(InteractionEvent::Hatch { tier });
+                    return events;
+                }
             }
             if !player.sneaking && crate::construction::entry(h.block as u16).is_some_and(|(e,_)|e.form==crate::construction::Form::Bed) {
                 // Bed: the spawn point moves here; at night you sleep till the morning.

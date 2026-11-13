@@ -1530,6 +1530,12 @@ impl App {
                                     net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: 0, hell: s.hell });
                                 }
                             }
+                            InteractionEvent::Hatch { .. } => self.audio.play(crate::audio::Sfx::Launch, 0.6),
+                            InteractionEvent::WorldSet { pos, block } => {
+                                if let Some(net) = &mut self.net {
+                                    net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u16, hell: s.hell });
+                                }
+                            }
                             InteractionEvent::SpawnMob { pos, .. } => {
                                 // The soul bursts into a puff where the creature appears.
                                 let c = s.chunks.grid().cell_center(pos);
@@ -1751,6 +1757,7 @@ impl App {
                         };
                         if screen != Screen::Map {
                             hud::draw(ctx, &icons, &hud);
+                            petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
                             if let Some(mob)=s.mobs.mobs.iter().find(|m|m.boss.is_some()&&m.hp>0.0) {
                                 let role=mob.boss.as_ref().unwrap();
                                 egui::Area::new(egui::Id::new("guardian_health")).anchor(egui::Align2::CENTER_TOP,egui::vec2(0.,10.)).interactable(false).show(ctx,|ui|{
@@ -2081,6 +2088,7 @@ impl App {
                 };
                 // Character model is visible in third-person views only.
                 let mut model_verts = wolfcraft_engine::renderer::model::build_mob_models(&s.mobs.mobs, cam.eye, cam.forward, (self.settings.render_distance * 16) as f64 * 1.15);
+                model_verts.extend(wolfcraft_engine::renderer::model::build_mob_models(&s.pet_models(), cam.eye, cam.forward, 64.0));
                 model_verts.extend(wolfcraft_engine::renderer::model::build_dropped_models(&s.drops.list, cam.eye, self.time.elapsed(), 48.0));
                 let frames:Vec<_>=s.storage_bank.frames.iter().filter(|((hell,c),_)|*hell==s.hell&&(s.chunks.grid().cell_center(*c)-cam.eye).length_squared()<48.0*48.0).filter_map(|((_,c),item)|s.chunks.get_block(*c).map(|b|(*c,b,*item))).collect();
                 model_verts.extend(wolfcraft_engine::renderer::model::build_frame_models(&s.chunks.grid(),&frames,cam.eye));
@@ -3344,3 +3352,74 @@ fn studio_touch_size(size: (u32, u32), studio: Option<&wolfcraft_ui::studio_ui::
     }
 }
 
+/// «Питомник» on screen: the coin counter with the pets in the team, and the egg hatch
+/// animation (the capsule wobbles, cracks, bursts in the pet's rarity colour).
+fn petsim_overlay(ctx: &egui::Context, p: &wolfcraft_engine::petsim::PetSim, lobby: bool) {
+    use egui::{Align2, Color32, FontId, Pos2, Shape, Stroke, Vec2};
+    use wolfcraft_engine::petsim::PETS;
+    if p.owned.is_empty() && p.coins == 0 && !lobby && p.hatching.is_none() {
+        return;
+    }
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("petsim")));
+    let screen = ctx.screen_rect();
+    let col = |c: [f32; 3], a: f32| Color32::from_rgba_unmultiplied((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, (a * 255.0) as u8);
+    // Coins: a gold coin and the amount, top left; the team under it.
+    let at = Pos2::new(screen.left() + 16.0, screen.top() + 70.0);
+    painter.circle_filled(at + Vec2::new(10.0, 10.0), 10.0, Color32::from_rgb(180, 130, 20));
+    painter.circle_filled(at + Vec2::new(10.0, 10.0), 7.5, Color32::from_rgb(250, 205, 60));
+    let text = format!("{}", p.coins);
+    painter.text(at + Vec2::new(27.0, 11.0), Align2::LEFT_CENTER, &text, FontId::proportional(20.0), Color32::from_black_alpha(160));
+    painter.text(at + Vec2::new(26.0, 10.0), Align2::LEFT_CENTER, &text, FontId::proportional(20.0), Color32::from_rgb(255, 225, 90));
+    for (i, k) in p.best().iter().enumerate() {
+        let kind = &PETS[*k];
+        let y = at.y + 34.0 + i as f32 * 20.0;
+        painter.circle_filled(Pos2::new(at.x + 6.0, y), 5.0, col(kind.rarity.color(), 1.0));
+        painter.text(Pos2::new(at.x + 16.0, y), Align2::LEFT_CENTER, format!("{} ×{:.0}", kind.name, kind.power), FontId::proportional(14.0), Color32::from_white_alpha(230));
+    }
+    if p.owned.len() > 3 {
+        painter.text(Pos2::new(at.x, at.y + 34.0 + 3.0 * 20.0), Align2::LEFT_CENTER, format!("всего питомцев: {}", p.owned.len()), FontId::proportional(12.0), Color32::from_white_alpha(170));
+    }
+    // Hatching.
+    let Some((t, k)) = p.hatching else { return };
+    let kind = &PETS[k];
+    let rc = kind.rarity.color();
+    let c = screen.center() + Vec2::new(0.0, -20.0);
+    let dim = (t / 0.3).min(1.0) * if t > 2.8 { ((3.2 - t) / 0.4).max(0.0) } else { 1.0 };
+    painter.rect_filled(screen, 0.0, Color32::from_black_alpha((dim * 140.0) as u8));
+    if t < 1.8 {
+        // The capsule egg: wobbles harder and harder, cracks appear.
+        let w = (t / 1.8).powi(2);
+        let ang = (t * 22.0).sin() * 0.35 * w;
+        let (sa, ca) = ang.sin_cos();
+        let pts: Vec<Pos2> = (0..40)
+            .map(|i| {
+                let a = i as f32 / 40.0 * std::f32::consts::TAU;
+                let (x, y) = (a.cos() * 48.0, a.sin() * if a.sin() < 0.0 { 66.0 } else { 54.0 });
+                c + Vec2::new(x * ca - y * sa, x * sa + y * ca)
+            })
+            .collect();
+        painter.add(Shape::convex_polygon(pts, Color32::from_rgb(245, 242, 232), Stroke::new(4.0, col(rc, 1.0))));
+        // Capsule band across the middle.
+        painter.line_segment([c + Vec2::new(-46.0 * ca, -46.0 * sa), c + Vec2::new(46.0 * ca, 46.0 * sa)], Stroke::new(6.0, col(rc, 0.9)));
+        if t > 0.9 {
+            let crack = [(-10.0, -30.0), (0.0, -14.0), (-8.0, 2.0), (6.0, 16.0), (-2.0, 30.0)];
+            let n = (((t - 0.9) / 0.9) * crack.len() as f32).ceil() as usize;
+            let pts: Vec<Pos2> = crack.iter().take(n.max(2)).map(|(x, y)| c + Vec2::new(x * ca - y * sa, x * sa + y * ca)).collect();
+            painter.add(Shape::line(pts, Stroke::new(3.0, Color32::from_rgb(60, 50, 40))));
+        }
+    } else {
+        // Burst: rays and a ring in the rarity colour, then the name.
+        let k2 = ((t - 1.8) / 0.5).min(1.0);
+        for i in 0..16 {
+            let a = i as f32 / 16.0 * std::f32::consts::TAU + t * 0.6;
+            let r0 = 30.0 + 40.0 * k2;
+            let r1 = r0 + 60.0 + 30.0 * (i % 2) as f32;
+            painter.line_segment([c + Vec2::angled(a) * r0, c + Vec2::angled(a) * r1], Stroke::new(5.0, col(rc, 0.85 * dim)));
+        }
+        painter.circle_stroke(c, 40.0 + 70.0 * k2, Stroke::new(6.0 * (1.0 - k2) + 1.0, col(rc, dim)));
+        painter.circle_filled(c, 26.0, col(rc, dim));
+        painter.text(c + Vec2::new(0.0, 96.0), Align2::CENTER_CENTER, kind.rarity.name(), FontId::proportional(18.0), col(rc, dim));
+        painter.text(c + Vec2::new(0.0, 124.0), Align2::CENTER_CENTER, kind.name, FontId::proportional(30.0), Color32::from_white_alpha((dim * 255.0) as u8));
+        painter.text(c + Vec2::new(0.0, 152.0), Align2::CENTER_CENTER, format!("сила копания ×{:.0}", kind.power), FontId::proportional(15.0), Color32::from_white_alpha((dim * 200.0) as u8));
+    }
+}

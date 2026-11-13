@@ -413,6 +413,10 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::OakPlanks), 2), (ids::GUNPOWDER, 1)], (ids::GRENADE_LAUNCHER, 1), true, "Вооружение"));
         v.push(r(&[(ids::GUNPOWDER, 3), (ids::IRON_INGOT, 1), (ids::COPPER_INGOT, 1)], (ids::ROCKET, 2), true, "Вооружение"));
         v.push(r(&[(ids::IRON_INGOT, 8), (ids::BRONZE_INGOT, 2), (ids::GUNPOWDER, 2)], (ids::BAZOOKA, 1), true, "Вооружение"));
+        // «Питомник»: incubators for capsule eggs.
+        v.push(r(&[(ids::IRON_INGOT, 4), (b(Block::Glass), 2)], (b(Block::IncubatorCommon), 1), true, "Мобы"));
+        v.push(r(&[(b(Block::IncubatorCommon), 1), (ids::GOLD_INGOT, 2)], (b(Block::IncubatorRare), 1), true, "Мобы"));
+        v.push(r(&[(b(Block::IncubatorRare), 1), (ids::DIAMOND, 2)], (b(Block::IncubatorLegendary), 1), true, "Мобы"));
         // Food and armor.
         v.push(r(&[(ids::RAW_MEAT, 1), (ids::COAL, 1)], (ids::COOKED_MEAT, 1), true, "Плавка"));
         let armor_mats: [ItemId; 4] = [ids::STICK, ids::BRONZE_INGOT, ids::IRON_INGOT, ids::DIAMOND];

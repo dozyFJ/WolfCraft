@@ -9,6 +9,7 @@ pub mod config;
 pub mod drops;
 pub mod cubesphere;
 pub mod explosives;
+pub mod petsim;
 pub mod interaction;
 pub mod inventory;
 pub mod items;

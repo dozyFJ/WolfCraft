@@ -1823,6 +1823,11 @@ blocks! {
     // Lit with a lighter (or by another blast): see `explosives`. Not a catalogue piece:
     // `construction::entry` has nothing for this id.
     2444 Dynamite => info("Динамит", Opaque, 0.1, Hand, column(t::DYNAMITE_SIDE, t::DYNAMITE_TOP, t::DYNAMITE_TOP)),
+    // «Питомник» mini-game (see `petsim`).
+    2445 CoinBlock => emissive(info("Монетный блок", Opaque, 1.2, Hand, all(t::COIN_BLOCK))),
+    2446 IncubatorCommon => info("Инкубатор: обычное яйцо", Opaque, 2.0, Hand, column(t::INCUBATOR_SIDE, t::INCUBATOR_TOP, t::INCUBATOR_TOP)),
+    2447 IncubatorRare => info("Инкубатор: редкое яйцо", Opaque, 2.0, Hand, column(t::INCUBATOR_SIDE + 1, t::INCUBATOR_TOP, t::INCUBATOR_TOP)),
+    2448 IncubatorLegendary => info("Инкубатор: легендарное яйцо", Opaque, 2.0, Hand, column(t::INCUBATOR_SIDE + 2, t::INCUBATOR_TOP, t::INCUBATOR_TOP)),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
