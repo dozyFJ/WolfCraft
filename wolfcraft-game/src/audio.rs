@@ -219,7 +219,70 @@ fn synth(s: Sfx) -> Vec<f32> {
         Sfx::Pop => sweep(0.07, 620.0, 1100.0, 6.0).into_iter().map(|v| v * 0.5).collect(),
         Sfx::Fuse => burst(0.7, 0.85, 1.5, 107).into_iter().map(|v| v * 0.45).collect(),
         Sfx::Launch => mix(&burst(0.30, 0.55, 5.0, 113), &sweep(0.25, 320.0, 110.0, 4.0), 0.6),
-        Sfx::Explosion => mix(&burst(1.4, 0.10, 2.6, 127), &sweep(0.9, 75.0, 28.0, 2.5), 0.9),
+        // A blast: a sharp crack, a deep falling boom, a long rumble and falling debris.
+        Sfx::Explosion => {
+            let crack = burst(0.12, 0.85, 14.0, 127);
+            let boom = sweep(1.1, 90.0, 26.0, 2.2);
+            let rumble = burst(1.8, 0.05, 2.0, 131);
+            let debris = grains(1.6, 40, 0.016, 0.45, 2.2, 137);
+            let v = mix(&mix(&crack, &boom, 1.3), &rumble, 1.1);
+            mix(&v, &debris, 0.35)
+        }
+    }
+}
+
+/// Master treatment for every effect: a short room reverb (feedback combs with a dark tail),
+/// gentle tape-like saturation, peak normalisation and click-free fades. `room` 0..1.
+fn master(dry: Vec<f32>, room: f32) -> Vec<f32> {
+    let tail = (0.12 + 0.35 * room) * RATE as f32;
+    let n = dry.len() + tail as usize;
+    let mut wet = vec![0.0f32; n];
+    for (delay, fb) in [(1116usize, 0.62f32), (1277, 0.58), (1491, 0.55), (1617, 0.52)] {
+        let mut buf = vec![0.0f32; n];
+        let mut lp = 0.0f32;
+        for i in 0..n {
+            let x = dry.get(i).copied().unwrap_or(0.0);
+            let back = if i >= delay { buf[i - delay] } else { 0.0 };
+            lp += (back - lp) * 0.45;
+            buf[i] = x + lp * fb * room.max(0.2);
+            wet[i] += buf[i] * 0.25;
+        }
+    }
+    let mix_wet = 0.10 + 0.22 * room;
+    let mut out: Vec<f32> = (0..n)
+        .map(|i| {
+            let d = dry.get(i).copied().unwrap_or(0.0);
+            // `wet` holds the dry signal plus the echoes; keep only a share of the echoes.
+            d + (wet[i] - d) * mix_wet
+        })
+        .collect();
+    // Remove DC, saturate softly, normalise.
+    let mean = out.iter().sum::<f32>() / n.max(1) as f32;
+    for v in out.iter_mut() {
+        *v = ((*v - mean) * 1.4).tanh();
+    }
+    // Keep each effect as loud as it was designed (steps quiet, blasts loud), never clipping.
+    let dry_peak = dry.iter().fold(0.0f32, |m, v| m.max(v.abs())).clamp(1e-4, 0.95);
+    let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs())).max(1e-4);
+    let k = dry_peak / peak;
+    let fade_in = (0.002 * RATE as f32) as usize;
+    let fade_out = (0.012 * RATE as f32) as usize;
+    for (i, v) in out.iter_mut().enumerate() {
+        let a = (i as f32 / fade_in as f32).min(1.0);
+        let b = ((n - i) as f32 / fade_out as f32).min(1.0);
+        *v *= k * a * b;
+    }
+    out
+}
+
+/// How much room sound an effect gets.
+fn room_for(s: Sfx) -> f32 {
+    match s {
+        Sfx::Step(_) => 0.15,
+        Sfx::Dig(_) | Sfx::Hit | Sfx::Pop | Sfx::Eat => 0.3,
+        Sfx::Explosion => 1.0,
+        Sfx::Launch | Sfx::Break(_) => 0.6,
+        _ => 0.45,
     }
 }
 
@@ -244,7 +307,7 @@ impl Audio {
         for m in Mat::ALL {
             all.extend([Sfx::Break(m), Sfx::Place(m), Sfx::Step(m), Sfx::Dig(m)]);
         }
-        let bufs = all.into_iter().map(|s| (s, synth(s))).collect();
+        let bufs = all.into_iter().map(|s| (s, master(synth(s), room_for(s)))).collect();
         Self { _stream: stream, handle, bufs, volume: 0.6, seed: 12345 }
     }
 

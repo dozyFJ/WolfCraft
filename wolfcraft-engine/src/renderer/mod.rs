@@ -1335,7 +1335,7 @@ mod pose_preview {
         let mut s = String::new();
         for rest in 0..3u8 {
             let up = glam::DVec3::Y;
-            let pose = PlayerPose { feet: glam::DVec3::ZERO, heading: glam::DVec3::X, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, rest, skin: 0, attack: 0.0, held: Default::default(), armor: [None; 4] };
+            let pose = PlayerPose { feet: glam::DVec3::ZERO, heading: glam::DVec3::X, up, pitch: 0.0, phase: 0.0, amount: 0.0, sneaking: false, swimming: false, rest, skin: 0, attack: 0.0, held: Default::default(), armor: [None; 4], shield: false };
             s += &format!("# {rest}\n");
             for t in build_player_model(&pose, glam::DVec3::ZERO).chunks(3) {
                 let p: Vec<String> = t.iter().map(|q| format!("{} {} {}", q.pos[0], q.pos[1], q.pos[2])).collect();
