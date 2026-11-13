@@ -210,31 +210,18 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(COAL, "coal", blob(Rgb(0.15, 0.15, 0.17), 5.0, 51));
     l.add(RAW_IRON, "raw_iron", blob(Rgb(0.78, 0.60, 0.46), 5.0, 52));
     l.add(IRON_INGOT, "iron_ingot", ingot(Rgb(0.78, 0.78, 0.80)));
-    l.add(DIAMOND, "diamond", p(|q| {
-        // Cut crystal with distinct facets instead of a round blue blob.
-        for y in 3..14u32 {
-            let half = if y < 6 { y - 1 } else { (14 - y) / 2 + 1 };
-            for x in (8 - half)..(8 + half) {
-                let c = if y < 6 { Rgb(0.65, 0.83, 0.81) }
-                    else if x < 8 { Rgb(0.28, 0.57, 0.58) }
-                    else { Rgb(0.39, 0.69, 0.68) };
-                q.put(x, y, c, 1.0);
+    l.add(DIAMOND, "diamond", blob(Rgb(0.45, 0.95, 0.90), 4.5, 53));
+    l.add(
+        BREAD,
+        "bread",
+        p(|q| {
+            for y in 6..12u32 {
+                for x in 2..14u32 {
+                    q.put(x, y, Rgb(0.80, 0.58, 0.30).add((rnd(x, y, 54) - 0.5) * 0.08), 1.0);
+                }
             }
-        }
-    }));
-    l.add(BREAD, "bread", p(|q| {
-        for y in 5..13u32 {
-            let inset = if y == 5 || y == 12 { 2 } else { 0 };
-            for x in (2 + inset)..(14 - inset) {
-                let crust = y >= 10 || x == 2 || x == 13;
-                let score = y < 9 && (x + y) % 5 == 0;
-                let c = if score { Rgb(0.79, 0.65, 0.42) }
-                    else if crust { Rgb(0.48, 0.30, 0.15) }
-                    else { Rgb(0.66, 0.47, 0.25) };
-                q.put(x, y, c.add((rnd(x, y, 54) - 0.5) * 0.045), 1.0);
-            }
-        }
-    }));
+        }),
+    );
     l.add(GOLD_INGOT, "gold_ingot", ingot(Rgb(0.95, 0.80, 0.25)));
     l.add(RAW_GOLD, "raw_gold", blob(Rgb(0.92, 0.75, 0.25), 5.0, 55));
     l.add(
@@ -585,15 +572,68 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }));
     }
-    l.add(REVIVAL_HEART,"revival_heart",p(|q|{
-        for y in 2..14 {for x in 2..14 {let dx=(x as i32-8).abs();let dy=(y as i32-7).abs();if dx+dy<7 {q.put(x,y,if dx+dy>4 {Rgb(0.96,0.71,0.22)}else{Rgb(0.27,0.88,0.69)},1.0);}}}
+    // Guardian rewards, drawn like the rest of our icons (bright, with a highlight).
+    l.add(REVIVAL_HEART, "revival_heart", p(|q| {
+        // A golden heart with a green living core.
+        for y in 2..14u32 {
+            for x in 1..15u32 {
+                let (fx, fy) = ((x as f32 - 7.5) / 6.5, (y as f32 - 6.5) / 6.5);
+                let heart = (fx * fx + fy * fy - 0.55).powi(3) + fx * fx * fy * fy * fy * -1.0 < 0.0 || ((fx.abs() - 0.45).powi(2) + (fy + 0.35).powi(2) < 0.22);
+                let lower = fy > 0.0 && fx.abs() < 0.95 - fy * 0.95;
+                if (heart && fy <= 0.2) || lower {
+                    let core = fx.abs() + (fy - 0.05).abs() < 0.45;
+                    let c = if core { Rgb(0.30, 0.95, 0.70) } else { Rgb(1.0, 0.78, 0.22).add(-(fx + fy) * 0.07) };
+                    q.put(x, y, c, 1.0);
+                }
+            }
+        }
+        q.put(5, 4, Rgb(1.0, 1.0, 0.9), 1.0);
+        q.put(4, 5, Rgb(1.0, 1.0, 0.9), 1.0);
     }));
-    l.add(WINGS,"wind_wings",p(|q|{
-        for y in 2..14u32 {let w=(14-y).min(7);for x in 0..w {let c=Rgb(0.35,0.72,0.88).add(if (x+y)%3==0{0.12}else{0.0});q.put(x,y,c,1.);q.put(15-x,y,c,1.);}}
-        for y in 5..12 {q.put(7,y,Rgb(0.72,0.62,0.40),1.);q.put(8,y,Rgb(0.72,0.62,0.40),1.);}
+    l.add(WINGS, "wind_wings", p(|q| {
+        // Two feathered wings spread from a small harness.
+        for side in [0u32, 1] {
+            for (row, len) in [(3u32, 6u32), (4, 7), (5, 7), (6, 6), (7, 6), (8, 5), (9, 4), (10, 3), (11, 2)] {
+                for k in 0..len {
+                    let x = if side == 0 { 6 - k.min(6) } else { 9 + k };
+                    let feather = (k + row) % 2 == 0;
+                    let c = if k + 1 == len { Rgb(0.85, 0.96, 1.0) } else if feather { Rgb(0.45, 0.82, 0.98) } else { Rgb(0.32, 0.66, 0.90) };
+                    q.put(x, row + k / 3, c, 1.0);
+                }
+            }
+        }
+        for y in 5..11u32 {
+            q.put(7, y, Rgb(0.62, 0.45, 0.28), 1.0);
+            q.put(8, y, Rgb(0.50, 0.35, 0.20), 1.0);
+        }
     }));
-    for (id,name,color) in [(RITUAL_SEAL,"ritual_seal",Rgb(0.86,0.65,0.34)),(RESONANCE_RUNE,"resonance_rune",Rgb(0.58,0.32,0.92)),(VOLCANIC_CORE,"volcanic_core",Rgb(0.98,0.35,0.12))] {
-        l.add(id,name,p(|q|{for y in 2..14u32 {for x in 2..14u32 {let d=(x as i32-8).abs()+(y as i32-8).abs();if d<7 {q.put(x,y,color.scale(if d>4{0.65}else{1.0}),1.);}}}for n in 5..11 {q.put(8,n,Rgb(0.95,0.94,0.75),1.);}q.put(7,6,Rgb(0.95,0.94,0.75),1.);}));
+    for (id, name, color, glow) in [
+        (RITUAL_SEAL, "ritual_seal", Rgb(0.92, 0.72, 0.36), Rgb(0.55, 0.20, 0.12)),
+        (RESONANCE_RUNE, "resonance_rune", Rgb(0.62, 0.38, 0.98), Rgb(0.95, 0.85, 1.0)),
+        (VOLCANIC_CORE, "volcanic_core", Rgb(0.30, 0.12, 0.10), Rgb(1.0, 0.62, 0.15)),
+    ] {
+        l.add(id, name, p(move |q| {
+            // A round token with a rim, its own sign in the middle and a highlight.
+            for y in 1..15u32 {
+                for x in 1..15u32 {
+                    let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                    let d = (dx * dx + dy * dy).sqrt();
+                    if d > 6.6 {
+                        continue;
+                    }
+                    let rim = d > 5.2;
+                    let sign = match id {
+                        RITUAL_SEAL => (dx.abs() < 0.8 && dy.abs() < 3.6) || (dy.abs() < 0.8 && dx.abs() < 3.6) || (d > 3.0 && d < 4.0),
+                        RESONANCE_RUNE => (dx.abs() < 0.8 && dy.abs() < 4.0) || ((dx - dy).abs() < 0.9 && dy < 0.5 && dx.abs() < 3.0) || ((dx + dy).abs() < 0.9 && dy < 0.5 && dx.abs() < 3.0),
+                        _ => (dx.abs() * 1.3 + dy.abs() < 3.6) || (rnd(x, y, 305) < 0.18 && d < 5.0),
+                    };
+                    let c = if sign { glow } else if rim { color.scale(0.68) } else { color.add(-(dx + dy) * 0.02) };
+                    q.put(x, y, c, 1.0);
+                }
+            }
+            q.put(4, 4, Rgb(1.0, 1.0, 0.95), 1.0);
+            q.put(5, 3, Rgb(1.0, 1.0, 0.95), 1.0);
+        }));
     }
     for (_, img) in l.0.iter_mut() {
         outline(img);
