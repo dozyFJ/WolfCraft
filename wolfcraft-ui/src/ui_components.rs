@@ -208,8 +208,23 @@ pub fn row_card(ui: &mut Ui, selected: bool, add: impl FnOnce(&mut Ui)) -> Respo
     let hover = ui.ctx().animate_bool_with_time(id.with("hv"), ui.rect_contains_pointer(ui.available_rect_before_wrap()), ANIM_TIME);
     let fill = mix(p.surface, p.surface_hi, hover);
     let stroke = if selected { p.accent } else { mix(p.outline, p.accent.gamma_multiply(0.6), hover) };
+    // The row's own click area is registered *before* its contents (with last frame's rect),
+    // so buttons inside the row («Играть», delete…) stay on top and get their taps. Registered
+    // after the contents, it covered them and swallowed every tap.
+    let rect_key = id.with("row_rect");
+    let prev: Option<Rect> = ui.ctx().data(|d| d.get_temp(rect_key));
+    let bg = prev.map(|r| ui.interact(r, id, Sense::click()));
     let out = Frame::none().fill(fill).rounding(Rounding::ZERO).stroke(Stroke::new(if selected { 1.5_f32 } else { 1.0 }, stroke)).inner_margin(Margin::same(12.0)).show(ui, add);
-    ui.interact(out.response.rect, id, Sense::click())
+    let rect = out.response.rect;
+    ui.ctx().data_mut(|d| d.insert_temp(rect_key, rect));
+    match bg {
+        Some(r) if r.rect == rect => r,
+        // First frame, or the row moved/resized: catch up next frame.
+        _ => {
+            ui.ctx().request_repaint();
+            ui.interact(rect, id.with("first"), Sense::hover())
+        }
+    }
 }
 
 pub fn section_label(ui: &mut Ui, text: &str) {
