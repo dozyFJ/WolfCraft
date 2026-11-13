@@ -30,7 +30,13 @@ pub mod items {
     pub const ROTTEN_FLESH: u16 = 36;
     /// Armor: ARMOR_BASE + material * 4 + slot (helmet, chestplate, leggings, boots).
     pub const ARMOR_BASE: u16 = 37;
-    pub const COUNT: u16 = 53;
+    pub const GUNPOWDER: u16 = 53;
+    pub const LIGHTER: u16 = 54;
+    pub const GRENADE: u16 = 55;
+    pub const GRENADE_LAUNCHER: u16 = 56;
+    pub const ROCKET: u16 = 57;
+    pub const BAZOOKA: u16 = 58;
+    pub const COUNT: u16 = 59;
 }
 
 const PICKAXE: [&str; 16] = [
@@ -52,6 +58,96 @@ const SWORD: [&str; 16] = [
     "................", ".............xx.", "............xXx.", "...........xXx..", "..........xXx...", ".........xXx....",
     "........xXx.....", ".......xXx......", "..ww..xXx.......", "...wwxXx........", "....wwx.........", "...hhww.........",
     "..hh..ww........", ".hh.............", "................", "................",
+];
+const LIGHTER_TPL: [&str; 16] = [
+    "................",
+    ".......y........",
+    "......yfy.......",
+    "......fyf.......",
+    "......fyyf......",
+    ".......ff.......",
+    ".....mmmmmm.....",
+    ".....mmXXmm.....",
+    ".....rrrrrr.....",
+    ".....rRRRRr.....",
+    ".....rRRRRr.....",
+    ".....rRRRRr.....",
+    ".....rRRRRr.....",
+    ".....rRRRRr.....",
+    ".....rrrrrr.....",
+    "................",
+];
+const GRENADE_TPL: [&str; 16] = [
+    "................",
+    "........mm......",
+    ".......m..m.....",
+    "......mmmm.m....",
+    ".....gGGGGg.....",
+    "....gGGGGGGg....",
+    "...gGGgGGgGGg...",
+    "...gGGGGGGGGg...",
+    "...gGgGGgGGGg...",
+    "...gGGGGGGgGg...",
+    "...gGGgGGGGGg...",
+    "....gGGGGGGg....",
+    ".....gGGGGg.....",
+    "......gggg......",
+    "................",
+    "................",
+];
+const LAUNCHER_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "...........XX...",
+    "..........XmmX..",
+    ".........XmmmmX.",
+    "........XmmmmX..",
+    ".......XmmmmX...",
+    "......XmmmmX....",
+    ".....XhhmmX.....",
+    "....hhhXmX......",
+    "...hhhh.X.......",
+    "..hhhh..........",
+    ".hhhh...........",
+    ".hhh............",
+    "................",
+    "................",
+];
+const ROCKET_TPL: [&str; 16] = [
+    "................",
+    "............rr..",
+    "...........rRRr.",
+    "..........mRRr..",
+    ".........mmmr...",
+    "........mmmm....",
+    ".......mmmm.....",
+    "......mmmm......",
+    ".....mmmm.......",
+    "....mmmm........",
+    "...fmmm.........",
+    "..fffm..........",
+    ".fyff...........",
+    ".yf.............",
+    "................",
+    "................",
+];
+const BAZOOKA_TPL: [&str; 16] = [
+    "................",
+    "..............X.",
+    ".............XoX",
+    "............XooX",
+    "...........XooX.",
+    "..........XooX..",
+    ".........XooX...",
+    "........XooX....",
+    ".......XooXh....",
+    "......XooXhh....",
+    ".....XooX.h.....",
+    "....XooX........",
+    "...XooX.........",
+    "..XooX..........",
+    "..XXX...........",
+    "................",
 ];
 const MATERIALS: [Rgb; 4] = [Rgb(0.62, 0.45, 0.25), Rgb(0.55, 0.55, 0.55), Rgb(0.85, 0.85, 0.88), Rgb(0.35, 0.90, 0.85)];
 
@@ -236,6 +332,26 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             l.add(ARMOR_BASE + (mi * 4 + si) as u16, &format!("armor_{}_{}", mi, armor_names[si]), img);
         }
     }
+    // Explosives and weapons.
+    l.add(GUNPOWDER, "gunpowder", blob(Rgb(0.30, 0.30, 0.33), 5.0, 172));
+    let pal = |ch: char| match ch {
+        'y' => Some(Rgb(1.0, 0.90, 0.35)),
+        'f' => Some(Rgb(1.0, 0.50, 0.15)),
+        'm' => Some(Rgb(0.62, 0.64, 0.68)),
+        'X' => Some(Rgb(0.22, 0.24, 0.22)),
+        'r' => Some(Rgb(0.55, 0.10, 0.10)),
+        'R' => Some(Rgb(0.86, 0.20, 0.16)),
+        'g' => Some(Rgb(0.18, 0.30, 0.14)),
+        'G' => Some(Rgb(0.32, 0.48, 0.24)),
+        'h' => Some(Rgb(0.42, 0.30, 0.18)),
+        'o' => Some(Rgb(0.40, 0.46, 0.26)),
+        _ => None,
+    };
+    l.add(LIGHTER, "lighter", p(|q| q.template(&LIGHTER_TPL[..], &pal)));
+    l.add(GRENADE, "grenade", p(|q| q.template(&GRENADE_TPL[..], &pal)));
+    l.add(GRENADE_LAUNCHER, "grenade_launcher", p(|q| q.template(&LAUNCHER_TPL[..], &pal)));
+    l.add(ROCKET, "rocket", p(|q| q.template(&ROCKET_TPL[..], &pal)));
+    l.add(BAZOOKA, "bazooka", p(|q| q.template(&BAZOOKA_TPL[..], &pal)));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

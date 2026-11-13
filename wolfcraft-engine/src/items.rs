@@ -39,7 +39,14 @@ pub mod ids {
     /// 0 leather, 1 bronze, 2 iron, 3 diamond.
     pub const ARMOR_BASE: ItemId = 293;
     pub const ARMOR_LAST: ItemId = 308;
-    pub const LAST: ItemId = 308;
+    // Explosives and weapons.
+    pub const GUNPOWDER: ItemId = 309;
+    pub const LIGHTER: ItemId = 310;
+    pub const GRENADE: ItemId = 311;
+    pub const GRENADE_LAUNCHER: ItemId = 312;
+    pub const ROCKET: ItemId = 313;
+    pub const BAZOOKA: ItemId = 314;
+    pub const LAST: ItemId = 314;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -138,6 +145,12 @@ pub fn info(id: ItemId) -> ItemInfo {
             ItemInfo { name: ARMOR_NAMES[n], max_stack: 1, durability: 100 + (n / 4) as u16 * 120, ..plain(ARMOR_NAMES[n], sp::ARMOR_BASE + n as u16) }
         }
         ids::SHIELD => ItemInfo { max_stack: 1, durability: 336, ..plain("Щит", sp::SHIELD) },
+        ids::GUNPOWDER => plain("Порох", sp::GUNPOWDER),
+        ids::LIGHTER => ItemInfo { max_stack: 1, durability: 64, ..plain("Зажигалка", sp::LIGHTER) },
+        ids::GRENADE => ItemInfo { max_stack: 16, ..plain("Граната", sp::GRENADE) },
+        ids::GRENADE_LAUNCHER => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Гранатомёт", sp::GRENADE_LAUNCHER) },
+        ids::ROCKET => ItemInfo { max_stack: 16, ..plain("Ракета", sp::ROCKET) },
+        ids::BAZOOKA => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Базука", sp::BAZOOKA) },
         t if (ids::TOOLS_BASE..=ids::TOOLS_LAST).contains(&t) => {
             let n = (t - ids::TOOLS_BASE) as usize;
             let (mat, kind) = (n / 4, n % 4);
@@ -316,7 +329,7 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
     if id >= ITEM_BASE {
-        return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };
+        return if info(id).tool.is_some() || matches!(id, ids::LIGHTER | ids::GRENADE_LAUNCHER | ids::BAZOOKA) { "Инструменты" } else { "Предметы" };
     }
     let b = Block::from_u8(id as u8);
     match b.info().render {
@@ -324,7 +337,7 @@ pub fn category(id: ItemId) -> &'static str {
         _ => match b {
             Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
-            Block::MachineCasing | Block::Generator | Block::Cable | Block::Battery | Block::ElectricLamp | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
+            Block::MachineCasing | Block::Generator | Block::Cable | Block::Battery | Block::ElectricLamp | Block::ElectricFurnace | Block::CommandBlock | Block::Terminal | Block::SwitchOff | Block::Dynamite => "Техника",
             Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable => "Строительство",
             _ => "Природа",
         },

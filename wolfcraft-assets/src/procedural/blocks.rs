@@ -102,6 +102,8 @@ pub mod tiles {
     pub const TERMINAL: u16 = 95;
     pub const NETHERRACK: u16 = 93;
     pub const PORTAL: u16 = 94;
+    pub const DYNAMITE_SIDE: u16 = 96;
+    pub const DYNAMITE_TOP: u16 = 97;
 }
 
 const S: u32 = 16;
@@ -830,6 +832,33 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
         for (x, y) in [(3u32, 4u32), (4, 4), (5, 4), (3, 6), (4, 6), (5, 6), (6, 6), (7, 6), (3, 8), (4, 8), (3, 10), (4, 10), (5, 10), (6, 10)] {
             q.put(x, y, Rgb(0.30, 0.95, 0.45), 1.0);
+        }
+    }));
+    // Dynamite: a bundle of red sticks with a paper band; the top shows the stick ends and a wick.
+    l.add(DYNAMITE_SIDE, "dynamite_side", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let n = (rnd(x, y, 170) - 0.5) * 0.06;
+                let edge = x % 4 == 0 || x % 4 == 3;
+                let mut c = if edge { Rgb(0.62, 0.12, 0.10) } else { Rgb(0.86, 0.20, 0.16) }.add(n);
+                if (6..10).contains(&y) {
+                    c = if y == 6 || y == 9 { Rgb(0.30, 0.22, 0.16) } else { Rgb(0.92, 0.88, 0.78).add(n) };
+                }
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(DYNAMITE_TOP, "dynamite_top", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let (a, b) = (x % 4, y % 4);
+                let inner = (1..3).contains(&a) && (1..3).contains(&b);
+                let n = (rnd(x, y, 171) - 0.5) * 0.06;
+                q.put(x, y, if inner { Rgb(0.82, 0.72, 0.56).add(n) } else { Rgb(0.66, 0.14, 0.11).add(n) }, 1.0);
+            }
+        }
+        for (x, y) in [(7u32, 7u32), (8, 7), (7, 8), (8, 8), (8, 6), (9, 5)] {
+            q.put(x, y, Rgb(0.18, 0.16, 0.14), 1.0);
         }
     }));
     // Pixel-art finish for every opaque pixel: a touch more contrast and a limited palette

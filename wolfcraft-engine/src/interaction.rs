@@ -30,6 +30,14 @@ pub enum InteractionEvent {
     OpenCrafting,
     /// Right click on a chest or electric furnace.
     OpenContainer { pos: Cell, block: Block },
+    /// Lighter used on dynamite. The session lights it and keeps the event if that worked.
+    Ignite { pos: Cell },
+    /// Right click with a grenade launcher, bazooka or grenade. Kept only if a shot was fired.
+    Fire { weapon: items::ItemId },
+    /// A blast at a world point (sound, particles); `power` is its radius in blocks.
+    Exploded { at: glam::DVec3, power: f32 },
+    /// A block destroyed by a blast (sync, chips), without the usual break sound and drops.
+    Blasted { pos: Cell, block: Block },
 }
 
 #[derive(Default)]
@@ -135,7 +143,15 @@ impl Interaction {
     /// Right click: use the targeted block, eat, or place the held block.
     pub fn use_item(&mut self, world: &mut impl WorldEdit, player: &mut Player, hit: Option<Hit>) -> Vec<InteractionEvent> {
         let mut events = Vec::new();
+        let held_id = player.inventory.held().map(|s| s.id);
         if let Some(h) = hit {
+            if held_id == Some(items::ids::LIGHTER) && h.block == Block::Dynamite {
+                if !player.is_creative() {
+                    player.inventory.wear_selected();
+                }
+                events.push(InteractionEvent::Ignite { pos: h.cell });
+                return events;
+            }
             if h.block == Block::CraftingTable && !player.sneaking {
                 events.push(InteractionEvent::OpenCrafting);
                 return events;
@@ -163,6 +179,10 @@ impl Interaction {
             }
         }
         let Some(stack) = player.inventory.held() else { return events };
+        if crate::explosives::weapon(stack.id).is_some() {
+            events.push(InteractionEvent::Fire { weapon: stack.id });
+            return events;
+        }
         let info = stack.info();
         if let Some((hunger, sat)) = info.food {
             if player.survival.hunger < 20.0 && !player.is_creative() {

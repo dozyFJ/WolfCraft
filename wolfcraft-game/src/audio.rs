@@ -13,6 +13,11 @@ pub enum Sfx {
     Splash,
     /// A single hit on a block while mining.
     Hit,
+    /// Dynamite fuse catching fire.
+    Fuse,
+    /// Grenade launcher / bazooka shot.
+    Launch,
+    Explosion,
 }
 
 const RATE: u32 = 44100;
@@ -72,6 +77,9 @@ fn synth(s: Sfx) -> Vec<f32> {
         }
         Sfx::Splash => burst(0.35, 0.3, 4.0, 83),
         Sfx::Hit => mix(&burst(0.06, 0.45, 9.0, 97), &sweep(0.05, 210.0, 140.0, 8.0), 0.4),
+        Sfx::Fuse => burst(0.7, 0.85, 1.5, 107).into_iter().map(|v| v * 0.45).collect(),
+        Sfx::Launch => mix(&burst(0.30, 0.55, 5.0, 113), &sweep(0.25, 320.0, 110.0, 4.0), 0.6),
+        Sfx::Explosion => mix(&burst(1.4, 0.10, 2.6, 127), &sweep(0.9, 75.0, 28.0, 2.5), 0.9),
     }
 }
 
@@ -92,7 +100,7 @@ impl Audio {
                 (None, None)
             }
         };
-        let bufs = [Sfx::Break, Sfx::Place, Sfx::Step, Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit].into_iter().map(|s| (s, synth(s))).collect();
+        let bufs = [Sfx::Break, Sfx::Place, Sfx::Step, Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit, Sfx::Fuse, Sfx::Launch, Sfx::Explosion].into_iter().map(|s| (s, synth(s))).collect();
         Self { _stream: stream, handle, bufs, volume: 0.6, seed: 12345 }
     }
 

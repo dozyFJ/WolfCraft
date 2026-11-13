@@ -828,6 +828,32 @@ impl App {
                                 self.audio.play(crate::audio::Sfx::Break, 1.0);
                             }
                             InteractionEvent::Ate { .. } => self.audio.play(crate::audio::Sfx::Eat, 1.0),
+                            InteractionEvent::Ignite { pos } => {
+                                // The dynamite block turned into a burning charge.
+                                if let Some(net) = &mut self.net {
+                                    net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: 0, hell: s.hell });
+                                }
+                                self.audio.play(crate::audio::Sfx::Fuse, 1.0);
+                            }
+                            InteractionEvent::Fire { .. } => self.audio.play(crate::audio::Sfx::Launch, 1.0),
+                            InteractionEvent::Exploded { at, power } => {
+                                let dist = (at - s.player.eye_pos()).length() as f32;
+                                let gain = (1.6 * power / 4.0 / (1.0 + dist / 12.0)).clamp(0.05, 1.6);
+                                self.audio.play(crate::audio::Sfx::Explosion, gain);
+                            }
+                            InteractionEvent::Blasted { pos, block } => {
+                                // A couple of chips per block: a crater has hundreds of them.
+                                let n = (2.0 * self.settings.particles).round() as usize;
+                                if n > 0 {
+                                    if let Some(cols) = self.tile_colors.get(block.info().tiles[0] as usize) {
+                                        let centre = s.chunks.grid().cell_center(pos);
+                                        s.mobs.chips(centre, cols, n, 6.0);
+                                    }
+                                }
+                                if let Some(net) = &mut self.net {
+                                    net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: 0, hell: s.hell });
+                                }
+                            }
                         }
                     }
                     if s.player.survival.dead && self.screen == Screen::Playing {
@@ -1152,6 +1178,7 @@ impl App {
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));
+                model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.explosives.debris(self.time.elapsed()), cam.eye));
                 gfx.world.set_model(&gfx.gpu.device, &gfx.gpu.queue, &model_verts);
                 let sky_verts = wolfcraft_engine::renderer::sky::build_sky(&wolfcraft_engine::renderer::sky::SkyParams { eye: cam.eye, sun_dir: sun.as_vec3(), day, planet_radius: s.planet.radius, sky, time: self.time.elapsed(), underwater });
                 gfx.world.set_sky(&gfx.gpu.device, &gfx.gpu.queue, &sky_verts);
