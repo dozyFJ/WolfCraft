@@ -764,8 +764,9 @@ impl GameSession {
         use wolfcraft_engine::explosives::{DYNAMITE_FUSE, blast_damage, weapon};
         let creative = self.player.is_creative();
         let eye = self.player.eye_pos();
-        // On a phone the shot goes where the finger points, like every other "use".
-        let look = self.aim_dir.unwrap_or_else(|| self.player.look_dir());
+        // Weapons shoot at the centre of the screen (the weapon sight), on phones too: a tap
+        // anywhere fires.
+        let look = self.player.look_dir();
         let mut keep = Vec::with_capacity(events.len());
         for e in events.drain(..) {
             match e {
