@@ -74,6 +74,12 @@ const fn needs_pick(mut i: BlockInfo) -> BlockInfo {
     i.needs_tool = true;
     i
 }
+/// Only a pickaxe of at least `tier` (0 wood … 3 diamond) gets anything out of it.
+const fn tier(mut i: BlockInfo, tier: u8) -> BlockInfo {
+    i.needs_tool = true;
+    i.min_tier = tier;
+    i
+}
 const fn emissive(mut i: BlockInfo) -> BlockInfo {
     i.emissive = true;
     i
@@ -152,7 +158,7 @@ blocks! {
     32 StoneBricks => needs_pick(info("Каменные кирпичи", Opaque, 7.5, Pickaxe, all(t::STONE_BRICKS))),
     33 Lava => emissive(not_solid(info("Лава", Opaque, -1.0, Hand, all(t::LAVA)))),
     34 Basalt => needs_pick(info("Базальт", Opaque, 12.0, Pickaxe, column(t::BASALT_SIDE, t::BASALT_TOP, t::BASALT_TOP))),
-    35 Obsidian => needs_pick(info("Обсидиан", Opaque, 40.0, Pickaxe, all(t::OBSIDIAN))),
+    35 Obsidian => tier(info("Обсидиан", Opaque, 40.0, Pickaxe, all(t::OBSIDIAN)), 3),
     36 Mud => info("Грязь", Opaque, 0.9, Shovel, all(t::MUD)),
     37 MossyCobblestone => needs_pick(info("Замшелый булыжник", Opaque, 10.0, Pickaxe, all(t::MOSSY_COBBLESTONE))),
     38 BirchLog => info("Берёзовое бревно", Opaque, 3.0, Axe, column(t::BIRCH_LOG_SIDE, t::LOG_TOP, t::LOG_TOP)),
