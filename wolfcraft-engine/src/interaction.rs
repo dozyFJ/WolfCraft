@@ -96,8 +96,7 @@ impl Interaction {
             return events;
         }
         self.idle = 0.0;
-        let held = player.inventory.held().map(|s| s.info());
-        let Some(time) = items::break_time(held, hit.block, player.is_creative()) else {
+        let Some(time) = items::break_time_for(player.inventory.held(), hit.block, player.is_creative()) else {
             self.progress = 0.0;
             return events;
         };
@@ -161,7 +160,8 @@ impl Interaction {
             }
             player.survival.add_xp(items::xp_for(block));
             player.survival.exhaust(0.025);
-            if block.info().hardness > 0.0 {
+            // Own blocks wear the tool once, other blocks twice, instant ones never.
+            for _ in 0..crate::tools::wear_for_block(player.inventory.held().map(|s| s.id), block) {
                 player.inventory.wear_selected();
             }
         }

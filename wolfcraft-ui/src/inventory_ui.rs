@@ -323,6 +323,9 @@ fn draw_slot(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUi
     if let Some(s) = stack {
         let dur = s.info().durability;
         let mut tip = s.display_name();
+        if let Some(rules) = wolfcraft_engine::tools::describe(s.id) {
+            tip += &format!("\n{rules}");
+        }
         if dur > 0 {
             tip += &format!("\nПрочность {}/{}", dur - s.damage, dur);
         }
@@ -795,7 +798,8 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
                             ui.painter().rect_filled(tag, Rounding::same(2.0), p.success);
                             ui.painter().text(tag.center(), egui::Align2::CENTER_CENTER, "NEW", egui::FontId::proportional(7.5), egui::Color32::BLACK);
                         }
-                        note(state, &resp, rect, items::info(*id).name);
+                        let name = items::info(*id).name;
+                        note(state, &resp, rect, match wolfcraft_engine::tools::describe(*id) { Some(r) => format!("{name} · {r}"), None => name.to_string() });
                     }
                 });
                 ui.add_space(GAP - ui.spacing().item_spacing.y);

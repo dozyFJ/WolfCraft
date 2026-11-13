@@ -448,6 +448,25 @@ pub fn break_time(held: Option<ItemInfo>, block: Block, creative: bool) -> Optio
     Some(t)
 }
 
+/// Seconds to break `block` with the held stack, by the tool rules (see `tools`): the
+/// tool's own blocks are fast, others take a bare hand's time, too low a material 3.3×
+/// slower; a sword breaks nothing in creative. `None` = cannot be broken.
+pub fn break_time_for(held: Option<ItemStack>, block: Block, creative: bool) -> Option<f32> {
+    let bi = block.info();
+    let id = held.map(|s| s.id);
+    if bi.hardness < 0.0 || block.is_fluid() || !crate::tools::may_break(id, creative) {
+        return None;
+    }
+    if creative {
+        return Some(0.0);
+    }
+    let mut t = bi.hardness / crate::tools::speed(id, block);
+    if bi.needs_tool && !can_harvest(held.map(|s| s.info()), block) {
+        t *= 3.3;
+    }
+    Some(t)
+}
+
 /// Added in the latest update (marked "NEW" and listed first in the creative inventory):
 /// blocks from the biome/building set on, the bow and its materials.
 pub fn is_new(id: ItemId) -> bool {

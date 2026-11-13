@@ -1419,10 +1419,9 @@ impl GameSession {
         }
         self.attack_cd = cooldown;
         self.mob_hits += 1;
-        if let Some(st) = self.player.inventory.held() {
-            if st.info().durability > 0 {
-                self.player.inventory.wear_selected();
-            }
+        // A sword wears once per blow, other tools twice (they are not weapons).
+        for _ in 0..wolfcraft_engine::tools::wear_for_hit(self.player.inventory.held().map(|s| s.id)) {
+            self.player.inventory.wear_selected();
         }
         true
     }
