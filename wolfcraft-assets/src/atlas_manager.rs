@@ -227,6 +227,7 @@ impl AtlasManager {
                             *img = crate::packs::toon_seeded(img, 16 * kscale, crate::packs::toon_bevel(name), seed);
                         } else {
                             crate::packs::vibrant(img);
+                            crate::packs::vibrant(img);
                             *img = crate::packs::upscale(img, kscale);
                         }
                         return;

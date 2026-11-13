@@ -341,15 +341,9 @@ fn leaves(base: Rgb, seed: u32) -> Image {
 
 fn ore(c: Rgb, seed: u32) -> Image {
     p(|q| {
-        q.noisy(Rgb(0.50, 0.50, 0.52), 0.08, 5);
-        // Larger mineral chips stay readable after the cartoon filter.
-        for y in 0..S { for x in 0..S {
-            let cluster = hash(x / 4, y / 4, seed) % 3 == 0;
-            if cluster && x % 4 > 0 && y % 4 > 0 && hash(x, y, seed + 1) % 7 != 0 {
-                let facet = if x % 4 == 1 || y % 4 == 1 { 0.10 } else { -0.05 };
-                q.put(x, y, c.add(facet), 1.0);
-            }
-        }}
+        q.noisy(Rgb(0.50, 0.50, 0.52), 0.12, 5);
+        q.speckle(Rgb(0.42, 0.42, 0.44), 0.25, 6);
+        q.speckle(c, 0.22, seed);
     })
 }
 
@@ -1809,51 +1803,108 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         "grass_top", "dirt", "stone", "sand", "snow", "granite", "limestone", "salt_block", "peat", "ash", "red_sand", "mud", "clay", "marble",
         "netherrack", "dry_grass_top", "swamp_grass_top", "podzol_top", "moss", "wool", "wool_red", "wool_blue", "wool_yellow", "terracotta", "packed_ice", "slate", "smooth_stone",
     ];
-    l.add(BUILD_GLASS, "building_glass", p(|q| {
-        for y in 0..S { for x in 0..S {
-            let grain = if BUILD_GLASS == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
-            q.put(x, y, Rgb(0.68, 0.84, 0.91).add(grain), 0.35);
-        } }
-    }));
-    l.add(BUILD_GLASS_RED, "building_glass_red", p(|q| {
-        for y in 0..S { for x in 0..S {
-            let grain = if BUILD_GLASS_RED == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
-            q.put(x, y, Rgb(0.88, 0.24, 0.3).add(grain), 0.4);
-        } }
-    }));
-    l.add(BUILD_GLASS_BLUE, "building_glass_blue", p(|q| {
-        for y in 0..S { for x in 0..S {
-            let grain = if BUILD_GLASS_BLUE == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
-            q.put(x, y, Rgb(0.18, 0.48, 0.9).add(grain), 0.4);
-        } }
-    }));
-    l.add(BUILD_GLASS_GREEN, "building_glass_green", p(|q| {
-        for y in 0..S { for x in 0..S {
-            let grain = if BUILD_GLASS_GREEN == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
-            q.put(x, y, Rgb(0.25, 0.75, 0.48).add(grain), 0.4);
-        } }
-    }));
+    // Building glass, in the style of our window glass: a clear pane with a light frame
+    // and two diagonal glints; the coloured ones are tinted the same way.
+    for (id, name, tint, alpha) in [
+        (BUILD_GLASS, "building_glass", Rgb(0.72, 0.88, 0.96), 0.30),
+        (BUILD_GLASS_RED, "building_glass_red", Rgb(0.92, 0.30, 0.34), 0.42),
+        (BUILD_GLASS_BLUE, "building_glass_blue", Rgb(0.26, 0.52, 0.94), 0.42),
+        (BUILD_GLASS_GREEN, "building_glass_green", Rgb(0.30, 0.80, 0.50), 0.42),
+    ] {
+        l.add(id, name, p(move |q| {
+            for y in 0..S {
+                for x in 0..S {
+                    let frame = x == 0 || y == 0 || x == S - 1 || y == S - 1;
+                    if frame {
+                        q.put(x, y, tint.lerp(Rgb(1.0, 1.0, 1.0), 0.35), 0.95);
+                    } else {
+                        q.put(x, y, tint.add((rnd(x / 4, y / 4, 301) - 0.5) * 0.04), alpha);
+                    }
+                }
+            }
+            for i in 3..7 {
+                q.put(i, i - 1, Rgb(1.0, 1.0, 1.0), 0.85);
+                q.put(i + 6, i + 5, Rgb(1.0, 1.0, 1.0), 0.85);
+            }
+        }));
+    }
+    // Upholstery: a woven cloth, warm teal with a darker cross-thread.
     l.add(BUILD_FABRIC, "building_fabric", p(|q| {
-        for y in 0..S { for x in 0..S {
-            let grain = if BUILD_FABRIC == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
-            q.put(x, y, Rgb(0.25, 0.53, 0.65).add(grain), 1.0);
-        } }
+        for y in 0..S {
+            for x in 0..S {
+                let weave = if (x + y) % 2 == 0 { 0.04 } else { -0.03 };
+                let seam = if y % 8 == 7 || x % 8 == 7 { -0.07 } else { 0.0 };
+                q.put(x, y, Rgb(0.22, 0.56, 0.70).add(weave + seam + (rnd(x, y, 302) - 0.5) * 0.04), 1.0);
+            }
+        }
     }));
+    // Mirror: silvery glass with a soft sky gradient and a bright diagonal glint.
     l.add(BUILD_MIRROR, "building_mirror", p(|q| {
-        for y in 0..S { for x in 0..S {
-            let grain = if BUILD_MIRROR == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
-            q.put(x, y, Rgb(0.72, 0.82, 0.88).add(grain), 1.0);
-        } }
+        for y in 0..S {
+            for x in 0..S {
+                let sky = Rgb(0.80, 0.90, 0.97).lerp(Rgb(0.60, 0.72, 0.84), y as f32 / 15.0);
+                let glint = (x + y == 9 || x + y == 10 || x + y == 17) && x > 1 && y > 1 && x < 14 && y < 14;
+                q.put(x, y, if glint { Rgb(1.0, 1.0, 1.0) } else { sky }, 1.0);
+            }
+        }
     }));
+    // Ceramic: glazed off-white tiles with thin grout lines and a glaze highlight.
     l.add(BUILD_CERAMIC, "building_ceramic", p(|q| {
-        for y in 0..S { for x in 0..S {
-            let grain = if BUILD_CERAMIC == BUILD_FABRIC { if (x + y) % 3 == 0 { 0.025 } else { -0.015 } } else { 0.0 };
-            q.put(x, y, Rgb(0.87, 0.86, 0.79).add(grain), 1.0);
-        } }
+        for y in 0..S {
+            for x in 0..S {
+                let grout = x % 8 == 0 || y % 8 == 0;
+                let shine = (x % 8 == 2 && y % 8 == 2) || (x % 8 == 3 && y % 8 == 2);
+                let c = if grout { Rgb(0.66, 0.66, 0.62) } else if shine { Rgb(1.0, 1.0, 0.98) } else { Rgb(0.90, 0.89, 0.83).add((rnd(x / 8, y / 8, 303) - 0.5) * 0.04) };
+                q.put(x, y, c, 1.0);
+            }
+        }
     }));
-    l.add(BUILD_PICTURE_FOREST, "building_picture_forest", p(|q| {for y in 0..S {for x in 0..S {q.put(x,y,if y>11 {Rgb(0.23,0.43,0.19)}else if (x==4||x==11)&&y>5 {Rgb(0.37,0.25,0.15)}else if ((x as i32-4).abs()+(y as i32-5).abs()<5)||((x as i32-11).abs()+(y as i32-6).abs()<4) {Rgb(0.18,0.48,0.27)}else {Rgb(0.51,0.72,0.83)},1.0);}}}));
-    l.add(BUILD_PICTURE_SKY, "building_picture_sky", p(|q| {for y in 0..S {for x in 0..S {q.put(x,y,if (x as i32-11).pow(2)+(y as i32-4).pow(2)<9 {Rgb(1.0,0.84,0.35)}else if y>10+x/4 {Rgb(0.32,0.32,0.58)}else {Rgb(0.30+y as f32*0.025,0.40,0.68)},1.0);}}}));
-    l.add(BUILD_PICTURE_ISKRIT, "building_picture_iskrit", p(|q| {for y in 0..S {for x in 0..S {q.put(x,y,if (x+y)%5==0||x==8 {Rgb(0.95,0.61,0.17)}else {Rgb(0.19,0.14,0.33)},1.0);}}}));
+    // Paintings: little pixel-art scenes.
+    l.add(BUILD_PICTURE_FOREST, "building_picture_forest", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let sky = Rgb(0.55, 0.80, 0.98).lerp(Rgb(0.80, 0.92, 1.0), y as f32 / 11.0);
+                let ground = y > 11;
+                let trunk = (x == 4 || x == 11) && (7..=11).contains(&y);
+                let crown = |cx: i32, cy: i32, r: i32| (x as i32 - cx).pow(2) + (y as i32 - cy).pow(2) <= r * r;
+                let leaf = crown(4, 5, 3) || crown(11, 4, 4);
+                let c = if ground {
+                    Rgb(0.30, 0.62, 0.24).add(if (x + y) % 3 == 0 { 0.06 } else { 0.0 })
+                } else if leaf {
+                    Rgb(0.18, 0.52, 0.22).add(if (x + 2 * y) % 4 == 0 { 0.10 } else { 0.0 })
+                } else if trunk {
+                    Rgb(0.42, 0.28, 0.16)
+                } else {
+                    sky
+                };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(BUILD_PICTURE_SKY, "building_picture_sky", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let dusk = Rgb(0.30, 0.34, 0.70).lerp(Rgb(0.98, 0.62, 0.42), y as f32 / 12.0);
+                let sun = (x as i32 - 11).pow(2) + (y as i32 - 5).pow(2) <= 6;
+                let hill = y as f32 > 11.0 + ((x as f32) * 0.7).sin() * 1.5;
+                let cloud = (y == 3 && (2..6).contains(&x)) || (y == 4 && (1..7).contains(&x));
+                let c = if hill { Rgb(0.20, 0.22, 0.40) } else if sun { Rgb(1.0, 0.88, 0.40) } else if cloud { Rgb(0.98, 0.86, 0.84) } else { dusk };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(BUILD_PICTURE_ISKRIT, "building_picture_iskrit", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as i32 - 8, y as i32 - 8);
+                let gem = dx.abs() + dy.abs() <= 4;
+                let core = dx.abs() + dy.abs() <= 1;
+                let ray = (dx == 0 || dy == 0 || dx.abs() == dy.abs()) && dx.abs().max(dy.abs()) <= 7;
+                let c = if core { Rgb(1.0, 0.95, 0.85) } else if gem { Rgb(0.95, 0.25, 0.22).add(if dx + dy < 0 { 0.10 } else { -0.06 }) } else if ray { Rgb(0.80, 0.30, 0.30) } else { Rgb(0.14, 0.09, 0.18).add((rnd(x, y, 304) - 0.5) * 0.04) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);
