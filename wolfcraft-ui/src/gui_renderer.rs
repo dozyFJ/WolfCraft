@@ -220,7 +220,24 @@ impl GuiIcons {
             let (tile,_,_)=construction::surface(entry,face.surface);
             let Some(uv)=self.block_uv.get(tile as usize) else{continue};
             let base=mesh.vertices.len() as u32;
-            for (p,t) in face.points.iter().zip([uv.left_top(),uv.right_top(),uv.right_bottom(),uv.left_bottom()]) {mesh.vertices.push(epaint::Vertex{pos:project(*p),uv:t,color:Color32::WHITE});}
+            // Shade by the face's direction (top bright, sides darker) and map the texture by
+            // position, so the icon reads as a 3D shape instead of a flat blob.
+            let e1=[face.points[1][0]-face.points[0][0],face.points[1][1]-face.points[0][1],face.points[1][2]-face.points[0][2]];
+            let e2=[face.points[2][0]-face.points[0][0],face.points[2][1]-face.points[0][1],face.points[2][2]-face.points[0][2]];
+            let n=[e1[1]*e2[2]-e1[2]*e2[1],e1[2]*e2[0]-e1[0]*e2[2],e1[0]*e2[1]-e1[1]*e2[0]];
+            let len=(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]).sqrt().max(1e-6);
+            let (nx,ny,nz)=((n[0]/len).abs(),(n[1]/len).abs(),(n[2]/len).abs());
+            let k=(0.58+0.42*nz+0.16*nx-0.06*ny).clamp(0.45,1.0);
+            let tint=Color32::from_gray((k*255.0) as u8);
+            let axis=if nz>=nx&&nz>=ny {2} else if nx>=ny {0} else {1};
+            let full=face.surface==construction::geometry::Surface::Picture;
+            for (p,t) in face.points.iter().zip([uv.left_top(),uv.right_top(),uv.right_bottom(),uv.left_bottom()]) {
+                let t=if full {t} else {
+                    let (u,v)=match axis {2=>(p[0],p[1]),0=>(p[1],1.-p[2]),_=>(p[0],1.-p[2])};
+                    egui::pos2(uv.left()+uv.width()*u.clamp(0.,1.),uv.top()+uv.height()*v.clamp(0.,1.))
+                };
+                mesh.vertices.push(epaint::Vertex{pos:project(*p),uv:t,color:tint});
+            }
             mesh.add_triangle(base,base+1,base+2);mesh.add_triangle(base,base+2,base+3);
         }
         painter.add(egui::Shape::mesh(mesh));

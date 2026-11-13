@@ -472,7 +472,15 @@ fn mesh_construction(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32;3])->
         let f=axis*2+usize::from(normal[axis]<0.);
         let (verts,idx)=if alpha {(&mut out.water,&mut out.water_idx)}else{(&mut out.opaque,&mut out.opaque_idx)};
         let base=verts.len() as u32;
-        for (p,uv) in face.points.iter().zip([[0.,0.],[1.,0.],[1.,1.],[0.,1.]]) {
+        // Texture by position inside the cell (not the whole tile squeezed onto every small
+        // face): a thin leg shows a thin strip of planks, a dome keeps one continuous
+        // texture. Pictures keep the full image.
+        let n_local=[normal[2],normal[0],normal[1]]; // back to (i, j, k)
+        let la=(0..3).max_by(|a,b|n_local[*a].abs().total_cmp(&n_local[*b].abs())).unwrap();
+        let full=face.surface==construction::geometry::Surface::Picture;
+        for (p,uv0) in face.points.iter().zip([[0.,0.],[1.,0.],[1.,1.],[0.,1.]]) {
+            let uv=if full {uv0} else {match la {2=>[p[0],p[1]],0=>[p[1],1.-p[2]],_=>[p[0],1.-p[2]]}};
+            let uv=[uv[0].clamp(0.,1.),uv[1].clamp(0.,1.)];
             verts.push(Vertex {pos:inp.to_local(x as f32+p[1],y as f32+p[2],z as f32+p[0]),uv,flags:tile as u32|((emissive as u32)<<16)|((f as u32)<<17)|((alpha as u32)<<27)|lit,light:[if emissive{1.}else{0.9},if emissive{1.}else{sky}]});
         }
         idx.extend_from_slice(&[base,base+1,base+2,base,base+2,base+3]);
