@@ -34,7 +34,7 @@ android_logger = "0.14"
 oboe = { version = "0.6", features = ["shared-stdcxx"] }
 
 [package.metadata.android]
-package = "com.wolfcraft.game"
+package = "com.wolfcraft.test"
 apk_name = "WolfCraft"
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android", "i686-linux-android"]
 
@@ -46,7 +46,7 @@ target_sdk_version = 35
 name = "android.permission.INTERNET"
 
 [package.metadata.android.application]
-label = "WolfCraft"
+label = "WolfCraft Тест"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
 
 [package.metadata.android.application.activity]
