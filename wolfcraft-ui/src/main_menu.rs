@@ -279,7 +279,8 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
             ui.add_space(6.0);
             egui::ScrollArea::vertical().id_salt("nearby").max_height(ui.available_height() - 10.0).show(ui, |ui| {
                 for (name, addr, players, max) in &st.nearby {
-                    row_card(ui, false, |ui| {
+                    // A tap anywhere on the row joins too (not only on «Играть»).
+                    let row = row_card(ui, false, |ui| {
                         ui.horizontal(|ui| {
                             let (r, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
                             icons.paint(ui.painter(), r, icon::GLOBE, p.success);
@@ -295,6 +296,10 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
                             });
                         });
                     });
+                    if row.clicked() && players < max && act.is_none() {
+                        st.net_error = None;
+                        act = Some(MenuAction::JoinServer(addr.clone()));
+                    }
                     ui.add_space(6.0);
                 }
                 if st.nearby.is_empty() {
@@ -324,7 +329,8 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
                     ui.label(egui::RichText::new("Список пуст. Добавьте сервер ниже: имя и адрес (например 192.168.0.10:25570).").size(13.5).color(p.text_muted));
                 }
                 for (i, (name, addr)) in st.servers.iter().enumerate() {
-                    row_card(ui, false, |ui| {
+                    let mut trash = Rect::NOTHING;
+                    let row = row_card(ui, false, |ui| {
                         ui.horizontal(|ui| {
                             let (r, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
                             icons.paint(ui.painter(), r, icon::GLOBE, p.accent);
@@ -333,7 +339,9 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
                                 ui.label(egui::RichText::new(addr).size(12.5).color(p.text_muted));
                             });
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if icon_button(ui, icons, icon::TRASH, 34.0, ButtonKind::Danger).clicked() {
+                                let t = icon_button(ui, icons, icon::TRASH, 34.0, ButtonKind::Danger);
+                                trash = t.rect;
+                                if t.clicked() {
                                     remove = Some(i);
                                 }
                                 if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 0.0, true).clicked() {
@@ -342,6 +350,14 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
                             });
                         });
                     });
+                    if row.clicked() && act.is_none() && remove.is_none() {
+                        let on_trash = row.interact_pointer_pos().is_some_and(|p| trash.expand(4.0).contains(p));
+                        if on_trash {
+                            remove = Some(i);
+                        } else {
+                            act = Some(MenuAction::JoinServer(addr.clone()));
+                        }
+                    }
                     ui.add_space(6.0);
                 }
             });
@@ -1372,6 +1388,59 @@ mod tests {
         let mut raw = egui::RawInput::default();
         raw.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 760.0)));
         let _ = ctx.run(raw, |c| f(c));
+    }
+
+    /// A tap = finger down in one frame, up in the next (like a phone). Returns the action of
+    /// the frame where the finger lifts.
+    fn tap(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, at: Pos2) -> MenuAction {
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 720.0));
+        let mut act = MenuAction::None;
+        for pressed in [true, false] {
+            let mut raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            raw.events.push(egui::Event::PointerMoved(at));
+            raw.events.push(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+            let _ = ctx.run(raw, |c| {
+                let a = world_select(c, icons, st, &[], "0.3.0");
+                if a != MenuAction::None {
+                    act = a;
+                }
+            });
+        }
+        // Pointer leaves the screen between taps.
+        let mut raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+        raw.events.push(egui::Event::PointerGone);
+        let _ = ctx.run(raw, |c| {
+            world_select(c, icons, st, &[], "0.3.0");
+        });
+        act
+    }
+
+    #[test]
+    fn tap_on_nearby_server_joins_it() {
+        let (ctx, icons) = setup();
+        let mut st = WorldSelectState { mode: 1, net_tab: 0, ..Default::default() };
+        st.nearby = vec![("Сервер".into(), "10.8.181.7:25570".into(), 0, 16)];
+        // A few frames to lay the screen out (the rows learn their size).
+        for _ in 0..3 {
+            frame(&ctx, |c| {
+                world_select(c, &icons, &mut st, &[], "0.3.0");
+            });
+        }
+        let want = MenuAction::JoinServer("10.8.181.7:25570".into());
+        // Scan down the screen: a tap on the «Играть» button (right side) and one on the
+        // server's name (left side) must both join.
+        let mut on_button = false;
+        let mut on_row = false;
+        for y in (60..520).step_by(8) {
+            if !on_button && tap(&ctx, &icons, &mut st, Pos2::new(1470.0, y as f32)) == want {
+                on_button = true;
+            }
+            if !on_row && tap(&ctx, &icons, &mut st, Pos2::new(250.0, y as f32)) == want {
+                on_row = true;
+            }
+        }
+        assert!(on_button, "tap on «Играть» must join the server");
+        assert!(on_row, "tap on the server row must join the server");
     }
 
     #[test]
