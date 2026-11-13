@@ -67,6 +67,11 @@ pub fn android_entry(app: winit::platform::android::activity::AndroidApp, studio
         Ok(e) => run(args, e),
         Err(e) => log::error!("event loop: {e}"),
     }
+    // The studio runs in its own process inside the WolfStudio app: end it, so the next
+    // «Студия» starts fresh (an event loop can be built only once per process).
+    if studio {
+        std::process::exit(0);
+    }
 }
 /// Text input on phones. The game runs in a NativeActivity, which has no input connection:
 /// Gboard and other keyboards cannot type into it (non-Latin letters never arrive at all).

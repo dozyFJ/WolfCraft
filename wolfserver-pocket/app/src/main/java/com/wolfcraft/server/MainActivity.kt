@@ -32,9 +32,10 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * WolfServer Pocket: a dashboard of the server running on this phone, with a bottom bar —
- * Главная (dashboard), Сервер (start, world, players), Настройки, Консоль (log + messages).
- * Data comes from the server's own API on 127.0.0.1 (the same one its browser panel uses).
+ * WolfStudio: the studio and the server in one app. Bottom bar — Студия (opens the WolfCraft
+ * studio, also on the running server's world), Сервер (dashboard: address, world, players,
+ * start/stop, messages), Консоль (log), Настройки. Server data comes from its own API on
+ * 127.0.0.1; the studio is the engine's NativeActivity in its own process.
  */
 class MainActivity : Activity() {
 
@@ -140,7 +141,7 @@ class MainActivity : Activity() {
             setBackgroundColor(cCard)
             setPadding(dp(8), dp(8), dp(8), dp(10))
         }
-        val items = listOf("⌂" to "Главная", "▶" to "Сервер", "⚙" to "Настройки", "›_" to "Консоль")
+        val items = listOf("✎" to "Студия", "▶" to "Сервер", "›_" to "Консоль", "⚙" to "Настройки")
         items.forEachIndexed { i, (icon, name) ->
             val b = TextView(this).apply {
                 this.text = "$icon\n$name"
@@ -207,10 +208,10 @@ class MainActivity : Activity() {
         lastRender = renderKey()
         content.removeAllViews()
         when (tab) {
-            0 -> renderHome()
-            1 -> renderServer()
-            2 -> renderSettings()
-            else -> renderConsole()
+            0 -> renderStudio()
+            1 -> renderServerTab()
+            2 -> renderConsole()
+            else -> renderSettings()
         }
     }
 
@@ -271,7 +272,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             addView(label(title, 24f, cText, true))
             val ver = status?.optString("version")?.takeIf { it.isNotEmpty() }
-            addView(label("WolfServer Pocket" + (ver?.let { " · v$it" } ?: ""), 12.5f, cMuted))
+            addView(label("WolfStudio" + (ver?.let { " · сервер v$it" } ?: ""), 12.5f, cMuted))
         })
         bar.addView(label(if (on) "РАБОТАЕТ" else "ОСТАНОВЛЕН", 12f, if (on) cGreen else cMuted, true).apply {
             letterSpacing = 0.08f
@@ -281,8 +282,35 @@ class MainActivity : Activity() {
         content.addView(bar)
     }
 
+    /** Студия: open the engine's studio, on its own projects or on this server's world. */
+    private fun renderStudio() {
+        header("Студия")
+        content.addView(card {
+            addView(caption("WolfCraft Студия"))
+            addView(label("Свои миры и игры: стройте из блоков, кистью и WorldEdit, пишите скрипты на Luau.", 14.5f, cMuted))
+            addView(button("✎  Открыть студию", 1) { openStudio(null) })
+        })
+        content.addView(card {
+            addView(caption("Мир сервера"))
+            if (ServerService.running()) {
+                addView(label("«${status?.optString("name") ?: ServerService.world}» — правки сразу видят все игроки на сервере.", 14.5f, cText))
+                addView(button("Открыть мир сервера в студии", 1) { openStudio("127.0.0.1:${ServerService.PORT}") })
+            } else {
+                addView(label("Сервер выключен. Запусти его, и его мир можно будет менять в студии.", 14.5f, cMuted))
+                addView(button("▶  Запустить сервер") { startServer() })
+            }
+            addView(label("Миры других серверов в твоей сети студия показывает сама: Проекты → «Миры на серверах».", 13f, cMuted).apply { setPadding(0, dp(10), 0, 0) })
+        })
+    }
+
+    /** Сервер: the dashboard and the server controls on one screen. */
+    private fun renderServerTab() {
+        if (ServerService.running()) renderHome() else header("Сервер")
+        renderServerControls()
+    }
+
     private fun renderHome() {
-        header("Главная")
+        header("Сервер")
         val s = status
         val on = ServerService.running()
         content.addView(card {
@@ -341,8 +369,7 @@ class MainActivity : Activity() {
         })
     }
 
-    private fun renderServer() {
-        header("Сервер")
+    private fun renderServerControls() {
         val on = ServerService.running()
         val prefs = getSharedPreferences("ui", MODE_PRIVATE)
         content.addView(card {
@@ -367,10 +394,7 @@ class MainActivity : Activity() {
             }
             addView(label(ServerService.status, 13.5f, cMuted).apply { setPadding(0, dp(10), 0, 0) })
         })
-        if (on) {
-            content.addView(sayCard("Сообщение всем игрокам"))
-            playersCard()
-        }
+        if (on) content.addView(sayCard("Сообщение всем игрокам"))
     }
 
     private fun sayCard(title: String) = card {
@@ -411,7 +435,7 @@ class MainActivity : Activity() {
             addView(row("Версия приложения", ver))
             addView(divider())
             addView(row("Сервер", status?.optString("version")?.takeIf { it.isNotEmpty() }?.let { "WolfCraft $it" } ?: "WolfCraft"))
-            addView(label("Тот же WolfServer, что и на ПК (WolfServer.exe).", 13f, cMuted).apply { setPadding(0, dp(8), 0, 0) })
+            addView(label("Студия и сервер в одном приложении. Сервер тот же, что и на ПК (WolfServer.exe).", 13f, cMuted).apply { setPadding(0, dp(8), 0, 0) })
         })
     }
 
@@ -430,6 +454,17 @@ class MainActivity : Activity() {
     }
 
     // ---- Actions ----------------------------------------------------------------------------
+
+    /** Starts the studio; with `server` it opens that server's world (address) right away. */
+    private fun openStudio(server: String?) {
+        try {
+            val f = java.io.File(filesDir, "open_server.txt")
+            if (server != null) f.writeText(server) else f.delete()
+            startActivity(Intent(this, android.app.NativeActivity::class.java))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Студия не открылась: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
 
     private fun startServer() {
         val prefs = getSharedPreferences("ui", MODE_PRIVATE)

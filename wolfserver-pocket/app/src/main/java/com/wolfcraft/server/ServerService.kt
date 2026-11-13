@@ -173,7 +173,7 @@ class ServerService : Service() {
         )
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("WolfServer Pocket")
+            .setContentTitle("WolfStudio · сервер")
             .setContentText(text.lineSequence().first())
             .setOngoing(true)
             .setContentIntent(open)
