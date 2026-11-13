@@ -183,6 +183,10 @@ pub mod tiles {
     pub const BUILD_PICTURE_ISKRIT: u16 = 182;
     pub const DYNAMITE_SIDE: u16 = 183;
     pub const DYNAMITE_TOP: u16 = 184;
+    pub const COIN_BLOCK: u16 = 185;
+    pub const INCUBATOR_TOP: u16 = 186;
+    /// Incubator sides: common, rare, legendary egg.
+    pub const INCUBATOR_SIDE: u16 = 187;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -1934,6 +1938,55 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             q.put(x, y, Rgb(0.18, 0.16, 0.14), 1.0);
         }
     }));
+    // «Питомник»: a block of gold coins and the egg incubators.
+    l.add(COIN_BLOCK, "coin_block", p(|q| {
+        q.noisy(Rgb(0.78, 0.58, 0.12), 0.05, 180);
+        for (cx, cy) in [(4.0f32, 4.0f32), (11.0, 5.0), (6.0, 11.0), (12.0, 12.0), (2.0, 13.0), (14.0, 1.0)] {
+            for y in 0..S {
+                for x in 0..S {
+                    let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                    if d < 3.2 {
+                        let rim = d > 2.3;
+                        let hl = x as f32 + 0.5 < cx && y as f32 + 0.5 < cy;
+                        q.put(x, y, if rim { Rgb(0.70, 0.48, 0.08) } else if hl { Rgb(1.0, 0.92, 0.45) } else { Rgb(0.98, 0.80, 0.22) }, 1.0);
+                    }
+                }
+            }
+        }
+    }));
+    l.add(INCUBATOR_TOP, "incubator_top", p(|q| {
+        q.noisy(Rgb(0.80, 0.82, 0.86), 0.03, 181);
+        for y in 0..S {
+            for x in 0..S {
+                if x < 2 || y < 2 || x > 13 || y > 13 {
+                    q.put(x, y, Rgb(0.50, 0.52, 0.58), 1.0);
+                }
+            }
+        }
+        for y in 5..11u32 {
+            for x in 5..11u32 {
+                q.put(x, y, Rgb(0.55, 0.85, 1.0), 1.0);
+            }
+        }
+    }));
+    for (i, frame) in [Rgb(0.62, 0.64, 0.70), Rgb(0.30, 0.55, 0.95), Rgb(0.95, 0.72, 0.18)].into_iter().enumerate() {
+        let name = ["incubator_common", "incubator_rare", "incubator_legendary"][i];
+        let egg = [Rgb(0.96, 0.94, 0.88), Rgb(0.60, 0.80, 1.0), Rgb(1.0, 0.85, 0.40)][i];
+        l.add(INCUBATOR_SIDE + i as u16, name, p(move |q| {
+            for y in 0..S {
+                for x in 0..S {
+                    let border = x < 2 || x > 13 || y < 2 || y > 13;
+                    let glass = Rgb(0.70, 0.88, 0.96).add((rnd(x, y, 182) - 0.5) * 0.04);
+                    let (ex, ey) = ((x as f32 + 0.5 - 8.0) / 3.6, (y as f32 + 0.5 - 8.8) / 4.6);
+                    let c = if border { frame } else if ex * ex + ey * ey < 1.0 { if ex < -0.3 && ey < -0.3 { Rgb(1.0, 1.0, 1.0) } else { egg } } else { glass };
+                    q.put(x, y, c, 1.0);
+                }
+            }
+            for x in 2..14u32 {
+                q.put(x, 13, frame.scale(0.7), 1.0);
+            }
+        }));
+    }
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

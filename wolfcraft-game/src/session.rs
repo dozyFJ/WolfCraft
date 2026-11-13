@@ -109,6 +109,14 @@ pub struct GameSession {
     pub arrows: wolfcraft_engine::projectiles::Arrows,
     /// Lit dynamite and grenades / rockets in flight.
     pub explosives: wolfcraft_engine::explosives::Explosives,
+    /// «Питомник» mini-game: coins, hatched pets, the pets following the player.
+    pub petsim: wolfcraft_engine::petsim::PetSim,
+    /// Seconds to the next scan for coin blocks around the player.
+    coin_scan: f32,
+    /// Coin blocks near the player (cell, centre), refreshed by the scan.
+    coin_cells: Vec<(wolfcraft_engine::cubesphere::Cell, DVec3)>,
+    /// The lobby was built here (coin blocks keep appearing near it).
+    pub petsim_home: Option<DVec3>,
     /// Bow draw 0..1 while the use button is held with a bow.
     /// The player is asleep in a bed or sits on a chair (drawn in third person, cannot walk).
     pub rest: Option<Rest>,
@@ -210,6 +218,10 @@ impl GameSession {
             death_burst_done: false,
             arrows: Default::default(),
             explosives: wolfcraft_engine::explosives::Explosives::new(seed),
+            petsim: Default::default(),
+            coin_scan: 0.0,
+            coin_cells: Vec::new(),
+            petsim_home: None,
             rest: None,
             bow_charge: 0.0,
             bow_arrow: None,
@@ -254,6 +266,11 @@ impl GameSession {
         s.storage_bank=wolfcraft_engine::storage_bank::StorageBank::load(&s.dir.join("storage_bank.bin"));
         s.boss_book=wolfcraft_engine::bosses::BossBook::load(&s.dir.join("bosses.txt"));
         s.load_containers();
+        s.petsim = wolfcraft_engine::petsim::PetSim::from_text(&std::fs::read_to_string(s.dir.join("petsim.txt")).unwrap_or_default());
+        s.petsim_home = std::fs::read_to_string(s.dir.join("petsim_home.txt")).ok().and_then(|t| {
+            let v: Vec<f64> = t.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            (v.len() == 3).then(|| DVec3::new(v[0], v[1], v[2]))
+        });
         s.load_block_commands();
         s.load_dimension();
         s.player.align_heading();
@@ -593,6 +610,8 @@ impl GameSession {
         }
         // Explosives: light dynamite, fire weapons, then fuses, flight and blasts.
         self.explosives_step(&mut events, dt);
+        // «Питомник»: eggs, pets, coin blocks.
+        self.petsim_step(&mut events, dt);
         // Spawn souls bring creatures to life (standing on the bottom of the cell).
         for e in &events {
             if let InteractionEvent::SpawnMob { pos, kind } = e {
@@ -879,6 +898,201 @@ impl GameSession {
                 }
             }
         }
+    }
+
+    /// «Питомник»: buying eggs at incubators, coins from coin blocks, pets that follow the
+    /// player and dig coin blocks, and new coin blocks appearing round the lobby.
+    fn petsim_step(&mut self, events: &mut Vec<InteractionEvent>, dt: f32) {
+        use wolfcraft_engine::block::Block;
+        use wolfcraft_engine::petsim::{COIN_REWARD, EGGS, PETS, Rarity, hatch};
+        let creative = self.player.is_creative();
+        let mut keep = Vec::with_capacity(events.len());
+        for e in events.drain(..) {
+            match e {
+                InteractionEvent::Hatch { tier } => {
+                    let egg = &EGGS[(tier as usize).min(EGGS.len() - 1)];
+                    if self.petsim.hatching.is_some() {
+                        continue;
+                    }
+                    if !creative && self.petsim.coins < egg.price {
+                        self.item_name = Some((format!("{}: нужно {} монет (у вас {})", egg.name, egg.price, self.petsim.coins), 2.5));
+                        continue;
+                    }
+                    if !creative {
+                        self.petsim.coins -= egg.price;
+                    }
+                    let kind = hatch(tier as usize, self.mobs.rand(), self.mobs.rand());
+                    self.petsim.owned.push(kind);
+                    self.petsim.hatching = Some((0.0, kind));
+                    keep.push(e);
+                }
+                InteractionEvent::Broken { block: Block::CoinBlock, .. } => {
+                    self.petsim.coins += COIN_REWARD;
+                    self.item_name = Some((format!("+{COIN_REWARD} монет · всего {}", self.petsim.coins), 1.5));
+                    keep.push(e);
+                }
+                other => keep.push(other),
+            }
+        }
+        *events = keep;
+        // The hatch animation runs 3.2 s; the pet joins the team when the egg opens.
+        if let Some((t, kind)) = &mut self.petsim.hatching {
+            let before = *t;
+            *t += dt;
+            if before < 1.8 && *t >= 1.8 {
+                self.item_name = Some((format!("{} {}!", PETS[*kind].rarity.name(), PETS[*kind].name), 3.0));
+                self.picked_up += 1;
+            }
+            if *t > 3.2 {
+                self.petsim.hatching = None;
+            }
+        }
+        if self.petsim.owned.is_empty() && self.petsim_home.is_none() {
+            return;
+        }
+        let feet = self.player.body.pos;
+        let heading = self.player.heading;
+        if self.petsim.pets.len() != self.petsim.best().len() || self.petsim.pets.iter().map(|p| p.kind).ne(self.petsim.best()) {
+            self.petsim.refresh(feet, heading);
+        }
+        // Scan for coin blocks around the player twice a second.
+        self.coin_scan -= dt;
+        if self.coin_scan <= 0.0 {
+            self.coin_scan = 0.5;
+            self.coin_cells.clear();
+            let g = self.chunks.grid();
+            let at = g.world_to_cell(feet);
+            for di in -12..=12 {
+                for dj in -12..=12 {
+                    for dk in -4..=5 {
+                        if let Some(c) = g.offset(at, di, dj, dk) {
+                            if self.chunks.get_block(c) == Some(Block::CoinBlock) {
+                                self.coin_cells.push((c, g.cell_center(c)));
+                            }
+                        }
+                    }
+                }
+            }
+            // Keep about ten coin blocks round the lobby.
+            if let Some(home) = self.petsim_home {
+                if (home - feet).length() < 40.0 && self.coin_cells.len() < 10 {
+                    let a = self.mobs.rand() * std::f64::consts::TAU;
+                    let r = 4.0 + self.mobs.rand() * 9.0;
+                    let (di, dj) = ((a.cos() * r) as i32, (a.sin() * r) as i32);
+                    let home_cell = g.world_to_cell(home);
+                    if let Some(col) = g.offset(home_cell, di, dj, 0) {
+                        // First solid block from above with air over it.
+                        for dk in (-6..=6).rev() {
+                            let (Some(c), Some(up)) = (g.offset(col, 0, 0, dk), g.offset(col, 0, 0, dk + 1)) else { continue };
+                            let (Some(b), Some(ub)) = (self.chunks.get_block(c), self.chunks.get_block(up)) else { break };
+                            if b.is_solid() && ub == Block::Air {
+                                if self.chunks.set_block(up, Block::CoinBlock) {
+                                    events.push(InteractionEvent::WorldSet { pos: up, block: Block::CoinBlock });
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let dug = self.petsim.update(feet, heading, &self.coin_cells, dt);
+        for c in dug {
+            if self.chunks.get_block(c) == Some(Block::CoinBlock) && self.chunks.set_block(c, Block::Air) {
+                self.coin_cells.retain(|(x, _)| *x != c);
+                self.petsim.coins += COIN_REWARD;
+                self.item_name = Some((format!("+{COIN_REWARD} монет · всего {}", self.petsim.coins), 1.5));
+                self.picked_up += 1;
+                events.push(InteractionEvent::Blasted { pos: c, block: Block::CoinBlock });
+            }
+        }
+        // Rare pets glitter in their colour; digging pets throw gold sparks.
+        let sparkle: Vec<(DVec3, [f32; 3], bool)> = self.petsim.pets.iter().map(|p| (p.pos, PETS[p.kind].rarity.color(), PETS[p.kind].rarity >= Rarity::Rare || p.dig > 0.0)).collect();
+        for (p, c, on) in sparkle {
+            if on && self.mobs.rand() < dt as f64 * 6.0 {
+                let up = wolfcraft_engine::physics::up_at(p);
+                let o = DVec3::new(self.mobs.rand() - 0.5, self.mobs.rand() - 0.5, self.mobs.rand() - 0.5) * 0.7;
+                self.mobs.fx_glow(p + up * 0.5 + o, up * 0.5, c, 0.035, 0.8, wolfcraft_engine::mobs::FxKind::Rise);
+            }
+        }
+    }
+
+    /// Pets as creatures to draw (the renderer only knows creatures).
+    pub fn pet_models(&self) -> Vec<wolfcraft_engine::mobs::Mob> {
+        use wolfcraft_engine::petsim::{PETS, PetSim};
+        self.petsim
+            .pets
+            .iter()
+            .map(|p| {
+                let up = wolfcraft_engine::physics::up_at(p.pos);
+                let mut m = wolfcraft_engine::mobs::Mob::new(PETS[p.kind].model, p.pos + up * PetSim::bounce(p), p.heading);
+                m.anim = p.anim;
+                m.amount = if p.moving { 1.0 } else { 0.0 };
+                m
+            })
+            .collect()
+    }
+
+    /// Builds the «Питомник» lobby ahead of the player: a floor, three incubators and coin
+    /// blocks round it. Returns the number of blocks set.
+    pub fn build_petsim_lobby(&mut self) -> Result<usize, String> {
+        use wolfcraft_engine::block::Block as B;
+        if self.hell {
+            return Err("Питомник строится только на родной планете".into());
+        }
+        let g = self.chunks.grid();
+        let feet = g.world_to_cell(self.player.body.pos);
+        let centre = g.cell_center(feet);
+        let ax = |di: i32, dj: i32| g.offset(feet, di, dj, 0).map(|c| (g.cell_center(c) - centre).normalize()).unwrap_or(DVec3::ZERO);
+        let (ei, ej) = (ax(1, 0), ax(0, 1));
+        let h = self.player.heading;
+        let fwd = if h.dot(ei).abs() >= h.dot(ej).abs() { (h.dot(ei).signum() as i32, 0) } else { (0, h.dot(ej).signum() as i32) };
+        let side = (fwd.1, fwd.0);
+        let mid = g.offset(feet, fwd.0 * 9, fwd.1 * 9, 0).ok_or("Слишком близко к краю грани планеты, отойдите чуть в сторону")?;
+        const R: i32 = 8;
+        let mut cells = Vec::new();
+        for di in -R..=R {
+            for dj in -R..=R {
+                if di * di + dj * dj > R * R + R {
+                    continue;
+                }
+                let Some(col) = g.offset(mid, di, dj, 0) else { continue };
+                for dk in -2..=5 {
+                    let Some(cell) = g.offset(col, 0, 0, dk) else { continue };
+                    let b = if dk == -2 { B::StoneBricks } else if dk == -1 { if (di + dj).rem_euclid(2) == 0 { B::PolishedMarble } else { B::SmoothStone } } else { B::Air };
+                    cells.push((cell, b));
+                }
+            }
+        }
+        // Incubators in a row at the far side, lanterns between them.
+        for (n, b) in [(-3, B::IncubatorCommon), (0, B::IncubatorRare), (3, B::IncubatorLegendary)] {
+            if let Some(c) = g.offset(mid, fwd.0 * 4 + side.0 * n, fwd.1 * 4 + side.1 * n, 0) {
+                cells.push((c, b));
+            }
+        }
+        for n in [-5, 5] {
+            if let Some(c) = g.offset(mid, fwd.0 * 4 + side.0 * n, fwd.1 * 4 + side.1 * n, 0) {
+                cells.push((c, B::Lantern));
+            }
+        }
+        // A ring of coin blocks.
+        for k in 0..12 {
+            let a = k as f64 / 12.0 * std::f64::consts::TAU;
+            let (di, dj) = ((a.cos() * 6.0).round() as i32, (a.sin() * 6.0).round() as i32);
+            if di * fwd.0 + dj * fwd.1 >= 3 {
+                continue; // keep the incubator side clear
+            }
+            if let Some(c) = g.offset(mid, di, dj, 0) {
+                cells.push((c, B::CoinBlock));
+            }
+        }
+        let (n, missed) = crate::worldedit::apply(self, cells);
+        if n == 0 || missed > 0 {
+            return Err("Мир вокруг ещё не загрузился, подойдите ближе или попробуйте через пару секунд".into());
+        }
+        self.petsim_home = Some(g.cell_center(mid));
+        self.coin_scan = 0.0;
+        Ok(n)
     }
 
     fn handle_building_events(&mut self, events:&mut Vec<InteractionEvent>, used_stack:Option<wolfcraft_engine::items::ItemStack>) {
@@ -1177,6 +1391,14 @@ impl GameSession {
         if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}
         self.save_containers();
         self.save_block_commands();
+        if !self.petsim.owned.is_empty() || self.petsim.coins > 0 {
+            if let Err(e) = std::fs::write(self.dir.join("petsim.txt"), self.petsim.to_text()) {
+                log::error!("petsim: {e}");
+            }
+        }
+        if let Some(h) = self.petsim_home {
+            let _ = std::fs::write(self.dir.join("petsim_home.txt"), format!("{} {} {}", h.x, h.y, h.z));
+        }
         let dim = if self.hell {
             let p = self.overworld_pos.unwrap_or(DVec3::ZERO);
             format!("hell {} {} {}", p.x, p.y, p.z)
