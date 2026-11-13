@@ -455,7 +455,13 @@ impl GameSession {
         self.hit = self.aim_dir.and_then(|d| raycast(&self.chunks, eye, d, reach));
         if !self.player.survival.dead {
             let hit = self.hit;
-            events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held, dt, self.cfg.seed));
+            // A creature in front of the block takes the blow: holding to hit it never digs the
+            // block behind it.
+            let creature_first = self.aim_dir.is_some_and(|d| {
+                let reach = Interaction::reach(&self.player) - 1.5;
+                self.mobs.raycast(eye, d, reach).is_some_and(|(_, t)| self.hit.is_none_or(|h| t < h.dist + 0.5))
+            });
+            events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held && !creature_first, dt, self.cfg.seed));
             // A tap on a creature in the crosshair hits it (touch screens: a short tap is "use").
             if input.use_pressed && !self.try_attack(0.25) {
                 used_stack=self.player.inventory.held();
@@ -471,6 +477,17 @@ impl GameSession {
             let day = local_sun(self.player.world_time, up).dot(up) > 0.05;
             let peaceful = self.cfg.difficulty == wolfcraft_engine::config::Difficulty::Peaceful;
             let dealt = self.mobs.update(&self.chunks, self.player.body.pos, day, peaceful, !self.player.is_creative(), dt.min(0.1) as f64);
+            // What the guardians' blows do besides damage.
+            for (e, secs) in std::mem::take(&mut self.mobs.boss_effects) {
+                if !self.player.is_creative() && e != wolfcraft_engine::magic::Effect::Harm {
+                    self.player.apply_effect(e, 1, secs);
+                }
+            }
+            let knock = std::mem::replace(&mut self.mobs.boss_knock, DVec3::ZERO);
+            if knock.length_squared() > 0.0 && !self.player.body.flying {
+                self.player.body.vel += knock;
+                self.player.body.on_ground = false;
+            }
             if dealt > 0.0 {
                 let armor = self.player.armor_points();
                 // «Защита» on worn pieces: another 3 % per level.

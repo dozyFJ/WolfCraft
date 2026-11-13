@@ -1345,3 +1345,28 @@ mod pose_preview {
         std::fs::write(std::env::var("POSE_OUT").unwrap(), s).unwrap();
     }
 }
+
+#[cfg(test)]
+mod boss_preview {
+    #[test]
+    #[ignore]
+    fn dump_bosses() {
+        use crate::bosses::{BossKind, BossRole};
+        use crate::cubesphere::Cell;
+        let mut s = String::new();
+        for (k, kind) in [BossKind::Stone, BossKind::Root, BossKind::Ember].into_iter().enumerate() {
+            let up = glam::DVec3::Y;
+            let feet = glam::DVec3::new(0.0, 0.0, 0.0);
+            let mut m = crate::mobs::Mob::new(crate::mobs::MobKind::Ghoul, feet, glam::DVec3::Z);
+            m.boss = Some(BossRole::new(kind, Cell::new(0, 0, 0, 0), feet));
+            m.hp = kind.max_hp() * 0.2;
+            let _ = up;
+            s += &format!("# {k}\n");
+            for t in super::model::build_mob_models(&[m], glam::DVec3::new(0.0, 1.5, 6.0), glam::DVec3::NEG_Z, 100.0).chunks(3) {
+                let p: Vec<String> = t.iter().map(|q| format!("{} {} {}", q.pos[0], q.pos[1], q.pos[2])).collect();
+                s += &format!("{} {} {} {}\n", p.join(" "), t[0].color[0], t[0].color[1], t[0].color[2]);
+            }
+        }
+        std::fs::write(std::env::var("BOSS_OUT").unwrap(), s).unwrap();
+    }
+}

@@ -18,8 +18,64 @@ impl BossKind {
     }}
 }
 #[derive(Clone,Debug)]
-pub struct BossRole {pub kind:BossKind,pub home:Cell,pub anchor:DVec3,pub target:DVec3,pub cooldown:f32,pub casting:f32}
-impl BossRole {pub fn new(kind:BossKind,home:Cell,anchor:DVec3)->Self{Self{kind,home,anchor,target:anchor,cooldown:2.0,casting:0.0}}}
+pub struct BossRole {
+    pub kind:BossKind,pub home:Cell,pub anchor:DVec3,pub target:DVec3,pub cooldown:f32,pub casting:f32,
+    /// The attack being cast (see `Attack`).
+    pub attack:Attack,
+    /// Several aimed spots for a volley (fireballs, root spikes).
+    pub targets:Vec<DVec3>,
+    /// Seconds of a charge left, and its direction.
+    pub charge:f32,pub charge_dir:DVec3,
+    /// Circling direction for ranged guardians (+1 / -1) and when it flips.
+    pub orbit:f64,pub orbit_t:f32,
+    /// Seconds without moving although trying (stuck): then it jumps.
+    pub stuck:f32,
+    /// How many attacks so far (picks the next one).
+    pub count:u32,
+}
+impl BossRole {pub fn new(kind:BossKind,home:Cell,anchor:DVec3)->Self{Self{kind,home,anchor,target:anchor,cooldown:2.0,casting:0.0,attack:Attack::Slam,targets:Vec::new(),charge:0.0,charge_dir:DVec3::ZERO,orbit:1.0,orbit_t:3.0,stuck:0.0,count:0}}}
+
+/// The guardians' attacks. Each is announced by a glowing ring on the ground (or rings),
+/// then lands after the cast time: step out of the ring.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum Attack {
+    /// Stone: a ground slam all round itself (radius 6), throws the player up.
+    Slam,
+    /// Stone: hurls a boulder where the player stands (radius 2.5).
+    Boulder,
+    /// Stone (phase 3): charges straight at the player.
+    Charge,
+    /// Forest: roots burst from the ground under the player and two spots beside it, and
+    /// hold you (slowness).
+    Roots,
+    /// Forest: calls two wolves from the woods.
+    Summon,
+    /// Forest (phase 3): draws life from the forest (heals while the cast lasts).
+    Heal,
+    /// Ember: a volley of fireballs: one on the player, more around in later phases.
+    Fireballs,
+    /// Ember: a ring of fire round itself (radius 4.5).
+    FireRing,
+}
+
+impl BossKind {
+    /// The attack after `count` attacks in `phase` (each guardian has its own rotation).
+    pub fn next_attack(self,phase:u8,count:u32,dist:f64)->Attack{
+        use Attack::*;
+        match self {
+            Self::Stone => if dist<5.5 {Slam} else if phase==3&&count%2==0 {Charge} else {Boulder},
+            Self::Root => match (phase,count%3) {(3,2)=>Heal,(p,1) if p>=2=>Summon,_=>Roots},
+            Self::Ember => if dist<4.5||(phase==3&&count%3==2) {FireRing} else {Fireballs},
+        }
+    }
+    /// How far it likes to stay from the player (melee guardians 0).
+    pub fn keep_away(self)->f64{match self{Self::Stone=>0.0,Self::Root=>7.0,Self::Ember=>9.0}}
+}
+impl Attack {
+    pub fn radius(self)->f64{match self{Attack::Slam=>6.0,Attack::Boulder=>2.5,Attack::Roots=>2.2,Attack::Fireballs=>2.0,Attack::FireRing=>4.5,_=>0.0}}
+    pub fn damage(self,phase:u8)->f32{let b=match self{Attack::Slam=>6.0,Attack::Boulder=>5.0,Attack::Charge=>8.0,Attack::Roots=>4.0,Attack::Fireballs=>4.0,Attack::FireRing=>6.0,_=>0.0};if phase==3{b*1.5}else{b}}
+    pub fn cast_time(self,phase:u8)->f32{let b=match self{Attack::Slam=>1.4,Attack::Boulder=>1.2,Attack::Charge=>0.8,Attack::Roots=>1.1,Attack::Summon=>1.0,Attack::Heal=>2.5,Attack::Fireballs=>1.0,Attack::FireRing=>1.3};if phase==3{b*0.7}else{b}}
+}
 #[derive(Clone,Debug)]
 pub struct BossDeath {pub kind:BossKind,pub home:Cell,pub at:DVec3}
 #[derive(Clone,Copy)]
@@ -51,4 +107,23 @@ impl BossBook {
 #[cfg(test)]mod tests{use super::*;
  #[test]fn rewards_are_rare_and_encounters_cannot_pay_twice(){let c=Cell::new(0,1,2,3);let mut b=BossBook::default();assert_eq!(b.begin(BossKind::Stone,c),Ok(180.));assert!(b.finish(BossKind::Stone,c));assert!(!b.finish(BossKind::Stone,c));assert!(b.begin(BossKind::Stone,c).is_err());for k in [BossKind::Stone,BossKind::Root,BossKind::Ember]{assert!(k.rewards().iter().all(|s|crate::items::is_valid(s.id)));assert_eq!(k.phase(1.),3);}}
  #[test]fn encounter_state_survives_reload(){let p=std::env::temp_dir().join(format!("wc_boss_{}.txt",std::process::id()));let mut b=BossBook::default();let c=Cell::new(2,3,4,5);b.begin(BossKind::Root,c).unwrap();b.records.get_mut(&(BossKind::Root,c)).unwrap().hp=44.;b.save(&p).unwrap();assert_eq!(BossBook::load(&p).begin(BossKind::Root,c),Ok(44.));std::fs::remove_file(p).unwrap();}
+ #[test]fn every_guardian_has_its_own_attacks_and_phase_three_is_harder(){
+  use Attack::*;
+  // Stone: slams up close, throws boulders from afar, charges in phase 3.
+  assert_eq!(BossKind::Stone.next_attack(1,0,3.0),Slam);
+  assert_eq!(BossKind::Stone.next_attack(1,0,10.0),Boulder);
+  assert_eq!(BossKind::Stone.next_attack(3,0,10.0),Charge);
+  // Forest: roots, wolves from phase 2, healing in phase 3.
+  assert_eq!(BossKind::Root.next_attack(1,0,8.0),Roots);
+  assert_eq!(BossKind::Root.next_attack(1,1,8.0),Roots);
+  assert_eq!(BossKind::Root.next_attack(2,1,8.0),Summon);
+  assert_eq!(BossKind::Root.next_attack(3,2,8.0),Heal);
+  // Ember: fireballs from afar, a fire ring up close or in phase 3.
+  assert_eq!(BossKind::Ember.next_attack(1,0,9.0),Fireballs);
+  assert_eq!(BossKind::Ember.next_attack(1,0,3.0),FireRing);
+  assert_eq!(BossKind::Ember.next_attack(3,2,9.0),FireRing);
+  // The ranged ones keep their distance; phase 3 hits harder and casts faster.
+  assert!(BossKind::Root.keep_away()>0.0&&BossKind::Ember.keep_away()>BossKind::Root.keep_away()&&BossKind::Stone.keep_away()==0.0);
+  for a in [Slam,Boulder,Charge,Roots,Fireballs,FireRing] {assert!(a.damage(3)>a.damage(1)&&a.cast_time(3)<a.cast_time(1));}
+ }
 }
