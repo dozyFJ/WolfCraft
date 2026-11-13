@@ -14,3 +14,6 @@ wolfcraft-engine.workspace = true
 wolfcraft-common.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { workspace = true, features = ["android-native-activity"] }

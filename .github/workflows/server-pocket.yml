@@ -1,0 +1,91 @@
+name: WolfServer (Pocket APK + PC)
+
+on:
+  push:
+    branches: [mobile-explosives]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wolfserver-pocket
+  cancel-in-progress: false
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust + targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wolfserver
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0 ndk;27.2.12479018'
+
+      - name: WolfServer for Android (arm64)
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android26-clang"
+          export CC_aarch64_linux_android="$BIN/aarch64-linux-android26-clang"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          cargo build -p wolfserver --release --target aarch64-linux-android
+          mkdir -p wolfserver-pocket/app/src/main/jniLibs/arm64-v8a
+          cp target/aarch64-linux-android/release/WolfServer wolfserver-pocket/app/src/main/jniLibs/arm64-v8a/libwolfserver.so
+          ls -lh wolfserver-pocket/app/src/main/jniLibs/arm64-v8a/
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: WolfServer Pocket APK
+        working-directory: wolfserver-pocket
+        run: |
+          gradle --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../WolfServerPocket.apk
+          ls -lh ../WolfServerPocket.apk
+
+      - name: WolfServer for Windows (PC)
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq mingw-w64
+          cargo build -p wolfserver --release --target x86_64-pc-windows-gnu
+          cp target/x86_64-pc-windows-gnu/release/WolfServer.exe WolfServer.exe
+          ls -lh WolfServer.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WolfServer
+          path: |
+            WolfServerPocket.apk
+            WolfServer.exe
+          if-no-files-found: ignore
+
+      - name: Publish "server-test" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="WolfServerPocket.apk"
+          [ -f WolfServer.exe ] && files="$files WolfServer.exe"
+          gh release delete server-test -y --cleanup-tag || true
+          gh release create server-test $files --prerelease --target "$GITHUB_SHA" \
+            --title "WolfServer ТЕСТ (сборка #${{ github.run_number }})" \
+            --notes "WolfServerPocket.apk — сервер на телефоне; WolfServer.exe — тот же сервер для ПК. Из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."

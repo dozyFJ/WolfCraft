@@ -4,7 +4,9 @@
 //! between clients, and serves a local control panel in the browser.
 //!
 //! Usage: `WolfServer [--name <мир>] [--seed <число>] [--port <порт>] [--creative]
-//!                    [--background] [--no-browser]`
+//!                    [--background] [--no-browser] [--data <папка>]`
+//!
+//! The same server runs on a PC and, inside the WolfServer Pocket app, on an Android phone.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -183,7 +185,9 @@ fn main() {
     }
     let name = arg_value(&args, "--name").unwrap_or_else(|| "Сервер".to_string());
     let port = arg_value(&args, "--port").and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
-    let dir = data_dir().join("worlds").join(slugify(&name));
+    // `--data`: where worlds live (the phone app passes its own files folder).
+    let data = arg_value(&args, "--data").map(PathBuf::from).unwrap_or_else(data_dir);
+    let dir = data.join("worlds").join(slugify(&name));
 
     // Existing world: keep its settings. New world: create them.
     let cfg = match WorldConfig::load(&dir) {
@@ -260,3 +264,9 @@ mod tests {
         assert_eq!(query_param("id=7", "t"), None);
     }
 }
+
+/// The engine links winit, whose Android backend expects this entry point even though the
+/// server is a plain command-line program there (WolfServer Pocket starts it as a process).
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+fn android_main(_app: winit::platform::android::activity::AndroidApp) {}
