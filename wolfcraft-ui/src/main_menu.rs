@@ -1450,20 +1450,12 @@ mod tests {
             println!("tap at play centre {:?} -> {a:?}; button now {after:?}", r.center());
             assert_eq!(a, want, "tap in the middle of «Играть»");
         }
-        // Scan down the screen: a tap on the «Играть» button (right side) and one on the
-        // server's name (left side) must both join.
-        let mut on_button = false;
-        let mut on_row = false;
-        for y in (60..520).step_by(8) {
-            if !on_button && tap(&ctx, &icons, &mut st, Pos2::new(1470.0, y as f32)) == want {
-                on_button = true;
-            }
-            if !on_row && tap(&ctx, &icons, &mut st, Pos2::new(250.0, y as f32)) == want {
-                on_row = true;
-            }
+        // And a tap on the row itself (on the server's name, left side).
+        if let Some((r, ..)) = row {
+            let a = tap(&ctx, &icons, &mut st, Pos2::new(r.left() + 120.0, r.center().y));
+            assert_eq!(a, want, "tap on the server row");
         }
-        assert!(on_button, "tap on «Играть» must join the server");
-        assert!(on_row, "tap on the server row must join the server");
+        assert!(play.is_some() && row.is_some(), "the nearby server row is drawn");
     }
 
     #[test]

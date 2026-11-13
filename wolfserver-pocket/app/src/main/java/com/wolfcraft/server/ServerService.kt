@@ -34,6 +34,8 @@ class ServerService : Service() {
         @Volatile var proc: Process? = null
         @Volatile var status: String = "Остановлен"
         @Volatile var world: String = ""
+        /** Key for the server's control API (the dashboard calls it on 127.0.0.1). */
+        @Volatile var token: String = ""
         private val lines = ArrayDeque<String>()
 
         fun running() = proc?.isAlive == true
@@ -94,7 +96,8 @@ class ServerService : Service() {
             return
         }
         val data = File(filesDir, "wolfserver").apply { mkdirs() }
-        val cmd = mutableListOf(exe.absolutePath, "--name", name, "--port", PORT.toString(), "--no-browser", "--data", data.absolutePath)
+        token = java.util.UUID.randomUUID().toString().replace("-", "")
+        val cmd = mutableListOf(exe.absolutePath, "--name", name, "--port", PORT.toString(), "--no-browser", "--data", data.absolutePath, "--token", token)
         if (creative) cmd += "--creative"
         try {
             if (wakeLock == null) {
@@ -106,7 +109,7 @@ class ServerService : Service() {
                 wifiLock = (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
                     .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "wolfserver:wifi").apply { acquire() }
             }
-            addLog("▶ ${cmd.drop(1).joinToString(" ")}")
+            addLog("▶ ${cmd.drop(1).dropLast(2).joinToString(" ")}")
             val pb = ProcessBuilder(cmd).directory(data).redirectErrorStream(true)
             pb.environment()["HOME"] = data.absolutePath
             pb.environment()["TMPDIR"] = cacheDir.absolutePath
