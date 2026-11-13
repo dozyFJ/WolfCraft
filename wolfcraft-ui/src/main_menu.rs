@@ -289,13 +289,17 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
                                 ui.label(egui::RichText::new(format!("игроков {players}/{max} · {addr}")).size(12.5).color(p.text_muted));
                             });
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 0.0, players < max).clicked() {
+                                let b = pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 0.0, players < max);
+                                // Where the button is and what it saw (read by the tap test).
+                                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("dbg_play"), (b.rect, b.hovered(), b.contains_pointer(), b.is_pointer_button_down_on(), b.enabled())));
+                                if b.clicked() {
                                     st.net_error = None;
                                     act = Some(MenuAction::JoinServer(addr.clone()));
                                 }
                             });
                         });
                     });
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("dbg_row"), (row.rect, row.hovered(), row.contains_pointer(), row.is_pointer_button_down_on(), row.sense.click)));
                     if row.clicked() && players < max && act.is_none() {
                         st.net_error = None;
                         act = Some(MenuAction::JoinServer(addr.clone()));
@@ -1405,6 +1409,11 @@ mod tests {
                     act = a;
                 }
             });
+            if std::env::var("TAP_TRACE").is_ok() {
+                let b: Option<(Rect, bool, bool, bool, bool)> = ctx.data(|d| d.get_temp(egui::Id::new("dbg_play")));
+                let r: Option<(Rect, bool, bool, bool, bool)> = ctx.data(|d| d.get_temp(egui::Id::new("dbg_row")));
+                println!("  {} at {at:?}: play {b:?} row {r:?} act {act:?}", if pressed { "down" } else { "up  " });
+            }
         }
         // Pointer leaves the screen between taps.
         let mut raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
@@ -1422,11 +1431,25 @@ mod tests {
         st.nearby = vec![("Сервер".into(), "10.8.181.7:25570".into(), 0, 16)];
         // A few frames to lay the screen out (the rows learn their size).
         for _ in 0..3 {
-            frame(&ctx, |c| {
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 720.0))), ..Default::default() };
+            let _ = ctx.run(raw, |c| {
                 world_select(c, &icons, &mut st, &[], "0.3.0");
             });
         }
         let want = MenuAction::JoinServer("10.8.181.7:25570".into());
+        type Dbg = (Rect, bool, bool, bool, bool);
+        let play: Option<Dbg> = ctx.data(|d| d.get_temp(egui::Id::new("dbg_play")));
+        let row: Option<Dbg> = ctx.data(|d| d.get_temp(egui::Id::new("dbg_row")));
+        println!("play button: {play:?}\nrow: {row:?}");
+        if let Some((r, ..)) = play {
+            // Press frame and release frame, reporting what the button saw each time.
+            unsafe { std::env::set_var("TAP_TRACE", "1") };
+            let a = tap(&ctx, &icons, &mut st, r.center());
+            unsafe { std::env::remove_var("TAP_TRACE") };
+            let after: Option<Dbg> = ctx.data(|d| d.get_temp(egui::Id::new("dbg_play")));
+            println!("tap at play centre {:?} -> {a:?}; button now {after:?}", r.center());
+            assert_eq!(a, want, "tap in the middle of «Играть»");
+        }
         // Scan down the screen: a tap on the «Играть» button (right side) and one on the
         // server's name (left side) must both join.
         let mut on_button = false;
