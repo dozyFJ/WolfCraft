@@ -278,54 +278,64 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
             *h = [r.min.x, r.min.y, r.max.x, r.max.y];
         }
     }
-    // XP bar.
+    // Status stack above the hotbar, bottom to top:
+    // XP bar -> health -> hunger -> everything else (air, ...), one row each.
     let xp_y = hotbar.top() - 10.0;
     let xp = Rect::from_min_size(Pos2::new(hotbar.left() + 4.0, xp_y - 5.0), Vec2::new(hb_w - 8.0, 6.0));
+    // Top edge of everything drawn above the hotbar; compass / item name go above it.
+    let mut stack_top = hotbar.top() - 10.0;
     if !s.creative {
         painter.rect_filled(xp, Rounding::ZERO, p.surface_hi.gamma_multiply(0.9));
         painter.rect_filled(Rect::from_min_size(xp.min, Vec2::new(xp.width() * s.xp_progress.clamp(0.0, 1.0), 6.0)), Rounding::ZERO, Color32::from_rgb(150, 230, 60));
         if s.xp_level > 0 {
-            painter.text(Pos2::new(xp.center().x, xp.top() - 5.0), Align2::CENTER_BOTTOM, s.xp_level.to_string(), bold_font(15.0), Color32::from_rgb(170, 245, 80));
+            // Level number at the right end, so it never overlaps the left-aligned rows.
+            painter.text(Pos2::new(xp.right(), xp.top() - 3.0), Align2::RIGHT_BOTTOM, s.xp_level.to_string(), bold_font(15.0), Color32::from_rgb(170, 245, 80));
         }
-        // Health (left) and hunger (right).
-        let row_y = xp.top() - 22.0 - if s.xp_level > 0 { 4.0 } else { -6.0 };
-        // Minecraft-style pixel hearts: low health makes them shake, damage flashes the outline.
+        const ROW: f32 = 20.0;
+        let x0 = hotbar.left() + 6.0;
+        // Row 1: health. Minecraft-style pixel hearts: low health makes them shake, damage
+        // flashes the outline.
+        let mut row_y = xp.top() - 4.0 - 18.0;
         let t = ctx.input(|i| i.time);
         let flash = s.hurt > 0.0 && ((t * 8.0) as i64) % 2 == 0;
         for i in 0..10 {
             let fill = ((s.health - i as f32 * 2.0) / 2.0).clamp(0.0, 1.0);
             let shake = if s.health <= 4.0 { ((crate::hud::shake_seed(i, (t * 12.0) as u64) % 3) as f32 - 1.0) * 1.5 } else { 0.0 };
-            let origin = Pos2::new(hotbar.left() + 6.0 + i as f32 * 20.0, row_y + shake);
+            let origin = Pos2::new(x0 + i as f32 * ROW, row_y + shake);
             pixel_heart(&painter, origin, 2.0, fill, flash);
         }
+        // Row 2: hunger.
+        row_y -= ROW;
         for i in 0..10 {
-            let r = Rect::from_min_size(Pos2::new(hotbar.right() - 6.0 - (i as f32 + 1.0) * 20.0 + 2.0, row_y), Vec2::splat(18.0));
+            let r = Rect::from_min_size(Pos2::new(x0 + i as f32 * ROW, row_y), Vec2::splat(18.0));
             icons.paint(&painter, r, icon::HUNGER, Color32::from_black_alpha(110));
-            let fill = ((s.hunger - (9 - i) as f32 * 2.0) / 2.0).clamp(0.0, 1.0);
+            let fill = ((s.hunger - i as f32 * 2.0) / 2.0).clamp(0.0, 1.0);
             icons.paint_partial(&painter, r, icon::HUNGER, Color32::WHITE, fill);
         }
-        // Air bubbles.
+        // Row 3+: other indicators (air bubbles).
         if s.underwater || s.air < 14.9 {
+            row_y -= ROW;
             let n = (s.air / 15.0 * 10.0).ceil() as i32;
             for i in 0..n.clamp(0, 10) {
-                let c = Pos2::new(hotbar.right() - 14.0 - i as f32 * 20.0, row_y - 14.0);
+                let c = Pos2::new(x0 + 9.0 + i as f32 * ROW, row_y + 9.0);
                 painter.circle_stroke(c, 6.5, Stroke::new(2.0_f32, Color32::from_rgb(170, 220, 255)));
                 painter.circle_filled(c + Vec2::new(-2.0, -2.0), 1.6, Color32::from_white_alpha(200));
             }
         }
+        stack_top = row_y;
     }
     if s.creative && s.flying {
         painter.text(Pos2::new(hotbar.center().x, xp_y - 8.0), Align2::CENTER_BOTTOM, "Полёт", FontId::proportional(13.0), p.accent);
     }
-    // Compass strip above the hotbar (and above hearts / hunger in survival).
-    let compass_bottom = hotbar.top() - if s.creative { 14.0 } else { 62.0 };
+    // Compass strip above the whole status stack.
+    let compass_bottom = stack_top - 4.0;
     if let (Some(b), false) = (s.compass, s.compact) {
         draw_compass(&painter, &p, Rect::from_center_size(Pos2::new(hotbar.center().x, compass_bottom - 12.0), Vec2::new(hb_w.min(420.0), 24.0)), b);
     }
     // Selected item name.
     if let Some((name, t)) = &s.item_name {
         let a = (t * 2.0).clamp(0.0, 1.0);
-        let y = if s.compass.is_some() && !s.compact { compass_bottom - 32.0 } else { hotbar.top() - if s.creative { 24.0 } else { 70.0 } };
+        let y = if s.compass.is_some() && !s.compact { compass_bottom - 32.0 } else { stack_top - 14.0 };
         painter.text(Pos2::new(hotbar.center().x, y), Align2::CENTER_BOTTOM, name, FontId::proportional(16.0), p.text.gamma_multiply(a));
     }
     // Potion effects: a column of chips on the right, under the minimap on phones.

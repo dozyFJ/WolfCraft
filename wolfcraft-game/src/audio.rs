@@ -64,6 +64,11 @@ pub enum Sfx {
     Hit,
     /// An item picked up from the ground: a short bright pop.
     Pop,
+    /// Dynamite fuse catching fire.
+    Fuse,
+    /// Grenade launcher / bazooka shot.
+    Launch,
+    Explosion,
 }
 
 const RATE: u32 = 44100;
@@ -212,6 +217,9 @@ fn synth(s: Sfx) -> Vec<f32> {
         // A blow on a creature: a punchy thump.
         Sfx::Hit => mix(&ring(0.10, &[(140.0, 0.6), (95.0, 0.3)], 6.0), &burst(0.07, 0.4, 9.0, 97), 0.5),
         Sfx::Pop => sweep(0.07, 620.0, 1100.0, 6.0).into_iter().map(|v| v * 0.5).collect(),
+        Sfx::Fuse => burst(0.7, 0.85, 1.5, 107).into_iter().map(|v| v * 0.45).collect(),
+        Sfx::Launch => mix(&burst(0.30, 0.55, 5.0, 113), &sweep(0.25, 320.0, 110.0, 4.0), 0.6),
+        Sfx::Explosion => mix(&burst(1.4, 0.10, 2.6, 127), &sweep(0.9, 75.0, 28.0, 2.5), 0.9),
     }
 }
 
@@ -232,7 +240,7 @@ impl Audio {
                 (None, None)
             }
         };
-        let mut all = vec![Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit, Sfx::Pop];
+        let mut all = vec![Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit, Sfx::Pop, Sfx::Fuse, Sfx::Launch, Sfx::Explosion];
         for m in Mat::ALL {
             all.extend([Sfx::Break(m), Sfx::Place(m), Sfx::Step(m), Sfx::Dig(m)]);
         }

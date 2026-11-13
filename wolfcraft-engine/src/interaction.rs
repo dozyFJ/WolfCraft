@@ -40,6 +40,14 @@ pub enum InteractionEvent {
     Dropped { pos: Cell, stack: ItemStack },
     /// A spawn soul was used: a creature appears in this cell.
     SpawnMob { pos: Cell, kind: crate::mobs::MobKind },
+    /// Lighter used on dynamite. The session lights it and keeps the event if that worked.
+    Ignite { pos: Cell },
+    /// Use with a grenade launcher, bazooka or grenade. Kept only if a shot was fired.
+    Fire { weapon: items::ItemId },
+    /// A blast at a world point (sound, particles); `power` is its radius in blocks.
+    Exploded { at: glam::DVec3, power: f32 },
+    /// A block destroyed by a blast (sync, chips), without the usual break sound.
+    Blasted { pos: Cell, block: Block },
 }
 
 #[derive(Default)]
@@ -177,7 +185,16 @@ impl Interaction {
     /// Right click: use the targeted block, eat, or place the held block.
     pub fn use_item(&mut self, world: &mut impl WorldEdit, player: &mut Player, hit: Option<Hit>) -> Vec<InteractionEvent> {
         let mut events = Vec::new();
+        let held_id = player.inventory.held().map(|s| s.id);
         if let Some(h) = hit {
+            // Lighter on dynamite: it starts to burn.
+            if held_id == Some(items::ids::LIGHTER) && h.block == Block::Dynamite {
+                if !player.is_creative() {
+                    player.inventory.wear_selected();
+                }
+                events.push(InteractionEvent::Ignite { pos: h.cell });
+                return events;
+            }
             if !player.sneaking && crate::construction::entry(h.block as u16).is_some_and(|(e,_)|e.form==crate::construction::Form::Bed) {
                 // Bed: the spawn point moves here; at night you sleep till the morning.
                 let c = world.grid().cell_center(h.cell);
@@ -253,6 +270,11 @@ impl Interaction {
             }
         }
         let Some(stack) = player.inventory.held() else { return events };
+        // Grenade launcher, bazooka, grenade: the session fires (if there is ammo).
+        if crate::explosives::weapon(stack.id).is_some() {
+            events.push(InteractionEvent::Fire { weapon: stack.id });
+            return events;
+        }
         // Armor in hand: put it on.
         if player.inventory.equip_selected() {
             return events;

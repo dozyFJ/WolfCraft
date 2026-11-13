@@ -76,7 +76,14 @@ pub mod ids {
     pub const RITUAL_SEAL: ItemId = 353;
     pub const RESONANCE_RUNE: ItemId = 354;
     pub const VOLCANIC_CORE: ItemId = 355;
-    pub const LAST: ItemId = 355;
+    // Explosives and weapons.
+    pub const GUNPOWDER: ItemId = 356;
+    pub const LIGHTER: ItemId = 357;
+    pub const GRENADE: ItemId = 358;
+    pub const GRENADE_LAUNCHER: ItemId = 359;
+    pub const ROCKET: ItemId = 360;
+    pub const BAZOOKA: ItemId = 361;
+    pub const LAST: ItemId = 361;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -181,6 +188,12 @@ pub fn info(id: ItemId) -> ItemInfo {
             ItemInfo { name: ARMOR_NAMES[n], max_stack: 1, durability: 100 + (n / 4) as u16 * 120, ..plain(ARMOR_NAMES[n], sp::ARMOR_BASE + n as u16) }
         }
         ids::SHIELD => ItemInfo { max_stack: 1, durability: 336, ..plain("Щит", sp::SHIELD) },
+        ids::GUNPOWDER => plain("Порох", sp::GUNPOWDER),
+        ids::LIGHTER => ItemInfo { max_stack: 1, durability: 64, ..plain("Зажигалка", sp::LIGHTER) },
+        ids::GRENADE => ItemInfo { max_stack: 16, ..plain("Граната", sp::GRENADE) },
+        ids::GRENADE_LAUNCHER => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Гранатомёт", sp::GRENADE_LAUNCHER) },
+        ids::ROCKET => ItemInfo { max_stack: 16, ..plain("Ракета", sp::ROCKET) },
+        ids::BAZOOKA => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Базука", sp::BAZOOKA) },
         ids::BOW => ItemInfo { max_stack: 1, durability: 384, ..plain("Лук", sp::BOW) },
         ids::ARROW => plain("Стрела", sp::ARROW),
         ids::STRING => plain("Нить", sp::STRING),
@@ -526,12 +539,15 @@ pub fn category(id: ItemId) -> &'static str {
         if (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id) {
             return "Вооружение";
         }
-        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
+        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD | ids::GUNPOWDER | ids::LIGHTER | ids::GRENADE | ids::GRENADE_LAUNCHER | ids::ROCKET | ids::BAZOOKA) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
             return "Вооружение";
         }
         return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };
     }
     let b = Block::from_id(id);
+    if b == Block::Dynamite {
+        return "Вооружение";
+    }
     if b.part().is_some() {
         return "Техника";
     }
