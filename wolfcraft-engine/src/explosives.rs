@@ -83,12 +83,14 @@ pub struct Explosives {
     pub lit: Vec<Lit>,
     pub shots: Vec<Shot>,
     cooldown: f32,
+    /// Cooldown of the last shot (for the reload animation).
+    last_cooldown: f32,
     rng: u64,
 }
 
 impl Explosives {
     pub fn new(seed: u64) -> Self {
-        Self { lit: Vec::new(), shots: Vec::new(), cooldown: 0.0, rng: splitmix(seed ^ 0xB00F) }
+        Self { lit: Vec::new(), shots: Vec::new(), cooldown: 0.0, last_cooldown: 0.0, rng: splitmix(seed ^ 0xB00F) }
     }
 
     fn rand(&mut self) -> f64 {
@@ -101,9 +103,15 @@ impl Explosives {
         self.cooldown <= 0.0
     }
 
+    /// Reload progress of the weapon: 1 right after a shot, 0 when ready again.
+    pub fn reload(&self) -> f32 {
+        if self.last_cooldown > 0.0 { (self.cooldown / self.last_cooldown).clamp(0.0, 1.0) } else { 0.0 }
+    }
+
     /// Launches a projectile from `from` along the unit vector `dir`.
     pub fn fire(&mut self, kind: ShotKind, from: DVec3, dir: DVec3, speed: f64, cooldown: f32) {
         self.cooldown = cooldown;
+        self.last_cooldown = cooldown;
         if self.shots.len() >= MAX_LIVE {
             return;
         }

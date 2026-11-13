@@ -977,12 +977,26 @@ pub struct HandsPose {
     pub glint: bool,
     /// Colour of the potion on the tip of the arrow on the bow string (tipped arrows).
     pub arrow_tip: Option<[f32; 3]>,
+    /// Grenade launcher or bazooka in the hands: a full 3D weapon held with both hands.
+    pub gun: Option<GunPose>,
+}
+
+/// State of a held grenade launcher (`kind` 0) or bazooka (`kind` 1) for the view model.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GunPose {
+    pub kind: u8,
+    /// 1 right after a shot, fading to 0: kick back and up, muzzle flash.
+    pub recoil: f32,
+    /// Reload progress 0..1 (0 = ready): the weapon dips and comes back.
+    pub reload: f32,
+    /// A round sits in the muzzle (rocket tip / grenade visible).
+    pub loaded: bool,
 }
 
 impl HandsPose {
     /// Resting pose looking along `forward` (handy for tests and previews).
     pub fn rest(forward: Vec3, up: Vec3) -> Self {
-        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None, bow: None, glint: false, arrow_tip: None }
+        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None, bow: None, glint: false, arrow_tip: None, gun: None }
     }
 }
 
@@ -1331,6 +1345,9 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool, cross
 pub const ARM: usize = 3 * 36;
 
 pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
+    if let Some(g) = pose.gun {
+        return build_gun_view(pose, g);
+    }
     let frame = camera_frame(pose);
     let (skin_c, _, _, sleeve_c, _) = skin_colors(pose.skin);
     let sleeve_c = pose.sleeve.unwrap_or(sleeve_c);
@@ -1378,6 +1395,104 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
             }
         }
         twist_verts(&mut v[start..], &frame, &a, side);
+    }
+    v
+}
+
+/// Grenade launcher / bazooka in first person: a box-built 3D weapon held with both hands
+/// (camera-local: x right, y up, z forward). The bazooka lies on the right shoulder, the
+/// launcher is held at the chest. Recoil kicks it back and up with a muzzle flash; while
+/// reloading it dips and tips down, then comes back with a fresh round in the muzzle.
+fn build_gun_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
+    const OLIVE: [f32; 3] = [0.34, 0.40, 0.22];
+    const OLIVE_D: [f32; 3] = [0.26, 0.31, 0.17];
+    const DARK: [f32; 3] = [0.15, 0.16, 0.15];
+    const STEEL: [f32; 3] = [0.40, 0.42, 0.45];
+    const WOOD: [f32; 3] = [0.52, 0.36, 0.20];
+    const ROCKET: [f32; 3] = [0.80, 0.18, 0.14];
+    const GRENADE: [f32; 3] = [0.32, 0.48, 0.24];
+    const LENS: [f32; 3] = [0.45, 0.80, 1.0];
+    let frame = camera_frame(pose);
+    let (skin_c, _, _, sleeve_c, _) = skin_colors(pose.skin);
+    let sleeve_c = pose.sleeve.unwrap_or(sleeve_c);
+    let (off, btilt, _, _) = body_motion(pose);
+    let r = g.recoil.clamp(0.0, 1.0);
+    let kick = r * r;
+    let rl = g.reload.clamp(0.0, 1.0);
+    let dip = (rl * std::f32::consts::PI).sin();
+    let bazooka = g.kind == 1;
+    let anchor = if bazooka { Vec3::new(0.21, -0.17, 0.12) } else { Vec3::new(0.19, -0.21, 0.20) };
+    let base = anchor + off + Vec3::new(0.0, -0.12 * dip + 0.015 * kick, -0.13 * kick);
+    // + tips the muzzle down: reload dips it, recoil throws it up.
+    let angle = 0.50 * dip - 0.30 * kick + btilt * 0.5;
+    let pivot = base;
+    let mut v: Vec<ModelVertex> = Vec::with_capacity(1200);
+    let bx = |v: &mut Vec<ModelVertex>, a: [f32; 3], b: [f32; 3], c: [f32; 3]| {
+        add_hand_box(v, &frame, base + Vec3::from(a), base + Vec3::from(b), pivot, angle, c);
+    };
+    let muzzle_z;
+    if bazooka {
+        // Tube with two bands, a steel muzzle ring and a flared exhaust behind the shoulder.
+        bx(&mut v, [-0.075, -0.075, -0.25], [0.075, 0.075, 1.02], OLIVE);
+        bx(&mut v, [-0.081, -0.081, 0.24], [0.081, 0.081, 0.29], OLIVE_D);
+        bx(&mut v, [-0.081, -0.081, 0.70], [0.081, 0.081, 0.75], OLIVE_D);
+        bx(&mut v, [-0.092, -0.092, 0.98], [0.092, 0.092, 1.08], STEEL);
+        bx(&mut v, [-0.10, -0.10, -0.34], [0.10, 0.10, -0.24], DARK);
+        // Optical sight on the left side, its lens towards the target.
+        bx(&mut v, [-0.17, -0.005, 0.30], [-0.075, 0.065, 0.46], DARK);
+        bx(&mut v, [-0.155, 0.008, 0.46], [-0.09, 0.052, 0.47], LENS);
+        bx(&mut v, [-0.10, -0.03, 0.34], [-0.075, 0.03, 0.42], DARK);
+        // Rear pistol grip with trigger guard, front grip, shoulder rest.
+        bx(&mut v, [-0.025, -0.23, 0.13], [0.025, -0.075, 0.20], DARK);
+        bx(&mut v, [-0.012, -0.13, 0.20], [0.012, -0.075, 0.27], DARK);
+        bx(&mut v, [-0.025, -0.20, 0.46], [0.025, -0.075, 0.52], DARK);
+        bx(&mut v, [-0.06, -0.12, -0.10], [0.06, -0.075, 0.06], DARK);
+        if g.loaded {
+            // Rocket warhead sticking out of the muzzle.
+            bx(&mut v, [-0.058, -0.058, 1.08], [0.058, 0.058, 1.15], ROCKET);
+            bx(&mut v, [-0.036, -0.036, 1.15], [0.036, 0.036, 1.21], ROCKET);
+            bx(&mut v, [-0.014, -0.014, 1.21], [0.014, 0.014, 1.24], [0.55, 0.12, 0.10]);
+        }
+        muzzle_z = 1.08;
+        // Hands: right on the rear grip, left under the front grip.
+        bx(&mut v, [-0.066, -0.26, 0.09], [0.066, -0.13, 0.24], skin_c);
+        bx(&mut v, [-0.07, -0.55, -0.02], [0.07, -0.25, 0.16], sleeve_c);
+        bx(&mut v, [-0.066, -0.24, 0.42], [0.066, -0.12, 0.56], skin_c);
+        bx(&mut v, [-0.28, -0.55, 0.34], [-0.04, -0.22, 0.52], sleeve_c);
+    } else {
+        // Short heavy barrel, revolving drum, wooden stock, sights.
+        bx(&mut v, [-0.058, -0.058, 0.08], [0.058, 0.058, 0.76], STEEL);
+        bx(&mut v, [-0.074, -0.074, 0.70], [0.074, 0.074, 0.80], DARK);
+        bx(&mut v, [-0.13, -0.14, 0.12], [0.13, 0.11, 0.37], OLIVE);
+        bx(&mut v, [-0.136, -0.146, 0.16], [0.136, 0.116, 0.18], OLIVE_D);
+        bx(&mut v, [-0.136, -0.146, 0.31], [0.136, 0.116, 0.33], OLIVE_D);
+        bx(&mut v, [-0.045, -0.17, -0.30], [0.045, -0.02, 0.12], WOOD);
+        bx(&mut v, [-0.05, -0.20, -0.33], [0.05, 0.0, -0.27], DARK);
+        bx(&mut v, [-0.03, -0.28, 0.04], [0.03, -0.12, 0.11], DARK);
+        bx(&mut v, [-0.03, -0.22, 0.48], [0.03, -0.058, 0.55], DARK);
+        bx(&mut v, [-0.01, 0.058, 0.66], [0.01, 0.11, 0.70], DARK);
+        bx(&mut v, [-0.035, 0.11, 0.06], [-0.015, 0.16, 0.09], DARK);
+        bx(&mut v, [0.015, 0.11, 0.06], [0.035, 0.16, 0.09], DARK);
+        if g.loaded {
+            bx(&mut v, [-0.046, -0.046, 0.76], [0.046, 0.046, 0.81], GRENADE);
+        }
+        muzzle_z = 0.80;
+        bx(&mut v, [-0.066, -0.31, 0.01], [0.066, -0.17, 0.15], skin_c);
+        bx(&mut v, [-0.07, -0.60, -0.12], [0.07, -0.29, 0.08], sleeve_c);
+        bx(&mut v, [-0.066, -0.25, 0.44], [0.066, -0.12, 0.58], skin_c);
+        bx(&mut v, [-0.30, -0.58, 0.36], [-0.04, -0.23, 0.54], sleeve_c);
+    }
+    if kick > 0.55 {
+        // Muzzle flash for the first moments after the shot: bright, unlit.
+        let start = v.len();
+        let k = (kick - 0.55) / 0.45;
+        let z = muzzle_z;
+        let f = 0.10 + 0.10 * k;
+        bx(&mut v, [-f, -f, z], [f, f, z + 0.10 + 0.20 * k], [1.0, 0.62, 0.18]);
+        bx(&mut v, [-f * 0.55, -f * 0.55, z], [f * 0.55, f * 0.55, z + 0.18 + 0.30 * k], [1.0, 0.95, 0.60]);
+        for q in v[start..].iter_mut() {
+            q.tex = 3.0;
+        }
     }
     v
 }

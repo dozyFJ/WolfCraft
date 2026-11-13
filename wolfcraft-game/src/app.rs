@@ -254,6 +254,8 @@ pub struct App {
     hand_block: f32,
     /// Block-placing arm motion, 1 -> 0.
     hand_place: f32,
+    /// Weapon kick after a shot: 1 → 0.
+    gun_recoil: f32,
     /// Fraction of a crumble particle owed while mining (see the mining effects).
     mine_dust: f32,
     /// Ink of sign texts, drawn on the signs in the world.
@@ -376,6 +378,7 @@ impl App {
             look_pending: (0.0, 0.0),
             hand_block: 0.0,
             hand_place: 0.0,
+            gun_recoil: 0.0,
             mine_dust: 0.0,
             sign_texts: Default::default(),
             hand_switch: 0.0,
@@ -1506,7 +1509,7 @@ impl App {
                                 self.audio.play(crate::audio::Sfx::Fuse, 1.0);
                             }
                             InteractionEvent::Fire { .. } => {
-                                self.hand_place = 1.0;
+                                self.gun_recoil = 1.0;
                                 self.audio.play(crate::audio::Sfx::Launch, 1.0);
                             }
                             InteractionEvent::Exploded { at, power } => {
@@ -1734,6 +1737,7 @@ impl App {
                             hint: if screen == Screen::Playing { hint } else { None },
                             mining: s.interaction.mining_fraction(),
                             bow_charge: s.bow_charge,
+                            weapon_reload: s.explosives.reload(),
                             // Sign texts are drawn on the signs in the world now, not as a plate.
                             sign_text: None,
                             item_name: s.item_name.clone(),
@@ -2295,6 +2299,7 @@ impl App {
                     self.hand_lift = (self.hand_lift + self.hand_lift_vel * dt.min(0.05)).clamp(-0.09, 0.09);
                 }
                 self.hand_place = (self.hand_place - dt * 6.5).max(0.0);
+                self.gun_recoil = (self.gun_recoil - dt * 3.2).max(0.0);
                 if s.player.inventory.selected != self.last_hotbar {
                     self.last_hotbar = s.player.inventory.selected;
                     self.hand_switch = 1.0;
@@ -2329,6 +2334,18 @@ impl App {
                         bow: bow.then_some(s.bow_charge),
                         glint: s.player.inventory.held().is_some_and(|h| h.enchanted()),
                         arrow_tip: s.bow_arrow.and_then(crate::session::tipped_effect).map(|e| e.color()),
+                        gun: s.player.inventory.held().and_then(|st| {
+                            use wolfcraft_engine::items::ids;
+                            let kind = match st.id {
+                                ids::GRENADE_LAUNCHER => 0,
+                                ids::BAZOOKA => 1,
+                                _ => return None,
+                            };
+                            let ammo = wolfcraft_engine::explosives::weapon(st.id).map(|w| w.0).unwrap_or(0);
+                            let reload = s.explosives.reload();
+                            let loaded = reload <= 0.0 && (s.player.is_creative() || s.player.inventory.count(ammo) > 0);
+                            Some(wolfcraft_engine::renderer::model::GunPose { kind, recoil: self.gun_recoil, reload, loaded })
+                        }),
                     };
                     let hands = build_first_person_hands(&hand_pose);
                     // View model placement: settings, item-switch dip, aspect ratio.

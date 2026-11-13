@@ -68,6 +68,8 @@ pub struct HudState<'a> {
     pub mining: f32,
     /// Bow draw 0..1 (a bar under the crosshair while drawing).
     pub bow_charge: f32,
+    /// Grenade launcher / bazooka reload 0..1 (1 right after a shot, 0 ready).
+    pub weapon_reload: f32,
     /// Text of the sign under the crosshair.
     pub sign_text: Option<String>,
     pub item_name: Option<(String, f32)>,
@@ -216,11 +218,52 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
 
     // ---- Crosshair (hidden only when blocks are picked with the finger) ----
     let c = screen.center();
-    for (a, b) in if !s.crosshair { &[][..] } else { &[((-9.0, 0.0), (-3.0, 0.0)), ((3.0, 0.0), (9.0, 0.0)), ((0.0, -9.0), (0.0, -3.0)), ((0.0, 3.0), (0.0, 9.0))][..] } {
+    let gun_held = s.inventory.held().is_some_and(|h| matches!(h.id, wolfcraft_engine::items::ids::GRENADE_LAUNCHER | wolfcraft_engine::items::ids::BAZOOKA));
+    for (a, b) in if !s.crosshair || gun_held { &[][..] } else { &[((-9.0, 0.0), (-3.0, 0.0)), ((3.0, 0.0), (9.0, 0.0)), ((0.0, -9.0), (0.0, -3.0)), ((0.0, 3.0), (0.0, 9.0))][..] } {
         let (a, b): ((f32, f32), (f32, f32)) = (*a, *b);
         let (a, b) = (c + Vec2::new(a.0, a.1), c + Vec2::new(b.0, b.1));
         painter.line_segment([a, b], Stroke::new(4.0_f32, Color32::from_black_alpha(130)));
         painter.line_segment([a, b], Stroke::new(2.0_f32, Color32::from_white_alpha(235)));
+    }
+    // Weapon sight for the grenade launcher and the bazooka: a ring with a centre dot, side
+    // ticks, drop marks below (grenades fly in an arc) and a reload arc round the ring.
+    let weapon = s.inventory.held().map(|h| h.id).filter(|id| matches!(*id, wolfcraft_engine::items::ids::GRENADE_LAUNCHER | wolfcraft_engine::items::ids::BAZOOKA));
+    if let Some(id) = weapon {
+        let ready = s.weapon_reload <= 0.0;
+        let col = if ready { Color32::from_rgb(255, 120, 70) } else { Color32::from_white_alpha(150) };
+        let shadow = Stroke::new(4.0_f32, Color32::from_black_alpha(120));
+        let rad = 24.0;
+        painter.circle_stroke(c, rad, shadow);
+        painter.circle_stroke(c, rad, Stroke::new(2.0_f32, col));
+        painter.circle_filled(c, 3.0, Color32::from_black_alpha(140));
+        painter.circle_filled(c, 2.0, col);
+        for (dx, dy) in [(1.0f32, 0.0f32), (-1.0, 0.0), (0.0, -1.0)] {
+            let a = c + Vec2::new(dx, dy) * (rad + 4.0);
+            let b = c + Vec2::new(dx, dy) * (rad + 12.0);
+            painter.line_segment([a, b], shadow);
+            painter.line_segment([a, b], Stroke::new(2.0_f32, col));
+        }
+        if id == wolfcraft_engine::items::ids::GRENADE_LAUNCHER {
+            // Drop marks: aim this much higher for far targets.
+            for (i, y) in [10.0f32, 20.0, 32.0].iter().enumerate() {
+                let w = 10.0 - i as f32 * 2.5;
+                let a = c + Vec2::new(-w, *y);
+                let b = c + Vec2::new(w, *y);
+                painter.line_segment([a, b], Stroke::new(3.0_f32, Color32::from_black_alpha(110)));
+                painter.line_segment([a, b], Stroke::new(1.5_f32, col));
+            }
+        }
+        if !ready {
+            // Reload: the arc fills up clockwise from the top.
+            let done = 1.0 - s.weapon_reload.clamp(0.0, 1.0);
+            let n = 32;
+            let pts: Vec<Pos2> = (0..=n).map(|i| {
+                let t = done * i as f32 / n as f32;
+                let a = -std::f32::consts::FRAC_PI_2 + t * std::f32::consts::TAU;
+                c + Vec2::new(a.cos(), a.sin()) * (rad + 5.0)
+            }).collect();
+            painter.add(egui::Shape::line(pts, Stroke::new(3.0_f32, Color32::from_rgb(255, 200, 80))));
+        }
     }
     // Bow draw: a small bar under the crosshair, turning gold when fully drawn.
     if s.bow_charge > 0.0 {
@@ -518,6 +561,7 @@ mod tests {
                     hint: Some("ЛКМ — сломать".into()),
                     mining: 0.5,
                     bow_charge: 0.5,
+                    weapon_reload: 0.3,
                     sign_text: Some("Привет".into()),
                     item_name: Some(("Лампа".into(), 1.0)),
                     show_fps: true,
