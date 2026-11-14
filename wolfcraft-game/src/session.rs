@@ -109,6 +109,8 @@ pub struct GameSession {
     pub arrows: wolfcraft_engine::projectiles::Arrows,
     /// Lit dynamite and grenades / rockets in flight.
     pub explosives: wolfcraft_engine::explosives::Explosives,
+    /// Destruction physics: loose structures falling, blocks thrown by blasts.
+    pub collapse: wolfcraft_engine::collapse::Collapse,
     /// «Питомник» mini-game: coins, hatched pets, the pets following the player.
     pub petsim: wolfcraft_engine::petsim::PetSim,
     /// Seconds to the next scan for coin blocks around the player.
@@ -223,6 +225,7 @@ impl GameSession {
             death_burst_done: false,
             arrows: Default::default(),
             explosives: wolfcraft_engine::explosives::Explosives::new(seed),
+            collapse: wolfcraft_engine::collapse::Collapse::new(seed),
             petsim: Default::default(),
             coin_scan: 0.0,
             coin_cells: Vec::new(),
@@ -630,6 +633,8 @@ impl GameSession {
         }
         // Explosives: light dynamite, fire weapons, then fuses, flight and blasts.
         self.explosives_step(&mut events, dt);
+        // Destruction physics: what lost its support falls, thrown blocks come down.
+        self.collapse_step(&mut events, dt);
         // «Питомник»: eggs, pets, coin blocks.
         if self.minigames || self.studio {
             self.petsim_step(&mut events, dt);
@@ -823,6 +828,116 @@ impl GameSession {
 
     /// Lighting, firing, fuses, projectiles and blast damage. Request events (`Ignite`, `Fire`)
     /// stay in `events` only if they actually happened; blasts add `Exploded` and `Blasted`.
+    fn collapse_step(&mut self, events: &mut Vec<InteractionEvent>, dt: f32) {
+        use wolfcraft_engine::block::Block;
+        use wolfcraft_engine::collapse::{Collapse, Landing};
+        use wolfcraft_engine::interaction::WorldEdit;
+        use wolfcraft_engine::physics::Voxels;
+        // Holes made this frame: broken blocks and blast craters.
+        let mut holes = Vec::new();
+        let mut blast = None;
+        let mut thrown = Vec::new();
+        for e in events.iter() {
+            match *e {
+                // Builders in creative and the studio make floating things on purpose: only
+                // blasts bring those down. In survival a pickaxe can too.
+                InteractionEvent::Broken { pos, .. } if !self.studio && !self.player.is_creative() => holes.push(pos),
+                InteractionEvent::Blasted { pos, block } => {
+                    holes.push(pos);
+                    thrown.push((pos, block));
+                }
+                InteractionEvent::Exploded { at, power } => blast = Some((at, power)),
+                _ => {}
+            }
+        }
+        if !holes.is_empty() {
+            let grid = self.chunks.grid();
+            // Some blocks of a crater fly out as real blocks (they shatter where they land).
+            if let Some((at, power)) = blast {
+                let every = (thrown.len() / 30).max(3);
+                for (i, (c, b)) in thrown.iter().enumerate() {
+                    if i % every == 0 {
+                        self.collapse.throw(*b, grid.cell_center(*c), at, power);
+                    }
+                }
+            }
+            let chunks = &self.chunks;
+            let planet = &self.planet;
+            // Untouched terrain holds whatever stands on it.
+            let groups = Collapse::loose_groups(&grid, &holes, |c| chunks.get_block(c), |c, b| planet.block_at(c) == b);
+            for g in groups {
+                let blocks: Vec<(wolfcraft_engine::cubesphere::Cell, Block)> = g.iter().filter_map(|c| self.chunks.get_block(*c).map(|b| (*c, b))).collect();
+                let mut removed = Vec::new();
+                self.collapse.drop_group(
+                    &grid,
+                    &blocks,
+                    |c| {
+                        let ok = self.chunks.set_block(c, Block::Air);
+                        if ok {
+                            removed.push(c);
+                        }
+                        ok
+                    },
+                    blast.map(|b| b.0),
+                );
+                // Containers in a falling building spill their contents.
+                for c in &removed {
+                    if let Some(slots) = self.containers.remove(c) {
+                        let centre = grid.cell_center(*c);
+                        for st in slots.into_iter().flatten() {
+                            self.drops.pop_from_block(st, centre);
+                        }
+                    }
+                    events.push(InteractionEvent::WorldSet { pos: *c, block: Block::Air });
+                }
+            }
+        }
+        if self.collapse.falling.is_empty() {
+            return;
+        }
+        // A falling block that hits the player or a creature hurts them and breaks.
+        let up = self.player.up();
+        let me = self.player.body.pos + up * 0.9;
+        let mut hits = Vec::new();
+        for (i, f) in self.collapse.falling.iter().enumerate() {
+            let fall = -f.vel.dot(wolfcraft_engine::physics::up_at(f.pos));
+            if fall < 6.0 {
+                continue;
+            }
+            if !self.player.survival.dead && (f.pos - me).length_squared() < 0.9 * 0.9 {
+                hits.push((i, None, fall));
+            } else if let Some(m) = self.mobs.mobs.iter().position(|m| m.hp > 0.0 && (m.centre() - f.pos).length_squared() < 0.9 * 0.9) {
+                hits.push((i, Some(m), fall));
+            }
+        }
+        for &(i, mob, fall) in hits.iter().rev() {
+            let f = self.collapse.falling.swap_remove(i);
+            let dmg = (fall as f32 * 0.35).min(14.0);
+            match mob {
+                None if !self.player.is_creative() => self.player.damage(dmg, self.cfg.difficulty),
+                Some(m) => {
+                    let _ = self.mobs.hurt(m, dmg, f.pos + up * 2.0);
+                }
+                None => {}
+            }
+            events.push(InteractionEvent::Shattered { at: f.pos, block: f.block });
+        }
+        let grid = self.chunks.grid();
+        let chunks = &self.chunks;
+        let landings = self.collapse.update(&grid, dt, |p| chunks.block_at_world(p).is_solid(), |c| chunks.get_block(c).is_some_and(|b| b == Block::Air || b.is_fluid() || b.info().render == wolfcraft_engine::block::RenderKind::Cross));
+        for l in landings {
+            match l {
+                Landing::Placed { cell, block } => {
+                    if self.chunks.set_block(cell, block) {
+                        events.push(InteractionEvent::WorldSet { pos: cell, block });
+                        events.push(InteractionEvent::Landed { pos: cell, block });
+                    }
+                }
+                Landing::Shattered { pos, block, .. } => events.push(InteractionEvent::Shattered { at: pos, block }),
+            }
+        }
+    }
+
     fn explosives_step(&mut self, events: &mut Vec<InteractionEvent>, dt: f32) {
         use wolfcraft_engine::explosives::{DYNAMITE_FUSE, blast_damage, weapon};
         let creative = self.player.is_creative();

@@ -279,6 +279,8 @@ pub struct App {
     gun_recoil: f32,
     /// Hit marker after a bullet struck a creature (seconds left).
     hit_marker: f32,
+    /// Collapse sounds: at most one thud every few hundredths of a second.
+    thud_cd: f32,
     /// Studio: the block last tapped or aimed at (shown in «Выбранный блок»).
     studio_target: Option<wolfcraft_engine::cubesphere::Cell>,
     /// Fraction of a crumble particle owed while mining (see the mining effects).
@@ -411,6 +413,7 @@ impl App {
             hand_place: 0.0,
             gun_recoil: 0.0,
             hit_marker: 0.0,
+            thud_cd: 0.0,
             studio_target: None,
             mine_dust: 0.0,
             sign_texts: Default::default(),
@@ -1608,6 +1611,29 @@ impl App {
                                 }
                                 self.audio.play(crate::audio::Sfx::Break(crate::audio::Mat::of(block)), 1.0);
                             }
+                            InteractionEvent::Shattered { at, block } => {
+                                // A falling or thrown block breaks apart where it lands.
+                                if let Some(cols) = self.tile_colors.get(block.info().tiles[0] as usize) {
+                                    s.mobs.chips(at, cols, (6.0 * self.settings.particles) as usize, 4.0);
+                                }
+                                if self.thud_cd <= 0.0 {
+                                    let dist = (at - s.player.eye_pos()).length() as f32;
+                                    self.audio.play(crate::audio::Sfx::Break(crate::audio::Mat::of(block)), (1.0 / (1.0 + dist / 10.0)).clamp(0.1, 1.0));
+                                    self.thud_cd = 0.06;
+                                }
+                            }
+                            InteractionEvent::Landed { pos, block } => {
+                                if self.thud_cd <= 0.0 {
+                                    let at = s.chunks.grid().cell_center(pos);
+                                    let dist = (at - s.player.eye_pos()).length() as f32;
+                                    self.audio.play(crate::audio::Sfx::Place(crate::audio::Mat::of(block)), (1.2 / (1.0 + dist / 10.0)).clamp(0.1, 1.0));
+                                    self.thud_cd = 0.06;
+                                }
+                                if let Some(cols) = self.tile_colors.get(block.info().tiles[0] as usize) {
+                                    let at = s.chunks.grid().cell_center(pos);
+                                    s.mobs.chips(at, &[cols[0]], (2.0 * self.settings.particles) as usize, 2.0);
+                                }
+                            }
                             InteractionEvent::Ate { .. } => self.audio.play(crate::audio::Sfx::Eat, 1.0),
                             InteractionEvent::Dropped { .. } => {}
                             InteractionEvent::Ignite { pos } => {
@@ -2273,6 +2299,19 @@ impl App {
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.explosives.debris(self.time.elapsed()), cam.eye));
+                // Falling and thrown blocks: cubes in their block's colours, tumbling.
+                if !s.collapse.falling.is_empty() {
+                    let cubes: Vec<wolfcraft_engine::mobs::Debris> = s
+                        .collapse
+                        .falling
+                        .iter()
+                        .map(|f| {
+                            let c = self.tile_colors.get(f.block.info().tiles[0] as usize).map(|c| c[1]).unwrap_or([0.6, 0.6, 0.6]);
+                            wolfcraft_engine::mobs::Debris { pos: f.pos, vel: f.vel, color: c, size: if f.debris { 0.7 } else { 0.98 }, age: 0.0, spin: f.spin * f.age, kind: wolfcraft_engine::mobs::FxKind::Fall, glow: false }
+                        })
+                        .collect();
+                    model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&cubes, cam.eye));
+                }
                 gfx.world.set_model(&gfx.gpu.device, &gfx.gpu.queue, &model_verts);
                 let sky_verts = wolfcraft_engine::renderer::sky::build_sky(&wolfcraft_engine::renderer::sky::SkyParams { eye: cam.eye, sun_dir: sun.as_vec3(), day, planet_radius: s.planet.radius, sky, time: self.time.elapsed(), underwater, cube: s.planet.grid.cube });
                 gfx.world.set_sky(&gfx.gpu.device, &gfx.gpu.queue, &sky_verts);
@@ -2440,6 +2479,7 @@ impl App {
                 self.hand_place = (self.hand_place - dt * 6.5).max(0.0);
                 self.gun_recoil = (self.gun_recoil - dt * 3.2).max(0.0);
                 self.hit_marker = (self.hit_marker - dt).max(0.0);
+                self.thud_cd = (self.thud_cd - dt).max(0.0);
                 if s.player.inventory.selected != self.last_hotbar {
                     self.last_hotbar = s.player.inventory.selected;
                     self.hand_switch = 1.0;

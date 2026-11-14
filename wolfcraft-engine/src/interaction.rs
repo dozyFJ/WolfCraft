@@ -57,6 +57,10 @@ pub enum InteractionEvent {
     Hatch { tier: u8 },
     /// A block set by the game itself (coin blocks appearing): only needs syncing.
     WorldSet { pos: Cell, block: Block },
+    /// A falling block broke apart here (chips and a sound; nothing to sync).
+    Shattered { at: glam::DVec3, block: Block },
+    /// A falling block settled into this cell (a thud; synced by its `WorldSet`).
+    Landed { pos: Cell, block: Block },
 }
 
 #[derive(Default)]
