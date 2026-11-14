@@ -209,43 +209,87 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
     egui::CentralPanel::default().frame(Frame::none()).show(ctx, |ui| {
         planet_backdrop(ui, planet, &p);
         let rect = ui.max_rect();
-        // Dock of icon buttons on a half-circle at the bottom; the menu column is centred above it.
-        // Upright: the arc under the menu. Lying phone: the menu on the left, the arc on the right.
+        // One list of buttons (no dock): Играть first, then the rest in pairs, Выход, and a small
+        // version badge at the end. Above it the logo: icon on the left, WOLFCRAFT in capitals,
+        // a line under it. Lying phone: logo on the left half, buttons on the right.
         let wide = rect.width() > rect.height() * 1.2;
-        let (arc_r, arc_cx) = if wide {
-            ((rect.width() * 0.5 * 0.42).min(rect.height() - 110.0).clamp(90.0, 170.0), rect.left() + rect.width() * 0.75)
+        let (logo_area, list_area) = if wide {
+            (Rect::from_min_max(rect.min, Pos2::new(rect.center().x, rect.bottom())), Rect::from_min_max(Pos2::new(rect.center().x, rect.top()), rect.max))
         } else {
-            ((rect.width() * 0.40).clamp(118.0, 170.0), rect.center().x)
+            (Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.top() + rect.height() * 0.30)), Rect::from_min_max(Pos2::new(rect.left(), rect.top() + rect.height() * 0.30), rect.max))
         };
-        let dock_h = arc_r + 70.0;
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("game-dock-h"), dock_h));
-        let above = if wide { Rect::from_min_max(rect.min, Pos2::new(rect.center().x, rect.bottom())) } else { Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.bottom() - dock_h - 8.0)) };
-        let width = (above.width() - 32.0).clamp(180.0, 360.0);
-        let height = (above.height() - 16.0).clamp(150.0, 320.0);
-        let col = Rect::from_center_size(above.center(), Vec2::new(width, height));
+        // Logo.
+        {
+            let painter = ui.painter();
+            let title = "WOLFCRAFT";
+            let size = (logo_area.width() * 0.105).clamp(26.0, 40.0);
+            let g = painter.layout_no_wrap(title.to_string(), bold_font(size), Color32::WHITE);
+            let ic = size * 1.25;
+            let total = ic + 12.0 + g.size().x;
+            let left = logo_area.center().x - total / 2.0;
+            let cy = logo_area.center().y + if wide { -10.0 } else { 6.0 };
+            icons.paint(painter, Rect::from_min_size(Pos2::new(left, cy - ic / 2.0), Vec2::splat(ic)), icon::LOGO, Color32::WHITE);
+            let tx = left + ic + 12.0;
+            painter.galley(Pos2::new(tx, cy - g.size().y / 2.0 - 6.0), g.clone(), Color32::WHITE);
+            painter.text(Pos2::new(tx + 1.0, cy + g.size().y / 2.0 - 2.0), Align2::LEFT_TOP, "Целая планета из блоков", FontId::proportional((size * 0.38).max(12.0)), Color32::from_white_alpha(170));
+        }
+        let width = (list_area.width() - 32.0).clamp(200.0, 380.0);
+        let height = (list_area.height() - 16.0).max(150.0);
+        let col = Rect::from_center_size(list_area.center(), Vec2::new(width, height));
+        let sheet_id = egui::Id::new("game-menu-sheet");
+        let open: Option<Sheet> = ui.ctx().data(|d| d.get_temp(sheet_id)).flatten();
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col), |ui| {
             egui::ScrollArea::vertical().id_salt("game-main-menu").show(ui, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new("WolfCraft").font(bold_font(40.0)).color(Color32::WHITE));
-                    ui.add_space(24.0);
-                    ui.spacing_mut().item_spacing.y = 12.0;
-                    let w = width.min(320.0);
+                    let compact = wide && rect.height() < 420.0;
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, if compact { 6.0 } else { 10.0 });
+                    let w = width.min(380.0);
+                    let half = (w - 10.0) / 2.0;
                     if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, w, true).clicked() {
                         action = MenuAction::OpenWorldSelect;
                     }
-                    if pill_button(ui, icons, Some(icon::GEAR), "Настройки", ButtonKind::Secondary, w, true).clicked() {
-                        action = MenuAction::OpenSettings;
+                    let mut sheet = |ui: &mut Ui, want: Sheet| {
+                        let next = if open == Some(want) { None } else { Some(want) };
+                        ui.ctx().data_mut(|d| d.insert_temp(sheet_id, next));
+                    };
+                    let rows: [[(u16, &str, u8); 2]; 3] = [
+                        [(icon::GLOBE, "Сеть", 0), (icon::BRUSH, "Скины", 1)],
+                        [(icon::BACKPACK, "Магазин", 2), (icon::STAR, "Новости", 3)],
+                        [(icon::PROPS, "Ещё", 4), (icon::GEAR, "Настройки", 5)],
+                    ];
+                    for row in rows {
+                        ui.horizontal(|ui| {
+                            ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
+                            for (ic, label, k) in row {
+                                let on = (k == 3 && open == Some(Sheet::News)) || (k == 4 && open == Some(Sheet::More));
+                                if pill_button(ui, icons, Some(ic), label, if on { ButtonKind::Primary } else { ButtonKind::Secondary }, half, true).clicked() {
+                                    match k {
+                                        0 => action = MenuAction::OpenNetwork,
+                                        1 => action = open_settings_at(ui.ctx(), 0),
+                                        2 => action = open_settings_at(ui.ctx(), 2),
+                                        3 => sheet(ui, Sheet::News),
+                                        4 => sheet(ui, Sheet::More),
+                                        _ => action = MenuAction::OpenSettings,
+                                    }
+                                }
+                            }
+                        });
                     }
                     if pill_button(ui, icons, Some(icon::EXIT), "Выход", ButtonKind::Secondary, w, true)
                         .on_hover_text("Вернуться в лаунчер").clicked() {
                         action = MenuAction::Back;
                     }
+                    // The version: a small badge at the end of the list.
+                    let short: String = version.split('.').take(2).collect::<Vec<_>>().join(".");
+                    let g = ui.painter().layout_no_wrap(format!("v{short}"), FontId::proportional(12.0), Color32::from_white_alpha(200));
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(g.size().x + 22.0, 24.0), Sense::hover());
+                    ui.painter().rect_filled(r, Rounding::same(12.0), Color32::from_white_alpha(18));
+                    ui.painter().rect_stroke(r, Rounding::same(12.0), Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
+                    ui.painter().galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
                 });
             });
         });
-        if let Some(a) = game_dock(ui, icons, &p, rect, arc_cx, arc_r, version) {
-            action = a;
-        }
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("game-dock-h"), 24.0f32));
     });
     if let Some(a) = game_menu_sheet(ctx, icons, &p) {
         action = a;
@@ -268,6 +312,7 @@ fn open_settings_at(ctx: &egui::Context, tab: usize) -> MenuAction {
 /// The dock under the game menu: Скины, Магазин, Сеть, Новости, Ещё on a half-circle, each a
 /// see-through round button with a soft icon and a caption; in the middle of the arc a small
 /// version badge.
+#[allow(dead_code)]
 fn game_dock(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, cx: f32, arc_r: f32, version: &str) -> Option<MenuAction> {
     const ITEMS: [(u16, &str); 5] = [(icon::BRUSH, "Скины"), (icon::BACKPACK, "Магазин"), (icon::GLOBE, "Сеть"), (icon::STAR, "Новости"), (icon::PROPS, "Ещё")];
     const BTN: f32 = 27.0;
@@ -1760,7 +1805,7 @@ mod tests {
             }, |ctx| { game_menu(ctx, &icons, "0.3.0", None); });
             render();
             let out = render();
-            for label in ["WolfCraft", "Играть", "Настройки", "Выход", "Скины", "Магазин", "Сеть", "Новости", "Ещё"] {
+            for label in ["WOLFCRAFT", "Играть", "Настройки", "Выход", "Скины", "Магазин", "Сеть", "Новости", "Ещё"] {
                 let r = out.shapes.iter().find_map(|s| match &s.shape {
                     egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t.galley.rect.translate(t.pos.to_vec2())), _ => None
                 }).expect(label);
