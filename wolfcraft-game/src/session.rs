@@ -1981,15 +1981,9 @@ impl GameSession {
         let right0 = look.cross(up).normalize_or_zero();
         let up = if roll > 0.0 && right0.length_squared() > 0.5 { (up * roll.cos() + right0 * roll.sin()).normalize() } else { up };
         match self.camera_mode {
-            CameraMode::First => {
-                // View bobbing while walking (Minecraft): the eye bounces twice per stride and
-                // sways a little sideways.
-                let p = &self.player;
-                let k = if p.body.on_ground && self.rest.is_none() { p.anim_amount as f64 } else { 0.0 };
-                let ph = p.anim_phase as f64;
-                let bob = up * ((ph * 2.0).sin().abs() * 0.06 * k) + right0 * (ph.sin() * 0.035 * k);
-                Camera { eye: eye + bob, forward: look, up }
-            }
+            // No view bobbing: on the cube planet "on the ground" flickers between frames and the
+            // bob made the whole view twitch.
+            CameraMode::First => Camera { eye, forward: look, up },
             CameraMode::ThirdBack | CameraMode::ThirdFront => {
                 let sign = if self.camera_mode == CameraMode::ThirdBack { -1.0 } else { 1.0 };
                 let want = 4.2;
