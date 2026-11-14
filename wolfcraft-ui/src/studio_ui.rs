@@ -400,8 +400,14 @@ const DOCK_TABS: [(&str, u16); 5] = [("Тулбокс", icon::CUBE), ("Пров�
 #[allow(clippy::too_many_arguments)]
 fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &StudioView, inv: &mut Inventory, p: &Palette, mut actions: Vec<StudioAction>, mut covered: Vec<Rect>) -> (Vec<StudioAction>, Vec<Rect>) {
     let screen = ctx.screen_rect();
+    // Landscape: the window buttons are a column on the right (a sidebar); upright: a row
+    // of pills under the ribbon.
+    let landscape = screen.width() > screen.height();
+    const SIDE_W: f32 = 92.0;
+    let pills_h: f32 = if landscape { 0.0 } else { 38.0 };
     const PILLS_H: f32 = 38.0;
-    let top_bar = Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H + PILLS_H));
+    let top_bar = Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H + pills_h));
+    let side = landscape.then(|| Rect::from_min_max(Pos2::new(screen.right() - SIDE_W, top_bar.bottom()), screen.max));
     covered.push(top_bar);
     egui::Area::new(Id::new("studio-top-p")).order(egui::Order::Foreground).fixed_pos(top_bar.min).show(ctx, |ui| {
         let painter = ui.painter().clone();
@@ -447,11 +453,13 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
         // Window pills under the ribbon: a tap opens that window in the dock below, a tap
         // on the open one hides the dock (the whole screen is the world then).
         let pills = Rect::from_min_size(top_bar.min + Vec2::new(0.0, MENU_H + RIBBON_H), Vec2::new(top_bar.width(), PILLS_H));
+        if !landscape {
         painter.rect_filled(pills, 0.0, p.bg);
         painter.line_segment([pills.left_bottom(), pills.right_bottom()], Stroke::new(1.0_f32, p.outline));
+        }
         let gap = 5.0;
         let pw = (pills.width() - gap * (DOCK_TABS.len() as f32 + 1.0)) / DOCK_TABS.len() as f32;
-        for (i, (name, ic)) in DOCK_TABS.iter().enumerate() {
+        for (i, (name, ic)) in DOCK_TABS.iter().enumerate().filter(|_| !landscape) {
             let r = Rect::from_min_size(Pos2::new(pills.left() + gap + (pw + gap) * i as f32, pills.top() + 5.0), Vec2::new(pw, PILLS_H - 10.0));
             let resp = ui.interact(r, Id::new(("dock-pill", i)), Sense::click());
             let on = st.dock_open && st.dock_tab == i;
@@ -500,6 +508,32 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
         });
     });
 
+    // Right sidebar (landscape): the windows one under another, an icon over its name.
+    if let Some(side) = side {
+        covered.push(side);
+        egui::Area::new(Id::new("studio-side")).order(egui::Order::Foreground).fixed_pos(side.min).show(ctx, |ui| {
+            let painter = ui.painter().clone();
+            painter.rect_filled(side, 0.0, p.surface);
+            painter.line_segment([side.left_top(), side.left_bottom()], Stroke::new(1.0_f32, p.outline));
+            ui.set_width(side.width());
+            ui.set_height(side.height());
+            let n = DOCK_TABS.len() as f32;
+            let item_h = ((side.height() - 8.0) / n).min(66.0);
+            for (i, (name, ic)) in DOCK_TABS.iter().enumerate() {
+                let r = Rect::from_min_size(Pos2::new(side.left() + 6.0, side.top() + 4.0 + item_h * i as f32), Vec2::new(side.width() - 12.0, item_h - 4.0));
+                let resp = ui.interact(r, Id::new(("dock-side", i)), Sense::click());
+                let on = st.dock_open && st.dock_tab == i;
+                painter.rect_filled(r, Rounding::same(10.0), if on { p.accent } else if resp.hovered() || resp.is_pointer_button_down_on() { p.surface_hover } else { p.surface });
+                let col = if on { p.on_accent } else { p.text };
+                icons.paint(&painter, Rect::from_center_size(Pos2::new(r.center().x, r.top() + r.height() * 0.38), Vec2::splat(20.0)), *ic, col);
+                painter.text(Pos2::new(r.center().x, r.bottom() - r.height() * 0.2), Align2::CENTER_CENTER, *name, FontId::proportional(11.0), col);
+                if resp.clicked() {
+                    toggle_dock(st, i);
+                }
+            }
+        });
+    }
+
     // The ribbon's "Скрипт" opens the code tab of the dock here.
     if st.center == Center::Script {
         st.center = Center::World;
@@ -508,13 +542,12 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
     }
     if !st.dock_open {
         st.view_bottom = None;
-        st.view_right = None;
+        st.view_right = side.map(|s| s.left());
         return (actions, covered);
     }
     // World and dock: under the world when upright, beside it on the right in landscape.
-    let landscape = screen.width() > screen.height();
-    let dock = if landscape {
-        let avail = screen.width();
+    let dock = if let Some(side) = side {
+        let avail = side.left() - screen.left();
         st.dock_frac = st.dock_frac.clamp(0.35, 0.75);
         let split_x = screen.left() + avail * st.dock_frac;
         st.view_bottom = None;
@@ -522,7 +555,7 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
         if let Some(dx) = splitter(ctx, "studio-split-dock-x", Rect::from_min_max(Pos2::new(split_x - 7.0, top_bar.bottom()), Pos2::new(split_x + 7.0, screen.bottom())), true, p) {
             st.dock_frac += dx / avail.max(1.0);
         }
-        Rect::from_min_max(Pos2::new(split_x, top_bar.bottom()), screen.max)
+        Rect::from_min_max(Pos2::new(split_x, top_bar.bottom()), Pos2::new(side.left(), screen.bottom()))
     } else {
         let avail = screen.bottom() - top_bar.bottom();
         st.dock_frac = st.dock_frac.clamp(0.25, 0.8);
