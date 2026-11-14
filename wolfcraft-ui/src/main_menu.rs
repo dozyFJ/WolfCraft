@@ -16,6 +16,7 @@ pub enum MenuAction {
     LaunchVersion(String),
     OpenCreate,
     OpenSettings,
+    CheckUpdates,
     Quit,
     Back,
     PlayWorld(String),
@@ -1208,9 +1209,9 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
             match tab {
                 6 => {
                     ui.label(format!("Установлена WolfCraft {version}"));
-                    ui.label("Новая версия игры устанавливается поверх текущей через APK. Миры сохраняются; не удаляйте приложение перед обновлением.");
-                    ui.label("Приватный GitHub потребует входа в ваш аккаунт. Токен доступа в игру не встроен.");
-                    if pill_button(ui, icons, Some(icon::REFRESH), "Обновления на GitHub", ButtonKind::Primary, 250.0, true).clicked() {
+                    ui.label(if cfg!(target_os="android") { "Обновления устанавливаются внутри приложения. Если понадобится новый загрузчик, приложение сообщит об этом." } else { "Новая версия устанавливается поверх текущей. Не удаляйте папку миров перед обновлением." });
+                    ui.label(if cfg!(target_os="android") { "Для закрытого репозитория ключ чтения вводится один раз в окне обновления." } else { "Приватный GitHub потребует входа в ваш аккаунт." });
+                    if pill_button(ui, icons, Some(icon::REFRESH), if cfg!(target_os="android") {"Проверить обновления"} else {"Обновления на GitHub"}, ButtonKind::Primary, 250.0, true).clicked() {
                         res.open_updates = true;
                     }
                     ui.add_space(12.0);
@@ -1737,4 +1738,5 @@ mod tests {
         assert_eq!(names(sorted_filtered(&w, "ГАМ", 0)), vec!["Гамма"]);
     }
 }
+
 

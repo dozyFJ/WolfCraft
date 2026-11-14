@@ -21,12 +21,18 @@ android {
         applicationId = "com.wolfcraft.server"
         minSdk = 26
         targetSdk = 33
-        versionCode = runNumber
+        versionCode = 200000 + runNumber
         versionName = "0.1.$runNumber"
+        manifestPlaceholders["otaSaveFormat"] = System.getenv("OTA_SAVE_FORMAT") ?: "3"
+        manifestPlaceholders["otaShellHash"] = System.getenv("OTA_SHELL_HASH") ?: "development"
+        manifestPlaceholders["otaBuild"] = System.getenv("GITHUB_SHA") ?: "builtin"
+        manifestPlaceholders["otaSequence"] = System.getenv("GITHUB_RUN_ID") ?: "0"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
     }
+
+    sourceSets.getByName("main").java.srcDir("../../android-shared/src/main/java")
 
     // Same key as the game's CI builds (ci/wolfcraft-release.keystore), so updates install
     // over the previous version.
@@ -54,8 +60,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // The server binary ships as lib/arm64-v8a/libwolfserver.so and must be unpacked to the
-    // native library folder: that is the one place Android lets an app start a program from.
+    // Initial JNI cores are extracted from the APK; signed OTA cores are loaded from
+    // app-private storage. Downloaded executables are never started with exec().
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -67,3 +73,4 @@ android {
         checkReleaseBuilds = false
     }
 }
+

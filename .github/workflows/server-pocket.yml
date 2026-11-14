@@ -2,7 +2,7 @@ name: WolfStudio app (studio + server) + WolfServer PC
 
 on:
   push:
-    branches: [mobile-explosives]
+    branches: [mobile-explosives, codex/ota-launchers]
   workflow_dispatch:
 
 permissions:
@@ -46,10 +46,11 @@ jobs:
           BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android26-clang"
           export CC_aarch64_linux_android="$BIN/aarch64-linux-android26-clang"
+          export CXX_aarch64_linux_android="$BIN/aarch64-linux-android26-clang++"
           export AR_aarch64_linux_android="$BIN/llvm-ar"
-          cargo build -p wolfserver --release --target aarch64-linux-android
+          cargo build -p wolfserver --lib --release --target aarch64-linux-android
           mkdir -p wolfserver-pocket/app/src/main/jniLibs/arm64-v8a
-          cp target/aarch64-linux-android/release/WolfServer wolfserver-pocket/app/src/main/jniLibs/arm64-v8a/libwolfserver.so
+          cp target/aarch64-linux-android/release/libwolfserver_runtime.so wolfserver-pocket/app/src/main/jniLibs/arm64-v8a/
 
       - name: Studio library for Android (arm64)
         run: |
@@ -74,9 +75,29 @@ jobs:
       - name: WolfServer Pocket APK
         working-directory: wolfserver-pocket
         run: |
+          export OTA_SHELL_HASH="$(cd .. && python3 tools/shell_hash.py studio)"
+          export OTA_SAVE_FORMAT="$(sed -n 's/.*pub const SAVE_FORMAT: u32 = \([0-9]*\).*/\1/p' ../wolfcraft-common/src/version.rs)"
           gradle --no-daemon assembleRelease
           cp app/build/outputs/apk/release/app-release.apk ../WolfStudio.apk
+          python3 ../tools/check_shell_apk.py studio ../WolfStudio.apk
           ls -lh ../WolfStudio.apk
+
+      - name: Sign and publish native studio/server OTA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export OTA_SHELL_HASH="$(python3 tools/shell_hash.py studio)"
+          python3 tools/build_ota.py --kind studio --input wolfserver-pocket/app/src/main/jniLibs/arm64-v8a --output studio-ota --build "$GITHUB_SHA" --sequence "$GITHUB_RUN_ID" --keystore ci/wolfcraft-release.keystore --shell-hash "$OTA_SHELL_HASH" --nm "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          tag=server-test
+          if [ "$GITHUB_REF_NAME" = "codex/ota-launchers" ]; then tag=studio-ota-bootstrap; fi
+          gh release delete "$tag" -y --cleanup-tag || true
+          gh release create "$tag" WolfStudio.apk --prerelease --target "$GITHUB_SHA" \
+            --title "WolfStudio + WolfServer · OTA-загрузчик (#${{ github.run_number }})" \
+            --notes "Установи APK один раз. Кнопка обновления меняет совместимые ядра редактора и сервера без APK. ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."
+          gh release delete studio-ota -y --cleanup-tag || true
+          gh release create studio-ota studio-ota/* --prerelease --target "$GITHUB_SHA" \
+            --title "WolfStudio native OTA ${GITHUB_SHA::7}" \
+            --notes "Подписанные ядра редактора и сервера arm64 для APK-загрузчика."
 
       - name: WolfServer for Windows (PC)
         continue-on-error: true
@@ -92,15 +113,14 @@ jobs:
           path: |
             WolfStudio.apk
             WolfServer.exe
+            studio-ota/*
           if-no-files-found: ignore
 
-      - name: Publish "server-test" release
+      - name: Attach Windows server
+        if: ${{ hashFiles('WolfServer.exe') != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="WolfStudio.apk"
-          [ -f WolfServer.exe ] && files="$files WolfServer.exe"
-          gh release delete server-test -y --cleanup-tag || true
-          gh release create server-test $files --prerelease --target "$GITHUB_SHA" \
-            --title "WolfStudio + WolfServer ТЕСТ (сборка #${{ github.run_number }})" \
-            --notes "WolfStudio.apk — студия и сервер на телефоне в одном приложении; WolfServer.exe — тот же сервер для ПК. Из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."
+          tag=server-test
+          if [ "$GITHUB_REF_NAME" = "codex/ota-launchers" ]; then tag=studio-ota-bootstrap; fi
+          gh release upload "$tag" WolfServer.exe --clobber

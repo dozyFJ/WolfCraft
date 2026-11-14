@@ -18,6 +18,11 @@
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:usesCleartextTraffic="true">
 
+        <meta-data android:name="wolf.ota.build" android:value="${otaBuild}" />
+        <meta-data android:name="wolf.ota.saveformat" android:value="f${otaSaveFormat}" />
+        <meta-data android:name="wolf.ota.shellhash" android:value="${otaShellHash}" />
+        <meta-data android:name="wolf.ota.sequence" android:value="s${otaSequence}" />
+        <activity android:name="com.wolfcraft.ota.RestartActivity" android:exported="false" android:process=":ota" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -31,7 +36,7 @@
 
         <!-- The studio: the WolfCraft engine (libwolfstudio.so) in its own process. -->
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="com.wolfcraft.ota.NativeHostActivity"
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode"
             android:exported="false"
             android:label="WolfStudio"
@@ -49,3 +54,4 @@
             android:exported="false" />
     </application>
 </manifest>
+
