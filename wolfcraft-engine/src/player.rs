@@ -164,7 +164,8 @@ impl Player {
 
     pub fn eye_pos(&self) -> DVec3 {
         let h = if self.sneaking { EYE_HEIGHT - 0.3 } else { EYE_HEIGHT };
-        self.body.pos + self.up() * (h + self.step_smooth)
+        // (The session's camera has its own step smoothing; `step_smooth` is for the body.)
+        self.body.pos + self.up() * h
     }
 
     pub fn right(&self) -> DVec3 {

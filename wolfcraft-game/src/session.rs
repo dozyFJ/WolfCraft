@@ -120,6 +120,11 @@ pub struct GameSession {
     rest_camera: Option<CameraMode>,
     /// Vertical camera lag (blocks along up) that smooths automatic steps.
     cam_lag: f64,
+    /// Camera feel: dip after a hard landing, last vertical speed (to spot the landing),
+    /// third-person shoulder offset (smoothed, shrinks near walls).
+    land_dip: f64,
+    prev_vy: f64,
+    shoulder: f64,
     prev_radius: f64,
     /// Smoothed eye radius (filters tiny collision jitter).
     eye_r: f64,
@@ -266,6 +271,9 @@ impl GameSession {
             camera_mode: CameraMode::First,
             rest_camera: None,
             cam_lag: 0.0,
+            land_dip: 0.0,
+            prev_vy: 0.0,
+            shoulder: 0.0,
             prev_radius: 0.0,
             eye_r: 0.0,
             tp_dist: 4.2,
@@ -558,6 +566,32 @@ impl GameSession {
             self.cam_lag -= dr;
         }
         self.cam_lag = (self.cam_lag * (-16.0 * dt as f64).exp()).clamp(-1.6, 0.6);
+        // A hard landing: the view sinks a little and springs back (like Minecraft/Halo).
+        {
+            let up = self.player.up();
+            let vy = self.player.body.vel.dot(up);
+            if self.player.body.on_ground && self.prev_vy < -7.0 && !self.player.body.flying {
+                self.land_dip = ((-self.prev_vy - 7.0) * 0.035).clamp(0.05, 0.45);
+            }
+            self.prev_vy = if self.player.body.on_ground { 0.0 } else { vy };
+            self.land_dip *= (-7.0 * dt as f64).exp();
+        }
+        // Third person behind: over the right shoulder (Fortnite/GTA), closer to the middle
+        // when a wall is on the right.
+        {
+            let want = if self.camera_mode == CameraMode::ThirdBack {
+                let eye = self.player.eye_pos();
+                let right = self.player.right();
+                let mut free = 0.0;
+                while free < 0.8 && !self.chunks.block_at_world(eye + right * (free + 0.35)).is_solid() {
+                    free += 0.05;
+                }
+                free.min(0.75)
+            } else {
+                0.0
+            };
+            self.shoulder += (want - self.shoulder) * (1.0 - (-8.0 * dt as f64).exp());
+        }
         // Eye height: follow small changes smoothly, jump on big ones (teleport, falling).
         let er = radial(self.player.eye_pos());
         if (er - self.eye_r).abs() > 0.35 || !self.player.body.on_ground {
@@ -1941,15 +1975,28 @@ impl GameSession {
         let eye_r = if self.eye_r > 0.0 { self.eye_r } else { radial(raw_eye) };
         let eye = along(wolfcraft_engine::cubesphere::col_dir(raw_eye), eye_r) + up * self.cam_lag;
         let look = self.player.look_dir();
+        let eye = eye - up * self.land_dip;
+        // Hurt: the view rolls a little to one side and settles (Minecraft's damage tilt).
+        let roll = self.player.survival.hurt_flash as f64 * 0.35;
+        let right0 = look.cross(up).normalize_or_zero();
+        let up = if roll > 0.0 && right0.length_squared() > 0.5 { (up * roll.cos() + right0 * roll.sin()).normalize() } else { up };
         match self.camera_mode {
-            CameraMode::First => Camera { eye, forward: look, up },
+            CameraMode::First => {
+                // View bobbing while walking (Minecraft): the eye bounces twice per stride and
+                // sways a little sideways.
+                let p = &self.player;
+                let k = if p.body.on_ground && self.rest.is_none() { p.anim_amount as f64 } else { 0.0 };
+                let ph = p.anim_phase as f64;
+                let bob = up * ((ph * 2.0).sin().abs() * 0.06 * k) + right0 * (ph.sin() * 0.035 * k);
+                Camera { eye: eye + bob, forward: look, up }
+            }
             CameraMode::ThirdBack | CameraMode::ThirdFront => {
                 let sign = if self.camera_mode == CameraMode::ThirdBack { -1.0 } else { 1.0 };
                 let want = 4.2;
                 let dir = look * sign;
                 let _ = want;
                 let dist = self.tp_dist.min(self.room_along(eye, dir));
-                let pos = eye + dir * dist;
+                let pos = eye + dir * dist + right0 * self.shoulder;
                 Camera { eye: pos, forward: if sign < 0.0 { look } else { -look }, up }
             }
         }
