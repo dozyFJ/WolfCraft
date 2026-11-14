@@ -1662,7 +1662,7 @@ mod tests {
             let out = render();
             for label in ["WolfCraft", "Играть", "Настройки", "Выход", "Скины", "Магазин", "Сеть", "Новости", "Ещё"] {
                 let r = out.shapes.iter().find_map(|s| match &s.shape {
-                    egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(Rect::from_min_size(t.pos, t.galley.size())), _ => None
+                    egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t.galley.rect.translate(t.pos.to_vec2())), _ => None
                 }).expect(label);
                 assert!(r.left() >= 0.0 && r.right() <= width + 1.0 && r.top() >= 0.0 && r.bottom() <= 740.0, "{label}: {r:?}");
             }
