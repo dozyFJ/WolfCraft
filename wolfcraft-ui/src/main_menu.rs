@@ -122,39 +122,268 @@ fn loading_panel(ctx: &egui::Context, icons: &GuiIcons, title: &str, subtitle: &
     // The bar moves smoothly instead of jumping between chunk batches.
     let shown = ctx.animate_value_with_time(egui::Id::new("loading-bar"), fraction.clamp(0.0, 1.0), 0.35);
     egui::CentralPanel::default().frame(Frame::none()).show(ctx, |ui| {
-        planet_backdrop(ui, None, &p);
         let rect = ui.max_rect();
+        let t = ui.input(|i| i.time) as f32;
+        world_backdrop(ui.painter(), rect, t);
         if interactive {
             clicked = ui.interact(rect, egui::Id::new("splash-skip"), Sense::click()).clicked();
         }
         let scale = (rect.height() / 540.0).clamp(0.6, 1.0);
         let painter = ui.painter();
         let cx = rect.center().x;
-        let mid = rect.top() + rect.height() * 0.44;
-        painter.text(Pos2::new(cx, mid - 34.0 * scale), Align2::CENTER_BOTTOM, title, bold_font(40.0 * scale), Color32::WHITE);
-        // A soft pulse on the status line while work goes on.
-        let t = ui.input(|i| i.time) as f32;
-        let pulse = 0.7 + 0.3 * (t * 2.2).sin().abs();
-        painter.text(Pos2::new(cx, mid - 4.0 * scale), Align2::CENTER_CENTER, subtitle, FontId::proportional(15.0), Color32::from_white_alpha((200.0 * pulse) as u8));
-        let w = (rect.width() * 0.42).clamp(180.0, 420.0);
-        let bar = Rect::from_center_size(Pos2::new(cx, mid + 26.0 * scale), Vec2::new(w, 6.0));
-        painter.rect_filled(bar, Rounding::same(3.0), Color32::from_white_alpha(28));
-        let fill = Rect::from_min_size(bar.min, Vec2::new(bar.width() * shown, bar.height()));
-        painter.rect_filled(fill, Rounding::same(3.0), p.accent);
-        // A light running along the filled part.
-        if shown > 0.02 && shown < 0.999 {
-            let x = fill.left() + fill.width() * ((t * 0.6).fract());
-            painter.rect_filled(Rect::from_center_size(Pos2::new(x, bar.center().y), Vec2::new(30.0, 6.0)), Rounding::same(3.0), Color32::from_white_alpha(70));
+        let mid = rect.top() + rect.height() * 0.40;
+        // A soft dark glow behind the text so it reads on the moving world.
+        let glow = Rect::from_center_size(Pos2::new(cx, mid), Vec2::new((rect.width() * 0.9).min(520.0), 190.0 * scale));
+        for k in 0..6 {
+            let g = glow.shrink2(Vec2::new(k as f32 * 18.0, k as f32 * 12.0) * scale);
+            painter.rect_filled(g, Rounding::same(80.0), Color32::from_black_alpha(14));
         }
-        painter.text(Pos2::new(bar.right(), bar.bottom() + 8.0), Align2::RIGHT_TOP, format!("{:.0}%", shown * 100.0), FontId::proportional(12.0), Color32::from_white_alpha(150));
-        // The tip near the bottom, wrapped.
-        let g = painter.layout(tip.to_string(), FontId::proportional(13.5), Color32::from_white_alpha(160), (rect.width() - 64.0).min(560.0));
-        let tip_pos = Pos2::new(cx - g.size().x / 2.0, rect.bottom() - 46.0 * scale - g.size().y);
-        painter.galley(tip_pos, g, Color32::from_white_alpha(160));
-        painter.text(Pos2::new(rect.right() - 12.0, rect.bottom() - 8.0), Align2::RIGHT_BOTTOM, format!("v{version}"), FontId::proportional(11.0), Color32::from_white_alpha(110));
+        wave_title(painter, Pos2::new(cx, mid - 34.0 * scale), title, 44.0 * scale, t);
+        // Status line: letters come in one by one, then the dots run.
+        let now = ui.input(|i| i.time);
+        let key = egui::Id::new(("loading-sub", subtitle));
+        let start = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(key, || now));
+        let since = (now - start) as f32;
+        let n = subtitle.chars().count();
+        let shown_chars = ((since * 28.0) as usize).min(n);
+        let dots = if shown_chars == n && !subtitle.ends_with('…') { [".", "..", "...", ""][((t * 2.5) as usize) % 4] } else { "" };
+        let line: String = subtitle.chars().take(shown_chars).collect::<String>() + dots;
+        let pulse = 0.75 + 0.25 * (t * 2.2).sin().abs();
+        painter.text(Pos2::new(cx + 1.0, mid + 1.0), Align2::CENTER_CENTER, &line, FontId::proportional(16.0), Color32::from_black_alpha(150));
+        painter.text(Pos2::new(cx, mid), Align2::CENTER_CENTER, &line, FontId::proportional(16.0), Color32::from_white_alpha((230.0 * pulse) as u8));
+        let w = (rect.width() * 0.62).clamp(200.0, 440.0);
+        let bar = Rect::from_center_size(Pos2::new(cx, mid + 40.0 * scale), Vec2::new(w, 22.0));
+        liquid_bar(painter, bar, shown, t, p.accent);
+        painter.text(Pos2::new(bar.right(), bar.bottom() + 8.0), Align2::RIGHT_TOP, format!("{:.0}%", shown * 100.0), FontId::proportional(13.0), Color32::from_white_alpha(200));
+        // The tip near the bottom on a dark strip, wrapped; it slides in when it changes.
+        let g = painter.layout(tip.to_string(), FontId::proportional(13.5), Color32::from_white_alpha(225), (rect.width() - 64.0).min(560.0));
+        let phase = (t / 5.0).fract();
+        let slide = (1.0 - (phase * 8.0).min(1.0)).powi(2) * 24.0;
+        let alpha = ((phase * 8.0).min(1.0) * ((1.0 - phase) * 12.0).min(1.0)).clamp(0.0, 1.0);
+        let tip_pos = Pos2::new(cx - g.size().x / 2.0, rect.bottom() - 46.0 * scale - g.size().y + slide);
+        let back = Rect::from_min_size(tip_pos, g.size()).expand2(Vec2::new(14.0, 8.0));
+        painter.rect_filled(back, Rounding::same(12.0), Color32::from_black_alpha((120.0 * alpha) as u8));
+        painter.galley(tip_pos, g, Color32::from_white_alpha((225.0 * alpha) as u8));
+        painter.text(Pos2::new(rect.right() - 12.0, rect.bottom() - 8.0), Align2::RIGHT_BOTTOM, format!("v{version}"), FontId::proportional(11.0), Color32::from_white_alpha(170));
     });
-    ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    ctx.request_repaint_after(std::time::Duration::from_millis(16));
     clicked
+}
+
+/// The title with each letter riding a wave and a light sweeping across it.
+fn wave_title(painter: &egui::Painter, center_bottom: Pos2, text: &str, size: f32, t: f32) {
+    let font = bold_font(size);
+    let glyphs: Vec<(String, f32)> = text.chars().map(|c| {
+        let s = c.to_string();
+        let w = painter.layout_no_wrap(s.clone(), font.clone(), Color32::WHITE).size().x;
+        (s, w)
+    }).collect();
+    let total: f32 = glyphs.iter().map(|g| g.1).sum();
+    let mut x = center_bottom.x - total / 2.0;
+    let n = glyphs.len().max(1) as f32;
+    // The sweep runs across every 3 s.
+    let sweep = (t / 3.0).fract() * (n + 6.0) - 3.0;
+    for (i, (s, w)) in glyphs.iter().enumerate() {
+        let fi = i as f32;
+        let dy = (t * 3.0 - fi * 0.55).sin() * size * 0.08;
+        let shine = (1.0 - ((fi - sweep).abs() / 2.0)).clamp(0.0, 1.0);
+        let pos = Pos2::new(x, center_bottom.y + dy);
+        painter.text(pos + Vec2::new(2.0, 3.0), Align2::LEFT_BOTTOM, s, font.clone(), Color32::from_black_alpha(140));
+        let base = Color32::from_rgb(235, 245, 255);
+        let hot = Color32::from_rgb(140, 220, 255);
+        let c = lerp_color(base, hot, shine);
+        painter.text(pos, Align2::LEFT_BOTTOM, s, font.clone(), c);
+        x += w;
+    }
+}
+
+fn lerp_color(a: Color32, b: Color32, k: f32) -> Color32 {
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
+    Color32::from_rgba_unmultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
+}
+
+/// A glass capsule that fills with liquid: a wobbling front, waves on top, bubbles and a gloss.
+fn liquid_bar(painter: &egui::Painter, bar: Rect, fill: f32, t: f32, accent: Color32) {
+    let r = bar.height() / 2.0;
+    painter.rect_filled(bar.expand(2.0), Rounding::same(r + 2.0), Color32::from_black_alpha(110));
+    painter.rect_filled(bar, Rounding::same(r), Color32::from_white_alpha(18));
+    // Half-height of the capsule at x: round ends.
+    let half = |x: f32| -> f32 {
+        let dl = bar.left() + r - x;
+        let dr = x - (bar.right() - r);
+        let d = dl.max(dr).max(0.0);
+        (r * r - d * d).max(0.0).sqrt()
+    };
+    let front = bar.left() + bar.width() * fill;
+    let deep = Color32::from_rgb(20, 90, 200);
+    let top = lerp_color(accent, Color32::from_rgb(120, 230, 255), 0.4);
+    let back_c = Color32::from_rgba_unmultiplied(top.r(), top.g(), top.b(), 110);
+    if fill > 0.002 {
+        let step = 2.0;
+        for layer in 0..2 {
+            let mut m = egui::Mesh::default();
+            let (amp, k, sp, off) = if layer == 0 { (2.4, 0.09, 2.6, 1.3) } else { (2.0, 0.12, -3.4, 0.0) };
+            let mut x = bar.left();
+            loop {
+                // The front edge wobbles like a pushed wave.
+                let wob = (t * 4.0).sin() * 3.0 + (t * 6.3 + 1.0).sin() * 1.5;
+                let end = front + wob;
+                if x > end || x > bar.right() {
+                    break;
+                }
+                let h = half(x);
+                if h > 0.0 {
+                    let near = ((end - x) / 10.0).clamp(0.0, 1.0);
+                    let level = bar.center().y - h * 0.55 + ((x * k + t * sp + off).sin() * amp + (x * k * 2.3 - t * sp * 0.7).sin() * amp * 0.4) * near.max(0.4);
+                    let y0 = level.max(bar.center().y - h + 0.5);
+                    let y1 = bar.center().y + h - 0.5;
+                    let (ct, cb) = if layer == 0 { (back_c, back_c) } else { (top, deep) };
+                    let i = m.vertices.len() as u32;
+                    m.colored_vertex(Pos2::new(x, y0), ct);
+                    m.colored_vertex(Pos2::new(x, y1.max(y0)), cb);
+                    if i >= 2 {
+                        m.add_triangle(i - 2, i - 1, i);
+                        m.add_triangle(i - 1, i + 1, i);
+                    }
+                }
+                x += step;
+            }
+            painter.add(egui::Shape::mesh(m));
+        }
+        // Bubbles rising through the liquid.
+        for b in 0..10u32 {
+            let h = b.wrapping_mul(2654435761) ^ 0x5bd1_e995;
+            let bx = bar.left() + r + ((h % 1000) as f32 / 1000.0) * (bar.width() - 2.0 * r);
+            if bx > front - 4.0 {
+                continue;
+            }
+            let speed = 0.5 + ((h >> 10) % 100) as f32 / 120.0;
+            let ph = (t * speed + (h % 97) as f32 / 97.0).fract();
+            let hh = half(bx);
+            let by = bar.center().y + hh * 0.8 - ph * hh * 1.4;
+            let wiggle = (t * 5.0 + b as f32).sin() * 1.2;
+            painter.circle_stroke(Pos2::new(bx + wiggle, by), 1.0 + ((h >> 4) % 3) as f32 * 0.5, Stroke::new(1.0, Color32::from_white_alpha((150.0 * (1.0 - ph)) as u8)));
+        }
+    }
+    // Glass gloss on top and the rim.
+    let gloss = Rect::from_min_max(Pos2::new(bar.left() + r * 0.7, bar.top() + 3.0), Pos2::new(bar.right() - r * 0.7, bar.top() + 6.0));
+    painter.rect_filled(gloss, Rounding::same(2.0), Color32::from_white_alpha(40));
+    painter.rect_stroke(bar, Rounding::same(r), Stroke::new(1.5, Color32::from_white_alpha(120)));
+}
+
+/// A living world behind the loading text: dusk sky, drifting clouds, blocky hills scrolling
+/// past at two depths, and a lake with moving waves and glints.
+fn world_backdrop(painter: &egui::Painter, rect: Rect, t: f32) {
+    let vgrad = |r: Rect, a: Color32, b: Color32| {
+        let mut m = egui::Mesh::default();
+        m.colored_vertex(r.left_top(), a);
+        m.colored_vertex(r.right_top(), a);
+        m.colored_vertex(r.right_bottom(), b);
+        m.colored_vertex(r.left_bottom(), b);
+        m.add_triangle(0, 1, 2);
+        m.add_triangle(0, 2, 3);
+        egui::Shape::mesh(m)
+    };
+    let horizon = rect.top() + rect.height() * 0.70;
+    painter.add(vgrad(Rect::from_min_max(rect.min, Pos2::new(rect.right(), horizon)), Color32::from_rgb(10, 18, 44), Color32::from_rgb(232, 138, 92)));
+    // Sun low on the horizon.
+    let sun = Pos2::new(rect.left() + rect.width() * 0.72, horizon - rect.height() * 0.10);
+    for k in (1..7).rev() {
+        painter.circle_filled(sun, 18.0 + k as f32 * 14.0, Color32::from_rgba_unmultiplied(255, 190, 120, 10));
+    }
+    painter.circle_filled(sun, 22.0, Color32::from_rgb(255, 226, 170));
+    // Stars fading towards the horizon.
+    for i in 0..70u32 {
+        let h = i.wrapping_mul(2654435761).rotate_left(7) ^ 0x9e37_79b9;
+        let x = rect.left() + (h % 10_000) as f32 / 10_000.0 * rect.width();
+        let yk = ((h / 10_000) % 10_000) as f32 / 10_000.0;
+        let y = rect.top() + yk * (horizon - rect.top()) * 0.6;
+        let tw = 0.5 + 0.5 * (t * (1.0 + (h % 5) as f32 * 0.4) + i as f32).sin();
+        painter.circle_filled(Pos2::new(x, y), 1.0, Color32::from_white_alpha(((1.0 - yk) * 160.0 * tw) as u8));
+    }
+    // Clouds drifting.
+    for i in 0..6u32 {
+        let h = i.wrapping_mul(0x27d4_eb2d) ^ 0x1656_67b1;
+        let sp = 6.0 + (h % 10) as f32;
+        let span = rect.width() + 260.0;
+        let x = rect.left() - 130.0 + ((h % 1000) as f32 / 1000.0 * span + t * sp).rem_euclid(span);
+        let y = rect.top() + rect.height() * (0.12 + ((h >> 8) % 100) as f32 / 100.0 * 0.40);
+        let c = Color32::from_rgba_unmultiplied(255, 220, 210, 26);
+        for (dx, dy, rr) in [(-34.0, 6.0, 20.0), (0.0, 0.0, 28.0), (34.0, 5.0, 22.0), (14.0, 12.0, 20.0), (-14.0, 12.0, 18.0)] {
+            painter.circle_filled(Pos2::new(x + dx, y + dy), rr, c);
+        }
+    }
+    // Blocky hills: column heights from smooth value noise, in whole blocks.
+    let noise = |i: i64, seed: u32| -> f32 {
+        let hv = |n: i64| ((n as u32).wrapping_mul(0x9E37_79B1) ^ seed).wrapping_mul(0x85EB_CA6B).rotate_left(13) as f32 / u32::MAX as f32;
+        let a = i.div_euclid(6);
+        let f = i.rem_euclid(6) as f32 / 6.0;
+        let s = f * f * (3.0 - 2.0 * f);
+        hv(a) * (1.0 - s) + hv(a + 1) * s
+    };
+    let water_y = rect.top() + rect.height() * 0.80;
+    for (bs, speed, seed, base, amp, grass, dirt) in [
+        (12.0f32, 8.0f32, 7u32, horizon - 10.0, 7.0f32, Color32::from_rgb(52, 70, 92), Color32::from_rgb(40, 52, 74)),
+        (20.0, 22.0, 31, water_y - 6.0, 6.0, Color32::from_rgb(74, 150, 70), Color32::from_rgb(96, 66, 44)),
+    ] {
+        let scroll = t * speed;
+        let first = ((rect.left() + scroll) / bs).floor() as i64;
+        let cols = (rect.width() / bs) as i64 + 2;
+        for c in first..first + cols {
+            let x = c as f32 * bs - scroll;
+            let hb = (noise(c, seed) * amp).round() + 2.0;
+            let ytop = base - hb * bs;
+            let col = Rect::from_min_max(Pos2::new(x, ytop), Pos2::new(x + bs + 0.5, water_y + 2.0));
+            painter.rect_filled(col, Rounding::ZERO, dirt);
+            painter.rect_filled(Rect::from_min_size(col.min, Vec2::new(bs + 0.5, bs * 0.35)), Rounding::ZERO, grass);
+            // Block seams.
+            let mut y = ytop + bs;
+            while y < water_y {
+                painter.line_segment([Pos2::new(x, y), Pos2::new(x + bs, y)], Stroke::new(1.0, Color32::from_black_alpha(28)));
+                y += bs;
+            }
+            // A tree now and then on the near hills.
+            if bs > 15.0 && (c.wrapping_mul(2654435761) as u32) % 9 == 0 {
+                let trunk = Rect::from_min_size(Pos2::new(x + bs * 0.35, ytop - bs * 1.6), Vec2::new(bs * 0.3, bs * 1.6));
+                painter.rect_filled(trunk, Rounding::ZERO, Color32::from_rgb(90, 60, 36));
+                painter.rect_filled(Rect::from_center_size(Pos2::new(x + bs * 0.5, ytop - bs * 2.0), Vec2::splat(bs * 1.4)), Rounding::ZERO, Color32::from_rgb(52, 120, 56));
+            }
+        }
+    }
+    // The lake: layered waves with a gradient, sun glints running on top.
+    for layer in 0..2 {
+        let mut m = egui::Mesh::default();
+        let (amp, k, sp, a_top, a_bot) = if layer == 0 {
+            (4.0, 0.025, 1.2, Color32::from_rgba_unmultiplied(90, 160, 220, 150), Color32::from_rgba_unmultiplied(20, 50, 110, 200))
+        } else {
+            (3.0, 0.04, -1.8, Color32::from_rgb(60, 140, 210), Color32::from_rgb(8, 26, 60))
+        };
+        let mut x = rect.left();
+        let base = water_y + layer as f32 * 6.0;
+        while x <= rect.right() + 6.0 {
+            let y = base + (x * k + t * sp).sin() * amp + (x * k * 2.7 - t * sp * 1.3).sin() * amp * 0.35;
+            let i = m.vertices.len() as u32;
+            m.colored_vertex(Pos2::new(x, y), a_top);
+            m.colored_vertex(Pos2::new(x, rect.bottom()), a_bot);
+            if i >= 2 {
+                m.add_triangle(i - 2, i - 1, i);
+                m.add_triangle(i - 1, i + 1, i);
+            }
+            x += 6.0;
+        }
+        painter.add(egui::Shape::mesh(m));
+    }
+    // Sun path on the water.
+    for j in 0..14u32 {
+        let fy = j as f32 / 14.0;
+        let y = water_y + 10.0 + fy * (rect.bottom() - water_y - 10.0);
+        let w = 10.0 + fy * 60.0;
+        let shift = (t * 2.0 + j as f32 * 1.7).sin() * 8.0;
+        let a = (0.5 + 0.5 * (t * 3.0 + j as f32).sin()) * (1.0 - fy) * 120.0;
+        painter.line_segment([Pos2::new(sun.x - w / 2.0 + shift, y), Pos2::new(sun.x + w / 2.0 + shift, y)], Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 220, 170, a as u8)));
+    }
+    // Darken a bit so the text stays readable.
+    painter.add(vgrad(rect, Color32::from_black_alpha(90), Color32::from_black_alpha(40)));
 }
 
 pub fn splash_screen(ctx:&egui::Context,icons:&GuiIcons,progress:f32,version:&str)->bool {
