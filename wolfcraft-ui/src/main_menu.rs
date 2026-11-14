@@ -209,9 +209,11 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
     egui::CentralPanel::default().frame(Frame::none()).show(ctx, |ui| {
         planet_backdrop(ui, planet, &p);
         let rect = ui.max_rect();
-        // Dock of icon buttons along the bottom; the menu column is centred above it.
-        const DOCK_H: f32 = 70.0;
-        let above = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.bottom() - DOCK_H - 16.0));
+        // Dock of icon buttons on a half-circle at the bottom; the menu column is centred above it.
+        let arc_r = (rect.width() * 0.40).clamp(118.0, 170.0);
+        let dock_h = arc_r + 70.0;
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("game-dock-h"), dock_h));
+        let above = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.bottom() - dock_h - 8.0));
         let width = (rect.width() - 32.0).clamp(180.0, 360.0);
         let height = (above.height() - 16.0).clamp(150.0, 320.0);
         let col = Rect::from_center_size(above.center(), Vec2::new(width, height));
@@ -235,9 +237,7 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
                 });
             });
         });
-        ui.painter().text(Pos2::new(rect.right() - 16.0, rect.bottom() - 14.0), Align2::RIGHT_BOTTOM,
-            format!("v{version}"), FontId::proportional(12.0), Color32::from_gray(190));
-        if let Some(a) = game_dock(ui, icons, &p, rect, DOCK_H) {
+        if let Some(a) = game_dock(ui, icons, &p, rect, arc_r, version) {
             action = a;
         }
     });
@@ -259,30 +259,44 @@ fn open_settings_at(ctx: &egui::Context, tab: usize) -> MenuAction {
     MenuAction::OpenSettings
 }
 
-/// The dock under the game menu: Скины, Магазин, Сеть, Новости, Ещё — an icon over a caption.
-fn game_dock(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, h: f32) -> Option<MenuAction> {
+/// The dock under the game menu: Скины, Магазин, Сеть, Новости, Ещё on a half-circle, each a
+/// see-through round button with a soft icon and a caption; in the middle of the arc a small
+/// version badge.
+fn game_dock(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, arc_r: f32, version: &str) -> Option<MenuAction> {
     const ITEMS: [(u16, &str); 5] = [(icon::BRUSH, "Скины"), (icon::BACKPACK, "Магазин"), (icon::GLOBE, "Сеть"), (icon::STAR, "Новости"), (icon::PROPS, "Ещё")];
-    let item_w = 82.0;
-    let w = (item_w * ITEMS.len() as f32 + 16.0).min(rect.width() - 24.0);
-    let dock = Rect::from_min_size(Pos2::new(rect.center().x - w / 2.0, rect.bottom() - h - 12.0), Vec2::new(w, h));
+    const BTN: f32 = 27.0;
+    let c = Pos2::new(rect.center().x, rect.bottom() - 30.0);
     let painter = ui.painter().clone();
-    painter.rect_filled(dock.translate(Vec2::new(0.0, 3.0)), Rounding::same(22.0), Color32::from_black_alpha(90));
-    painter.rect_filled(dock, Rounding::same(22.0), p.surface.gamma_multiply(0.92));
-    painter.rect_stroke(dock, Rounding::same(22.0), Stroke::new(1.0_f32, p.outline));
+    // The arc itself: a faint line through the buttons.
+    let n = 48;
+    let pts: Vec<Pos2> = (0..=n).map(|k| {
+        let a = std::f32::consts::PI * (1.0 + k as f32 / n as f32);
+        c + Vec2::new(a.cos(), a.sin()) * arc_r
+    }).collect();
+    painter.add(egui::Shape::line(pts, Stroke::new(1.5_f32, Color32::from_white_alpha(28))));
+    // Version badge in the middle.
+    let short: String = version.split('.').take(2).collect::<Vec<_>>().join(".");
+    painter.circle_filled(c, 26.0, Color32::from_white_alpha(14));
+    painter.circle_stroke(c, 26.0, Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
+    painter.text(c - Vec2::new(0.0, 4.0), Align2::CENTER_CENTER, format!("v{short}"), bold_font(14.0), Color32::from_white_alpha(220));
+    painter.text(c + Vec2::new(0.0, 10.0), Align2::CENTER_CENTER, "версия", FontId::proportional(9.0), Color32::from_white_alpha(130));
     let sheet_id = egui::Id::new("game-menu-sheet");
     let open: Option<Sheet> = ui.ctx().data(|d| d.get_temp(sheet_id)).flatten();
-    let step = (dock.width() - 16.0) / ITEMS.len() as f32;
     let mut out = None;
     for (i, (ic, label)) in ITEMS.iter().enumerate() {
-        let r = Rect::from_min_size(Pos2::new(dock.left() + 8.0 + step * i as f32, dock.top() + 4.0), Vec2::new(step, h - 8.0));
+        let a = std::f32::consts::PI * (1.0 + (i as f32 + 0.5) / ITEMS.len() as f32);
+        let at = c + Vec2::new(a.cos(), a.sin()) * arc_r;
+        // Button and caption together are the tap area.
+        let r = Rect::from_min_max(at - Vec2::new(BTN + 6.0, BTN), at + Vec2::new(BTN + 6.0, BTN + 22.0));
         let resp = ui.interact(r, egui::Id::new(("game-dock", i)), Sense::click());
         let on = (i == 3 && open == Some(Sheet::News)) || (i == 4 && open == Some(Sheet::More));
-        if on || resp.hovered() || resp.is_pointer_button_down_on() {
-            ui.painter().rect_filled(r.shrink2(Vec2::new(4.0, 0.0)), Rounding::same(16.0), if on { p.accent.gamma_multiply(0.25) } else { p.surface_hover });
-        }
-        let col = if on { p.accent } else { p.text };
-        icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 22.0), Vec2::splat(24.0)), *ic, col);
-        ui.painter().text(Pos2::new(r.center().x, r.bottom() - 12.0), Align2::CENTER_CENTER, *label, FontId::proportional(12.5), if on { p.accent } else { p.text_muted });
+        let pressed = resp.is_pointer_button_down_on();
+        let fill = if on { p.accent.gamma_multiply(0.35) } else if pressed || resp.hovered() { Color32::from_white_alpha(40) } else { Color32::from_white_alpha(16) };
+        ui.painter().circle_filled(at, BTN, fill);
+        ui.painter().circle_stroke(at, BTN, Stroke::new(1.2_f32, if on { p.accent } else { Color32::from_white_alpha(70) }));
+        let col = if on { p.accent } else { Color32::from_white_alpha(200) };
+        icons.paint(ui.painter(), Rect::from_center_size(at, Vec2::splat(24.0)), *ic, col);
+        ui.painter().text(Pos2::new(at.x, at.y + BTN + 11.0), Align2::CENTER_CENTER, *label, FontId::proportional(11.5), if on { p.accent } else { Color32::from_white_alpha(170) });
         if resp.clicked() {
             match i {
                 0 => out = Some(open_settings_at(ui.ctx(), 0)),
@@ -307,7 +321,7 @@ fn game_menu_sheet(ctx: &egui::Context, icons: &GuiIcons, p: &Palette) -> Option
     let w = (screen.width() - 32.0).min(420.0);
     let mut out = None;
     let mut close = false;
-    egui::Area::new(egui::Id::new("game-menu-sheet-area")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -96.0)).show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("game-menu-sheet-area")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -ctx.data(|d| d.get_temp::<f32>(egui::Id::new("game-dock-h"))).unwrap_or(96.0) - 8.0)).show(ctx, |ui| {
         Frame::none().fill(p.surface).rounding(Rounding::same(20.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
             ui.set_width(w - 32.0);
             ui.horizontal(|ui| {
