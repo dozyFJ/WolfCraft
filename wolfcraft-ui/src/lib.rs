@@ -7,6 +7,7 @@ pub mod hud;
 pub mod inventory_ui;
 pub mod launcher;
 pub mod studio_ui;
+pub mod texture_editor;
 pub mod main_menu;
 pub mod osk;
 pub mod theme_manager;

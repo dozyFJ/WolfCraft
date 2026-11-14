@@ -18,7 +18,7 @@ jobs:
         with:
           key: ui-test
       - name: Tap on a nearby server joins it
-        run: cargo test -p wolfcraft-ui --lib -- main_menu studio_ui --nocapture
+        run: cargo test -p wolfcraft-ui --lib -- main_menu studio_ui texture_editor --nocapture
       - name: Destruction physics and weapons
         run: cargo test -p wolfcraft-engine --lib -- collapse explosives --nocapture
       - name: Invite codes
