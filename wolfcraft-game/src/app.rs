@@ -1921,6 +1921,7 @@ impl App {
         let mut lua_clicks: Vec<String> = Vec::new();
         let mut studio_actions: Vec<wolfcraft_ui::studio_ui::StudioAction> = Vec::new();
         let mut studio_cover: Vec<egui::Rect> = Vec::new();
+        let mut stellar_cover: Vec<egui::Rect> = Vec::new();
         let icons = gfx.gui.icons.clone();
         let version = wolfcraft_common::VERSION;
         let data_dir_str = self.data_dir.display().to_string();
@@ -2086,6 +2087,16 @@ impl App {
                             petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
                             voice_changed |= voice_ui(ctx, &icons, voice, voice_menu, settings, net_players, net.as_ref().map(|n| n.voice), time.elapsed() as f64);
                             buttonsim_overlay(ctx, &s.buttonsim);
+                            // «Звёздный пульт»: its button and skill menu, cinema bars, flashes.
+                            let holding = screen == Screen::Playing && s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::STAR_REMOTE);
+                            let flash = s.flash;
+                            let cinema = s.cinema;
+                            let o = wolfcraft_ui::stellar_ui::draw(ctx, &icons, &mut s.stellar_ui, holding, flash, cinema);
+                            if o.skip {
+                                s.skip_film = true;
+                                s.cutscene = None;
+                            }
+                            stellar_cover = o.cover;
                             if let Some(mob)=s.mobs.mobs.iter().find(|m|m.boss.is_some()&&m.hp>0.0) {
                                 let role=mob.boss.as_ref().unwrap();
                                 egui::Area::new(egui::Id::new("guardian_health")).anchor(egui::Align2::CENTER_TOP,egui::vec2(0.,10.)).interactable(false).show(ctx,|ui|{
@@ -2332,7 +2343,7 @@ impl App {
             self.touch.flying = s.player.body.flying;
         }
         if self.screen == Screen::Playing {
-            self.touch.blocked = studio_cover.iter().map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
+            self.touch.blocked = studio_cover.iter().chain(stellar_cover.iter()).map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
             // The studio's tools sidebar on the left: the stick moves out from under it.
             self.touch.left_inset = self.studio.as_ref().filter(|st| !st.playtest).and_then(|st| st.view_left).map(|x| x * ppp).unwrap_or(0.0);
         }
