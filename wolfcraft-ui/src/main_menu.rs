@@ -33,6 +33,8 @@ pub enum MenuAction {
     SaveGame,
     /// Pick a skin preset (launcher "Скины" tab).
     SetSkin(u8),
+    /// New nickname from the launcher profile.
+    SetNickname(String),
     /// Open this world in the studio (editor).
     OpenStudio(String),
     /// Join a server's world (address) with the studio tools: edits go straight to the server.

@@ -48,7 +48,7 @@ fn tabs() -> &'static [(Tab, &'static str)] {
     if is_studio_app() {
         &[(Tab::Studio, "Проекты"), (Tab::Settings, "Настройки")]
     } else {
-        &[(Tab::Home, "Главная"), (Tab::Skins, "Скины"), (Tab::Settings, "Настройки")]
+        &[(Tab::Home, "Главная"), (Tab::Skins, "Профиль"), (Tab::Settings, "Настройки")]
     }
 }
 
@@ -106,7 +106,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     let tab_id = Id::new("launcher-tab-v2");
     let mut tab: usize = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
     let tabs = tabs();
-    tab = tab.min(tabs.len() - 2);
+    tab = tab.min(tabs.len() - 1);
 
     // ---- Toolbar ----
     egui::TopBottomPanel::top("launcher-toolbar")
@@ -160,11 +160,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 nav_icon(ui, icons, *t, ic, col);
                 ui.painter().text(Pos2::new(r.center().x, r.bottom() - 13.0), Align2::CENTER_CENTER, *label, FontId::proportional(12.5), col);
                 if resp.clicked() {
-                    if *t == Tab::Settings {
-                        action = MenuAction::OpenSettings;
-                    } else {
-                        tab = i;
-                    }
+                    tab = i;
                 }
             }
         });
@@ -199,9 +195,9 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
             ui.spacing_mut().item_spacing.y = 10.0;
             match tabs[tab].0 {
                 Tab::Home => home(ui, icons, &p, planet, &mut action),
-                Tab::Settings => {}
+                Tab::Settings => launcher_settings(ui, icons, &p, version, dark, &mut action),
                 Tab::Studio => studio(ui, icons, &p, version, worlds, &mut action),
-                Tab::Skins => skins(ui, &p, skin, &mut action),
+                Tab::Skins => profile(ui, icons, &p, skin, nickname, worlds, &mut action),
             }
             ui.add_space(8.0);
         });
@@ -539,18 +535,53 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
 // ---------------------------------------------------------------------------------------------
 // Скины
 
-fn skins(ui: &mut Ui, p: &Palette, skin: u8, action: &mut MenuAction) {
+/// Профиль: the player card (skin, nickname you can edit, a few numbers) and the skin choice.
+fn profile(ui: &mut Ui, icons: &GuiIcons, p: &Palette, skin: u8, nickname: &str, worlds: &[crate::main_menu::WorldEntry], action: &mut MenuAction) {
     use wolfcraft_engine::renderer::model::{SKIN_NAMES, skin_colors};
     let w = ui.available_width();
-    // Big preview of the chosen skin.
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 200.0), Sense::hover());
-    gradient(ui, rect, p.surface, p.bg);
-    ui.painter().rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0_f32, p.outline));
-    figure(ui, Rect::from_center_size(Pos2::new(rect.left() + 110.0, rect.center().y), Vec2::new(90.0, 180.0)), skin_colors(skin));
-    let name = SKIN_NAMES.get(skin as usize).copied().unwrap_or("—");
-    ui.painter().text(Pos2::new(rect.left() + 200.0, rect.top() + 50.0), Align2::LEFT_TOP, name, bold_font(24.0), p.text);
-    ui.painter().text(Pos2::new(rect.left() + 200.0, rect.top() + 84.0), Align2::LEFT_TOP, "Ваш скин в игре и на сервере", FontId::proportional(13.5), p.text_muted);
-    ui.painter().text(Pos2::new(rect.left() + 200.0, rect.top() + 106.0), Align2::LEFT_TOP, "Виден от третьего лица и другим игрокам", FontId::proportional(13.5), p.text_muted);
+    // Player card: the figure on the left, name, skin and nickname field on the right.
+    Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::new(96.0, 190.0), Sense::hover());
+            gradient(ui, r, p.surface_hi, p.surface);
+            figure(ui, Rect::from_center_size(r.center(), Vec2::new(84.0, 172.0)), skin_colors(skin));
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width());
+                let shown = if nickname.trim().is_empty() { "Игрок" } else { nickname.trim() };
+                ui.add(egui::Label::new(egui::RichText::new(shown).font(bold_font(24.0)).color(p.text)).wrap());
+                let skin_name = SKIN_NAMES.get(skin as usize).copied().unwrap_or("—");
+                ui.add(egui::Label::new(egui::RichText::new(format!("Скин «{skin_name}» — виден в игре, от третьего лица и другим игрокам на сервере")).size(13.0).color(p.text_muted)).wrap());
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new("НИК").size(11.5).color(p.text_muted));
+                let id = Id::new("launcher-nick-edit");
+                let mut text: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_else(|| nickname.to_string());
+                let resp = ui.add(egui::TextEdit::singleline(&mut text).char_limit(16).hint_text("Игрок").desired_width(ui.available_width()));
+                ui.ctx().data_mut(|d| d.insert_temp(id, text.clone()));
+                let changed = text.trim() != nickname.trim();
+                if (resp.lost_focus() && changed) || (changed && pill_button(ui, icons, Some(icon::CHECK), "Сохранить ник", ButtonKind::Primary, ui.available_width(), true).clicked()) {
+                    *action = MenuAction::SetNickname(text.trim().to_string());
+                }
+            });
+        });
+    });
+    // A few numbers about the player.
+    let worlds_n = worlds.iter().filter(|w| !w.cfg.studio_project).count();
+    let projects = worlds.iter().filter(|w| w.cfg.studio_project).count();
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        let cw = (ui.available_width() - 20.0) / 3.0;
+        for (num, label) in [(worlds_n.to_string(), "миров"), (projects.to_string(), "проектов"), (SKIN_NAMES.len().to_string(), "скинов")] {
+            Frame::none().fill(p.surface).rounding(Rounding::same(14.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(8.0, 10.0)).show(ui, |ui| {
+                ui.set_width(cw - 16.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new(num).font(bold_font(22.0)).color(p.accent));
+                    ui.label(egui::RichText::new(label).size(12.0).color(p.text_muted));
+                });
+            });
+        }
+    });
     section(ui, p, "Выбор скина", "");
     let cols = ((w + 10.0) / 120.0).floor().max(2.0) as usize;
     let cw = (w - (cols as f32 - 1.0) * 10.0) / cols as f32;
@@ -570,6 +601,47 @@ fn skins(ui: &mut Ui, p: &Palette, skin: u8, action: &mut MenuAction) {
             }
         });
     }
+}
+
+/// Настройки лаунчера: look, game settings, version and about — right in the launcher.
+fn launcher_settings(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, dark: bool, action: &mut MenuAction) {
+    let card = |ui: &mut Ui, title: &str, body: &mut dyn FnMut(&mut Ui)| {
+        Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new(title.to_uppercase()).size(11.5).color(p.text_muted));
+            ui.add_space(6.0);
+            body(ui);
+        });
+    };
+    let row = |ui: &mut Ui, k: &str, v: &str| {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(k).color(p.text_muted));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(v).color(p.text));
+            });
+        });
+    };
+    card(ui, "Оформление", &mut |ui| {
+        row(ui, "Тема", if dark { "Тёмная" } else { "Светлая" });
+        if pill_button(ui, icons, Some(if dark { icon::SUN } else { icon::MOON }), if dark { "Светлая тема" } else { "Тёмная тема" }, ButtonKind::Secondary, ui.available_width(), true).clicked() {
+            *action = MenuAction::ToggleTheme;
+        }
+    });
+    card(ui, "Игра", &mut |ui| {
+        ui.label(egui::RichText::new("Графика, управление, звук, дальность прорисовки").size(13.0).color(p.text_muted));
+        if pill_button(ui, icons, Some(icon::GEAR), "Настройки игры", ButtonKind::Primary, ui.available_width(), true).clicked() {
+            *action = MenuAction::OpenSettings;
+        }
+    });
+    card(ui, "Версия", &mut |ui| {
+        row(ui, "Установлена", &format!("WolfCraft {version}"));
+        row(ui, "Канал", "Тест");
+        ui.label(egui::RichText::new("Новые сборки ставятся поверх, миры и профиль сохраняются").size(12.5).color(p.text_muted));
+    });
+    card(ui, "О лаунчере", &mut |ui| {
+        row(ui, "Лаунчер", if is_studio_app() { "WolfStudio" } else { "WolfCraft" });
+        row(ui, "Сервер", "WolfStudio · WolfServer.exe");
+    });
 }
 
 /// Flat front view of the character in the given skin colours.
