@@ -35,7 +35,16 @@ struct VsOut {
     @location(2) light: vec2<f32>,
     @location(3) world: vec3<f32>,
     @location(4) rel: vec3<f32>,
+    // 0 = fully there, 1 = a chunk that just appeared (it dissolves in).
+    @location(5) fade: f32,
 };
+
+fn bayer4(p: vec2<f32>) -> f32 {
+    let x = u32(p.x) & 3u;
+    let y = u32(p.y) & 3u;
+    var m = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+    return (m[y * 4u + x] + 0.5) / 16.0;
+}
 
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
@@ -61,6 +70,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.flags = in.flags;
     out.light = in.light;
     out.rel = rel;
+    out.fade = in.inst.w;
     out.world = g.cam.xyz + rel;
     return out;
 }
@@ -286,6 +296,10 @@ fn fs_opaque(in: VsOut) -> @location(0) vec4<f32> {
     if (c0.a < 0.5 && (in.flags & (1u << 27u)) == 0u) {
         discard;
     }
+    // New chunks dissolve in through an ordered dither instead of popping up.
+    if (in.fade > 0.001 && bayer4(in.clip.xy) < in.fade) {
+        discard;
+    }
     var c = c0;
     let n_geom = n;
     var relief_light = 1.0;
@@ -362,7 +376,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let c = sample_tile(in);
     var n = geom_normal(in.rel);
     var rgb = shade(in, c, n);
-    var a = c.a;
+    var a = c.a * (1.0 - in.fade);
     if (fx_on(2u) && g.misc.y < 0.5 && (in.flags & (1u << 27u)) == 0u) {
         // Shaders: small moving waves, a sun glint and more sky reflected at grazing angles.
         let w = in.world;

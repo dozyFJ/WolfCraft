@@ -242,7 +242,12 @@ struct ChunkGpu {
     radius: f64,
     /// Opaque indices of blocks and shapes; the rest (grass, flowers) is skipped far away.
     detail_start: u32,
+    /// When the chunk first appeared (it fades in over `CHUNK_FADE` s).
+    born: std::time::Instant,
 }
+
+/// How long a newly loaded chunk takes to dissolve in.
+const CHUNK_FADE: f32 = 0.45;
 
 /// Beyond this distance (blocks) chunks are drawn without small details (grass, flowers).
 pub const DETAIL_DIST: f32 = 56.0;
@@ -843,9 +848,10 @@ impl WorldRenderer {
     }
 
     pub fn upload_mesh(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, key: ChunkKey, mesh: MeshData) {
-        let (old_o, old_w) = match self.chunks.remove(&key) {
-            Some(c) => (c.opaque, c.water),
-            None => (None, None),
+        // A remeshed chunk (block placed, light changed) keeps its age: only new ones fade in.
+        let (old_o, old_w, born) = match self.chunks.remove(&key) {
+            Some(c) => (c.opaque, c.water, c.born),
+            None => (None, None, std::time::Instant::now()),
         };
         let opaque = self.upload_buf(device, queue, old_o, &mesh.opaque, &mesh.opaque_idx);
         let water = self.upload_buf(device, queue, old_w, &mesh.water, &mesh.water_idx);
@@ -854,7 +860,7 @@ impl WorldRenderer {
         }
         if opaque.is_some() || water.is_some() {
             let (center, radius) = self.grid.chunk_bounds(key);
-            self.chunks.insert(key, ChunkGpu { opaque, water, origin: self.grid.chunk_ref(key), center, radius, detail_start: mesh.detail_start });
+            self.chunks.insert(key, ChunkGpu { opaque, water, origin: self.grid.chunk_ref(key), center, radius, detail_start: mesh.detail_start, born });
         }
     }
 
@@ -986,9 +992,12 @@ impl WorldRenderer {
             visible.push((*key, centre.length_squared()));
         }
         visible.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        let now = std::time::Instant::now();
         for (key, _) in &visible {
-            let o = (self.chunks[key].origin - p.eye).as_vec3();
-            offsets.push([o.x, o.y, o.z, 0.0]);
+            let c = &self.chunks[key];
+            let o = (c.origin - p.eye).as_vec3();
+            let fade = 1.0 - ((now - c.born).as_secs_f32() / CHUNK_FADE).clamp(0.0, 1.0);
+            offsets.push([o.x, o.y, o.z, fade]);
         }
         if offsets.len() > self.instance_cap {
             self.instance_cap = offsets.len().next_power_of_two();
