@@ -2280,6 +2280,8 @@ impl App {
         }
         if self.screen == Screen::Playing {
             self.touch.blocked = studio_cover.iter().map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
+            // The studio's tools sidebar on the left: the stick moves out from under it.
+            self.touch.left_inset = self.studio.as_ref().filter(|st| !st.playtest).and_then(|st| st.view_left).map(|x| x * ppp).unwrap_or(0.0);
         }
         for a in studio_actions {
             self.studio_action(a, &mut submitted, &mut actions);

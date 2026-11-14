@@ -99,6 +99,8 @@ pub struct StudioState {
     pub view_bottom: Option<f32>,
     /// Right edge of the world view (points) when the dock is at the side (landscape).
     pub view_right: Option<f32>,
+    /// Left edge of the world view (points): the tools sidebar in landscape.
+    pub view_left: Option<f32>,
 }
 
 impl Default for StudioState {
@@ -133,6 +135,7 @@ impl Default for StudioState {
             dock_frac: 0.5,
             view_bottom: None,
             view_right: None,
+            view_left: None,
         }
     }
 }
@@ -404,11 +407,58 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
     // of pills under the ribbon.
     let landscape = screen.width() > screen.height();
     const SIDE_W: f32 = 92.0;
+    const LEFT_W: f32 = 104.0;
     let pills_h: f32 = if landscape { 0.0 } else { 38.0 };
     const PILLS_H: f32 = 38.0;
-    let top_bar = Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H + pills_h));
-    let side = landscape.then(|| Rect::from_min_max(Pos2::new(screen.right() - SIDE_W, top_bar.bottom()), screen.max));
+    // Landscape: three columns — tools on the left (what was the top bar), the scene in the
+    // middle, the windows on the right. Upright: the bar on top.
+    let top_bar = if landscape { Rect::from_min_size(screen.min, Vec2::new(screen.width(), 0.0)) } else { Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H + pills_h)) };
+    let side = landscape.then(|| Rect::from_min_max(Pos2::new(screen.right() - SIDE_W, screen.top()), screen.max));
+    let left = landscape.then(|| Rect::from_min_max(screen.min, Pos2::new(screen.left() + LEFT_W, screen.bottom())));
+    st.view_left = left.map(|l| l.right());
+    if let Some(left) = left {
+        covered.push(left);
+        egui::Area::new(Id::new("studio-left")).order(egui::Order::Foreground).fixed_pos(left.min).show(ctx, |ui| {
+            let painter = ui.painter().clone();
+            painter.rect_filled(left, 0.0, p.surface);
+            painter.line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, p.outline));
+            ui.set_width(left.width());
+            ui.set_height(left.height());
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left.shrink2(Vec2::new(4.0, 6.0))), |ui| {
+                egui::ScrollArea::vertical().id_salt("studio-left-scroll").auto_shrink([false, false]).show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        if play_button(ui, p).clicked() {
+                            actions.push(StudioAction::Playtest(true));
+                        }
+                        // The ribbon's tabs, one under another.
+                        for (tb, name) in [(Tab::Home, "Главная"), (Tab::Model, "Модель"), (Tab::Brush, "Кисть"), (Tab::Test, "Тест"), (Tab::View, "Вид")] {
+                            let on = st.tab == tb;
+                            let (r, resp) = ui.allocate_exact_size(Vec2::new(left.width() - 12.0, 24.0), Sense::click());
+                            ui.painter().rect_filled(r, Rounding::same(6.0), if on { p.accent.gamma_multiply(0.25) } else if resp.hovered() { p.surface_hover } else { Color32::TRANSPARENT });
+                            ui.painter().text(r.center(), Align2::CENTER_CENTER, name, FontId::proportional(12.5), if on { p.accent } else { p.text_muted });
+                            if resp.clicked() {
+                                st.tab = tb;
+                                if tb == Tab::Brush {
+                                    st.brush_on = true;
+                                }
+                            }
+                        }
+                        sep(ui, p);
+                        ribbon(ui, icons, p, st, view, &mut actions);
+                        sep(ui, p);
+                        for (ic, name, act) in [(icon::DOWNLOAD, "Сохранить", StudioAction::Save), (icon::GLOBE, "Сервер", StudioAction::Publish), (icon::EXIT, "Выйти", StudioAction::Exit)] {
+                            if tool(ui, icons, p, ic, name, false).clicked() {
+                                actions.push(act);
+                            }
+                        }
+                    });
+                });
+            });
+        });
+    }
     covered.push(top_bar);
+    if !landscape {
     egui::Area::new(Id::new("studio-top-p")).order(egui::Order::Foreground).fixed_pos(top_bar.min).show(ctx, |ui| {
         let painter = ui.painter().clone();
         painter.rect_filled(Rect::from_min_size(top_bar.min, Vec2::new(top_bar.width(), MENU_H)), 0.0, p.bg);
@@ -507,6 +557,7 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
             });
         });
     });
+    }
 
     // Right sidebar (landscape): the windows one under another, an icon over its name.
     if let Some(side) = side {
@@ -547,9 +598,10 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
     }
     // World and dock: under the world when upright, beside it on the right in landscape.
     let dock = if let Some(side) = side {
-        let avail = side.left() - screen.left();
+        let x0 = left.map(|l| l.right()).unwrap_or(screen.left());
+        let avail = side.left() - x0;
         st.dock_frac = st.dock_frac.clamp(0.35, 0.75);
-        let split_x = screen.left() + avail * st.dock_frac;
+        let split_x = x0 + avail * st.dock_frac;
         st.view_bottom = None;
         st.view_right = Some(split_x);
         if let Some(dx) = splitter(ctx, "studio-split-dock-x", Rect::from_min_max(Pos2::new(split_x - 7.0, top_bar.bottom()), Pos2::new(split_x + 7.0, screen.bottom())), true, p) {
@@ -1094,6 +1146,12 @@ fn splitter(ctx: &egui::Context, id: &str, rect: Rect, vertical: bool, p: &Palet
 }
 
 fn sep(ui: &mut Ui, p: &Palette) {
+    if !ui.layout().main_dir().is_horizontal() {
+        // In the left sidebar: a short horizontal line.
+        let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width().min(70.0), 9.0), Sense::hover());
+        ui.painter().line_segment([Pos2::new(r.left(), r.center().y), Pos2::new(r.right(), r.center().y)], Stroke::new(1.0_f32, p.outline));
+        return;
+    }
     let (r, _) = ui.allocate_exact_size(Vec2::new(9.0, RIBBON_H - 18.0), Sense::hover());
     ui.painter().line_segment([Pos2::new(r.center().x, r.top()), Pos2::new(r.center().x, r.bottom())], Stroke::new(1.0_f32, p.outline));
 }
