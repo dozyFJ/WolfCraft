@@ -83,7 +83,8 @@ pub mod items {
     pub const RAW_FISH: u16 = 127;
     pub const COOKED_FISH: u16 = 128;
     pub const STAR_REMOTE: u16 = 129;
-    pub const COUNT: u16 = 130;
+    pub const STAR_BLASTER: u16 = 130;
+    pub const COUNT: u16 = 131;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -302,6 +303,24 @@ const BULLETS_TPL: [&str; 16] = [
     "..CCC...CCC.ccc.",
     ".............ccc",
     "............CCC.",
+    "................",
+    "................",
+];
+const STAR_BLASTER_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "...........C....",
+    "..KKKKKKKKKKCC..",
+    ".KgggggGGGGGKCC.",
+    ".KGGGGGGCCCGK...",
+    ".KKKKKGGGGGGK...",
+    ".....KGYKKKKK...",
+    ".....KGYK.......",
+    "....KGGK........",
+    "....KGGK........",
+    "...KGGK.........",
+    "...KKKK.........",
     "................",
     "................",
 ];
@@ -1061,6 +1080,14 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         'r' => Some(Rgb(1.0, 0.55, 0.50)),
         'Y' => Some(Rgb(1.0, 0.90, 0.40)),
         'C' => Some(Rgb(0.70, 0.85, 1.0)),
+        _ => None,
+    })));
+    l.add(STAR_BLASTER, "star_blaster", p(|q| q.template(&STAR_BLASTER_TPL[..], &|ch: char| match ch {
+        'K' => Some(Rgb(0.10, 0.11, 0.16)),
+        'G' => Some(Rgb(0.55, 0.58, 0.68)),
+        'g' => Some(Rgb(0.80, 0.82, 0.90)),
+        'C' => Some(Rgb(0.40, 0.95, 1.0)),
+        'Y' => Some(Rgb(1.0, 0.85, 0.30)),
         _ => None,
     })));
     for (_, img) in l.0.iter_mut() {

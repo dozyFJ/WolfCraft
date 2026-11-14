@@ -18,7 +18,7 @@ use wolfcraft_engine::planet::{Planet, smoothstep};
 use wolfcraft_engine::player::{Controls, Player, clock_string, local_sun};
 
 /// The remote's skills, in the order sneak + tap cycles them.
-pub const STELLAR_NAMES: [&str; 5] = ["Рельсотрон", "Игла", "Семь звёзд", "Тессеракт", "Чёрная дыра"];
+pub const STELLAR_NAMES: [&str; 9] = ["Рельсотрон", "Игла", "Семь звёзд", "Тессеракт", "Чёрная дыра", "Метеоритный дождь", "Солнечное копьё", "Ледяная комета", "Сверхновая"];
 
 /// A skill of «Звёздный пульт» being cast: where, how long ago it began, its own state.
 #[derive(Clone, Debug)]
@@ -1046,7 +1046,7 @@ impl GameSession {
                         self.stellar_ui.open = true;
                         continue;
                     }
-                    let mode = self.stellar_ui.mode.min(4);
+                    let mode = self.stellar_ui.mode.min(8);
                     if self.star_cd > 0.0 || self.stellar.is_some() {
                         self.item_name = Some((format!("Пульт перезаряжается: {:.0} с", self.star_cd.ceil().max(1.0)), 1.5));
                         continue;
@@ -1073,7 +1073,7 @@ impl GameSession {
                         self.stellar = Some(Stellar { mode, at, cell: h.cell, t: 0.0, pts: Vec::new(), step: 0, side });
                     }
                     self.skip_film = false;
-                    const MOTTO: [&str; 5] = ["Огонь с края галактики", "Тишина, потом гром", "Созвездие падает на землю", "Мир режется на клетки", "Всё падает внутрь"];
+                    const MOTTO: [&str; 9] = ["Огонь с края галактики", "Тишина, потом гром", "Созвездие падает на землю", "Мир режется на клетки", "Всё падает внутрь", "Небо горит", "Луч солнца режет землю", "Вечная зима за секунду", "Рождение и смерть звезды"];
                     self.title = Some((format!("SS-0{} · {}", mode + 1, STELLAR_NAMES[mode as usize].to_uppercase()), MOTTO[mode as usize].to_string(), 0.0));
                     self.star_cd = 12.0;
                     self.item_name = Some((format!("{}!", STELLAR_NAMES[mode as usize]), 2.5));
@@ -1088,7 +1088,8 @@ impl GameSession {
                         self.item_name = Some((format!("Нет боеприпасов: {}", wolfcraft_engine::items::info(ammo).name), 1.5));
                         continue;
                     }
-                    if !creative {
+                    // The star blaster needs no ammo.
+                    if !creative && ammo != wolfcraft_engine::items::ids::STAR_BLASTER {
                         self.player.inventory.take(ammo, 1);
                     }
                     if let Some(gun) = wolfcraft_engine::explosives::firearm(id) {
@@ -1134,6 +1135,17 @@ impl GameSession {
         self.tick_stellar(dt, &mut stellar_events);
         self.tick_epic(dt, &mut stellar_events);
         events.extend(stellar_events);
+        // Meteors smoke and burn, plasma bolts leave a cyan streak.
+        let glowing: Vec<(DVec3, wolfcraft_engine::explosives::ShotKind)> = self.explosives.glowing().collect();
+        for (p, kind) in glowing {
+            let up = wolfcraft_engine::physics::up_at(p);
+            if kind == wolfcraft_engine::explosives::ShotKind::Meteor {
+                self.mobs.fx_glow(p, up * 1.0, [1.0, 0.55, 0.15], 0.35, 0.5, wolfcraft_engine::mobs::FxKind::Rise);
+                self.mobs.fx(p, up * 1.5, [0.25, 0.22, 0.2], 0.5, 1.5, wolfcraft_engine::mobs::FxKind::Rise);
+            } else {
+                self.mobs.fx_glow(p, DVec3::ZERO, [0.45, 0.95, 1.0], 0.12, 0.2, wolfcraft_engine::mobs::FxKind::Rise);
+            }
+        }
         // Their glowing tails.
         let stars: Vec<DVec3> = self.explosives.stars().collect();
         for p in stars {
@@ -2369,8 +2381,8 @@ impl GameSession {
             self.cutscene = None;
         }
         let Some(mut s) = self.stellar.take() else { return };
-        let pw = self.stellar_ui.power.clamp(0.5, 2.0) as f64;
-        let dmg_k = self.stellar_ui.damage.clamp(0.0, 3.0);
+        let pw = self.stellar_ui.power.clamp(0.5, 2.5) as f64;
+        let dmg_k = self.stellar_ui.damage.clamp(0.0, 5.0);
         let t0 = s.t;
         s.t += dt * self.stellar_ui.speed.clamp(0.3, 3.0);
         let t = s.t;
@@ -2402,13 +2414,16 @@ impl GameSession {
                 1 => look_at(at - side * 48.0 + up * 16.0, at + up * 8.0),
                 2 => look_at(at + up * 60.0 + ring(t as f64 * 0.15) * 32.0, at),
                 3 => look_at(at + up * 30.0 + ring(t as f64 * 0.35) * 48.0, at + up * 6.0),
+                5 => look_at(at + up * 45.0 - side * 55.0, at),
+                6 => look_at(at - side * 70.0 * self.stellar_ui.power as f64 + up * 25.0 + up.cross(side) * 20.0, at),
+                8 => look_at(at + up * 20.0 - side * 60.0 + ring(t as f64 * 0.2) * 10.0, at + up * 8.0),
                 _ => look_at(at + up * 14.0 + ring(t as f64 * 0.7) * 26.0, at + up * 6.0),
             });
         }
         match s.mode {
             0 => {
                 #[allow(non_snake_case)]
-                let R = (10.0 * pw).round() as i32;
+                let R = (13.0 * pw).round() as i32;
                 if t < 2.2 {
                     // Red laser from the sky and a shrinking red ring on the ground.
                     for _ in 0..4 {
@@ -2463,7 +2478,7 @@ impl GameSession {
             }
             1 => {
                 #[allow(non_snake_case)]
-                let R = (18.0 * pw).round() as i32;
+                let R = (22.0 * pw).round() as i32;
                 if t < 1.8 {
                     for k in 0..8 {
                         let a = t as f64 * 2.0 + k as f64 * 0.785;
@@ -2568,7 +2583,7 @@ impl GameSession {
                 // Black hole: hangs a little above the ground, pulls everything in, eats a ball
                 // of the world shell by shell, then collapses in a violet flash.
                 let c = at + up * 6.0;
-                let r_max = 9.0 * pw;
+                let r_max = 11.0 * pw;
                 if t < 3.5 {
                     for k in 0..10 {
                         let a = t as f64 * 5.0 + k as f64 * 0.628;
@@ -2633,6 +2648,180 @@ impl GameSession {
                     events.push(InteractionEvent::Exploded { at: c, power: 10.0 });
                 }
                 finished = t > 4.6;
+            }
+            5 => {
+                // Meteor shower: burning rocks rain on the area for six seconds.
+                let r = 18.0 * pw;
+                if t < 6.0 {
+                    let n = ((t / 0.11) as u32).saturating_sub(s.step);
+                    for _ in 0..n.min(4) {
+                        s.step += 1;
+                        let a = self.mobs.rand() * std::f64::consts::TAU;
+                        let d = self.mobs.rand().sqrt() * r;
+                        let p = at + ring(a) * d;
+                        self.explosives.call_meteor(p, s.side * -0.8 + ring(a + 1.0) * 0.3);
+                    }
+                    self.shake = self.shake.max(0.25);
+                }
+                if crossed(6.0) {
+                    self.epic_impact(at, r * 0.5, [1.0, 0.5, 0.15], 0.4);
+                }
+                finished = t > 8.0;
+            }
+            6 => {
+                // Sun spear: a golden line marks the path, then a beam from the sky sweeps
+                // along it and cuts a burning trench.
+                let len = 60.0 * pw;
+                let half = len / 2.0;
+                let w = (3.0 * pw).round() as i32;
+                let side = s.side;
+                if t < 1.5 {
+                    for _ in 0..6 {
+                        let k = self.mobs.rand() * len - half;
+                        self.mobs.fx_glow(at + side * k + up * 0.6, up * 0.3, [1.0, 0.85, 0.3], 0.12, 0.3, FxKind::Rise);
+                    }
+                } else if t < 4.0 {
+                    let k = ((t - 1.5) / 2.5) as f64;
+                    let target = (k * len) as u32;
+                    while s.step <= target {
+                        let p = at + side * (s.step as f64 - half);
+                        let pu = wolfcraft_engine::physics::up_at(p);
+                        if let Some(h) = wolfcraft_engine::physics::raycast(&self.chunks, p + pu * 30.0, -pu, 60.0) {
+                            let mut cells = Vec::new();
+                            for di in -w..=w {
+                                for dj in -w..=w {
+                                    if di * di + dj * dj > w * w {
+                                        continue;
+                                    }
+                                    for dk in -w..=6 {
+                                        if let Some(c) = g.offset(h.cell, di, dj, dk) {
+                                            cells.push((c, B::Air));
+                                        }
+                                    }
+                                    if let Some(c) = g.offset(h.cell, di, dj, -w - 1) {
+                                        cells.push((c, B::Magma));
+                                    }
+                                }
+                            }
+                            self.stellar_set(cells);
+                            self.stellar_hurt(p, w as f64 + 1.0, 30.0 * dmg_k);
+                        }
+                        s.step += 1;
+                    }
+                    let p = at + side * (k * len - half);
+                    for _ in 0..10 {
+                        let h = self.mobs.rand() * 80.0;
+                        let col = if self.mobs.rand() < 0.5 { [1.0, 0.95, 0.6] } else { [1.0, 0.75, 0.2] };
+                        self.mobs.fx_glow(p + up * h, -up * 20.0, col, 0.45, 0.25, FxKind::Rise);
+                    }
+                    self.shake = self.shake.max(0.5);
+                    self.flash = Some(([1.0, 0.85, 0.4], 0.15));
+                }
+                if crossed(4.0) {
+                    self.epic_impact(at + side * half, 6.0, [1.0, 0.8, 0.3], 0.5);
+                }
+                finished = t > 5.0;
+            }
+            7 => {
+                // Ice comet: falls in a cold blue streak and freezes everything around.
+                let r = (14.0 * pw).round() as i32;
+                if t < 1.6 {
+                    let h = 90.0 * (1.0 - t as f64 / 1.6);
+                    for k in 0..8 {
+                        let col = if k % 2 == 0 { [0.7, 0.95, 1.0] } else { [1.0, 1.0, 1.0] };
+                        self.mobs.fx_glow(at + up * (h + k as f64 * 1.5), up * 4.0, col, 0.4, 0.4, FxKind::Rise);
+                    }
+                }
+                if crossed(1.6) {
+                    let mut cells = Vec::new();
+                    for di in -r..=r {
+                        for dj in -r..=r {
+                            let d2 = di * di + dj * dj;
+                            if d2 > r * r {
+                                continue;
+                            }
+                            let rr = (d2 as f64).sqrt();
+                            // A small crater in the middle.
+                            if rr < 4.0 {
+                                for dk in -2..=3 {
+                                    if let Some(c) = g.offset(s.cell, di, dj, dk) {
+                                        cells.push((c, B::Air));
+                                    }
+                                }
+                                if let Some(c) = g.offset(s.cell, di, dj, -3) {
+                                    cells.push((c, B::PackedIce));
+                                }
+                                continue;
+                            }
+                            // The ground freezes: snow, ice, ice over water; ice spikes here and there.
+                            let hsh = ((di * 73 + dj * 151) as u32).wrapping_mul(2654435761);
+                            if let Some(c) = g.offset(s.cell, di, dj, 0) {
+                                let top = self.chunks.get_block(c);
+                                let b = if top.is_some_and(|b| b.is_water()) { B::Ice } else if hsh % 3 == 0 { B::PackedIce } else { B::Snow };
+                                if top.is_some_and(|b| b != B::Air) {
+                                    cells.push((c, b));
+                                }
+                            }
+                            if hsh % 17 == 0 {
+                                let tall = 2 + (hsh / 17 % 6) as i32;
+                                for dk in 1..=tall {
+                                    if let Some(c) = g.offset(s.cell, di, dj, dk) {
+                                        cells.push((c, B::PackedIce));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    self.stellar_set(cells);
+                    self.stellar_hurt(at, r as f64, 25.0 * dmg_k);
+                    for m in &mut self.mobs.mobs {
+                        if (m.body.pos - at).length() < r as f64 * 1.5 {
+                            m.slow = 12.0;
+                        }
+                    }
+                    self.epic_impact(at, r as f64, [0.6, 0.9, 1.0], 0.8);
+                    for k in 0..40 {
+                        let a = k as f64 * 2.399;
+                        self.mobs.fx(at + up, ring(a) * 10.0 + up * 6.0, [0.95, 0.98, 1.0], 0.3, 2.5, FxKind::Leaf);
+                    }
+                }
+                finished = t > 2.6;
+            }
+            8 => {
+                // Supernova: a little sun swells over the ground, pulsing, the world shakes
+                // harder and harder… then everything around is blown away.
+                let r = (13.0 * pw).round().min(26.0) as i32;
+                let c = at + up * 8.0;
+                if t < 3.2 {
+                    let k = t as f64 / 3.2;
+                    let rr = 1.0 + k * 5.0 + (t as f64 * 12.0).sin() * 0.3;
+                    for _ in 0..16 {
+                        let v = DVec3::new(self.mobs.rand() - 0.5, self.mobs.rand() - 0.5, self.mobs.rand() - 0.5).normalize_or_zero();
+                        let col = if self.mobs.rand() < 0.5 { [1.0, 1.0, 0.85] } else { [1.0, 0.7, 0.2] };
+                        self.mobs.fx_glow(c + v * rr, v * 1.5, col, 0.5, 0.2, FxKind::Rise);
+                    }
+                    self.shake = self.shake.max(k as f32 * 0.8);
+                    self.flash = Some(([1.0, 0.95, 0.7], (k * 0.25) as f32));
+                }
+                if crossed(3.2) {
+                    let mut cells = Vec::new();
+                    for di in -r..=r {
+                        for dj in -r..=r {
+                            for dk in -r..=r {
+                                if di * di + dj * dj + dk * dk <= r * r {
+                                    if let Some(cl) = g.offset(s.cell, di, dj, dk) {
+                                        cells.push((cl, B::Air));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    self.stellar_set(cells);
+                    self.stellar_hurt(at, r as f64 * 1.3, 80.0 * dmg_k);
+                    self.epic_impact(c, r as f64 * 1.4, [1.0, 1.0, 0.9], 1.0);
+                    self.slowmo = 1.2;
+                }
+                finished = t > 4.5;
             }
             _ => {
                 // 8×8 cells of 3×3 blocks.
