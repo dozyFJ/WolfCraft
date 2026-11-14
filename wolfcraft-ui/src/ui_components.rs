@@ -363,7 +363,10 @@ pub fn full_screen(ctx: &egui::Context, id: &str, add: impl FnOnce(&mut Ui)) -> 
         ui.painter().rect_filled(bg, 0.0, Color32::from_black_alpha(140));
     });
     egui::Area::new(Id::new(id).with("full-body")).order(egui::Order::Tooltip).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
-        Frame::none().fill(p.surface).stroke(Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22))).inner_margin(Margin::same(10.0)).show(ui, |ui| {
+        // The HUD's look: a see-through dark glass panel with rounded corners and a thin light
+        // edge, like the top bar's islands.
+        let _ = p;
+        Frame::none().fill(Color32::from_rgba_unmultiplied(14, 16, 22, 215)).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.5_f32, Color32::from_white_alpha(45))).inner_margin(Margin::same(10.0)).show(ui, |ui| {
             ui.set_width(rect.width() - 20.0);
             ui.set_height(rect.height() - 20.0);
             add(ui);
