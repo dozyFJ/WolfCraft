@@ -541,8 +541,6 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(SILVER_INGOT, "silver_ingot", ingot(Rgb(0.90, 0.92, 0.98)));
     l.add(RAW_MEAT, "raw_meat", meat(Rgb(0.82, 0.36, 0.38), Rgb(0.95, 0.75, 0.75)));
     l.add(COOKED_MEAT, "cooked_meat", meat(Rgb(0.55, 0.30, 0.16), Rgb(0.80, 0.55, 0.30)));
-    l.add(RAW_FISH, "raw_fish", fish(Rgb(0.55, 0.70, 0.80), Rgb(0.95, 0.55, 0.30)));
-    l.add(COOKED_FISH, "cooked_fish", fish(Rgb(0.78, 0.58, 0.32), Rgb(0.55, 0.35, 0.18)));
     l.add(ROTTEN_FLESH, "rotten_flesh", meat(Rgb(0.45, 0.50, 0.30), Rgb(0.60, 0.65, 0.40)));
     let armor_mats = [Rgb(0.55, 0.36, 0.20), Rgb(0.74, 0.54, 0.24), Rgb(0.82, 0.83, 0.86), Rgb(0.40, 0.90, 0.88)];
     let armor_tpl: [&[&str; 16]; 4] = [&HELMET, &CHEST, &LEGS, &BOOTS];
@@ -1035,6 +1033,8 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             q.put(8, y, Rgb(0.08, 0.10, 0.06), 1.0);
         }
     }));
+    l.add(RAW_FISH, "raw_fish", fish(Rgb(0.55, 0.70, 0.80), Rgb(0.95, 0.55, 0.30)));
+    l.add(COOKED_FISH, "cooked_fish", fish(Rgb(0.78, 0.58, 0.32), Rgb(0.55, 0.35, 0.18)));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);
