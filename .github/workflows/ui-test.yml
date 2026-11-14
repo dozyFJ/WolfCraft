@@ -21,6 +21,8 @@ jobs:
         run: cargo test -p wolfcraft-ui --lib -- main_menu studio_ui texture_editor server_page --nocapture
       - name: Destruction physics and weapons
         run: cargo test -p wolfcraft-engine --lib -- collapse explosives bosses mobs config --nocapture
+      - name: Blocks placement, physics, stairs, swimming
+        run: cargo test -p wolfcraft-engine --lib -- interaction physics player construction --nocapture
       - name: Cartoon resource packs
         run: cargo test -p wolfcraft-assets --lib -- packs --nocapture
       - name: Invite codes
