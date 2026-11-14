@@ -320,7 +320,7 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
                 for (title, text) in [
                     ("Одна сеть Wi-Fi", "Один игрок открывает мир во вкладке «Создать сервер» — у остальных он сразу появляется в этом списке."),
                     ("Только мобильный интернет", "Операторы не пропускают входящие подключения, поэтому напрямую через мобильную сеть сыграть нельзя. Включите точку доступа на телефоне с сервером и подключите к ней друзей: сервер появится здесь, а интернет на игру не тратится."),
-                    ("Код приглашения", "Сервер показывает в чате код вида ABCD-EFGH. Его можно ввести во вкладке «По коду»."),
+                    ("Код приглашения", "Сервер показывает короткий код вида K7QX2 (в чате, в WolfStudio и в WolfServer). Введите его во вкладке «По коду»."),
                 ] {
                     row_card(ui, false, |ui| {
                         ui.set_width(ui.available_width());
@@ -431,7 +431,7 @@ fn online_tab(ui: &mut egui::Ui, icons: &GuiIcons, p: &crate::theme_manager::Pal
             ui.label(egui::RichText::new("По коду или адресу").font(bold_font(18.0)).color(p.text));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                text_input(ui, icons, &mut st.address, "Код ABCD-EFGH или адрес 192.168.0.10", 360.0, Some(icon::GLOBE));
+                text_input(ui, icons, &mut st.address, "Код K7QX2 или адрес 192.168.0.10", 360.0, Some(icon::GLOBE));
                 ui.add_space(8.0);
                 let ready = !st.address.trim().is_empty();
                 if pill_button(ui, icons, Some(icon::PLAY), "Подключиться", ButtonKind::Primary, 0.0, ready).clicked() {

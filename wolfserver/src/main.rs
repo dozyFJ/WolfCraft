@@ -104,6 +104,7 @@ fn handle_panel(server: &ServerHandle, cfg: &WorldConfig, token: &str, mut strea
                 "edits": s.edits[0].len() + s.edits[1].len(),
                 "uptime": s.started.elapsed().as_secs(),
                 "addresses": lan_addresses(s.port),
+                "codes": wolfcraft_net::lan::codes_for(&lan_addresses(s.port)),
                 "players": players,
                 "log": s.log.iter().collect::<Vec<_>>(),
             });
@@ -240,6 +241,9 @@ fn main() {
         s.log(format!("WolfCraft Сервер {} — мир «{}», seed {}, изменённых блоков: {e}", wolfcraft_common::VERSION, cfg.name, cfg.seed as i64));
         for a in lan_addresses(port) {
             s.log(format!("Адрес для игроков: {a}"));
+        }
+        for c in wolfcraft_net::lan::codes_for(&lan_addresses(port)) {
+            s.log(format!("Код для входа: {c}  (WolfCraft → Игра по сети → По коду)"));
         }
     }
 

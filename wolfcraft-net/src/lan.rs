@@ -102,32 +102,122 @@ pub fn host_lines(port: u16) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Invite codes: 8 letters for "IP:port" (32 bits of address + port offset from the default).
+// Invite codes: short codes for "IP:port", typed in «По коду» instead of an address.
+//
+// A home Wi-Fi (192.168.x.x) on the usual port gives 5 characters ("K7QX2"), a phone's
+// hotspot or office network (10.x.x.x) 7, any other address 8–10. The last character is a
+// check digit, so a typo is caught instead of sending the player to a stranger's server.
+// Letters that look alike are left out (no I, O, 0, 1); case, spaces and dashes don't matter.
 
 const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-/// "ABCD-EFGH" for an address. The port must be within 255 of the default one.
-pub fn invite_code(ip: Ipv4Addr, port: u16) -> Option<String> {
-    let off = port.checked_sub(crate::DEFAULT_PORT).filter(|o| *o < 256)?;
-    let v: u64 = ((u32::from(ip) as u64) << 8) | off as u64;
-    let s: String = (0..8).rev().map(|i| ALPHABET[((v >> (i * 5)) & 31) as usize] as char).collect();
-    Some(format!("{}-{}", &s[..4], &s[4..]))
+/// (kind, payload bits) of an address: 0 = 192.168.a.b, 1 = 10.a.b.c, 2 = 172.16–31.a.b,
+/// 3 = any other.
+fn address_kind(ip: Ipv4Addr) -> (u64, u64, u32) {
+    let o = ip.octets();
+    let v = u32::from(ip) as u64;
+    if o[0] == 192 && o[1] == 168 {
+        (0, v & 0xFFFF, 16)
+    } else if o[0] == 10 {
+        (1, v & 0xFF_FFFF, 24)
+    } else if o[0] == 172 && (16..32).contains(&o[1]) {
+        (2, v & 0xF_FFFF, 20)
+    } else {
+        (3, v, 32)
+    }
 }
 
-/// Address of an invite code, if `text` is one (case, spaces and the dash are ignored).
+fn check_digit(digits: &[u64]) -> u64 {
+    // Odd weights: any single wrong character changes the sum modulo 32.
+    digits.iter().enumerate().map(|(i, d)| d * (2 * i as u64 + 3)).sum::<u64>() % 32
+}
+
+fn group(s: &str) -> String {
+    if s.len() <= 5 {
+        return s.to_string();
+    }
+    let cut = s.len() / 2;
+    format!("{}-{}", &s[..cut], &s[cut..])
+}
+
+/// The invite code of an address. The port must be within 255 of the default one.
+pub fn invite_code(ip: Ipv4Addr, port: u16) -> Option<String> {
+    let off = port.checked_sub(crate::DEFAULT_PORT).filter(|o| *o < 256)? as u64;
+    let (kind, payload, bits) = address_kind(ip);
+    let flag = u64::from(off != 0);
+    // Low bits: kind and the port flag; then the port offset (if any); then the address.
+    let mut v = (kind << 1) | flag;
+    let mut total = 3u32;
+    if flag == 1 {
+        v |= off << 3;
+        total += 8;
+    }
+    v |= payload << total;
+    total += bits;
+    let n = total.div_ceil(5) as usize;
+    let digits: Vec<u64> = (0..n).rev().map(|i| (v >> (i * 5)) & 31).collect();
+    let mut s: String = digits.iter().map(|d| ALPHABET[*d as usize] as char).collect();
+    s.push(ALPHABET[check_digit(&digits) as usize] as char);
+    Some(group(&s))
+}
+
+/// Address of an invite code, if `text` is one (case, spaces and the dash are ignored;
+/// O and I read as the 0 and 1 that are not in codes, so they cannot mean anything).
 pub fn parse_invite(text: &str) -> Option<String> {
-    let clean: Vec<u8> = text.trim().to_uppercase().bytes().filter(|b| *b != b'-' && *b != b' ').collect();
-    if clean.len() != 8 {
+    let clean: Vec<u8> = text.trim().to_uppercase().bytes().filter(|b| !matches!(b, b'-' | b' ')).collect();
+    if !(4..=12).contains(&clean.len()) || clean.iter().all(|b| b.is_ascii_digit() || *b == b'.' || *b == b':') {
         return None;
     }
-    let mut v: u64 = 0;
-    for b in clean {
-        let d = ALPHABET.iter().position(|a| *a == b)? as u64;
-        v = (v << 5) | d;
+    let mut digits = Vec::with_capacity(clean.len());
+    for b in &clean {
+        digits.push(ALPHABET.iter().position(|a| a == b)? as u64);
     }
-    let ip = Ipv4Addr::from((v >> 8) as u32);
-    let port = crate::DEFAULT_PORT + (v & 0xff) as u16;
+    let check = digits.pop()?;
+    if check_digit(&digits) != check {
+        return None;
+    }
+    let v = digits.iter().fold(0u64, |v, d| (v << 5) | d);
+    let flag = v & 1;
+    let kind = (v >> 1) & 3;
+    let mut rest = v >> 3;
+    let mut used = 3u32;
+    let off = if flag == 1 {
+        let o = rest & 0xFF;
+        rest >>= 8;
+        used += 8;
+        o
+    } else {
+        0
+    };
+    let bits = [16u32, 24, 20, 32][kind as usize];
+    used += bits;
+    // The code is exactly as long as this kind of address needs.
+    if used.div_ceil(5) as usize != digits.len() || rest >> bits != 0 {
+        return None;
+    }
+    let payload = rest as u32;
+    let ip = match kind {
+        0 => Ipv4Addr::from(0xC0A8_0000 | payload),
+        1 => Ipv4Addr::from(0x0A00_0000 | payload),
+        2 => Ipv4Addr::from(0xAC10_0000 | payload),
+        _ => Ipv4Addr::from(payload),
+    };
+    let port = crate::DEFAULT_PORT + off as u16;
     Some(format!("{ip}:{port}"))
+}
+
+/// Invite codes for addresses written as "ip:port" (as `server::lan_addresses` gives them).
+pub fn codes_for(addresses: &[String]) -> Vec<String> {
+    addresses
+        .iter()
+        .filter_map(|a| {
+            let sa: std::net::SocketAddrV4 = a.parse().ok()?;
+            if sa.ip().is_loopback() {
+                return None;
+            }
+            invite_code(*sa.ip(), sa.port())
+        })
+        .collect()
 }
 
 /// What the player typed: an invite code or an address; returns "host:port".
@@ -226,10 +316,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invite_codes_roundtrip() {
+    fn invite_codes_are_short_and_checked() {
+        let home = invite_code(Ipv4Addr::new(192, 168, 1, 23), crate::DEFAULT_PORT).unwrap();
+        assert_eq!(home.len(), 5, "{home}");
+        assert_eq!(parse_invite(&home).unwrap(), format!("192.168.1.23:{}", crate::DEFAULT_PORT));
+        let spot = invite_code(Ipv4Addr::new(10, 8, 181, 7), crate::DEFAULT_PORT).unwrap();
+        assert_eq!(parse_invite(&spot).unwrap(), format!("10.8.181.7:{}", crate::DEFAULT_PORT));
+        for ip in [Ipv4Addr::new(172, 20, 3, 4), Ipv4Addr::new(85, 12, 200, 9), Ipv4Addr::new(192, 168, 255, 255)] {
+            for port in [crate::DEFAULT_PORT, crate::DEFAULT_PORT + 7] {
+                let c = invite_code(ip, port).unwrap();
+                assert_eq!(parse_invite(&c).unwrap(), format!("{ip}:{port}"), "{c}");
+            }
+        }
+        // One wrong letter is caught by the check digit.
+        let mut bad: Vec<char> = home.chars().collect();
+        bad[1] = if bad[1] == 'A' { 'B' } else { 'A' };
+        assert!(parse_invite(&bad.into_iter().collect::<String>()).is_none());
+        assert_eq!(codes_for(&[format!("192.168.1.23:{}", crate::DEFAULT_PORT), "127.0.0.1:25570".into()]), vec![home.clone()]);
         let ip = Ipv4Addr::new(192, 168, 43, 1);
         let code = invite_code(ip, crate::DEFAULT_PORT).unwrap();
-        assert_eq!(code.len(), 9);
         assert_eq!(parse_invite(&code).unwrap(), format!("192.168.43.1:{}", crate::DEFAULT_PORT));
         assert_eq!(parse_invite(&code.to_lowercase().replace('-', " ")).unwrap(), format!("192.168.43.1:{}", crate::DEFAULT_PORT));
         assert!(parse_invite("192.168.0.5").is_none());
