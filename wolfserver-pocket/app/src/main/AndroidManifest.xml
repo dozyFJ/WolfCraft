@@ -14,7 +14,7 @@
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:icon="@drawable/ic_launcher"
-        android:label="WolfCraft"
+        android:label="WolfStudio"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:usesCleartextTraffic="true">
 
@@ -34,7 +34,7 @@
             android:name="android.app.NativeActivity"
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode"
             android:exported="false"
-            android:label="WolfCraft"
+            android:label="WolfStudio"
             android:launchMode="singleTask"
             android:process=":studio"
             android:screenOrientation="sensorLandscape"
