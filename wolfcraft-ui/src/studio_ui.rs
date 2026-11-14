@@ -132,6 +132,7 @@ impl Default for StudioState {
             dock_open: false,
             dock_frac: 0.5,
             view_bottom: None,
+            view_right: None,
         }
     }
 }
