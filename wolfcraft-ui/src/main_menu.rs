@@ -273,7 +273,7 @@ fn liquid_bar(painter: &egui::Painter, bar: Rect, fill: f32, t: f32, accent: Col
 
 /// A living world behind the loading text: dusk sky, drifting clouds, blocky hills scrolling
 /// past at two depths, and a lake with moving waves and glints.
-fn world_backdrop(painter: &egui::Painter, rect: Rect, t: f32) {
+pub(crate) fn world_backdrop(painter: &egui::Painter, rect: Rect, t: f32) {
     let vgrad = |r: Rect, a: Color32, b: Color32| {
         let mut m = egui::Mesh::default();
         m.colored_vertex(r.left_top(), a);

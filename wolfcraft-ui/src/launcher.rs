@@ -132,18 +132,22 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
         let screen = ctx.screen_rect();
         let full = screen.expand(160.0);
         let bg = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(full);
-        bg.rect_filled(full, 0.0, p.bg);
-        bg.rect_filled(Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + TOOLBAR_H)), 0.0, p.surface);
-        bg.rect_filled(Rect::from_min_max(Pos2::new(full.left(), screen.bottom() - NAV_H), full.max), 0.0, p.surface);
+        // The living world from the loading splash, dimmed so cards stay readable.
+        crate::main_menu::world_backdrop(&bg, full, ctx.input(|i| i.time) as f32);
+        bg.rect_filled(full, 0.0, p.bg.gamma_multiply(if p.dark { 0.55 } else { 0.45 }));
+        let bar = p.surface.gamma_multiply(0.82);
+        bg.rect_filled(Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + TOOLBAR_H)), 0.0, bar);
+        bg.rect_filled(Rect::from_min_max(Pos2::new(full.left(), screen.bottom() - NAV_H), full.max), 0.0, bar);
         bg.line_segment([Pos2::new(full.left(), screen.top() + TOOLBAR_H), Pos2::new(full.right(), screen.top() + TOOLBAR_H)], Stroke::new(1.0_f32, p.outline));
         bg.line_segment([Pos2::new(full.left(), screen.bottom() - NAV_H), Pos2::new(full.right(), screen.bottom() - NAV_H)], Stroke::new(1.0_f32, p.outline));
+        ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
     // ---- Toolbar: each page has its own (title and its own buttons) ----
     let page = tabs[tab].0;
     egui::TopBottomPanel::top("launcher-toolbar")
         .exact_height(TOOLBAR_H)
-        .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(16.0, 8.0)))
+        .frame(Frame::none().fill(p.surface.gamma_multiply(0.82)).inner_margin(Margin::symmetric(16.0, 8.0)))
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 if page == Tab::Home {
@@ -223,7 +227,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     if page == Tab::Server {
         egui::TopBottomPanel::top("launcher-server-tabs")
             .exact_height(46.0)
-            .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(10.0, 4.0)).stroke(Stroke::new(1.0_f32, p.outline)))
+            .frame(Frame::none().fill(p.surface.gamma_multiply(0.82)).inner_margin(Margin::symmetric(10.0, 4.0)).stroke(Stroke::new(1.0_f32, p.outline)))
             .show(ctx, |ui| {
                 server_tab = crate::server_page::tab_bar(ui, &p);
             });
@@ -232,7 +236,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     // ---- Bottom navigation ----
     egui::TopBottomPanel::bottom("launcher-nav")
         .exact_height(NAV_H)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)))
+        .frame(Frame::none().fill(p.surface.gamma_multiply(0.82)).stroke(Stroke::new(1.0_f32, p.outline)))
         .show(ctx, |ui| {
             let rect = ui.max_rect();
             let w = rect.width() / tabs.len() as f32;
@@ -279,7 +283,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     }
 
     // ---- Page ----
-    egui::CentralPanel::default().frame(Frame::none().fill(p.bg).inner_margin(Margin::symmetric(16.0, 14.0))).show(ctx, |ui| {
+    egui::CentralPanel::default().frame(Frame::none().inner_margin(Margin::symmetric(16.0, 14.0))).show(ctx, |ui| {
         egui::ScrollArea::vertical().id_salt(("launcher-page", tab)).auto_shrink([false, false]).drag_to_scroll(true).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 10.0;
             match tabs[tab].0 {
