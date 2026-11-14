@@ -164,6 +164,15 @@ pub struct GameSession {
     pub flash: Option<([f32; 3], f32)>,
     /// «Пропустить»: no film for the rest of this cast.
     pub skip_film: bool,
+    /// Epic touches: camera shake (0..1), slow motion left (s), the cast's title (name,
+    /// motto, age), burning embers left in craters (where, seconds, radius), late booms
+    /// (where, power, delay), blocks the last strike tore out (for flying chips).
+    shake: f32,
+    slowmo: f32,
+    pub title: Option<(String, String, f32)>,
+    embers: Vec<(DVec3, f32, f64)>,
+    booms: Vec<(DVec3, f32, f32)>,
+    stellar_removed: Vec<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)>,
     /// The skill being cast now.
     stellar: Option<Stellar>,
     /// A ritual of revival going on at an altar: (guardian, altar, seconds since it began).
@@ -268,6 +277,12 @@ impl GameSession {
             cinema: 0.0,
             flash: None,
             skip_film: false,
+            shake: 0.0,
+            slowmo: 0.0,
+            title: None,
+            embers: Vec::new(),
+            booms: Vec::new(),
+            stellar_removed: Vec::new(),
             stellar: None,
             attack_cd: 0.0,
             death_burst_done: false,
@@ -354,6 +369,13 @@ impl GameSession {
     }
 
     pub fn update(&mut self, input: &InputFrame, dt: f32, view: i32, frozen: bool) -> Vec<InteractionEvent> {
+        // Slow motion right after a big strike.
+        let dt = if self.slowmo > 0.0 {
+            self.slowmo -= dt;
+            dt * 0.35
+        } else {
+            dt
+        };
         self.clock += dt;
         self.chunks.update(self.player_chunk(), view, 6);
         let mut events = Vec::new();
@@ -1051,6 +1073,8 @@ impl GameSession {
                         self.stellar = Some(Stellar { mode, at, cell: h.cell, t: 0.0, pts: Vec::new(), step: 0, side });
                     }
                     self.skip_film = false;
+                    const MOTTO: [&str; 5] = ["Огонь с края галактики", "Тишина, потом гром", "Созвездие падает на землю", "Мир режется на клетки", "Всё падает внутрь"];
+                    self.title = Some((format!("SS-0{} · {}", mode + 1, STELLAR_NAMES[mode as usize].to_uppercase()), MOTTO[mode as usize].to_string(), 0.0));
                     self.star_cd = 12.0;
                     self.item_name = Some((format!("{}!", STELLAR_NAMES[mode as usize]), 2.5));
                     keep.push(e);
@@ -1108,6 +1132,7 @@ impl GameSession {
         }
         let mut stellar_events = Vec::new();
         self.tick_stellar(dt, &mut stellar_events);
+        self.tick_epic(dt, &mut stellar_events);
         events.extend(stellar_events);
         // Their glowing tails.
         let stars: Vec<DVec3> = self.explosives.stars().collect();
@@ -1180,6 +1205,9 @@ impl GameSession {
             events.push(InteractionEvent::Exploded { at: b.pos, power: b.power });
             // A fallen star leaves its glowing core at the bottom of the crater.
             if b.power >= wolfcraft_engine::explosives::STAR_POWER {
+                self.shake = self.shake.max(0.7);
+                self.flash = Some(([0.8, 0.9, 1.0], 0.35));
+                self.embers.push((b.pos, 6.0, 4.0));
                 let up = wolfcraft_engine::physics::up_at(b.pos);
                 let core = self.chunks.grid().world_to_cell(b.pos - up * 3.5);
                 if self.chunks.get_block(core).is_some_and(|x| !x.is_fluid()) && self.chunks.set_block(core, wolfcraft_engine::block::Block::Glowstone) {
@@ -1876,6 +1904,16 @@ impl GameSession {
     /// Camera for rendering. First person sits at the eye level; third person orbits behind or
     /// in front of the character and never clips into blocks.
     pub fn camera(&self) -> Camera {
+        let mut c = self.camera_base();
+        if self.shake > 0.0 {
+            let t = self.clock as f64;
+            let k = (self.shake * self.shake) as f64 * 0.45;
+            c.eye += DVec3::new((t * 53.0).sin(), (t * 71.0).sin(), (t * 37.0).sin()) * k;
+        }
+        c
+    }
+
+    fn camera_base(&self) -> Camera {
         if let Some(c) = self.cutscene {
             return c;
         }
@@ -2220,7 +2258,91 @@ impl GameSession {
             }
             if self.chunks.set_block(c, b) {
                 self.net_out.push((c, b));
+                if b == B::Air && self.stellar_removed.len() < 600 {
+                    self.stellar_removed.push((c, old));
+                }
             }
+        }
+    }
+
+    /// The big moment of a strike: flash, shake, slow motion, a dome of light racing out,
+    /// embers left burning and the rumble rolling on after.
+    fn epic_impact(&mut self, at: DVec3, radius: f64, color: [f32; 3], flash: f32) {
+        use wolfcraft_engine::mobs::FxKind;
+        self.flash = Some((color, flash));
+        self.shake = 1.0;
+        self.slowmo = 0.7;
+        let up = wolfcraft_engine::physics::up_at(at);
+        let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let ta = up.cross(helper).normalize();
+        let tb = up.cross(ta);
+        for k in 0..90 {
+            let a = k as f64 * 2.399;
+            let e = (k as f64 / 90.0).sqrt();
+            let dir = (ta * a.cos() + tb * a.sin()) * (1.0 - e * e).sqrt() + up * e;
+            let bright = [(color[0] + 0.4).min(1.0), (color[1] + 0.4).min(1.0), (color[2] + 0.4).min(1.0)];
+            self.mobs.fx_glow(at + up * 0.5, dir * (radius * 2.2 + 10.0), if k % 2 == 0 { bright } else { color }, 0.45, 0.9, FxKind::Rise);
+        }
+        self.embers.push((at, 9.0, radius.max(3.0)));
+        if self.embers.len() > 8 {
+            self.embers.remove(0);
+        }
+        self.booms.push((at, 6.0, 0.45));
+        self.booms.push((at, 4.0, 1.1));
+        self.booms.push((at, 2.5, 2.0));
+    }
+
+    /// Embers and smoke over fresh craters, late rolling booms, chips of the torn-out blocks,
+    /// the shake dying down.
+    fn tick_epic(&mut self, dt: f32, events: &mut Vec<InteractionEvent>) {
+        use wolfcraft_engine::mobs::FxKind;
+        self.shake = (self.shake - dt * 1.4).max(0.0);
+        if let Some(t) = &mut self.title {
+            t.2 += dt;
+            if t.2 > 4.0 {
+                self.title = None;
+            }
+        }
+        for e in &mut self.embers {
+            e.1 -= dt;
+        }
+        self.embers.retain(|e| e.1 > 0.0);
+        for (at, left, r) in self.embers.clone() {
+            let up = wolfcraft_engine::physics::up_at(at);
+            let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+            let ta = up.cross(helper).normalize();
+            let tb = up.cross(ta);
+            let k = (left / 9.0) as f64;
+            for _ in 0..3 {
+                let a = self.mobs.rand() * std::f64::consts::TAU;
+                let d = self.mobs.rand() * r;
+                let p = at + (ta * a.cos() + tb * a.sin()) * d;
+                if self.mobs.rand() < 0.5 {
+                    let g = 0.4 + self.mobs.rand() as f32 * 0.4;
+                    self.mobs.fx_glow(p, up * (1.0 + 2.0 * k), [1.0, g, 0.1], 0.12, 0.8, FxKind::Rise);
+                } else {
+                    let s = 0.15 + self.mobs.rand() as f32 * 0.15;
+                    self.mobs.fx(p, up * 3.0 * k, [s, s, s], 0.6, 3.0, FxKind::Rise);
+                }
+            }
+        }
+        let mut due = Vec::new();
+        for b in &mut self.booms {
+            b.2 -= dt;
+            if b.2 <= 0.0 {
+                due.push((b.0, b.1));
+            }
+        }
+        self.booms.retain(|b| b.2 > 0.0);
+        for (at, power) in due {
+            events.push(InteractionEvent::Exploded { at, power });
+            self.shake = self.shake.max(0.4);
+        }
+        // Chunks of the world fly off where a strike tore it out (a sample, not every block).
+        let removed = std::mem::take(&mut self.stellar_removed);
+        let step = (removed.len() / 90).max(1);
+        for (pos, block) in removed.into_iter().step_by(step) {
+            events.push(InteractionEvent::Blasted { pos, block });
         }
     }
 
@@ -2298,6 +2420,14 @@ impl GameSession {
                         let a = t as f64 * 3.0 + k as f64 * 1.047;
                         self.mobs.fx_glow(at + up * 0.6 + ring(a) * rr, DVec3::ZERO, [1.0, 0.2, 0.15], 0.14, 0.2, FxKind::Rise);
                     }
+                    // Energy gathering: sparks pulled in from all around, faster and faster.
+                    let n = (2.0 + t * 4.0) as usize;
+                    for _ in 0..n {
+                        let a = self.mobs.rand() * std::f64::consts::TAU;
+                        let from = at + ring(a) * (18.0 + self.mobs.rand() * 10.0) + up * (self.mobs.rand() * 14.0);
+                        self.mobs.fx_glow(from, (at + up * 2.0 - from) * (1.2 + t as f64), [1.0, 0.35, 0.3], 0.1, 0.6, FxKind::Rise);
+                    }
+                    self.shake = self.shake.max(t / 2.2 * 0.35);
                 }
                 if crossed(2.2) {
                     let c0 = s.cell;
@@ -2316,7 +2446,7 @@ impl GameSession {
                     }
                     self.stellar_set(cells);
                     self.stellar_hurt(at, R as f64 + 0.5, 60.0 * dmg_k);
-                    self.flash = Some(([1.0, 0.95, 0.95], 0.9));
+                    self.epic_impact(at, R as f64, [1.0, 0.95, 0.95], 0.95);
                     events.push(InteractionEvent::Exploded { at, power: 14.0 });
                 }
                 if (2.2..3.4).contains(&t) {
@@ -2383,7 +2513,7 @@ impl GameSession {
                     }
                     self.stellar_set(cells);
                     self.stellar_hurt(at, R as f64, 40.0 * dmg_k);
-                    self.flash = Some(([1.0, 0.55, 0.15], 0.7));
+                    self.epic_impact(at, R as f64, [1.0, 0.55, 0.15], 0.75);
                     // A silent hit: a ring of dust and heat racing out.
                     for k in 0..48 {
                         let a = k as f64 * std::f64::consts::TAU / 48.0;
@@ -2419,7 +2549,8 @@ impl GameSession {
                     for p in s.pts.clone() {
                         self.stellar_hurt(p, 2.0, 20.0 * dmg_k);
                     }
-                    self.flash = Some(([0.6, 0.75, 1.0], 0.5));
+                    let mid = s.pts[s.pts.len() / 2];
+                    self.epic_impact(mid, 8.0, [0.6, 0.75, 1.0], 0.55);
                 }
                 if s.step == 1 && s.pts.len() > 1 {
                     // Flames along the trenches.
@@ -2492,7 +2623,7 @@ impl GameSession {
                 }
                 if crossed(3.5) {
                     self.stellar_hurt(c, r_max * 1.5, 50.0 * dmg_k);
-                    self.flash = Some(([0.70, 0.40, 1.0], 0.9));
+                    self.epic_impact(c, r_max, [0.70, 0.40, 1.0], 0.9);
                     for k in 0..60 {
                         let a = k as f64 * 2.399;
                         let e = (k as f64 / 60.0) * 2.0 - 1.0;

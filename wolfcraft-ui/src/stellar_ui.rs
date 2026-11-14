@@ -47,7 +47,8 @@ pub struct StellarOut {
 
 /// `holding`: the remote is in hand. `flash`: colour and strength of a screen flash.
 /// `cinema`: 0..1, how far the cinema bars are in.
-pub fn draw(ctx: &egui::Context, _icons: &GuiIcons, m: &mut StellarMenu, holding: bool, flash: Option<([f32; 3], f32)>, cinema: f32) -> StellarOut {
+/// `title`: the cast's name and motto and how long they have been up (s).
+pub fn draw(ctx: &egui::Context, _icons: &GuiIcons, m: &mut StellarMenu, holding: bool, flash: Option<([f32; 3], f32)>, cinema: f32, title: Option<(&str, &str, f32)>) -> StellarOut {
     let mut out = StellarOut::default();
     let p = palette(ctx);
     let screen = ctx.screen_rect();
@@ -55,6 +56,19 @@ pub fn draw(ctx: &egui::Context, _icons: &GuiIcons, m: &mut StellarMenu, holding
     if let Some((c, a)) = flash {
         let a = (a.clamp(0.0, 1.0) * 255.0) as u8;
         painter.rect_filled(screen, 0.0, Color32::from_rgba_unmultiplied((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, a));
+    }
+    // The cast's title: big letters spreading apart, fading in and out.
+    if let Some((name, motto, age)) = title {
+        let a = (age / 0.5).min(1.0).min(((4.0 - age) / 0.8).max(0.0));
+        let alpha = (a * 255.0) as u8;
+        let y = screen.top() + screen.height() * 0.30;
+        let size = 30.0 + age * 2.0;
+        let spaced: String = name.chars().flat_map(|c| [c, ' ']).collect();
+        painter.text(Pos2::new(screen.center().x + 2.0, y + 2.0), Align2::CENTER_CENTER, &spaced, bold_font(size), Color32::from_black_alpha(alpha / 2));
+        painter.text(Pos2::new(screen.center().x, y), Align2::CENTER_CENTER, &spaced, bold_font(size), Color32::from_rgba_unmultiplied(255, 240, 220, alpha));
+        let lw = (screen.width() * 0.25 * a).max(1.0);
+        painter.line_segment([Pos2::new(screen.center().x - lw, y + size * 0.75), Pos2::new(screen.center().x + lw, y + size * 0.75)], Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(255, 200, 120, alpha)));
+        painter.text(Pos2::new(screen.center().x, y + size * 0.75 + 16.0), Align2::CENTER_CENTER, motto, FontId::proportional(15.0), Color32::from_rgba_unmultiplied(220, 225, 240, alpha));
     }
     if cinema > 0.0 {
         let h = screen.height() * 0.11 * cinema;
