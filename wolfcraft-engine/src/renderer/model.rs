@@ -753,6 +753,80 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3
                     add_box(&mut v, &f, Vec3::new(ex, hy + 0.18, hz + 0.24), Vec3::new(ex + 0.07, hy + 0.23, hz + 0.252), z, 0.0, eye);
                 }
             }
+            MobKind::Fish => {
+                // A little fish: body, tail fin that wags, a back fin, eyes.
+                let body = tint([0.95, 0.55, 0.20]);
+                let belly = tint([0.98, 0.92, 0.85]);
+                let fin = tint([0.30, 0.55, 0.85]);
+                let wag = (m.anim * 6.0).sin() * 0.5;
+                let y = 0.15;
+                add_box(&mut v, &f, Vec3::new(-0.08, y, -0.18), Vec3::new(0.08, y + 0.2, 0.2), z, 0.0, body);
+                add_box(&mut v, &f, Vec3::new(-0.07, y - 0.01, -0.12), Vec3::new(0.07, y + 0.05, 0.16), z, 0.0, belly);
+                add_box(&mut v, &f, Vec3::new(-0.01, y + 0.2, -0.08), Vec3::new(0.01, y + 0.28, 0.08), z, 0.0, fin);
+                // Tail: a thin plate, swung side to side by moving along x.
+                let tx = wag * 0.08;
+                add_box(&mut v, &f, Vec3::new(-0.015 + tx, y - 0.02, -0.34), Vec3::new(0.015 + tx, y + 0.22, -0.18), z, 0.0, fin);
+                for ex in [-0.085f32, 0.075] {
+                    add_box(&mut v, &f, Vec3::new(ex, y + 0.11, 0.12), Vec3::new(ex + 0.01, y + 0.15, 0.16), z, 0.0, [0.05, 0.05, 0.08]);
+                }
+            }
+            MobKind::Squid => {
+                // Squid: a tall mantle and eight tentacles that open and close as it swims.
+                let skin = tint([0.28, 0.36, 0.55]);
+                let dark = tint([0.20, 0.25, 0.42]);
+                let pulse = (m.anim * 2.0).sin() * 0.5 + 0.5;
+                add_box(&mut v, &f, Vec3::new(-0.3, 0.45, -0.3), Vec3::new(0.3, 1.15, 0.3), z, 0.0, skin);
+                for ex in [-0.2f32, 0.12] {
+                    add_box(&mut v, &f, Vec3::new(ex, 0.62, 0.3), Vec3::new(ex + 0.08, 0.72, 0.31), z, 0.0, [0.95, 0.95, 0.9]);
+                    add_box(&mut v, &f, Vec3::new(ex + 0.02, 0.63, 0.305), Vec3::new(ex + 0.06, 0.69, 0.315), z, 0.0, [0.05, 0.05, 0.08]);
+                }
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::TAU / 8.0;
+                    let (s, c) = a.sin_cos();
+                    let spread = 0.18 + pulse * 0.22;
+                    let top = Vec3::new(c * 0.2, 0.45, s * 0.2);
+                    let tip = Vec3::new(c * spread, 0.0, s * spread);
+                    add_rod(&mut v, &f, top, tip, 0.045, z, 0.0, dark);
+                }
+            }
+            MobKind::Dolphin | MobKind::Shark => {
+                // Long streamlined body, a fin on the back, a tail fin that beats up and down.
+                let shark = m.kind == MobKind::Shark;
+                let back = tint(if shark { [0.45, 0.50, 0.56] } else { [0.55, 0.65, 0.75] });
+                let belly = tint(if shark { [0.88, 0.88, 0.90] } else { [0.85, 0.88, 0.92] });
+                let len = if shark { 1.2 } else { 0.95 };
+                let w = if shark { 0.28 } else { 0.22 };
+                let y = 0.2;
+                let beat = (m.anim * 2.5).sin() * 0.35;
+                add_box(&mut v, &f, Vec3::new(-w, y, -len * 0.55), Vec3::new(w, y + w * 2.0, len * 0.5), z, 0.0, back);
+                add_box(&mut v, &f, Vec3::new(-w + 0.02, y - 0.02, -len * 0.45), Vec3::new(w - 0.02, y + w * 0.6, len * 0.45), z, 0.0, belly);
+                // Head / snout.
+                if shark {
+                    add_box(&mut v, &f, Vec3::new(-w * 0.8, y + 0.04, len * 0.5), Vec3::new(w * 0.8, y + w * 1.6, len * 0.8), z, 0.0, back);
+                    // Teeth.
+                    for tx in [-0.12f32, -0.04, 0.04, 0.12] {
+                        add_box(&mut v, &f, Vec3::new(tx - 0.02, y + 0.02, len * 0.74), Vec3::new(tx + 0.02, y + 0.08, len * 0.76), z, 0.0, [0.98, 0.98, 0.95]);
+                    }
+                } else {
+                    add_box(&mut v, &f, Vec3::new(-w * 0.8, y + 0.06, len * 0.5), Vec3::new(w * 0.8, y + w * 1.7, len * 0.62), z, 0.0, back);
+                    add_box(&mut v, &f, Vec3::new(-0.06, y + 0.08, len * 0.62), Vec3::new(0.06, y + 0.16, len * 0.8), z, 0.0, belly);
+                }
+                for ex in [-w * 0.8 - 0.005, w * 0.8 - 0.035] {
+                    add_box(&mut v, &f, Vec3::new(ex, y + w * 1.1, len * 0.55), Vec3::new(ex + 0.04, y + w * 1.35, len * 0.6), z, 0.0, [0.05, 0.05, 0.08]);
+                }
+                // Back fin (tall for the shark).
+                let fh = if shark { 0.5 } else { 0.25 };
+                add_box(&mut v, &f, Vec3::new(-0.03, y + w * 2.0, -0.1), Vec3::new(0.03, y + w * 2.0 + fh, 0.15), Vec3::new(0.0, y + w * 2.0, 0.15), -0.3, back);
+                // Side fins.
+                for sx in [-1.0f32, 1.0] {
+                    let (x0, x1) = if sx < 0.0 { (-w - 0.24, -w) } else { (w, w + 0.24) };
+                    add_box(&mut v, &f, Vec3::new(x0, y + 0.05, 0.05), Vec3::new(x1, y + 0.09, 0.3), z, 0.0, back);
+                }
+                // Tail: beats about the body's side axis.
+                let tp = Vec3::new(0.0, y + w, -len * 0.55);
+                add_box(&mut v, &f, Vec3::new(-w * 0.5, y + w * 0.6, -len * 0.95), Vec3::new(w * 0.5, y + w * 1.4, -len * 0.55), tp, beat, back);
+                add_box(&mut v, &f, Vec3::new(-w * 1.4, y + w * 0.85, -len * 1.1), Vec3::new(w * 1.4, y + w * 1.15, -len * 0.9), tp, beat * 1.4, back);
+            }
             MobKind::Dragon => {
                 // Green dragon: long body, neck and horned head in front, a tapering tail
                 // behind, four short legs tucked up in flight and two big wings that flap.

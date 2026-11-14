@@ -80,7 +80,9 @@ pub mod items {
     /// Riding: a saddle and the dragon's soul (spawns a dragon).
     pub const SADDLE: u16 = 125;
     pub const DRAGON_SOUL: u16 = 126;
-    pub const COUNT: u16 = 127;
+    pub const RAW_FISH: u16 = 127;
+    pub const COOKED_FISH: u16 = 128;
+    pub const COUNT: u16 = 129;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -382,6 +384,31 @@ const BOOTS: [&str; 16] = [
     ".xxxxxxx.xxxxxxx", "................", "................", "................",
 ];
 
+/// A fish lying sideways: oval body, forked tail on the left, an eye on the right.
+fn fish(body: Rgb, fin: Rgb) -> Image {
+    p(move |q| {
+        for y in 0..16u32 {
+            for x in 0..16u32 {
+                let dx = (x as f32 - 8.5) / 5.5;
+                let dy = (y as f32 - 8.0) / 3.2;
+                if dx * dx + dy * dy <= 1.0 {
+                    let shade = if y < 7 { 0.85 } else if y > 9 { 1.12 } else { 1.0 };
+                    q.put(x, y, body.scale(shade), 1.0);
+                }
+                // Tail.
+                let tx = 3i32 - x as i32;
+                if x <= 3 && (y as i32 - 8).abs() <= tx + 2 && (y as i32 - 8).abs() >= tx - 1 {
+                    q.put(x, y, fin, 1.0);
+                }
+            }
+        }
+        for x in 7..10u32 {
+            q.put(x, 5, fin, 1.0);
+        }
+        q.put(12, 7, Rgb(0.05, 0.05, 0.08), 1.0);
+    })
+}
+
 fn meat(c: Rgb, bone: Rgb) -> Image {
     p(|q| {
         for y in 4..13u32 {
@@ -514,6 +541,8 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(SILVER_INGOT, "silver_ingot", ingot(Rgb(0.90, 0.92, 0.98)));
     l.add(RAW_MEAT, "raw_meat", meat(Rgb(0.82, 0.36, 0.38), Rgb(0.95, 0.75, 0.75)));
     l.add(COOKED_MEAT, "cooked_meat", meat(Rgb(0.55, 0.30, 0.16), Rgb(0.80, 0.55, 0.30)));
+    l.add(RAW_FISH, "raw_fish", fish(Rgb(0.55, 0.70, 0.80), Rgb(0.95, 0.55, 0.30)));
+    l.add(COOKED_FISH, "cooked_fish", fish(Rgb(0.78, 0.58, 0.32), Rgb(0.55, 0.35, 0.18)));
     l.add(ROTTEN_FLESH, "rotten_flesh", meat(Rgb(0.45, 0.50, 0.30), Rgb(0.60, 0.65, 0.40)));
     let armor_mats = [Rgb(0.55, 0.36, 0.20), Rgb(0.74, 0.54, 0.24), Rgb(0.82, 0.83, 0.86), Rgb(0.40, 0.90, 0.88)];
     let armor_tpl: [&[&str; 16]; 4] = [&HELMET, &CHEST, &LEGS, &BOOTS];

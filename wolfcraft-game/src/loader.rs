@@ -9,7 +9,6 @@ use glam::{DVec3, IVec3};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use wolfcraft_engine::biome::Biome;
 use wolfcraft_engine::config::{GameMode, WorldConfig};
 use wolfcraft_engine::planet::{Planet, Rng};
 use wolfcraft_engine::player::Player;
@@ -136,7 +135,7 @@ fn run(req: &LoadRequest, sh: &LoadShared) -> Result<Loaded, String> {
     for i in 0..2500 {
         let d = Rng(cfg.seed ^ 0xB10 ^ (i as u64 + 1) * 104729).unit_vec();
         let col = planet.column(d);
-        if col.biome != Biome::Ocean && col.biome != Biome::DeepOcean && col.biome != Biome::FrozenOcean {
+        if !col.biome.is_ocean() {
             *hist.entry(col.biome.label()).or_default() += 1;
             checked += 1;
         }

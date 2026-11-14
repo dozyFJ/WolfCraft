@@ -121,10 +121,24 @@ pub fn flora(planet: &Planet, f: u8, i: i32, j: i32, col: &Column) -> Vec<(i32, 
     // Under water.
     if s < planet.radius - 0.5 {
         if col.elev > -30.0 && col.temp > 0.12 {
+            // Warm seas: coral reefs — bright lumps one to three blocks high.
+            if col.biome == Biome::WarmOcean && col.elev < -2.0 && u < 0.09 {
+                let h = splitmix(hash3(planet.seed ^ FLORA_SEED ^ 0xC0A1, i, j, f as i32));
+                let coral = [Block::RedWool, Block::YellowWool, Block::BlueWool, Block::Terracotta, Block::Wool, Block::Clay][(h % 6) as usize];
+                let tall = 1 + ((h >> 8) % 3) as i32;
+                let tall = tall.min((-col.elev - 1.0) as i32).max(1);
+                return (0..tall).map(|d| (k_above + d, coral)).collect();
+            }
             if u < 0.05 {
                 return vec![(k_above, Block::Seagrass)];
             }
-            if u < 0.075 && col.elev < -6.0 && col.biome == Biome::Ocean {
+            // Kelp forests, thickest in cold seas.
+            let kelp = match col.biome {
+                Biome::ColdOcean => 0.16,
+                Biome::Ocean => 0.075,
+                _ => 0.0,
+            };
+            if u < kelp && col.elev < -6.0 {
                 return vec![(k_above, Block::Kelp)];
             }
         }

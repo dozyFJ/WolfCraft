@@ -359,6 +359,10 @@ impl Planet {
                 Biome::FrozenOcean
             } else if e < -28.0 {
                 Biome::DeepOcean
+            } else if temp > 0.72 {
+                Biome::WarmOcean
+            } else if temp < 0.32 {
+                Biome::ColdOcean
             } else {
                 Biome::Ocean
             }

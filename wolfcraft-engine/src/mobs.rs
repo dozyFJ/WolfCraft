@@ -17,6 +17,11 @@ pub enum MobKind {
     Slime,
     /// A big flying dragon: peaceful unless hit; with a saddle it can be ridden.
     Dragon,
+    /// Water creatures: fish (rivers, lakes, seas), squid, dolphins and sharks (open sea).
+    Fish,
+    Squid,
+    Dolphin,
+    Shark,
 }
 
 /// Every kind of creature (spawn souls, tests).
@@ -24,7 +29,11 @@ pub const ALL_MOBS: [MobKind; 8] = [MobKind::Ghoul, MobKind::Crawler, MobKind::B
 
 impl MobKind {
     pub fn hostile(self) -> bool {
-        matches!(self, MobKind::Ghoul | MobKind::Crawler | MobKind::Wolf | MobKind::Slime)
+        matches!(self, MobKind::Ghoul | MobKind::Crawler | MobKind::Wolf | MobKind::Slime | MobKind::Shark)
+    }
+    /// Lives in water (swims, chokes on land).
+    pub fn aquatic(self) -> bool {
+        matches!(self, MobKind::Fish | MobKind::Squid | MobKind::Dolphin | MobKind::Shark)
     }
     pub fn name(self) -> &'static str {
         match self {
@@ -37,6 +46,10 @@ impl MobKind {
             MobKind::Wolf => "Волк",
             MobKind::Slime => "Слизень",
             MobKind::Dragon => "Дракон",
+            MobKind::Fish => "Рыба",
+            MobKind::Squid => "Кальмар",
+            MobKind::Dolphin => "Дельфин",
+            MobKind::Shark => "Акула",
         }
     }
     pub fn max_hp(self) -> f32 {
@@ -50,6 +63,10 @@ impl MobKind {
             MobKind::Wolf => 12.0,
             MobKind::Slime => 10.0,
             MobKind::Dragon => 60.0,
+            MobKind::Fish => 3.0,
+            MobKind::Squid => 8.0,
+            MobKind::Dolphin => 12.0,
+            MobKind::Shark => 24.0,
         }
     }
     /// Walking speed, blocks per second.
@@ -64,6 +81,10 @@ impl MobKind {
             MobKind::Wolf => 4.8,
             MobKind::Slime => 2.4,
             MobKind::Dragon => 5.0,
+            MobKind::Fish => 3.0,
+            MobKind::Squid => 1.6,
+            MobKind::Dolphin => 5.0,
+            MobKind::Shark => 4.2,
         }
     }
     pub fn damage(self) -> f32 {
@@ -72,6 +93,7 @@ impl MobKind {
             MobKind::Crawler => 2.0,
             MobKind::Wolf => 2.5,
             MobKind::Slime => 2.0,
+            MobKind::Shark => 4.0,
             _ => 0.0,
         }
     }
@@ -132,6 +154,8 @@ const HOSTILE_CAP: usize = 8;
 /// Upper bound of live particles (death cubes + block chips).
 pub const MAX_DEBRIS: usize = 400;
 const PASSIVE_CAP: usize = 6;
+/// Fish, squid, dolphins and sharks at once.
+const AQUATIC_CAP: usize = 8;
 const DESPAWN_DIST: f64 = 90.0;
 /// Farther than this from the player a calm mob sleeps: no AI, no physics, no animation.
 pub const SLEEP_DIST: f64 = 40.0;
@@ -151,6 +175,32 @@ impl MobManager {
     }
 
     /// Finds the ground along the radial line through `dir` (unit), searching down from above `r`.
+    /// Under water at this column: a point half-way down (at most 6 blocks under the surface)
+    /// and the depth of the water.
+    fn water_spot(world: &impl Voxels, dir: DVec3, r: f64) -> Option<(DVec3, i32)> {
+        let g = world.grid();
+        let mut rad = r + 14.0;
+        while rad > r - 40.0 {
+            let b = world.block_at_world(g.along(dir, rad));
+            if b.is_water() {
+                let mut depth = 0;
+                while depth < 48 && world.block_at_world(g.along(dir, rad - depth as f64 - 1.0)).is_water() {
+                    depth += 1;
+                }
+                if depth < 2 {
+                    return None;
+                }
+                let down = (depth as f64 * 0.5).min(6.0).max(1.0);
+                return Some((g.along(dir, rad - down), depth + 1));
+            }
+            if b.is_solid() {
+                return None;
+            }
+            rad -= 1.0;
+        }
+        None
+    }
+
     fn ground(world: &impl Voxels, dir: DVec3, r: f64) -> Option<DVec3> {
         let mut rad = r + 14.0;
         while rad > r - 24.0 {
@@ -288,8 +338,9 @@ impl MobManager {
     }
 
     fn try_spawn(&mut self, world: &impl Voxels, player: DVec3, day: bool) {
-        let hostile = self.mobs.iter().filter(|m| m.kind.hostile()).count();
-        let passive = self.mobs.len() - hostile;
+        let hostile = self.mobs.iter().filter(|m| m.kind.hostile() && !m.kind.aquatic()).count();
+        let aquatic = self.mobs.iter().filter(|m| m.kind.aquatic()).count();
+        let passive = self.mobs.len() - hostile - aquatic;
         let up = up_at(player);
         let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
         let t1 = tangent(helper, up).normalize();
@@ -297,6 +348,36 @@ impl MobManager {
         let ang = self.rand() * std::f64::consts::TAU;
         let dist = 22.0 + self.rand() * 22.0;
         let dir = world.grid().col_dir(player + (t1 * ang.cos() + t2 * ang.sin()) * dist);
+        // Water under the spot: fish in rivers and lakes; squid, dolphins and sharks in the sea.
+        if let Some((pos, depth)) = Self::water_spot(world, dir, world.grid().radial(player)) {
+            if aquatic >= AQUATIC_CAP {
+                return;
+            }
+            let pick = self.rand();
+            let kind = if depth < 6 {
+                MobKind::Fish
+            } else {
+                match pick {
+                    p if p < 0.45 => MobKind::Fish,
+                    p if p < 0.68 => MobKind::Squid,
+                    p if p < 0.86 => MobKind::Dolphin,
+                    _ if depth >= 9 => MobKind::Shark,
+                    _ => MobKind::Fish,
+                }
+            };
+            let h = tangent(t1, up_at(pos));
+            self.mobs.push(Mob::new(kind, pos, h.normalize_or_zero()));
+            // Fish come in little schools.
+            if kind == MobKind::Fish {
+                for k in 1..3 {
+                    let p = pos + t2 * (k as f64 * 0.8);
+                    if world.block_at_world(p).is_water() {
+                        self.mobs.push(Mob::new(kind, p, h.normalize_or_zero()));
+                    }
+                }
+            }
+            return;
+        }
         let want_hostile = !day;
         if want_hostile && hostile >= HOSTILE_CAP || !want_hostile && passive >= PASSIVE_CAP {
             return;
@@ -471,7 +552,7 @@ impl MobManager {
                     m.alert = 4.0;
                 }
             }
-            if m.kind.hostile() && targetable && m.alert > 0.0 {
+            if m.kind.hostile() && !m.kind.aquatic() && targetable && m.alert > 0.0 {
                 if flat.length() > 0.4 {
                     wish = flat.normalize();
                     m.heading = wish;
@@ -495,6 +576,67 @@ impl MobManager {
                 if wish.length_squared() > 0.0 {
                     m.heading = wish;
                 }
+            }
+            // Water creatures swim; on land they flop about and choke.
+            if m.kind.aquatic() {
+                let wet = |p: DVec3| world.block_at_world(p).is_water();
+                if !wet(m.body.pos + up * 0.3) {
+                    m.body.flying = false;
+                    let flop = m.body.on_ground && rolls[i * 2] < 0.08;
+                    step(world, &mut m.body, &MoveInput { wish: DVec3::ZERO, speed: 0.0, jump: flop, up: false, down: false }, dt);
+                    if m.body.on_ground {
+                        m.hp -= 0.6 * dt as f32;
+                    }
+                    m.amount = 1.0;
+                    m.anim += 12.0 * dt as f32;
+                    continue;
+                }
+                m.body.flying = true;
+                let chase = m.kind == MobKind::Shark && m.alert > 0.0 && targetable && wet(player + up * 0.5);
+                let (mut dir, mut vert) = if chase {
+                    let d = to_player.normalize_or_zero();
+                    (tangent(d, up).normalize_or_zero(), d.dot(up))
+                } else {
+                    let w = if wish.length_squared() > 0.0 { wish } else { m.heading * 0.4 };
+                    (w, (rolls[i * 2 + 1] - 0.5) * 0.6)
+                };
+                // Stay in the water: turn at banks and walls, stay under the surface.
+                let ahead = m.body.pos + dir.normalize_or_zero() * (m.kind.reach() + 0.8) + up * 0.3;
+                if dir.length_squared() > 0.0 && !wet(ahead) {
+                    dir = -dir;
+                    m.wander_dir = -m.wander_dir;
+                }
+                if !wet(m.body.pos + up * 1.0) && vert > 0.0 {
+                    vert = -0.3;
+                }
+                if !wet(m.body.pos - up * 0.4) && vert < 0.0 {
+                    vert = 0.2;
+                }
+                // Dolphins leap out now and then.
+                if m.kind == MobKind::Dolphin && !wet(m.body.pos + up * 1.4) && rolls[i * 2] < 0.004 {
+                    m.body.flying = false;
+                    m.body.vel += up * 7.0 + m.heading * 3.0;
+                }
+                let speed = m.kind.speed() * if chase { 1.5 } else { 1.0 };
+                step(world, &mut m.body, &MoveInput { wish: dir, speed, jump: false, up: false, down: false }, dt);
+                let rise = up * vert * speed * 0.5 * dt;
+                if wet(m.body.pos + rise + up * 0.3) {
+                    m.body.pos += rise;
+                }
+                if chase && dist < 2.0 && m.attack_cd <= 0.0 {
+                    dealt += m.kind.damage();
+                    m.attack_cd = 1.2;
+                }
+                if dir.length_squared() > 0.01 {
+                    m.heading = dir.normalize();
+                }
+                m.amount = 1.0;
+                m.anim += (2.0 + speed as f32) * dt as f32;
+                m.heading = tangent(m.heading, up).normalize_or_zero();
+                if m.heading.length_squared() < 0.5 {
+                    m.heading = tangent(DVec3::Y, up).normalize_or_zero();
+                }
+                continue;
             }
             // Dragons fly: they keep 8–18 blocks above the ground and circle about.
             if m.kind == MobKind::Dragon {
@@ -678,6 +820,10 @@ impl MobKind {
             MobKind::Wolf => vec![[0.55, 0.56, 0.60], [0.40, 0.41, 0.45], [0.85, 0.85, 0.86]],
             MobKind::Slime => vec![[0.45, 0.90, 0.40], [0.30, 0.75, 0.28], [0.65, 1.0, 0.55]],
             MobKind::Dragon => vec![[0.16, 0.55, 0.38], [0.85, 0.75, 0.40], [0.10, 0.30, 0.22]],
+            MobKind::Fish => vec![[0.95, 0.55, 0.20], [0.98, 0.95, 0.90], [0.30, 0.55, 0.85]],
+            MobKind::Squid => vec![[0.28, 0.36, 0.55], [0.20, 0.25, 0.42], [0.08, 0.08, 0.10]],
+            MobKind::Dolphin => vec![[0.55, 0.65, 0.75], [0.85, 0.88, 0.92], [0.40, 0.48, 0.58]],
+            MobKind::Shark => vec![[0.45, 0.50, 0.56], [0.88, 0.88, 0.90], [0.30, 0.33, 0.38]],
         }
     }
 
@@ -691,6 +837,10 @@ impl MobKind {
             MobKind::Chicken => 0.3,
             MobKind::Slime => 0.45,
             MobKind::Dragon => 1.9,
+            MobKind::Fish => 0.25,
+            MobKind::Squid => 0.4,
+            MobKind::Dolphin => 0.9,
+            MobKind::Shark => 1.2,
         }
     }
 
@@ -703,6 +853,10 @@ impl MobKind {
             MobKind::Chicken => 0.6,
             MobKind::Slime => 0.8,
             MobKind::Dragon => 2.2,
+            MobKind::Fish => 0.35,
+            MobKind::Squid => 0.9,
+            MobKind::Dolphin => 0.7,
+            MobKind::Shark => 0.9,
         }
     }
 }

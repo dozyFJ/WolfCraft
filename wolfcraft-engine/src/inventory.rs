@@ -423,6 +423,7 @@ pub fn recipes() -> &'static [Recipe] {
         // «Питомник»: incubators for capsule eggs.
         // Food and armor.
         v.push(r(&[(ids::RAW_MEAT, 1), (ids::COAL, 1)], (ids::COOKED_MEAT, 1), true, "Плавка"));
+        v.push(r(&[(ids::RAW_FISH, 1), (ids::COAL, 1)], (ids::COOKED_FISH, 1), true, "Плавка"));
         let armor_mats: [ItemId; 4] = [ids::STICK, ids::BRONZE_INGOT, ids::IRON_INGOT, ids::DIAMOND];
         let armor_units = [5u8, 8, 7, 4];
         for (mi, mat) in armor_mats.iter().enumerate() {
