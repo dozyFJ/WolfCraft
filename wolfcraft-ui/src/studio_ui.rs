@@ -419,57 +419,15 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
     // Landscape: the window buttons are a column on the right (a sidebar); upright: a row
     // of pills under the ribbon.
     let landscape = screen.width() > screen.height();
-    const SIDE_W: f32 = 92.0;
-    const LEFT_W: f32 = 104.0;
+    const SIDE_W: f32 = 108.0;
     let pills_h: f32 = if landscape { 0.0 } else { 38.0 };
     const PILLS_H: f32 = 38.0;
     // Landscape: three columns — tools on the left (what was the top bar), the scene in the
     // middle, the windows on the right. Upright: the bar on top.
     let top_bar = if landscape { Rect::from_min_size(screen.min, Vec2::new(screen.width(), 0.0)) } else { Rect::from_min_size(screen.min, Vec2::new(screen.width(), MENU_H + RIBBON_H + pills_h)) };
     let side = landscape.then(|| Rect::from_min_max(Pos2::new(screen.right() - SIDE_W, screen.top()), screen.max));
-    let left = landscape.then(|| Rect::from_min_max(screen.min, Pos2::new(screen.left() + LEFT_W, screen.bottom())));
-    st.view_left = left.map(|l| l.right());
-    if let Some(left) = left {
-        covered.push(left);
-        egui::Area::new(Id::new("studio-left")).order(egui::Order::Foreground).fixed_pos(left.min).show(ctx, |ui| {
-            let painter = ui.painter().clone();
-            painter.rect_filled(left, 0.0, p.surface);
-            painter.line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, p.outline));
-            ui.set_width(left.width());
-            ui.set_height(left.height());
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left.shrink2(Vec2::new(4.0, 6.0))), |ui| {
-                egui::ScrollArea::vertical().id_salt("studio-left-scroll").auto_shrink([false, false]).show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
-                        if play_button(ui, p).clicked() {
-                            actions.push(StudioAction::Playtest(true));
-                        }
-                        // The ribbon's tabs, one under another.
-                        for (tb, name) in [(Tab::Home, "Главная"), (Tab::Model, "Модель"), (Tab::Brush, "Кисть"), (Tab::Test, "Тест"), (Tab::View, "Вид")] {
-                            let on = st.tab == tb;
-                            let (r, resp) = ui.allocate_exact_size(Vec2::new(left.width() - 12.0, 24.0), Sense::click());
-                            ui.painter().rect_filled(r, Rounding::same(6.0), if on { p.accent.gamma_multiply(0.25) } else if resp.hovered() { p.surface_hover } else { Color32::TRANSPARENT });
-                            ui.painter().text(r.center(), Align2::CENTER_CENTER, name, FontId::proportional(12.5), if on { p.accent } else { p.text_muted });
-                            if resp.clicked() {
-                                st.tab = tb;
-                                if tb == Tab::Brush {
-                                    st.brush_on = true;
-                                }
-                            }
-                        }
-                        sep(ui, p);
-                        ribbon(ui, icons, p, st, view, &mut actions);
-                        sep(ui, p);
-                        for (ic, name, act) in [(icon::DOWNLOAD, "Сохранить", StudioAction::Save), (icon::GLOBE, "Сервер", StudioAction::Publish), (icon::EXIT, "Выйти", StudioAction::Exit)] {
-                            if tool(ui, icons, p, ic, name, false).clicked() {
-                                actions.push(act);
-                            }
-                        }
-                    });
-                });
-            });
-        });
-    }
+    let left: Option<Rect> = None;
+    st.view_left = None;
     covered.push(top_bar);
     if !landscape {
     egui::Area::new(Id::new("studio-top-p")).order(egui::Order::Foreground).fixed_pos(top_bar.min).show(ctx, |ui| {
@@ -581,20 +539,51 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
             painter.line_segment([side.left_top(), side.left_bottom()], Stroke::new(1.0_f32, p.outline));
             ui.set_width(side.width());
             ui.set_height(side.height());
-            let n = DOCK_TABS.len() as f32;
-            let item_h = ((side.height() - 8.0) / n).min(66.0);
-            for (i, (name, ic)) in DOCK_TABS.iter().enumerate() {
-                let r = Rect::from_min_size(Pos2::new(side.left() + 6.0, side.top() + 4.0 + item_h * i as f32), Vec2::new(side.width() - 12.0, item_h - 4.0));
-                let resp = ui.interact(r, Id::new(("dock-side", i)), Sense::click());
-                let on = st.dock_open && st.dock_tab == i;
-                painter.rect_filled(r, Rounding::same(10.0), if on { p.accent } else if resp.hovered() || resp.is_pointer_button_down_on() { p.surface_hover } else { p.surface });
-                let col = if on { p.on_accent } else { p.text };
-                icons.paint(&painter, Rect::from_center_size(Pos2::new(r.center().x, r.top() + r.height() * 0.38), Vec2::splat(20.0)), *ic, col);
-                painter.text(Pos2::new(r.center().x, r.bottom() - r.height() * 0.2), Align2::CENTER_CENTER, *name, FontId::proportional(11.0), col);
-                if resp.clicked() {
-                    toggle_dock(st, i);
-                }
-            }
+            // Everything in one column that scrolls: ▶, the ribbon's tabs and tools, save /
+            // server / exit, then the windows.
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(side.shrink2(Vec2::new(4.0, 6.0))), |ui| {
+                egui::ScrollArea::vertical().id_salt("studio-side-scroll").auto_shrink([false, false]).show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        if play_button(ui, p).clicked() {
+                            actions.push(StudioAction::Playtest(true));
+                        }
+                        // The ribbon's tabs, one under another.
+                        for (tb, name) in [(Tab::Home, "Главная"), (Tab::Model, "Модель"), (Tab::Brush, "Кисть"), (Tab::Test, "Тест"), (Tab::View, "Вид")] {
+                            let on = st.tab == tb;
+                            let (r, resp) = ui.allocate_exact_size(Vec2::new(side.width() - 12.0, 24.0), Sense::click());
+                            ui.painter().rect_filled(r, Rounding::same(6.0), if on { p.accent.gamma_multiply(0.25) } else if resp.hovered() { p.surface_hover } else { Color32::TRANSPARENT });
+                            ui.painter().text(r.center(), Align2::CENTER_CENTER, name, FontId::proportional(12.5), if on { p.accent } else { p.text_muted });
+                            if resp.clicked() {
+                                st.tab = tb;
+                                if tb == Tab::Brush {
+                                    st.brush_on = true;
+                                }
+                            }
+                        }
+                        sep(ui, p);
+                        ribbon(ui, icons, p, st, view, &mut actions);
+                        sep(ui, p);
+                        for (ic, name, act) in [(icon::DOWNLOAD, "Сохранить", StudioAction::Save), (icon::GLOBE, "Сервер", StudioAction::Publish), (icon::EXIT, "Выйти", StudioAction::Exit)] {
+                            if tool(ui, icons, p, ic, name, false).clicked() {
+                                actions.push(act);
+                            }
+                        }
+                        sep(ui, p);
+                        for (i, (name, ic)) in DOCK_TABS.iter().enumerate() {
+                            let (r, resp) = ui.allocate_exact_size(Vec2::new(side.width() - 12.0, 52.0), Sense::click());
+                            let on = st.dock_open && st.dock_tab == i;
+                            ui.painter().rect_filled(r, Rounding::same(10.0), if on { p.accent } else if resp.hovered() || resp.is_pointer_button_down_on() { p.surface_hover } else { p.surface });
+                            let col = if on { p.on_accent } else { p.text };
+                            icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 18.0), Vec2::splat(20.0)), *ic, col);
+                            ui.painter().text(Pos2::new(r.center().x, r.bottom() - 11.0), Align2::CENTER_CENTER, *name, FontId::proportional(11.0), col);
+                            if resp.clicked() {
+                                toggle_dock(st, i);
+                            }
+                        }
+                    });
+                });
+            });
         });
     }
 
