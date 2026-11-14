@@ -1686,11 +1686,12 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
             add_shield(&mut v, &frame, f, pivot, angle);
         }
         if side > 0.0 && pose.glint {
-            // Enchanted: a red shimmer runs along the held item.
+            // Enchanted: like the icon in the hotbar — the item keeps its own colours with a
+            // faint red tint, and a narrow bright band sweeps along it now and then.
             for q in v[held_start..].iter_mut() {
                 let p = Vec3::from(q.pos);
-                let wave = 0.5 + 0.5 * (pose.time * 4.0 - (p.x + p.y + p.z) * 18.0).sin();
-                let k = 0.25 + 0.35 * wave;
+                let wave = 0.5 + 0.5 * (pose.time * 3.0 - (p.x + p.y + p.z) * 9.0).sin();
+                let k = 0.06 + 0.30 * wave.powi(8);
                 q.color = [q.color[0] + (1.0 - q.color[0]) * k, q.color[1] * (1.0 - k * 0.75), q.color[2] * (1.0 - k * 0.75)];
             }
         }
@@ -2058,7 +2059,9 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         let u = (d * sx + e * sy).normalize();
         let w = (d * sy - e * sx).normalize();
         let n = u.cross(w).normalize();
-        let s = 0.56;
+        // Same proportions as the hotbar icon, not a giant: the tool fills about a quarter of
+        // the view's height, like in Minecraft.
+        let s = 0.46;
         // The grip pixel (12.5, 12.5 from the top-left) sits in the fist.
         let o = f + Vec3::new(-0.01, 0.03, 0.02) - u * (s * 0.78) - w * (s * 0.22);
         add_voxel_icon(v, frame, &px, o, u, w, n, s, pivot, angle);
