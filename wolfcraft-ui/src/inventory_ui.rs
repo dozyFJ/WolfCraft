@@ -632,7 +632,10 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                             result.close = true;
                         } else {
                             state.search_open = !state.search_open;
-                            if !state.search_open {
+                            if state.search_open {
+                                // Focus the field (and bring up the keyboard) right away.
+                                ui.ctx().data_mut(|d| d.insert_temp(Id::new("inv-search-fresh"), true));
+                            } else {
                                 state.search.clear();
                             }
                         }
@@ -641,7 +644,7 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 ui.add_space(6.0);
                 for (i, name) in CREATIVE_TABS.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
-                    let sel = state.tab == i;
+                    let sel = state.tab == i && !state.search_open;
                     hud_button(ui, rect, sel, resp.hovered() || resp.is_pointer_button_down_on(), p);
                     let inner = rect.shrink(tab * 0.18);
                     match i {
@@ -656,6 +659,9 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                     }
                     if resp.clicked() {
                         state.tab = i;
+                        // A category closes the search tab.
+                        state.search_open = false;
+                        state.search.clear();
                     }
                     resp.on_hover_text(*name);
                 }
@@ -710,9 +716,13 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
     let _ = &result;
     // ---- Tab title + search ----
     ui.horizontal(|ui| {
-        if state.search_open && state.tab != BACKPACK_TAB {
-            // The magnifier opened the search: it takes the title's place, full width.
-            text_input(ui, icons, &mut state.search, "Поиск…", grid_w - 14.0, Some(icon::SEARCH));
+        if state.search_open {
+            // The magnifier is a tab of its own: a search over every item and block.
+            let r = text_input(ui, icons, &mut state.search, "Поиск по всем предметам…", grid_w - 14.0, Some(icon::SEARCH));
+            let fresh = ui.ctx().data_mut(|d| std::mem::take(d.get_temp_mut_or_default::<bool>(Id::new("inv-search-fresh"))));
+            if fresh {
+                r.request_focus();
+            }
         } else {
             ui.label(egui::RichText::new(CREATIVE_TABS[state.tab]).font(bold_font(16.0)).color(p.text));
         }
@@ -723,7 +733,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
     // is more to scroll), so no empty band stays under the hotbar.
     let _ = rows;
     let grid_h = (ui.available_height() - 10.0 - cell - 6.0).max(cell);
-    if state.tab == BACKPACK_TAB {
+    if state.tab == BACKPACK_TAB && !state.search_open {
         // The survival inventory inside the creative one: armor, second hand, 2x2 crafting,
         // backpack and hotbar (scrolls on small screens).
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h + 10.0 + cell), Sense::hover());
@@ -734,12 +744,12 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             }
         });
         return;
-    } else if CREATIVE_TABS[state.tab] == "Конструктор" {
+    } else if CREATIVE_TABS[state.tab] == "Конструктор" && !state.search_open {
         egui::ScrollArea::vertical().id_salt("creative-constructor").max_height(grid_h).show(ui, |ui| {
             if let Some(message) = construction_panel(ui, icons, state, inv, true) { result.crafted = Some(message); }
         });
     } else {
-        let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| (in_tab(*id, state.tab) || !state.search.trim().is_empty()) && matches_search(*id, &state.search)).collect();
+        let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| (state.search_open || in_tab(*id, state.tab) || !state.search.trim().is_empty()) && matches_search(*id, &state.search)).collect();
         // Sorted: by category (in "Все"), then full blocks, shaped blocks (stairs, slabs,
         // doors…), plants, items and tools, alphabetically inside each group so related
         // things sit together (all oak, all diamond…).

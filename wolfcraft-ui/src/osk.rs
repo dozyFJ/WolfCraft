@@ -22,6 +22,13 @@ pub struct OskState {
     rect: Option<Rect>,
     layout: Layout,
     shift: bool,
+    /// Caps lock (shift tapped twice quickly).
+    caps: bool,
+    /// When shift was last tapped (for the double tap).
+    shift_at: f64,
+    /// How long backspace has been held, and the repeat clock.
+    back_held: f32,
+    back_rep: f32,
     /// Key events for the next frame.
     pub pending: Vec<Event>,
 }
@@ -46,6 +53,9 @@ enum K {
     Lang,
     Space,
     Enter,
+    Left,
+    Right,
+    Hide,
 }
 
 pub fn draw(ctx: &Context, st: &mut OskState) {
@@ -68,7 +78,9 @@ pub fn draw(ctx: &Context, st: &mut OskState) {
         ctx.data_mut(|d| d.insert_temp(Id::new("osk-height"), 0.0f32));
         return;
     }
-    let h = (screen.height() * 0.46).clamp(170.0, 300.0);
+    // Lying phone: a lower keyboard, so the field above stays visible.
+    let landscape = screen.width() > screen.height();
+    let h = if landscape { (screen.height() * 0.50).clamp(150.0, 230.0) } else { (screen.height() * 0.40).clamp(190.0, 300.0) };
     let rect = Rect::from_min_max(Pos2::new(screen.left(), screen.bottom() - h), screen.max);
     st.rect = Some(rect);
     ctx.data_mut(|d| d.insert_temp(Id::new("osk-height"), h));
@@ -79,6 +91,10 @@ pub fn draw(ctx: &Context, st: &mut OskState) {
         Layout::Sym => SYM,
     };
     let mut pressed: Vec<K> = Vec::new();
+    let mut back_down = false;
+    let press_now = ctx.input(|i| i.pointer.any_pressed());
+    let shift_on = st.shift || st.caps;
+    let caps = st.caps;
     egui::Area::new(Id::new("osk")).order(Order::Tooltip).fixed_pos(rect.min).interactable(true).show(ctx, |ui| {
         let painter = ui.painter().clone();
         painter.rect_filled(rect, 0.0, Color32::from_rgb(24, 26, 32));
@@ -93,8 +109,11 @@ pub fn draw(ctx: &Context, st: &mut OskState) {
         // Unit width: the longest letter row fills the width.
         let longest = rows.iter().map(|r| r.chars().count()).max().unwrap_or(10).max(10) as f32;
         let unit = (inner_w - gap * (longest - 1.0)) / longest;
+        let font = (row_h * 0.42).clamp(14.0, 22.0);
         let mut key = |ui: &mut egui::Ui, r: Rect, label: &str, k: K, accent: bool, id: String| {
-            let resp = ui.interact(r, Id::new(id), Sense::click());
+            // A key reacts the moment the finger lands (not on release): fast typing does not
+            // lose letters, and a finger sliding off the key does not cancel it.
+            let resp = ui.interact(r.expand(gap / 2.0), Id::new(id), Sense::click());
             let down = resp.is_pointer_button_down_on();
             let fill = if down {
                 Color32::from_rgb(38, 198, 218)
@@ -103,9 +122,20 @@ pub fn draw(ctx: &Context, st: &mut OskState) {
             } else {
                 Color32::from_rgb(44, 47, 56)
             };
-            ui.painter().rect_filled(r, 6.0, fill);
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional((row_h * 0.42).clamp(14.0, 22.0)), Color32::WHITE);
-            if resp.clicked() {
+            ui.painter().rect_filled(r, 7.0, fill);
+            ui.painter().text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(font), Color32::WHITE);
+            if matches!(k, K::Back) && down {
+                back_down = true;
+            }
+            if down && matches!(k, K::Ch(_)) {
+                // The pressed letter pops up above the finger, big.
+                let bubble = Rect::from_center_size(r.center_top() - Vec2::new(0.0, r.height() * 0.7), Vec2::new(r.width().max(34.0) * 1.3, r.height() * 1.25));
+                let layer = ui.ctx().layer_painter(egui::LayerId::new(Order::Tooltip, Id::new("osk-bubble")));
+                layer.rect_filled(bubble, 9.0, Color32::from_rgb(60, 66, 82));
+                layer.rect_stroke(bubble, 9.0, Stroke::new(1.5_f32, Color32::from_rgb(38, 198, 218)));
+                layer.text(bubble.center(), Align2::CENTER_CENTER, label, FontId::proportional(font * 1.5), Color32::WHITE);
+            }
+            if down && press_now {
                 pressed.push(k);
             }
         };
@@ -117,15 +147,15 @@ pub fn draw(ctx: &Context, st: &mut OskState) {
             let side = if ri == 2 { unit * 1.4 } else { 0.0 };
             let row_w = n * unit + (n - 1.0) * gap;
             if ri == 2 {
-                key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(side, row_h)), if st.shift { "AA" } else { "Aa" }, K::Shift, true, "osk-shift".into());
+                key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(side, row_h)), if caps { "⇪" } else if shift_on { "⇧" } else { "⇧" }, K::Shift, shift_on, "osk-shift".into());
                 let back = Rect::from_min_size(Pos2::new(rect.right() - pad - side, y), Vec2::new(side, row_h));
-                key(ui, back, "Стереть", K::Back, true, "osk-back".into());
+                key(ui, back, "⌫", K::Back, true, "osk-back".into());
                 x = rect.left() + pad + side + gap + ((inner_w - 2.0 * (side + gap)) - row_w) / 2.0;
             } else {
                 x += (inner_w - row_w) / 2.0;
             }
             for (ci, ch) in row.chars().enumerate() {
-                let c = if st.shift { ch.to_uppercase().next().unwrap_or(ch) } else { ch };
+                let c = if shift_on { ch.to_uppercase().next().unwrap_or(ch) } else { ch };
                 let r = Rect::from_min_size(Pos2::new(x + ci as f32 * (unit + gap), y), Vec2::new(unit, row_h));
                 key(ui, r, &c.to_string(), K::Ch(c), false, format!("osk-{ri}-{ci}"));
             }
@@ -133,15 +163,22 @@ pub fn draw(ctx: &Context, st: &mut OskState) {
         // Bottom row: symbols, language, space, enter.
         let y = rect.top() + pad + 3.0 * (row_h + gap);
         let mut x = rect.left() + pad;
-        let w_mode = unit * 1.6;
+        let w_mode = unit * 1.3;
+        let w_small = unit;
+        key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w_small, row_h)), "⌄", K::Hide, true, "osk-hide".into());
+        x += w_small + gap;
         key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w_mode, row_h)), if st.layout == Layout::Sym { "АБВ" } else { "?123" }, K::Mode, true, "osk-mode".into());
         x += w_mode + gap;
         key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w_mode, row_h)), if st.layout == Layout::En { "RU" } else { "EN" }, K::Lang, true, "osk-lang".into());
         x += w_mode + gap;
-        let w_enter = unit * 2.2;
-        let w_space = rect.right() - pad - x - w_enter - gap;
+        let w_enter = unit * 1.8;
+        let w_space = rect.right() - pad - x - w_enter - 3.0 * gap - 2.0 * w_small;
         key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w_space, row_h)), "пробел", K::Space, false, "osk-space".into());
         x += w_space + gap;
+        key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w_small, row_h)), "‹", K::Left, true, "osk-left".into());
+        x += w_small + gap;
+        key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w_small, row_h)), "›", K::Right, true, "osk-right".into());
+        x += w_small + gap;
         key(ui, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w_enter, row_h)), "Ввод", K::Enter, true, "osk-enter".into());
     });
 
@@ -150,11 +187,40 @@ pub fn draw(ctx: &Context, st: &mut OskState) {
         match k {
             K::Ch(c) => {
                 st.pending.push(Event::Text(c.to_string()));
-                if st.shift {
+                if st.shift && !st.caps {
                     st.shift = false;
                 }
             }
-            K::Shift => st.shift = !st.shift,
+            K::Shift => {
+                // One tap: the next letter big. Two quick taps: caps lock. A tap in caps: off.
+                let now = ctx.input(|i| i.time);
+                if st.caps {
+                    st.caps = false;
+                    st.shift = false;
+                } else if st.shift && now - st.shift_at < 0.4 {
+                    st.caps = true;
+                } else {
+                    st.shift = !st.shift;
+                }
+                st.shift_at = now;
+            }
+            K::Left => {
+                st.pending.push(key_ev(Key::ArrowLeft, true));
+                st.pending.push(key_ev(Key::ArrowLeft, false));
+            }
+            K::Right => {
+                st.pending.push(key_ev(Key::ArrowRight, true));
+                st.pending.push(key_ev(Key::ArrowRight, false));
+            }
+            K::Hide => {
+                // Down with the keyboard: the field lets go of the focus.
+                if let Some(id) = st.target.take() {
+                    ctx.memory_mut(|m| m.surrender_focus(id));
+                }
+                st.rect = None;
+                ctx.data_mut(|d| d.insert_temp(Id::new("osk-height"), 0.0f32));
+                return;
+            }
             K::Back => {
                 st.pending.push(key_ev(Key::Backspace, true));
                 st.pending.push(key_ev(Key::Backspace, false));
@@ -167,6 +233,24 @@ pub fn draw(ctx: &Context, st: &mut OskState) {
                 st.pending.push(key_ev(Key::Enter, false));
             }
         }
+    }
+    // Holding backspace: after a moment it keeps erasing, faster and faster.
+    if back_down {
+        let dt = ctx.input(|i| i.stable_dt).min(0.1);
+        st.back_held += dt;
+        if st.back_held > 0.45 {
+            st.back_rep += dt;
+            let every = if st.back_held > 1.5 { 0.03 } else { 0.07 };
+            while st.back_rep >= every {
+                st.back_rep -= every;
+                st.pending.push(key_ev(Key::Backspace, true));
+                st.pending.push(key_ev(Key::Backspace, false));
+            }
+        }
+        ctx.request_repaint();
+    } else {
+        st.back_held = 0.0;
+        st.back_rep = 0.0;
     }
     // Keep the field focused while typing on our keys.
     if on_keys {

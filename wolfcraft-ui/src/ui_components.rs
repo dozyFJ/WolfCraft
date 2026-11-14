@@ -360,13 +360,13 @@ pub fn full_screen(ctx: &egui::Context, id: &str, add: impl FnOnce(&mut Ui)) -> 
     let rect = Rect::from_min_max(screen.min + Vec2::new(ins[0] + 6.0, ins[1] + 6.0), screen.max - Vec2::new(ins[2] + 6.0, ins[3] + 6.0));
     egui::Area::new(Id::new(id).with("full")).order(egui::Order::Foreground).fixed_pos(screen.min).fade_in(false).show(ctx, |ui| {
         let (bg, _) = ui.allocate_exact_size(screen.size(), Sense::click());
-        ui.painter().rect_filled(bg, 0.0, Color32::from_black_alpha(140));
+        // Out to the real edges of the phone (past the safe margins).
+        ui.painter().with_clip_rect(bg.expand(200.0)).rect_filled(bg.expand(200.0), 0.0, Color32::from_black_alpha(170));
     });
     egui::Area::new(Id::new(id).with("full-body")).order(egui::Order::Tooltip).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
-        // The HUD's look: a see-through dark glass panel with rounded corners and a thin light
-        // edge, like the top bar's islands.
+        // No panel of its own: the screen is dimmed and the HUD-style tiles float on it.
         let _ = p;
-        Frame::none().fill(Color32::from_rgba_unmultiplied(14, 16, 22, 215)).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.5_f32, Color32::from_white_alpha(45))).inner_margin(Margin::same(10.0)).show(ui, |ui| {
+        Frame::none().inner_margin(Margin::same(10.0)).show(ui, |ui| {
             ui.set_width(rect.width() - 20.0);
             ui.set_height(rect.height() - 20.0);
             add(ui);
