@@ -10,6 +10,9 @@ use wolfcraft_engine::cubesphere::ChunkKey;
 use wolfcraft_engine::chunk_manager::ChunkManager;
 use wolfcraft_engine::config::{GameMode, WorldConfig};
 use wolfcraft_engine::interaction::{Interaction, InteractionEvent};
+
+/// Height above the baseplate the studio camera and players can rise to (no space there).
+pub const BASEPLATE_CEILING: f64 = 160.0;
 use wolfcraft_engine::physics::{Hit, Voxels, raycast};
 use wolfcraft_engine::planet::{Planet, smoothstep};
 use wolfcraft_engine::player::{Controls, Player, clock_string, local_sun};
@@ -460,6 +463,18 @@ impl GameSession {
                 let step = left.min(1.0 / 30.0);
                 self.player.update(&self.chunks, &controls, self.cfg.difficulty, step);
                 left -= step;
+            }
+        }
+        // Server places (baseplate): a flat world with a sky ceiling — no flying off into space.
+        if self.cfg.world_type == wolfcraft_engine::config::WorldType::Baseplate && !self.hell {
+            let top = self.planet.radius + BASEPLATE_CEILING;
+            if radial(self.player.body.pos) > top {
+                self.player.body.pos = along(wolfcraft_engine::cubesphere::col_dir(self.player.body.pos), top);
+                let up = self.player.up();
+                let v = self.player.body.vel.dot(up);
+                if v > 0.0 {
+                    self.player.body.vel -= up * v;
+                }
             }
         }
 
