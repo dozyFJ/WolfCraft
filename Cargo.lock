@@ -4011,13 +4011,23 @@ name = "wolfserver"
 version = "0.3.0"
 dependencies = [
  "getrandom 0.3.4",
+ "jni 0.21.1",
  "mlua",
  "serde",
  "serde_json",
  "toml",
+ "winit",
  "wolfcraft-common",
  "wolfcraft-engine",
  "wolfcraft-net",
+]
+
+[[package]]
+name = "wolfstudio"
+version = "0.3.0"
+dependencies = [
+ "winit",
+ "wolfcraft-game",
 ]
 
 [[package]]
@@ -4230,4 +4240,3 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
-

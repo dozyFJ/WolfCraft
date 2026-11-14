@@ -12,11 +12,12 @@ import android.net.wifi.WifiManager
 import android.os.IBinder
 import android.os.PowerManager
 import java.io.File
-import java.util.concurrent.TimeUnit
+import com.wolfcraft.ota.OtaManager
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
- * Foreground service that owns the WolfServer process (the same server as on a PC, built for
- * Android and shipped as lib/arm64-v8a/libwolfserver.so).
+ * Foreground service hosting the signed, replaceable WolfServer JNI core.
  */
 class ServerService : Service() {
 
@@ -33,7 +34,8 @@ class ServerService : Service() {
         private const val CHANNEL = "server"
         private const val NOTIF_ID = 1
 
-        @Volatile var proc: Process? = null
+        @Volatile var coreThread: Thread? = null
+        @Volatile private var coreLoaded = false
         @Volatile var status: String = "Остановлен"
         @Volatile var world: String = ""
         /** Folder of the running world (a place), for the studio list. */
@@ -42,7 +44,7 @@ class ServerService : Service() {
         @Volatile var token: String = ""
         private val lines = ArrayDeque<String>()
 
-        fun running() = proc?.isAlive == true
+        fun running() = coreThread?.isAlive == true
 
         fun addLog(line: String) {
             synchronized(lines) {
@@ -79,11 +81,12 @@ class ServerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         latestRequest = startId
+        OtaManager.registerPid(this, "main")
         startForeground(NOTIF_ID, notification(if (running()) status else "Запуск…"))
         if (intent?.action == ACTION_STOP) {
             lifecycle.execute {
-                stopServer()
-                if (latestRequest == startId) {
+                val stopped = stopServer()
+                if (stopped && latestRequest == startId) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf(startId)
                 }
@@ -102,70 +105,80 @@ class ServerService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification(s))
     }
 
+    private external fun nativeRun(args: Array<String>): String?
+    private external fun nativeStop()
+
     private fun startServer(name: String, creative: Boolean, worldId: String? = null) {
-        val exe = File(applicationInfo.nativeLibraryDir, "libwolfserver.so")
-        if (!exe.exists()) {
-            setStatus("Ошибка: в приложении нет сервера (libwolfserver.so)")
-            return
-        }
         val data = File(filesDir, "wolfserver").apply { mkdirs() }
         token = java.util.UUID.randomUUID().toString().replace("-", "")
-        val cmd = mutableListOf(exe.absolutePath, "--name", name, "--port", PORT.toString(), "--no-browser", "--data", data.absolutePath, "--token", token)
-        // Stored worlds retain their profile; new quick servers are ordinary planets.
-        if (worldId == null) cmd += "--planet"
-        cmd += if (creative) "--creative" else "--survival"
-        if (worldId != null) { cmd += "--world"; cmd += worldId }
+        OtaManager.prefs(this).edit().putString("server_token", token).apply()
+        val args = mutableListOf("--name", name, "--port", PORT.toString(), "--no-browser", "--data", data.absolutePath, "--token", token)
+        if (worldId == null) args += "--planet"
+        args += if (creative) "--creative" else "--survival"
+        if (worldId != null) { args += "--world"; args += worldId }
         try {
-            if (wakeLock == null) {
-                wakeLock = getSystemService(PowerManager::class.java)
-                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wolfserver:run").apply { acquire() }
+            if (!coreLoaded) {
+                OtaManager.loadServer(this)
+                coreLoaded = true
             }
+            if (wakeLock == null) wakeLock = getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wolfserver:run").apply { acquire() }
             if (wifiLock == null) {
                 @Suppress("DEPRECATION")
                 wifiLock = (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
                     .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "wolfserver:wifi").apply { acquire() }
             }
-            // The world argument may follow --token, so never log the raw command line.
             addLog("▶ WolfServer · $name · ${if (worldId == null) "обычный мир" else "мир $worldId"} · порт $PORT")
-            val pb = ProcessBuilder(cmd).directory(data).redirectErrorStream(true)
-            pb.environment()["HOME"] = data.absolutePath
-            pb.environment()["TMPDIR"] = cacheDir.absolutePath
-            val p = pb.start()
-            proc = p
             world = name
             Companion.worldId = worldId ?: ""
-            setStatus("Работает: мир «$name», порт $PORT")
-            // Server output into the log; when it ends, say how.
-            Thread {
-                try {
-                    p.inputStream.bufferedReader().forEachLine { addLog(it) }
-                } catch (_: Exception) {
-                }
-                val code = try { p.waitFor() } catch (_: Exception) { -1 }
-                if (proc === p) {
-                    proc = null
-                    setStatus(if (code == 0 || code == 143) "Остановлен" else "Сервер завершился (код $code), смотри логи")
+            setStatus("Запуск мира «$name»…")
+            val thread = Thread({
+                val error = try { nativeRun(args.toTypedArray()).also { if (it == null || !it.startsWith("Ошибка ядра")) OtaManager.markHealthy(this, "studio", "server") } } catch (e: Throwable) { e.message ?: "Ошибка ядра" }
+                if (coreThread === Thread.currentThread()) {
+                    coreThread = null
+                    if (error != null) addLog("Ошибка ядра: $error") else addLog("■ остановлен")
+                    setStatus(if (error == null) "Остановлен" else "Ошибка: $error")
                     releaseLocks()
                 }
-            }.start()
-        } catch (e: Exception) {
-            addLog("error: $e")
-            setStatus("Ошибка: ${e.message}")
+            }, "wolfserver-core")
+            coreThread = thread
+            thread.start()
+            Thread({
+                repeat(60) {
+                    if (!thread.isAlive) return@Thread
+                    try {
+                        val c = URL("http://127.0.0.1:$PANEL_PORT/api/status?t=$token").openConnection() as HttpURLConnection
+                        c.connectTimeout = 500; c.readTimeout = 500
+                        val ok = c.responseCode == 200
+                        c.inputStream.close(); c.disconnect()
+                        if (ok && thread.isAlive && coreThread === thread) {
+                            OtaManager.markHealthy(this, "studio", "server")
+                            setStatus("Работает: мир «$name», порт $PORT")
+                            return@Thread
+                        }
+                    } catch (_: Exception) { }
+                    Thread.sleep(250)
+                }
+            }, "wolfserver-ready").start()
+        } catch (e: Throwable) {
+            addLog("Ошибка загрузки ядра: ${e.message}")
+            setStatus("Ядро не загружено. Перезапусти приложение.")
+            OtaManager.rollback(this, "studio", "Ошибка загрузки сервера: ${e.javaClass.simpleName}")
             releaseLocks()
         }
     }
 
-    private fun stopServer() {
+    private fun stopServer(): Boolean {
         setStatus("Остановка…")
-        val p = proc
-        proc = null
-        p?.let {
-            it.destroy() // SIGTERM: the server saves and exits
-            if (!it.waitFor(8, TimeUnit.SECONDS)) it.destroyForcibly()
+        val thread = coreThread
+        if (thread != null && coreLoaded) {
+            try { nativeStop() } catch (e: Throwable) { addLog("Остановка ядра: ${e.message}") }
+            thread.join(8000)
+            if (thread.isAlive) { setStatus("Сервер ещё сохраняется…"); return false }
         }
-        addLog("■ остановлен")
         releaseLocks()
         status = "Остановлен"
+        return true
     }
 
     private fun releaseLocks() {
@@ -177,7 +190,8 @@ class ServerService : Service() {
 
     override fun onDestroy() {
         lifecycle.shutdown()
-        releaseLocks()
+        if (running() && coreLoaded) Thread { try { nativeStop() } catch (_: Throwable) { } }.start()
+        else releaseLocks()
         super.onDestroy()
     }
 
@@ -200,4 +214,5 @@ class ServerService : Service() {
             .build()
     }
 }
+
 

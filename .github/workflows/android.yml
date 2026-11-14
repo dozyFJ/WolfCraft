@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [mobile-explosives]
+    branches: [mobile-explosives, codex/ota-launchers]
   workflow_dispatch:
 
 permissions:
@@ -60,16 +60,47 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs WolfCraft.apk
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 WolfCraft.apk | tail -1
 
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build the one-time APK shell and signed native OTA
+        run: |
+          mkdir -p game-pocket/app/src/main/jniLibs/arm64-v8a
+          python3 - <<'PYCODE'
+          import pathlib, zipfile
+          target=pathlib.Path('game-pocket/app/src/main/jniLibs/arm64-v8a')
+          with zipfile.ZipFile('WolfCraft.apk') as z:
+              for name in z.namelist():
+                  if name.startswith('lib/arm64-v8a/') and name.endswith('.so'):
+                      (target/pathlib.Path(name).name).write_bytes(z.read(name))
+          PYCODE
+          export OTA_SHELL_HASH="$(python3 tools/shell_hash.py game)"
+          export OTA_SAVE_FORMAT="$(sed -n 's/.*pub const SAVE_FORMAT: u32 = \([0-9]*\).*/\1/p' wolfcraft-common/src/version.rs)"
+          gradle -p game-pocket --no-daemon assembleRelease
+          cp game-pocket/app/build/outputs/apk/release/app-release.apk WolfCraft.apk
+          python3 tools/check_shell_apk.py game WolfCraft.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs WolfCraft.apk
+          python3 tools/build_ota.py --kind game --input game-pocket/app/src/main/jniLibs/arm64-v8a --output game-ota --build "$GITHUB_SHA" --sequence "$GITHUB_RUN_ID" --keystore ci/wolfcraft-release.keystore --shell-hash "$OTA_SHELL_HASH" --nm "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+
       - uses: actions/upload-artifact@v4
         with:
           name: WolfCraft-apk
-          path: WolfCraft.apk
+          path: |
+            WolfCraft.apk
+            game-ota/*
 
       - name: Publish "latest" release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete test -y --cleanup-tag || true
-          gh release create test WolfCraft.apk --prerelease --target "$GITHUB_SHA" \
-            --title "WolfCraft ТЕСТ: взрывчатка (сборка #${{ github.run_number }})" \
-            --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай WolfCraft.apk ниже."
+          tag=test
+          if [ "$GITHUB_REF_NAME" = "codex/ota-launchers" ]; then tag=ota-bootstrap; fi
+          gh release delete "$tag" -y --cleanup-tag || true
+          gh release create "$tag" WolfCraft.apk --prerelease --target "$GITHUB_SHA" \
+            --title "WolfCraft · OTA-загрузчик (#${{ github.run_number }})" \
+            --notes "Один раз установи этот APK. Дальше совместимые ядра обновляются кнопкой в лаунчере. ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."
+          gh release delete game-ota -y --cleanup-tag || true
+          gh release create game-ota game-ota/* --prerelease --target "$GITHUB_SHA" \
+            --title "WolfCraft native OTA ${GITHUB_SHA::7}" \
+            --notes "Подписанное ядро arm64 для APK-загрузчика. Обновляется внутри приложения."
