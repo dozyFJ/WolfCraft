@@ -483,7 +483,7 @@ impl Settings {
         s
     }
 
-    /// Moves old settings to the current default look once (the player can switch back).
+    /// Migrate old settings and retire legacy built-in packs.
     pub fn migrate(&mut self) {
         // 2: the low-poly cartoon look (shader "Мульт", no relief, wind, water, grading and the
         // cartoon light on) is the game's own style.
@@ -505,6 +505,13 @@ impl Settings {
             self.texture_pack = "builtin:toon16".into();
             self.apply_shader_preset(4);
         }
+        self.texture_pack = match self.texture_pack.as_str() {
+            "builtin:16" => "builtin:toon16",
+            "builtin:32" => "builtin:toon32",
+            "builtin:64" => "builtin:toon",
+            "builtin:128" => "builtin:toon128",
+            _ => &self.texture_pack,
+        }.to_string();
         self.style_version = STYLE_VERSION;
     }
     pub fn save(&self, data_dir: &Path) {
@@ -526,13 +533,23 @@ mod tests {
         s.migrate();
         assert_eq!(s.texture_pack, "builtin:toon16");
         assert!(s.fx_toon && s.shaders == 4);
-        // A player who picks classic again keeps it.
+        // Retired classic selections migrate even in otherwise current settings.
         s.texture_pack = "builtin:16".into();
         s.apply_shader_preset(1);
         let mut back: Settings = toml::from_str(&toml::to_string(&s).unwrap()).unwrap();
         back.migrate();
-        assert_eq!(back.texture_pack, "builtin:16");
+        assert_eq!(back.texture_pack, "builtin:toon16");
         assert!(!back.fx_toon);
+    }
+
+    #[test]
+    fn legacy_packs_keep_resolution_and_custom_packs_survive() {
+        for (old, new) in [("builtin:16","builtin:toon16"),("builtin:32","builtin:toon32"),("builtin:64","builtin:toon"),("builtin:128","builtin:toon128"),("user:MyPack.zip","user:MyPack.zip")] {
+            let mut s = Settings::default();
+            s.texture_pack = old.into();
+            s.migrate();
+            assert_eq!(s.texture_pack, new);
+        }
     }
 
     #[test]

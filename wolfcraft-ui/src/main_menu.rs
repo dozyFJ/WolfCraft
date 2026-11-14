@@ -999,6 +999,7 @@ impl CreateWorldState {
 }
 
 pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldState, preview: Option<&TextureHandle>, version: &str, random_seed: u64) -> MenuAction {
+    if ctx.screen_rect().width() < 720.0 { return create_world_phone(ctx, icons, st, preview, version, random_seed); }
     let p = palette(ctx);
     let mut action = MenuAction::None;
     if top_bar(ctx, icons, "Создать мир", version, true) {
@@ -1065,14 +1066,22 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
     // Settings of the chosen section on the right.
     egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
         egui::ScrollArea::both().id_salt("cw-form").auto_shrink([false, false]).show(ui, |ui| {
+            create_world_form(ui, icons, st, random_seed);
+        });
+    });
+    action
+}
+
+
+fn create_world_form(ui: &mut Ui, icons: &GuiIcons, st: &mut CreateWorldState, random_seed: u64) {
             ui.spacing_mut().item_spacing.y = 6.0;
             if st.tab == 0 {
                 stacked_row(ui, "Название мира", None, |ui| {
-                    text_input(ui, icons, &mut st.name, "Новый мир", 300.0, Some(icon::EDIT));
+                    text_input(ui, icons, &mut st.name, "Новый мир", ui.available_width().min(300.0), Some(icon::EDIT));
                 });
                 ui.add_space(10.0);
                 stacked_row(ui, "Seed", Some("Пусто — случайный. Можно ввести число или текст"), |ui| {
-                    if text_input(ui, icons, &mut st.seed_text, "Случайный", 250.0, Some(icon::GLOBE)).changed() {
+                    if text_input(ui, icons, &mut st.seed_text, "Случайный", (ui.available_width() - 48.0).clamp(80.0, 250.0), Some(icon::GLOBE)).changed() {
                         st.preview_dirty = true;
                     }
                     if square_button(ui, icons, icon::REFRESH, false).clicked() {
@@ -1126,6 +1135,54 @@ pub fn create_world(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldS
                     toggle_switch(ui, &mut st.structures);
                 });
             }
+
+}
+
+fn create_world_phone(ctx: &egui::Context, icons: &GuiIcons, st: &mut CreateWorldState, preview: Option<&TextureHandle>, version: &str, random_seed: u64) -> MenuAction {
+    let p = palette(ctx);
+    let mut action = MenuAction::None;
+    egui::TopBottomPanel::top("create-phone-header")
+        .frame(Frame::none().fill(p.surface).inner_margin(Margin::same(12.0)))
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Создать мир").font(bold_font(21.0)).color(p.text));
+                ui.label(egui::RichText::new(format!("v{version}")).size(11.0).color(p.text_muted));
+            });
+            ui.horizontal(|ui| {
+                let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                for (i, label) in [(0usize, "Основное"), (1, "Планета")] {
+                    if pill_button(ui, icons, None, label, if st.tab == i { ButtonKind::Primary } else { ButtonKind::Secondary }, half, true).clicked() { st.tab = i; }
+                }
+            });
+        });
+    egui::TopBottomPanel::bottom("create-phone-actions")
+        .frame(Frame::none().fill(p.surface).inner_margin(Margin::same(12.0)))
+        .show(ctx, |ui| {
+            if let Some(error) = &st.error { ui.label(egui::RichText::new(error).color(p.warn)); }
+            ui.horizontal(|ui| {
+                let create_w = (ui.available_width() - 108.0).max(140.0);
+                if pill_button(ui, icons, Some(icon::ARROW_LEFT), "Назад", ButtonKind::Secondary, 100.0, true).clicked() { action = MenuAction::Back; }
+                if pill_button(ui, icons, Some(icon::CUBE), "Создать мир", ButtonKind::Primary, create_w, true).clicked() {
+                    match st.to_config(random_seed) {
+                        Ok(cfg) => { st.error = None; action = MenuAction::CreateWorld(Box::new(cfg)); }
+                        Err(error) => st.error = Some(error),
+                    }
+                }
+            });
+        });
+    egui::CentralPanel::default().frame(Frame::none().fill(p.bg).inner_margin(Margin::same(16.0))).show(ctx, |ui| {
+        egui::ScrollArea::vertical().id_salt("create-phone-body").auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let globe = ui.available_width().min(200.0);
+            ui.vertical_centered(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(globe), Sense::hover());
+                ui.painter().rect_filled(r, Rounding::same(12.0), Color32::from_rgb(6, 9, 18));
+                if let Some(tex) = preview { ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE); }
+                else { ui.painter().text(r.center(), Align2::CENTER_CENTER, "Генерация…", FontId::proportional(15.0), p.text_muted); }
+                ui.label(egui::RichText::new(format!("Seed: {}", st.effective_seed() as i64)).size(12.0).color(p.text_muted));
+            });
+            ui.add_space(12.0);
+            create_world_form(ui, icons, st, random_seed);
         });
     });
     action
@@ -1206,6 +1263,7 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
     for pack in packs.list {
         let sel = s.texture_pack == pack.id;
         let resp = row_card(ui, sel, |ui| {
+            ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
                 icons.paint(ui.painter(), r, if sel { icon::CHECK } else if pack.path.is_some() { icon::FOLDER } else { icon::CUBE }, if sel { p.accent } else { p.text_muted });
@@ -1847,6 +1905,36 @@ mod tests {
                 pause_menu(c, &icons, &PauseInfo { world_name: "Мир".into(), mode: "Выживание".into(), clock: "12:00".into(), biome: "Лес".into(), seed: 5, coords: [1.0, 2.0, 3.0], camera: "Вид от первого лица".into() });
             });
         }
+    }
+
+
+    #[test]
+    fn portrait_create_world_has_top_tabs_and_visible_working_create_button() {
+        let (ctx, icons) = setup();
+        let mut st = CreateWorldState::default();
+        st.name = "Мобильный мир".into();
+        let render = |st: &mut CreateWorldState, events| {
+            let mut action = MenuAction::None;
+            let out = ctx.run(egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(390.0, 844.0))),
+                events, ..Default::default()
+            }, |ctx| { action = create_world(ctx, &icons, st, None, "0.3.0", 42); });
+            (out, action)
+        };
+        render(&mut st, vec![]);
+        let (out, _) = render(&mut st, vec![]);
+        let text = |label: &str, below: f32| out.shapes.iter().find_map(|s| match &s.shape {
+            egui::epaint::Shape::Text(t) if t.galley.job.text == label && t.pos.y > below => Some(t.galley.rect.translate(t.pos.to_vec2())), _ => None
+        }).expect(label);
+        let base = text("Основное", 0.0);
+        let planet = text("Планета", 0.0);
+        assert!((base.center().y - planet.center().y).abs() < 2.0);
+        let create = text("Создать мир", 700.0);
+        assert!(create.right() <= 390.0 && create.bottom() < 844.0);
+        let at = create.center();
+        render(&mut st, vec![egui::Event::PointerMoved(at), egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+        let (_, action) = render(&mut st, vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+        assert!(matches!(action, MenuAction::CreateWorld(ref cfg) if cfg.name == "Мобильный мир"));
     }
 
     #[test]

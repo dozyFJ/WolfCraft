@@ -100,6 +100,20 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, id: &str, options: &[(T, &str
     let font = FontId::proportional(14.0);
     let widths: Vec<f32> = options.iter().map(|(_, l)| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::WHITE).size().x + 26.0).collect();
     let total: f32 = widths.iter().sum::<f32>() + 8.0;
+    if total > ui.available_width() {
+        return ui.push_id(id, |ui| {
+            let mut changed = false;
+            ui.horizontal_wrapped(|ui| {
+                for (option, label) in options {
+                    let on = *value == *option;
+                    let button = egui::Button::new(egui::RichText::new(*label).font(font.clone()).color(if on { Color32::WHITE } else { p.text }))
+                        .fill(if on { p.accent } else { p.surface_hi }).rounding(Rounding::same(10.0)).min_size(Vec2::new(0.0, 34.0));
+                    if ui.add(button).clicked() && !on { *value = *option; changed = true; }
+                }
+            });
+            changed
+        }).inner;
+    }
     let (rect, _) = ui.allocate_exact_size(Vec2::new(total, 34.0), Sense::hover());
     ui.painter().rect_filled(rect, Rounding::same(10.0), p.surface_hi);
     ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(1.0_f32, p.outline));
@@ -265,7 +279,7 @@ pub fn stacked_row(ui: &mut Ui, label: &str, hint: Option<&str>, add: impl FnOnc
         ui.label(egui::RichText::new(h).font(FontId::proportional(12.5)).color(p.text_muted));
     }
     ui.add_space(4.0);
-    ui.horizontal(add);
+    ui.horizontal_wrapped(add);
 }
 
 /// Horizontal progress pill with a centred label.
