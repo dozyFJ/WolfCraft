@@ -146,8 +146,7 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(8), dp(8), dp(10))
         }
         // The console moved into «Сервер» (its own tabs: console, settings, plugins…).
-        // One app: play, build, host. Главная · Редактор · Сервер · Профиль.
-        val items = listOf("⌂" to "Главная", "✎" to "Редактор", "▶" to "Сервер", "☺" to "Профиль")
+        val items = listOf("▦" to "Дашборд", "▶" to "Сервер", "⚙" to "Настройки")
         items.forEachIndexed { i, (icon, name) ->
             val b = TextView(this).apply {
                 this.text = "$icon\n$name"
@@ -215,10 +214,9 @@ class MainActivity : Activity() {
         lastRender = renderKey()
         content.removeAllViews()
         when (tab) {
-            0 -> renderMain()
-            1 -> renderStudio()
-            2 -> renderServerTab()
-            else -> renderProfile()
+            0 -> renderStudio()
+            1 -> renderServerTab()
+            else -> renderSettings()
         }
     }
 
@@ -488,7 +486,7 @@ class MainActivity : Activity() {
 
     /** Дашборд: servers (ordinary worlds) and places (own games, like Roblox Studio) on two tabs. */
     private fun renderStudio() {
-        header("Редактор")
+        header("Дашборд")
         val list = places()
         val placesList = list.filter { it.isPlace }
         val worldsList = list.filter { !it.isPlace }
@@ -891,78 +889,8 @@ class MainActivity : Activity() {
         })
     }
 
-    /** Главная: play the game, jump to the editor or the server. */
-    private fun renderMain() {
-        header("WolfCraft")
-        content.addView(card {
-            background = rounded(Color.rgb(28, 52, 110), 20)
-            addView(label("Играть", 24f, Color.WHITE, true))
-            addView(label("Свои миры, сервера друзей по коду, мини-игры. Ник: ${nickname()}", 14f, Color.rgb(200, 212, 240)).apply { setPadding(0, dp(6), 0, dp(10)) })
-            addView(button("▶  Играть", 1) { playGame() })
-        })
-        content.addView(card {
-            addView(caption("Создавать"))
-            addView(label("Плейсы и сервера в редакторе — как в Roblox Studio, только на телефоне.", 14f, cMuted).apply { setPadding(0, 0, 0, dp(8)) })
-            addView(button("✎  Открыть редактор") { selectTab(1) })
-        })
-        content.addView(card {
-            addView(caption("Мой сервер"))
-            val on = ServerService.running()
-            addView(label(if (on) "Работает: «${ServerService.world}»" else "Остановлен", 15f, if (on) cGreen else cMuted, true))
-            if (on) codes().firstOrNull()?.let { addView(row("Код входа", it)) }
-            addView(button(if (on) "Управлять сервером" else "Запустить сервер") { selectTab(2) })
-        })
-    }
-
-    /** Starts the game itself (the engine in game mode, its own worlds and menus). */
-    private fun playGame() {
-        try {
-            java.io.File(filesDir, "open_game.txt").writeText("1")
-            java.io.File(filesDir, "open_place.txt").delete()
-            java.io.File(filesDir, "open_server.txt").delete()
-            startActivity(Intent(this, android.app.NativeActivity::class.java))
-        } catch (e: Exception) {
-            Toast.makeText(this, "Игра не запустилась: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    // The game's own settings file (shared by the game and the editor).
-    private fun settingsFile() = java.io.File(filesDir, "settings.toml")
-
-    private fun nickname(): String = try {
-        settingsFile().readLines().firstOrNull { it.trim().startsWith("nickname") }?.substringAfter("=")?.trim()?.trim('"')?.ifBlank { null } ?: "Игрок"
-    } catch (_: Exception) { "Игрок" }
-
-    private fun setNickname(n: String) {
-        val clean = n.trim().replace("\"", "").replace("\\", "").take(16)
-        val f = settingsFile()
-        val lines = (if (f.exists()) f.readLines() else emptyList()).toMutableList()
-        val i = lines.indexOfFirst { it.trim().startsWith("nickname") }
-        val line = "nickname = \"$clean\""
-        // Top-level keys go before any [section].
-        if (i >= 0) lines[i] = line else lines.add(0, line)
-        f.writeText(lines.joinToString("\n") + "\n")
-    }
-
-    /** Профиль: nickname (used in the game, the editor and on servers) and app settings. */
-    private fun renderProfile() {
-        header("Профиль")
-        content.addView(card {
-            addView(caption("Игрок"))
-            val nick = input("Ник", nickname())
-            addView(nick)
-            addView(button("Сохранить ник", 1) {
-                setNickname(nick.text.toString())
-                nick.clearFocus()
-                Toast.makeText(this@MainActivity, "Ник: ${nickname()}", Toast.LENGTH_SHORT).show()
-            })
-            addView(label("Скин выбирается в игре: Играть → Профиль.", 13f, cMuted).apply { setPadding(0, dp(8), 0, 0) })
-        })
-        renderSettings(false)
-    }
-
-    private fun renderSettings(withHeader: Boolean = true) {
-        if (withHeader) header("Настройки")
+    private fun renderSettings() {
+        header("Настройки")
         content.addView(card {
             addView(caption("Работа в фоне"))
             val ok = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
