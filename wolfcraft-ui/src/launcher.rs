@@ -18,7 +18,21 @@ enum Tab {
     Home,
     Settings,
     Studio,
+    Server,
     Skins,
+}
+
+/// The app's data folder (the «Сервер» page keeps its files under `server/` there).
+static DATA_DIR: std::sync::RwLock<Option<std::path::PathBuf>> = std::sync::RwLock::new(None);
+
+pub fn set_data_dir(dir: std::path::PathBuf) {
+    if let Ok(mut d) = DATA_DIR.write() {
+        *d = Some(dir);
+    }
+}
+
+fn data_dir() -> Option<std::path::PathBuf> {
+    DATA_DIR.read().ok().and_then(|d| d.clone())
 }
 
 static STUDIO_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -48,7 +62,8 @@ fn tabs() -> &'static [(Tab, &'static str)] {
     if is_studio_app() {
         &[(Tab::Studio, "Проекты"), (Tab::Settings, "Настройки")]
     } else {
-        &[(Tab::Home, "Главная"), (Tab::Skins, "Профиль"), (Tab::Settings, "Настройки")]
+        // One app: play, build and host — settings are under the gear on top and in Профиль.
+        &[(Tab::Home, "Главная"), (Tab::Studio, "Редактор"), (Tab::Server, "Сервер"), (Tab::Skins, "Профиль")]
     }
 }
 
@@ -108,41 +123,102 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     let tabs = tabs();
     tab = tab.min(tabs.len() - 1);
 
-    // ---- Toolbar ----
+    // ---- Full-bleed background ----
+    // The phone's safe margins (and the strip under the status bar) are outside egui's
+    // screen; paint the page and bar colours out to the real edges so nothing looks cut.
+    {
+        let screen = ctx.screen_rect();
+        let full = screen.expand(160.0);
+        let bg = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(full);
+        bg.rect_filled(full, 0.0, p.bg);
+        bg.rect_filled(Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + TOOLBAR_H)), 0.0, p.surface);
+        bg.rect_filled(Rect::from_min_max(Pos2::new(full.left(), screen.bottom() - NAV_H), full.max), 0.0, p.surface);
+        bg.line_segment([Pos2::new(full.left(), screen.top() + TOOLBAR_H), Pos2::new(full.right(), screen.top() + TOOLBAR_H)], Stroke::new(1.0_f32, p.outline));
+        bg.line_segment([Pos2::new(full.left(), screen.bottom() - NAV_H), Pos2::new(full.right(), screen.bottom() - NAV_H)], Stroke::new(1.0_f32, p.outline));
+    }
+
+    // ---- Toolbar: each page has its own (title and its own buttons) ----
+    let page = tabs[tab].0;
     egui::TopBottomPanel::top("launcher-toolbar")
         .exact_height(TOOLBAR_H)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(16.0, 8.0)))
+        .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(16.0, 8.0)))
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::hover());
-                icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
-                // Upright phone: room only for the name and the two buttons.
-                let wide = ui.ctx().screen_rect().width() > 480.0;
-                if wide {
-                    ui.label(egui::RichText::new(tabs[tab].1).size(14.0).color(p.text_muted));
+                if page == Tab::Home {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::hover());
+                    icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
+                } else {
+                    let title = match page {
+                        Tab::Studio => "Редактор",
+                        Tab::Server => "Сервер",
+                        Tab::Skins => "Профиль",
+                        Tab::Settings => "Настройки",
+                        Tab::Home => "",
+                    };
+                    ui.label(egui::RichText::new(title).font(bold_font(21.0)).color(p.text));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    let update = if wide {
-                        crate::ui_components::pill_button(ui, icons, Some(icon::REFRESH), "Обновить", crate::ui_components::ButtonKind::Secondary, 0.0, true)
-                    } else { round_icon(ui, icons, &p, icon::REFRESH).on_hover_text("Обновить приложение") };
-                    if update.clicked() { action = MenuAction::CheckUpdates; }
-                    if round_icon(ui, icons, &p, icon::GEAR).clicked() {
-                        action = MenuAction::OpenSettings;
+                    if matches!(page, Tab::Home | Tab::Skins | Tab::Settings) {
+                        let update = if wide {
+                            pill_button(ui, icons, Some(icon::REFRESH), "Обновить", ButtonKind::Secondary, 0.0, true)
+                        } else {
+                            round_icon(ui, icons, &p, icon::REFRESH).on_hover_text("Обновить приложение")
+                        };
+                        if update.clicked() { action = MenuAction::CheckUpdates; }
                     }
-                    if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).clicked() {
-                        action = MenuAction::ToggleTheme;
-                    }
-                    if wide {
-                        let (r, _) = ui.allocate_exact_size(Vec2::new(64.0, 26.0), Sense::hover());
-                        ui.painter().rect_stroke(r, Rounding::same(13.0), Stroke::new(1.5_f32, p.accent));
-                        ui.painter().text(r.center(), Align2::CENTER_CENTER, format!("v{version}"), FontId::proportional(12.0), p.accent);
+                    match page {
+                        Tab::Home => {
+                            if round_icon(ui, icons, &p, icon::GEAR).clicked() {
+                                action = MenuAction::OpenSettings;
+                            }
+                            if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).clicked() {
+                                action = MenuAction::ToggleTheme;
+                            }
+                            let (r, _) = ui.allocate_exact_size(Vec2::new(64.0, 26.0), Sense::hover());
+                            ui.painter().rect_stroke(r, Rounding::same(13.0), Stroke::new(1.5_f32, p.accent));
+                            ui.painter().text(r.center(), Align2::CENTER_CENTER, format!("v{version}"), FontId::proportional(12.0), p.accent);
+                        }
+                        Tab::Studio => {
+                            // «+ Новый» opens the new-place form on the page.
+                            if pill_button(ui, icons, Some(icon::PLUS), "Новый", ButtonKind::Primary, 110.0, true).clicked() {
+                                let n = worlds.iter().filter(|w| w.cfg.studio_project || is_studio_app()).count() + 1;
+                                ui.ctx().data_mut(|d| d.insert_temp(Id::new("studio-new-form"), Some((format!("Сервер {n}"), 0u8))));
+                            }
+                        }
+                        Tab::Server => {
+                            if round_icon(ui, icons, &p, icon::SEARCH).clicked() {
+                                action = MenuAction::OpenNetwork;
+                            }
+                            if round_icon(ui, icons, &p, icon::PLUS).clicked() {
+                                action = MenuAction::HostServer(None);
+                            }
+                        }
+                        Tab::Skins | Tab::Settings => {
+                            if round_icon(ui, icons, &p, icon::GEAR).clicked() {
+                                action = MenuAction::OpenSettings;
+                            }
+                            if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).clicked() {
+                                action = MenuAction::ToggleTheme;
+                            }
+                        }
                     }
                 });
             });
         });
+
+    // «Сервер»: its own tabs right under the toolbar.
+    let mut server_tab = 0;
+    if page == Tab::Server {
+        egui::TopBottomPanel::top("launcher-server-tabs")
+            .exact_height(46.0)
+            .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(10.0, 4.0)).stroke(Stroke::new(1.0_f32, p.outline)))
+            .show(ctx, |ui| {
+                server_tab = crate::server_page::tab_bar(ui, &p);
+            });
+    }
 
     // ---- Bottom navigation ----
     egui::TopBottomPanel::bottom("launcher-nav")
@@ -201,7 +277,17 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 Tab::Home => home(ui, icons, &p, planet, &mut action),
                 Tab::Settings => launcher_settings(ui, icons, &p, version, dark, &mut action),
                 Tab::Studio => studio(ui, icons, &p, version, worlds, &mut action),
-                Tab::Skins => profile(ui, icons, &p, skin, nickname, worlds, &mut action),
+                Tab::Server => match (server_tab, data_dir()) {
+                    (0, _) | (_, None) => server(ui, icons, &p, worlds, &mut action),
+                    (t, Some(d)) => crate::server_page::page(ui, icons, &p, &d, t, worlds),
+                },
+                Tab::Skins => {
+                    profile(ui, icons, &p, skin, nickname, worlds, &mut action);
+                    if !is_studio_app() {
+                        ui.add_space(6.0);
+                        launcher_settings(ui, icons, &p, version, dark, &mut action);
+                    }
+                }
             }
             ui.add_space(8.0);
         });
@@ -231,6 +317,7 @@ fn nav_icon(ui: &Ui, icons: &GuiIcons, t: Tab, r: Rect, col: Color32) {
         }
         Tab::Settings => icons.paint(pt, r, icon::GEAR, col),
         Tab::Studio => icons.paint(pt, r, icon::HAMMER, col),
+        Tab::Server => icons.paint(pt, r, icon::GLOBE, col),
         Tab::Skins => {
             // A small figure: head and shoulders.
             let c = r.center();
@@ -440,6 +527,75 @@ fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
 /// Studio home, like Roblox Studio: servers are places. Create one here (name and template),
 /// it appears in the list; tap it to open the editor scene; «Запустить» publishes it as a
 /// running server. Worlds of WolfServer in the network can be edited live too.
+/// Сервер: host one of your worlds (or a place) for friends, or join / edit someone's server.
+fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu::WorldEntry], action: &mut MenuAction) {
+    let addr_id = Id::new("launcher-server-addr");
+    let mut addr: String = ui.ctx().data(|d| d.get_temp(addr_id)).unwrap_or_default();
+    let card = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
+        Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui);
+        });
+    };
+    // Join or edit by code / address (the page title is in the toolbar).
+    card(ui, &mut |ui| {
+        ui.label(egui::RichText::new("ВОЙТИ НА СЕРВЕР").size(11.5).color(p.text_muted));
+        let w = ui.available_width();
+        crate::ui_components::text_input(ui, icons, &mut addr, "Код K7QX2 или адрес 192.168.0.10", w, Some(icon::GLOBE));
+        ui.add_space(6.0);
+        let ready = !addr.trim().is_empty();
+        ui.horizontal(|ui| {
+            let half = (w - 8.0) / 2.0;
+            if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, half, ready).clicked() {
+                *action = MenuAction::JoinServer(addr.trim().to_string());
+            }
+            if pill_button(ui, icons, Some(icon::HAMMER), "Редактировать", ButtonKind::Secondary, half, ready).clicked() {
+                *action = MenuAction::EditServerInStudio(addr.trim().to_string());
+            }
+        });
+        ui.add_space(4.0);
+        if pill_button(ui, icons, Some(icon::SEARCH), "Сервера рядом (Wi‑Fi)", ButtonKind::Secondary, w, true).clicked() {
+            *action = MenuAction::OpenNetwork;
+        }
+    });
+    // Host: a world or a place, opened for friends (a code appears in the chat).
+    card(ui, &mut |ui| {
+        ui.label(egui::RichText::new("ЗАПУСТИТЬ СВОЙ СЕРВЕР").size(11.5).color(p.text_muted));
+        ui.label(egui::RichText::new("Выберите мир или плейс — в чате появится код входа для друзей.").size(13.0).color(p.text_muted));
+        ui.add_space(4.0);
+        for w in worlds.iter().take(40) {
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
+                match &w.preview {
+                    Some(t) => {
+                        ui.painter().image(t.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                    }
+                    None => {
+                        ui.painter().rect_filled(r, Rounding::same(8.0), p.bg);
+                    }
+                }
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(15.0)).color(p.text));
+                    ui.label(egui::RichText::new(if w.cfg.studio_project { "Плейс" } else { "Мир" }).size(12.0).color(p.text_muted));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if pill_button(ui, icons, Some(icon::GLOBE), "Запустить", ButtonKind::Primary, 120.0, true).clicked() {
+                        *action = MenuAction::HostServer(Some(w.cfg.id.clone()));
+                    }
+                });
+            });
+            ui.add_space(4.0);
+        }
+        if worlds.is_empty() {
+            ui.label(egui::RichText::new("Пока нет миров — создайте мир в «Главной» или плейс в «Редакторе».").size(13.0).color(p.text_muted));
+        }
+        if pill_button(ui, icons, Some(icon::PLUS), "Новый сетевой мир", ButtonKind::Secondary, ui.available_width(), true).clicked() {
+            *action = MenuAction::HostServer(None);
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(addr_id, addr));
+}
+
 fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[crate::main_menu::WorldEntry], action: &mut MenuAction) {
     let _ = version;
     let form_id = Id::new("studio-new-form");
@@ -447,14 +603,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     // In the WolfStudio app every world is a server (its own folder, apart from game worlds).
     let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project || is_studio_app()).collect();
 
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Мои серверы").font(bold_font(22.0)).color(p.text));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if form.is_none() && pill_button(ui, icons, Some(icon::PLUS), "Новый", ButtonKind::Primary, 120.0, true).clicked() {
-                form = Some((format!("Сервер {}", projects.len() + 1), 0));
-            }
-        });
-    });
+    // «+ Новый» is in the page's toolbar.
 
     // Creating a server: name and template, right here in the menu (not in the editor).
     if let Some((name, template)) = &mut form {
@@ -725,4 +874,5 @@ mod tests {
         assert_eq!(action, MenuAction::LaunchVersion("0.2.1".into()));
     }
 }
+
 
