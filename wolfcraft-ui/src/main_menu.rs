@@ -165,7 +165,7 @@ pub fn splash_screen(ctx:&egui::Context,icons:&GuiIcons,progress:f32,version:&st
 fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
     let rect = ui.max_rect();
     let painter = ui.painter();
-    painter.rect_filled(rect, Rounding::same(10.0), Color32::from_rgb(2, 7, 13));
+    painter.rect_filled(rect, Rounding::ZERO, Color32::from_rgb(2, 7, 13));
     // Twinkling stars at fixed pseudo-random spots.
     let t = ui.input(|i| i.time) as f32;
     for i in 0..140u32 {
@@ -186,7 +186,7 @@ fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
     }
     // Soft shade so the menu stays readable, darker from the top down to the middle where the
     // logo and title sit.
-    painter.rect_filled(rect, Rounding::same(10.0), p.bg.gamma_multiply(if p.dark { 0.25 } else { 0.15 }));
+    painter.rect_filled(rect, Rounding::ZERO, p.bg.gamma_multiply(if p.dark { 0.25 } else { 0.15 }));
     let mut m = egui::Mesh::default();
     let dark = Color32::from_black_alpha(200);
     let clear = Color32::from_black_alpha(0);

@@ -103,9 +103,18 @@ pub struct TouchState {
     pub voice_held: bool,
     /// Microphone icon: 0 off (crossed out), 1 on, 2 sending now. Set by the game.
     pub voice_state: u8,
+    /// A studio place in «Играть» (Roblox style): its GUI is the place's own (scripts); of
+    /// the game's controls only the stick, «Прыжок» and the top bar (chat, voice, menu) stay.
+    pub place_play: bool,
 }
 
-pub const STICK_R: f32 = 110.0;
+/// Joystick throw radius (physical pixels): grows with the screen like the buttons.
+fn stick_r(size: (u32, u32)) -> f32 {
+    95.0 * unit(size)
+}
+
+/// Deflection under this fraction counts as none (a resting thumb does not drift).
+const STICK_DEAD: f32 = 0.12;
 
 /// Pixel size of the controls scales with the screen height.
 fn unit(size: (u32, u32)) -> f32 {
@@ -148,7 +157,8 @@ fn button_rect(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>) -
 }
 
 /// Buttons of the top "island", left to right.
-const ISLAND: [Btn; 5] = [Btn::Chat, Btn::Voice, Btn::Camera, Btn::Tab, Btn::Pause];
+/// Chat, voice and the menu first: a place's «Играть» keeps only those three.
+const ISLAND: [Btn; 5] = [Btn::Chat, Btn::Voice, Btn::Pause, Btn::Camera, Btn::Tab];
 
 /// Island: (left x, centre y, slot width) in physical pixels, centred at the top.
 fn island_layout(size: (u32, u32)) -> (f32, f32, f32) {
@@ -170,6 +180,22 @@ fn hit(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>, p: (f32, 
 }
 
 impl TouchState {
+    /// Top-bar buttons shown now.
+    fn island(&self) -> &'static [Btn] {
+        if self.place_play { &ISLAND[..3] } else { &ISLAND }
+    }
+
+    /// Whether a round button is shown (and can be pressed) now.
+    fn shown(&self, b: Btn) -> bool {
+        if ISLAND.contains(&b) {
+            return !self.studio && self.island().contains(&b);
+        }
+        if self.place_play {
+            return b == Btn::Jump;
+        }
+        b != Btn::Fly || self.creative
+    }
+
     /// Handles a touch event while playing. Returns actions to apply.
     pub fn event(&mut self, t: &Touch, size: (u32, u32)) -> Vec<TouchAction> {
         self.seen = true;
@@ -180,7 +206,6 @@ impl TouchState {
                 let (w, h) = (size.0 as f32, size.1 as f32);
                 let on_hotbar = self.hotbar.is_some_and(|(l, t, r, bt)| p.0 >= l - 6.0 && p.0 <= r + 6.0 && p.1 >= t - 6.0 && p.1 <= bt + 6.0);
                 let inside = |r: Option<(f32, f32, f32, f32)>| r.is_some_and(|(l, t, rr, b)| p.0 >= l - 4.0 && p.0 <= rr + 4.0 && p.1 >= t - 4.0 && p.1 <= b + 4.0);
-                let island = |b: &Btn| matches!(b, Btn::Pause | Btn::Chat | Btn::Voice | Btn::Camera | Btn::Tab);
                 let role = if self.blocked.iter().any(|r| inside(Some(*r))) {
                     // A studio panel is there: not a game touch (an inert role so it does nothing).
                     Role::Hotbar
@@ -196,7 +221,7 @@ impl TouchState {
                     let slot = (((p.0 - l) / (r - l).max(1.0)) * 9.0).floor().clamp(0.0, 8.0) as usize;
                     out.push(TouchAction::HotbarSet(slot));
                     Role::Slot
-                } else if let Some(b) = BUTTONS.iter().copied().filter(|b| !(self.studio && island(b)) && (*b != Btn::Fly || self.creative)).find(|b| hit(*b, size, self.hotbar, p)) {
+                } else if let Some(b) = BUTTONS.iter().copied().filter(|b| self.shown(*b)).find(|b| hit(*b, size, self.hotbar, p)) {
                     match b {
                         Btn::Jump => {
                             // Held: jump on the ground, rise while flying. Flight itself has
@@ -242,9 +267,23 @@ impl TouchState {
                 if let Some(f) = self.fingers.iter_mut().find(|f| f.id == t.id) {
                     match f.role {
                         Role::Joystick => {
-                            let (dx, dy) = ((p.0 - f.start.0) / STICK_R, (p.1 - f.start.1) / STICK_R);
-                            let len = dx.hypot(dy).max(1.0);
-                            self.move_vec = (dx / len, -dy / len);
+                            // The base follows a thumb that slides past the rim (no dead end),
+                            // a small dead zone keeps a resting thumb still, and the response
+                            // is smooth from there to full speed.
+                            let rr = stick_r(size);
+                            let (mut dx, mut dy) = (p.0 - f.start.0, p.1 - f.start.1);
+                            let d = dx.hypot(dy);
+                            if d > rr {
+                                let k = (d - rr) / d;
+                                f.start.0 += dx * k;
+                                f.start.1 += dy * k;
+                                dx = p.0 - f.start.0;
+                                dy = p.1 - f.start.1;
+                            }
+                            let n = (dx.hypot(dy) / rr).min(1.0);
+                            let m = ((n - STICK_DEAD) / (1.0 - STICK_DEAD)).max(0.0);
+                            let len = dx.hypot(dy).max(1e-3);
+                            self.move_vec = (dx / len * m, -dy / len * m);
                         }
                         Role::Look => {
                             self.look.0 += p.0 - f.last.0;
@@ -354,28 +393,34 @@ impl TouchState {
         let line = Stroke::new(2.0, Color32::from_rgba_unmultiplied(220, 230, 240, 150));
         let u = unit(size);
         // Joystick: base where the thumb went down, otherwise a hint in the lower left.
-        let (bx, by, kx, ky) = match self.fingers.iter().find(|f| f.role == Role::Joystick) {
-            Some(f) => (f.start.0, f.start.1, f.start.0 + self.move_vec.0 * STICK_R, f.start.1 - self.move_vec.1 * STICK_R),
+        let rr = stick_r(size);
+        let held = self.fingers.iter().find(|f| f.role == Role::Joystick);
+        let (bx, by, kx, ky) = match held {
+            // The knob sits under the thumb.
+            Some(f) => (f.start.0, f.start.1, f.last.0, f.last.1),
             None => {
-                let (x, y) = (170.0 * u, size.1 as f32 - 170.0 * u);
+                let (x, y) = (150.0 * u, size.1 as f32 - 150.0 * u);
                 (x, y, x, y)
             }
         };
-        painter.circle(pt(bx, by), STICK_R * 0.9 / ppp, fill, line);
-        painter.circle(pt(kx, ky), 40.0 * u / ppp, Color32::from_rgba_unmultiplied(230, 240, 250, 150), line);
+        // Faint while waiting, clear while in use.
+        let a = if held.is_some() { 1.0 } else { 0.55 };
+        let fade = |c: Color32| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (c.a() as f32 * a) as u8);
+        painter.circle(pt(bx, by), rr / ppp, fade(fill), Stroke::new(2.0, fade(line.color)));
+        painter.circle(pt(kx, ky), rr * 0.42 / ppp, fade(Color32::from_rgba_unmultiplied(230, 240, 250, 160)), Stroke::new(2.0, fade(line.color)));
         // Top island: one rounded pill holding chat, camera, debug and pause.
         if !self.studio {
             let (x0, y, step) = island_layout(size);
             let hh = 34.0 * u;
-            let rect = egui::Rect::from_min_max(pt(x0 - 8.0 * u, y - hh), pt(x0 + step * ISLAND.len() as f32 + 8.0 * u, y + hh));
+            let rect = egui::Rect::from_min_max(pt(x0 - 8.0 * u, y - hh), pt(x0 + step * self.island().len() as f32 + 8.0 * u, y + hh));
             painter.rect(rect, hh / ppp, Color32::from_rgba_unmultiplied(12, 14, 20, 200), Stroke::new(1.5, Color32::from_rgba_unmultiplied(220, 230, 240, 70)));
-            for i in 1..ISLAND.len() {
+            for i in 1..self.island().len() {
                 let x = x0 + step * i as f32;
                 painter.line_segment([pt(x, y - hh * 0.45), pt(x, y + hh * 0.45)], Stroke::new(1.0, Color32::from_rgba_unmultiplied(220, 230, 240, 50)));
             }
             let white = Color32::from_rgba_unmultiplied(240, 245, 250, 235);
             let st = Stroke::new(2.4, white);
-            for b in ISLAND {
+            for &b in self.island() {
                 let (cx, cy, r) = button_rect(b, size, self.hotbar);
                 let c = pt(cx, cy);
                 let k = r * 0.5 / ppp;
@@ -429,7 +474,7 @@ impl TouchState {
             }
         }
         for b in BUTTONS {
-            if ISLAND.contains(&b) || (b == Btn::Fly && !self.creative) {
+            if ISLAND.contains(&b) || !self.shown(b) {
                 continue;
             }
             let (cx, cy, r) = button_rect(b, size, self.hotbar);
