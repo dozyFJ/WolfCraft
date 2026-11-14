@@ -771,6 +771,7 @@ impl App {
                 (b != wolfcraft_engine::block::Block::Air).then(|| (b as u16, b.info().name.to_string(), [c.i, c.j, c.k]))
             }),
             script_running: self.lua.is_some(),
+            models: s.we.models.iter().map(|m| (m.name.clone(), m.cells.len())).collect(),
             compact: cfg!(target_os = "android") || self.touch.seen,
             now: 0.0,
         })
@@ -937,6 +938,15 @@ impl App {
                     st.paint.open = false;
                 }
                 status(self, &format!("Из текстуры построено блоков: {n}"));
+            }
+            StudioAction::Model(i, cmd) => {
+                if let Some(s) = &mut self.session {
+                    crate::worldedit::load_models(s);
+                    let msg = crate::worldedit::model_cmd(s, i, cmd);
+                    match msg {
+                        Ok(t) | Err(t) => status(self, &t),
+                    }
+                }
             }
             StudioAction::SpawnHere => {
                 if let Some(s) = &mut self.session {
@@ -1586,6 +1596,7 @@ impl App {
                         }
                     }
                     if self.studio.is_some() {
+                        crate::worldedit::load_models(s);
                         if let Some(h) = s.hit {
                             self.studio_target = Some(h.cell);
                         }
