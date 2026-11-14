@@ -618,6 +618,29 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
     idx.extend(tri.iter().map(|t| base + t));
 }
 
+/// A small box in cell `c`, `lo`..`hi` in block units (x, y = up, z). The texture is pinned to
+/// the cell (a thin post shows the matching thin strip of the picture), seen from both sides.
+#[allow(clippy::too_many_arguments)]
+fn push_box(inp: &MeshInput, verts: &mut Vec<Vertex>, idx: &mut Vec<u32>, c: [i32; 3], lo: [f32; 3], hi: [f32; 3], tile: u32, light: [f32; 2]) {
+    for f in 0..6usize {
+        let a = f / 2;
+        let positive = f % 2 == 0;
+        let (ua, va) = ((a + 1) % 3, (a + 2) % 3);
+        let base = verts.len() as u32;
+        for (cu, cv) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)] {
+            let mut g = [0.0f32; 3];
+            g[a] = if positive { hi[a] } else { lo[a] };
+            g[ua] = if cu == 1 { hi[ua] } else { lo[ua] };
+            g[va] = if cv == 1 { hi[va] } else { lo[va] };
+            let pos = inp.to_local(c[0] as f32 + g[0], c[1] as f32 + g[1], c[2] as f32 + g[2]);
+            let (tu, tv) = if a == 1 { (g[ua], g[va]) } else if ua == 1 { (g[va], -g[ua]) } else { (g[ua], -g[va]) };
+            verts.push(Vertex { pos, uv: [tu, tv], flags: tile | ((f as u32) << 17), light });
+        }
+        idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        idx.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
+}
+
 /// Crossed-quad plants (grass, flowers, ...), standing along the radial axis.
 fn mesh_cross(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32) {
     for y in 0..CHUNK_SIZE {
@@ -628,6 +651,17 @@ fn mesh_cross(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32)
                     continue;
                 }
                 let sky = sky_at(inp, [x, y, z]) as f32 / 15.0;
+                // Torches are real 3D sticks (like Minecraft's): a 2-pixel post cut from the
+                // middle of the picture, standing on the block below, not two flat planes.
+                if let Some(parts) = b.torch_boxes() {
+                    let tile = b.info().tiles[0] as u32 | (bl([x, y, z]) << 20) | (1 << 16);
+                    for bx in parts {
+                        // Padded axes are (x, y, z) = (j, k, i).
+                        push_box(inp, &mut out.opaque, &mut out.opaque_idx, [x, y, z], [bx[1], bx[2], bx[0]], [bx[4], bx[5], bx[3]], tile, [1.0, 1.0]);
+                    }
+                    let _ = sky;
+                    continue;
+                }
                 // Torches and other emissive "plants" stay still.
                 let sway = if b.info().emissive { 0 } else { 1u32 << 25 };
                 let tile = b.info().tiles[0] as u32 | (bl([x, y, z]) << 20) | sway;
@@ -671,6 +705,52 @@ mod tests {
         assert!(mesh.water.iter().all(|v|v.flags&(1<<27)!=0));
         let table=crate::construction::block(crate::construction::Form::GlassTable,0,0).unwrap();
         let mesh=mesh_chunk(&input_with(&[(5,5,5,table)]));assert!(!mesh.opaque.is_empty()&&!mesh.water.is_empty());
+    }
+
+    /// Every block with its own model, alone in a chunk: the selection outline must hug what is
+    /// drawn (no torch head above its frame, no box sticking out of its cell). Construction
+    /// pieces are listed as a report; plain shape blocks and torches must match.
+    #[test]
+    fn construction_and_shape_outlines_match_models() {
+        let mut bad = Vec::new();
+        let mut report = Vec::new();
+        for &b in Block::ALL.iter() {
+            let constr = crate::construction::entry(b as u16).is_some();
+            if b.torch_boxes().is_none() && b.boxes().is_empty() && !constr {
+                continue;
+            }
+            for bx in b.boxes().iter().chain(b.torch_boxes().unwrap_or(&[]).iter()) {
+                let inside = bx.iter().all(|v| (-0.001..=1.001).contains(v)) && (0..3).all(|k| bx[k] <= bx[k + 3]);
+                if !inside && !constr {
+                    bad.push(format!("{b:?}: box {bx:?} leaves its cell"));
+                }
+            }
+            let inp = input_with(&[(8, 8, 8, b)]);
+            let m = mesh_chunk(&inp);
+            let pts: Vec<[f32; 3]> = m.opaque.iter().chain(m.water.iter()).map(|v| v.pos).collect();
+            if pts.is_empty() {
+                bad.push(format!("{b:?}: draws nothing"));
+                continue;
+            }
+            let bb = |list: &mut dyn Iterator<Item = [f32; 3]>| list.fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])]));
+            let (dlo, dhi) = bb(&mut pts.into_iter());
+            let o = b.outline_box();
+            // Padded axes are (x, y, z) = (j, k, i).
+            let corners = (0..8).map(|n| {
+                let pick = |bit: usize, lo: f32, hi: f32| if n >> bit & 1 == 1 { hi } else { lo };
+                inp.to_local(8.0 + pick(0, o[1], o[4]), 8.0 + pick(1, o[2], o[5]), 8.0 + pick(2, o[0], o[3]))
+            });
+            let (olo, ohi) = bb(&mut corners.into_iter());
+            let off = (0..3).map(|k| (dlo[k] - olo[k]).abs().max((dhi[k] - ohi[k]).abs())).fold(0.0f32, f32::max);
+            if off > 0.04 {
+                let line = format!("{b:?}: outline {o:?} is off the model by {off:.2}");
+                if constr { report.push(line) } else { bad.push(line) }
+            }
+        }
+        if !report.is_empty() {
+            eprintln!("construction pieces whose outline differs from the model ({}):\n{}", report.len(), report.join("\n"));
+        }
+        assert!(bad.is_empty(), "{} blocks look wrong:\n{}", bad.len(), bad.join("\n"));
     }
 
     #[test]

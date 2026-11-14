@@ -110,6 +110,16 @@ pub struct TouchState {
     pub left_inset: f32,
 }
 
+/// Stick deflection from the fixed base to the thumb: a small dead zone, then smooth to full.
+fn stick_vec(home: (f32, f32), p: (f32, f32), size: (u32, u32)) -> (f32, f32) {
+    let rr = stick_r(size);
+    let (dx, dy) = (p.0 - home.0, p.1 - home.1);
+    let n = (dx.hypot(dy) / rr).min(1.0);
+    let m = ((n - STICK_DEAD) / (1.0 - STICK_DEAD)).max(0.0);
+    let len = dx.hypot(dy).max(1e-3);
+    (dx / len * m, -dy / len * m)
+}
+
 /// Joystick throw radius (physical pixels): grows with the screen like the buttons.
 fn stick_r(size: (u32, u32)) -> f32 {
     95.0 * unit(size)
@@ -205,7 +215,7 @@ impl TouchState {
         let mut out = Vec::new();
         match t.phase {
             TouchPhase::Started => {
-                let (w, h) = (size.0 as f32, size.1 as f32);
+                let (w, _h) = (size.0 as f32, size.1 as f32);
                 let on_hotbar = self.hotbar.is_some_and(|(l, t, r, bt)| p.0 >= l - 6.0 && p.0 <= r + 6.0 && p.1 >= t - 6.0 && p.1 <= bt + 6.0);
                 let inside = |r: Option<(f32, f32, f32, f32)>| r.is_some_and(|(l, t, rr, b)| p.0 >= l - 4.0 && p.0 <= rr + 4.0 && p.1 >= t - 4.0 && p.1 <= b + 4.0);
                 let role = if self.blocked.iter().any(|r| inside(Some(*r))) {
@@ -258,34 +268,25 @@ impl TouchState {
                         Btn::Next => out.push(TouchAction::Hotbar(-1)),
                     }
                     Role::Button(b)
-                } else if p.0 > self.left_inset && p.0 < self.left_inset + w * 0.4 && p.1 > h * 0.3 && !self.fingers.iter().any(|f| f.role == Role::Joystick) {
+                } else if { let hm = self.stick_home(size); (p.0 - hm.0).hypot(p.1 - hm.1) < stick_r(size) * 2.2 } && p.0 < self.left_inset + w * 0.4 && !self.fingers.iter().any(|f| f.role == Role::Joystick) {
                     Role::Joystick
                 } else {
                     Role::Look
                 };
-                self.fingers.push(Finger { id: t.id, role, start: p, last: p, t0: Instant::now(), moved: 0.0, breaking: false, throws: 0 });
+                // The joystick is fixed in its corner: its base never jumps to where the thumb
+                // lands, the knob just goes to the thumb.
+                let start = if role == Role::Joystick { self.stick_home(size) } else { p };
+                if role == Role::Joystick {
+                    self.stick_to(start, p, size);
+                }
+                self.fingers.push(Finger { id: t.id, role, start, last: p, t0: Instant::now(), moved: 0.0, breaking: false, throws: 0 });
             }
             TouchPhase::Moved => {
                 if let Some(f) = self.fingers.iter_mut().find(|f| f.id == t.id) {
                     match f.role {
                         Role::Joystick => {
-                            // The base follows a thumb that slides past the rim (no dead end),
-                            // a small dead zone keeps a resting thumb still, and the response
-                            // is smooth from there to full speed.
-                            let rr = stick_r(size);
-                            let (mut dx, mut dy) = (p.0 - f.start.0, p.1 - f.start.1);
-                            let d = dx.hypot(dy);
-                            if d > rr {
-                                let k = (d - rr) / d;
-                                f.start.0 += dx * k;
-                                f.start.1 += dy * k;
-                                dx = p.0 - f.start.0;
-                                dy = p.1 - f.start.1;
-                            }
-                            let n = (dx.hypot(dy) / rr).min(1.0);
-                            let m = ((n - STICK_DEAD) / (1.0 - STICK_DEAD)).max(0.0);
-                            let len = dx.hypot(dy).max(1e-3);
-                            self.move_vec = (dx / len * m, -dy / len * m);
+                            let home = f.start;
+                            self.move_vec = stick_vec(home, p, size);
                         }
                         Role::Look => {
                             self.look.0 += p.0 - f.last.0;
@@ -388,6 +389,16 @@ impl TouchState {
     }
 
     /// Draws the controls with an egui painter; `ppp` = pixels per point.
+    /// Where the fixed joystick sits (physical pixels).
+    fn stick_home(&self, size: (u32, u32)) -> (f32, f32) {
+        let u = unit(size);
+        (self.left_inset + 150.0 * u, size.1 as f32 - 150.0 * u)
+    }
+
+    fn stick_to(&mut self, home: (f32, f32), p: (f32, f32), size: (u32, u32)) {
+        self.move_vec = stick_vec(home, p, size);
+    }
+
     pub fn draw(&self, painter: &egui::Painter, size: (u32, u32), ppp: f32) {
         use egui::{Align2, Color32, FontId, Pos2, Stroke};
         let pt = |x: f32, y: f32| Pos2::new(x / ppp, y / ppp);
@@ -399,9 +410,15 @@ impl TouchState {
         let held = self.fingers.iter().find(|f| f.role == Role::Joystick);
         let (bx, by, kx, ky) = match held {
             // The knob sits under the thumb.
-            Some(f) => (f.start.0, f.start.1, f.last.0, f.last.1),
+            Some(f) => {
+                // The knob follows the thumb but stays inside the ring.
+                let (dx, dy) = (f.last.0 - f.start.0, f.last.1 - f.start.1);
+                let d = dx.hypot(dy).max(1e-3);
+                let k = (rr / d).min(1.0);
+                (f.start.0, f.start.1, f.start.0 + dx * k, f.start.1 + dy * k)
+            }
             None => {
-                let (x, y) = (self.left_inset + 150.0 * u, size.1 as f32 - 150.0 * u);
+                let (x, y) = self.stick_home(size);
                 (x, y, x, y)
             }
         };

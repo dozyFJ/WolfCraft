@@ -3795,14 +3795,8 @@ fn block_outline(world: &impl wolfcraft_engine::physics::Voxels, c: wolfcraft_en
     let mirrored = b.door_mirror().filter(|(axis, _)| g.neighbor(c, *axis, -1).is_some_and(|n| b.door_mirrored_by(world.cell_block(n)))).map(|(_, mb)| mb);
     let bx: [f32; 6] = if let Some(mb) = mirrored {
         mb
-    } else if !b.boxes().is_empty() {
-        b.boxes().iter().fold([1.0, 1.0, 1.0, 0.0, 0.0, 0.0], |a, s| [a[0].min(s[0]), a[1].min(s[1]), a[2].min(s[2]), a[3].max(s[3]), a[4].max(s[4]), a[5].max(s[5])])
-    } else if matches!(b, Block::Torch | Block::IskritTorch) {
-        [0.40, 0.40, 0.0, 0.60, 0.60, 0.65]
-    } else if b.info().render == RenderKind::Cross {
-        [0.15, 0.15, 0.0, 0.85, 0.85, 0.85]
     } else {
-        [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+        b.outline_box()
     };
     let mut out = [glam::DVec3::ZERO; 8];
     for (n, p) in out.iter_mut().enumerate() {

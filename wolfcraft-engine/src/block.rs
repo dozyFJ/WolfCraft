@@ -1926,6 +1926,31 @@ impl Block {
         self.boxes().first().copied()
     }
 
+    /// 3D model of a torch, boxes as in `boxes` (i, j, k = up): the stick and, for the iskrit
+    /// torch, its glowing head. They match the torch pictures (stick in columns 7–8).
+    pub fn torch_boxes(self) -> Option<&'static [[f32; 6]]> {
+        const P: f32 = 1.0 / 16.0;
+        match self {
+            Block::Torch => Some(&[[7.0 * P, 7.0 * P, 0.0, 9.0 * P, 9.0 * P, 10.0 * P]]),
+            Block::IskritTorch => Some(&[[7.0 * P, 7.0 * P, 0.0, 9.0 * P, 9.0 * P, 7.0 * P], [5.0 * P, 5.0 * P, 6.0 * P, 11.0 * P, 11.0 * P, 12.0 * P]]),
+            _ => None,
+        }
+    }
+
+    /// The selection outline of a block in its cell (i, j, k = up): the union of what is drawn.
+    pub fn outline_box(self) -> [f32; 6] {
+        let union = |list: &[[f32; 6]]| list.iter().fold([1.0f32, 1.0, 1.0, 0.0, 0.0, 0.0], |a, s| [a[0].min(s[0]), a[1].min(s[1]), a[2].min(s[2]), a[3].max(s[3]), a[4].max(s[4]), a[5].max(s[5])]);
+        if let Some(t) = self.torch_boxes() {
+            union(t)
+        } else if !self.boxes().is_empty() {
+            union(self.boxes())
+        } else if self.info().render == RenderKind::Cross {
+            [0.15, 0.15, 0.0, 0.85, 0.85, 0.85]
+        } else {
+            [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+        }
+    }
+
     /// All boxes of a `Shape` block (empty for full cubes).
     pub fn boxes(self) -> &'static [[f32; 6]] {
         if let Some((e, r)) = crate::construction::entry(self as u16) { return &crate::construction::geometry::model(e.form, r, 0).boxes; }
