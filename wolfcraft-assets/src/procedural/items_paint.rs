@@ -82,7 +82,8 @@ pub mod items {
     pub const DRAGON_SOUL: u16 = 126;
     pub const RAW_FISH: u16 = 127;
     pub const COOKED_FISH: u16 = 128;
-    pub const COUNT: u16 = 129;
+    pub const STAR_REMOTE: u16 = 129;
+    pub const COUNT: u16 = 130;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -302,6 +303,24 @@ const BULLETS_TPL: [&str; 16] = [
     ".............ccc",
     "............CCC.",
     "................",
+    "................",
+];
+const STAR_REMOTE_TPL: [&str; 16] = [
+    "..........Y.....",
+    ".........YYY....",
+    "..........Y.....",
+    ".....KKKKKK.....",
+    "....KGGGGGGK....",
+    "....KCCCCCCK....",
+    "....KGGGGGGK....",
+    "....KGRrRRGK....",
+    "....KGRRRRGK....",
+    "....KGRRRRGK....",
+    "....KGGGGGGK....",
+    "....KGYGGYGK....",
+    "....KGGGGGGK....",
+    "....KGYGGYGK....",
+    ".....KKKKKK.....",
     "................",
 ];
 const SADDLE_TPL: [&str; 16] = [
@@ -1035,6 +1054,15 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }));
     l.add(RAW_FISH, "raw_fish", fish(Rgb(0.55, 0.70, 0.80), Rgb(0.95, 0.55, 0.30)));
     l.add(COOKED_FISH, "cooked_fish", fish(Rgb(0.78, 0.58, 0.32), Rgb(0.55, 0.35, 0.18)));
+    l.add(STAR_REMOTE, "star_remote", p(|q| q.template(&STAR_REMOTE_TPL[..], &|ch: char| match ch {
+        'K' => Some(Rgb(0.10, 0.11, 0.14)),
+        'G' => Some(Rgb(0.30, 0.32, 0.38)),
+        'R' => Some(Rgb(0.95, 0.15, 0.12)),
+        'r' => Some(Rgb(1.0, 0.55, 0.50)),
+        'Y' => Some(Rgb(1.0, 0.90, 0.40)),
+        'C' => Some(Rgb(0.70, 0.85, 1.0)),
+        _ => None,
+    })));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);
