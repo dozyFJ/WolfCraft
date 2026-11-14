@@ -70,7 +70,14 @@ pub mod items {
     /// «Питомник»: capsule eggs (common, rare, legendary) and the ten pets.
     pub const EGG_BASE: u16 = 106;
     pub const PET_BASE: u16 = 109;
-    pub const COUNT: u16 = 119;
+    /// Firearms: pistol, rifle, shotgun, sniper rifle; then bullets and shells.
+    pub const PISTOL: u16 = 119;
+    pub const RIFLE: u16 = 120;
+    pub const SHOTGUN: u16 = 121;
+    pub const SNIPER: u16 = 122;
+    pub const BULLETS: u16 = 123;
+    pub const SHELLS: u16 = 124;
+    pub const COUNT: u16 = 125;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -200,6 +207,114 @@ const BAZOOKA_TPL: [&str; 16] = [
     "...XooX.........",
     "..XooX..........",
     "..XXX...........",
+    "................",
+];
+const PISTOL_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "..XXXXXXXXXXX...",
+    "..XmmmmmmmmmXX..",
+    "..XmmmmmmmmmmX..",
+    "..XXXXXXhhhXXX..",
+    "......XXhhhX....",
+    ".......XhhhX....",
+    "........hhhX....",
+    "........hhhh....",
+    "........hhhh....",
+    "........XXXX....",
+    "................",
+    "................",
+];
+const RIFLE_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "........XX......",
+    "XXXXXXXXmmXXX...",
+    "XmmmmmmmmmmmmXX.",
+    ".XXXXXmmmmmmhhhh",
+    ".....XXmXXXhhhhh",
+    ".....XmmX.hhh.hh",
+    ".....XmmX.hh....",
+    "......XmmX......",
+    "......XmmX......",
+    ".......XX.......",
+    "................",
+    "................",
+];
+const SHOTGUN_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "XXXXXXXXXXX.....",
+    "mmmmmmmmmmmX....",
+    "XXXXXXXXXXmXhh..",
+    "..XhhhhhhXXhhhh.",
+    "...XXXXXX.hhhhhh",
+    "..........hh.hhh",
+    "..........h...hh",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+const SNIPER_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "........XXXXX...",
+    "........XLmmX...",
+    ".........XXX....",
+    "XXXXXXXXXmmXXX..",
+    "mmmmmmmmmmmmmhhh",
+    "XXXXXXXXXmXhhhhh",
+    "........XmXhh.hh",
+    ".........XXh....",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+const BULLETS_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "...y.....y......",
+    "..yyy...yyy.....",
+    "..yyy...yyy.....",
+    "..ccc...ccc..y..",
+    "..ccc...ccc.yyy.",
+    "..ccc...ccc.yyy.",
+    "..ccc...ccc.ccc.",
+    "..ccc...ccc.ccc.",
+    "..ccc...ccc.ccc.",
+    "..CCC...CCC.ccc.",
+    ".............ccc",
+    "............CCC.",
+    "................",
+    "................",
+];
+const SHELLS_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "..RRR....RRR....",
+    "..RRR....RRR....",
+    "..RRR....RRR....",
+    "..rRR....rRR....",
+    "..RRR....RRR....",
+    "..RRR....RRR....",
+    "..rRR....rRR....",
+    "..ccc....ccc....",
+    "..CCC....CCC....",
+    "................",
+    "................",
+    "................",
     "................",
 ];
 const MATERIALS: [Rgb; 4] = [Rgb(0.62, 0.45, 0.25), Rgb(0.55, 0.55, 0.55), Rgb(0.85, 0.85, 0.88), Rgb(0.35, 0.90, 0.85)];
@@ -824,6 +939,25 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }));
     }
+    // Firearms and ammunition.
+    let gpal = |ch: char| match ch {
+        'X' => Some(Rgb(0.13, 0.14, 0.15)),
+        'm' => Some(Rgb(0.38, 0.40, 0.43)),
+        'h' => Some(Rgb(0.45, 0.30, 0.17)),
+        'L' => Some(Rgb(0.45, 0.80, 1.0)),
+        'y' => Some(Rgb(0.80, 0.55, 0.25)),
+        'c' => Some(Rgb(0.88, 0.70, 0.30)),
+        'C' => Some(Rgb(0.60, 0.45, 0.18)),
+        'R' => Some(Rgb(0.80, 0.16, 0.14)),
+        'r' => Some(Rgb(0.95, 0.40, 0.35)),
+        _ => None,
+    };
+    l.add(PISTOL, "pistol", p(|q| q.template(&PISTOL_TPL[..], &gpal)));
+    l.add(RIFLE, "rifle", p(|q| q.template(&RIFLE_TPL[..], &gpal)));
+    l.add(SHOTGUN, "shotgun", p(|q| q.template(&SHOTGUN_TPL[..], &gpal)));
+    l.add(SNIPER, "sniper", p(|q| q.template(&SNIPER_TPL[..], &gpal)));
+    l.add(BULLETS, "bullets", p(|q| q.template(&BULLETS_TPL[..], &gpal)));
+    l.add(SHELLS, "shells", p(|q| q.template(&SHELLS_TPL[..], &gpal)));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

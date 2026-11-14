@@ -25,6 +25,8 @@ class ServerService : Service() {
         const val ACTION_STOP = "com.wolfcraft.server.STOP"
         const val EXTRA_NAME = "name"
         const val EXTRA_CREATIVE = "creative"
+        /** Folder of a WolfStudio place to run (its own world). */
+        const val EXTRA_WORLD = "world"
         /** Game port (players connect here) and the local control panel. */
         const val PORT = 25570
         const val PANEL_PORT = 25580
@@ -49,12 +51,13 @@ class ServerService : Service() {
 
         fun logText(): String = synchronized(lines) { lines.joinToString("\n") }
 
-        fun start(ctx: Context, name: String, creative: Boolean) {
+        fun start(ctx: Context, name: String, creative: Boolean, worldId: String? = null) {
             ctx.startForegroundService(
                 Intent(ctx, ServerService::class.java)
                     .setAction(ACTION_START)
                     .putExtra(EXTRA_NAME, name)
                     .putExtra(EXTRA_CREATIVE, creative)
+                    .putExtra(EXTRA_WORLD, worldId)
             )
         }
 
@@ -80,7 +83,8 @@ class ServerService : Service() {
         }
         val name = intent?.getStringExtra(EXTRA_NAME)?.trim()?.ifEmpty { null } ?: "Сервер"
         val creative = intent?.getBooleanExtra(EXTRA_CREATIVE, false) ?: false
-        if (!running()) Thread { startServer(name, creative) }.start()
+        val worldId = intent?.getStringExtra(EXTRA_WORLD)?.trim()?.ifEmpty { null }
+        if (!running()) Thread { startServer(name, creative, worldId) }.start()
         return START_NOT_STICKY
     }
 
@@ -89,7 +93,7 @@ class ServerService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification(s))
     }
 
-    private fun startServer(name: String, creative: Boolean) {
+    private fun startServer(name: String, creative: Boolean, worldId: String? = null) {
         val exe = File(applicationInfo.nativeLibraryDir, "libwolfserver.so")
         if (!exe.exists()) {
             setStatus("Ошибка: в приложении нет сервера (libwolfserver.so)")
@@ -99,6 +103,7 @@ class ServerService : Service() {
         token = java.util.UUID.randomUUID().toString().replace("-", "")
         val cmd = mutableListOf(exe.absolutePath, "--name", name, "--port", PORT.toString(), "--no-browser", "--data", data.absolutePath, "--token", token)
         if (creative) cmd += "--creative"
+        if (worldId != null) { cmd += "--world"; cmd += worldId }
         try {
             if (wakeLock == null) {
                 wakeLock = getSystemService(PowerManager::class.java)
