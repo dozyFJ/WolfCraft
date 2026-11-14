@@ -18,6 +18,7 @@ enum Tab {
     Home,
     Settings,
     Studio,
+    Server,
     Skins,
 }
 
@@ -48,7 +49,8 @@ fn tabs() -> &'static [(Tab, &'static str)] {
     if is_studio_app() {
         &[(Tab::Studio, "Проекты"), (Tab::Settings, "Настройки")]
     } else {
-        &[(Tab::Home, "Главная"), (Tab::Skins, "Профиль"), (Tab::Settings, "Настройки")]
+        // One app: play, build and host — settings are under the gear on top and in Профиль.
+        &[(Tab::Home, "Главная"), (Tab::Studio, "Редактор"), (Tab::Server, "Сервер"), (Tab::Skins, "Профиль")]
     }
 }
 
@@ -197,7 +199,14 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 Tab::Home => home(ui, icons, &p, planet, &mut action),
                 Tab::Settings => launcher_settings(ui, icons, &p, version, dark, &mut action),
                 Tab::Studio => studio(ui, icons, &p, version, worlds, &mut action),
-                Tab::Skins => profile(ui, icons, &p, skin, nickname, worlds, &mut action),
+                Tab::Server => server(ui, icons, &p, worlds, &mut action),
+                Tab::Skins => {
+                    profile(ui, icons, &p, skin, nickname, worlds, &mut action);
+                    if !is_studio_app() {
+                        ui.add_space(6.0);
+                        launcher_settings(ui, icons, &p, version, dark, &mut action);
+                    }
+                }
             }
             ui.add_space(8.0);
         });
@@ -227,6 +236,7 @@ fn nav_icon(ui: &Ui, icons: &GuiIcons, t: Tab, r: Rect, col: Color32) {
         }
         Tab::Settings => icons.paint(pt, r, icon::GEAR, col),
         Tab::Studio => icons.paint(pt, r, icon::HAMMER, col),
+        Tab::Server => icons.paint(pt, r, icon::GLOBE, col),
         Tab::Skins => {
             // A small figure: head and shoulders.
             let c = r.center();
@@ -436,6 +446,76 @@ fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
 /// Studio home, like Roblox Studio: servers are places. Create one here (name and template),
 /// it appears in the list; tap it to open the editor scene; «Запустить» publishes it as a
 /// running server. Worlds of WolfServer in the network can be edited live too.
+/// Сервер: host one of your worlds (or a place) for friends, or join / edit someone's server.
+fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu::WorldEntry], action: &mut MenuAction) {
+    let addr_id = Id::new("launcher-server-addr");
+    let mut addr: String = ui.ctx().data(|d| d.get_temp(addr_id)).unwrap_or_default();
+    let card = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
+        Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui);
+        });
+    };
+    ui.label(egui::RichText::new("Сервер").font(bold_font(22.0)).color(p.text));
+    // Join or edit by code / address.
+    card(ui, &mut |ui| {
+        ui.label(egui::RichText::new("ВОЙТИ НА СЕРВЕР").size(11.5).color(p.text_muted));
+        let w = ui.available_width();
+        crate::ui_components::text_input(ui, icons, &mut addr, "Код K7QX2 или адрес 192.168.0.10", w, Some(icon::GLOBE));
+        ui.add_space(6.0);
+        let ready = !addr.trim().is_empty();
+        ui.horizontal(|ui| {
+            let half = (w - 8.0) / 2.0;
+            if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, half, ready).clicked() {
+                *action = MenuAction::JoinServer(addr.trim().to_string());
+            }
+            if pill_button(ui, icons, Some(icon::HAMMER), "Редактировать", ButtonKind::Secondary, half, ready).clicked() {
+                *action = MenuAction::EditServerInStudio(addr.trim().to_string());
+            }
+        });
+        ui.add_space(4.0);
+        if pill_button(ui, icons, Some(icon::SEARCH), "Сервера рядом (Wi‑Fi)", ButtonKind::Secondary, w, true).clicked() {
+            *action = MenuAction::OpenNetwork;
+        }
+    });
+    // Host: a world or a place, opened for friends (a code appears in the chat).
+    card(ui, &mut |ui| {
+        ui.label(egui::RichText::new("ЗАПУСТИТЬ СВОЙ СЕРВЕР").size(11.5).color(p.text_muted));
+        ui.label(egui::RichText::new("Выберите мир или плейс — в чате появится код входа для друзей.").size(13.0).color(p.text_muted));
+        ui.add_space(4.0);
+        for w in worlds.iter().take(40) {
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
+                match &w.preview {
+                    Some(t) => {
+                        ui.painter().image(t.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                    }
+                    None => {
+                        ui.painter().rect_filled(r, Rounding::same(8.0), p.bg);
+                    }
+                }
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(15.0)).color(p.text));
+                    ui.label(egui::RichText::new(if w.cfg.studio_project { "Плейс" } else { "Мир" }).size(12.0).color(p.text_muted));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if pill_button(ui, icons, Some(icon::GLOBE), "Запустить", ButtonKind::Primary, 120.0, true).clicked() {
+                        *action = MenuAction::HostServer(Some(w.cfg.id.clone()));
+                    }
+                });
+            });
+            ui.add_space(4.0);
+        }
+        if worlds.is_empty() {
+            ui.label(egui::RichText::new("Пока нет миров — создайте мир в «Главной» или плейс в «Редакторе».").size(13.0).color(p.text_muted));
+        }
+        if pill_button(ui, icons, Some(icon::PLUS), "Новый сетевой мир", ButtonKind::Secondary, ui.available_width(), true).clicked() {
+            *action = MenuAction::HostServer(None);
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(addr_id, addr));
+}
+
 fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[crate::main_menu::WorldEntry], action: &mut MenuAction) {
     let _ = version;
     let form_id = Id::new("studio-new-form");
