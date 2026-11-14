@@ -261,6 +261,16 @@ class MainActivity : Activity() {
         return fromServer.ifEmpty { lanIps().map { "$it:${ServerService.PORT}" } }
     }
 
+    /** Invite codes from the server (short, typed in «По коду» instead of the address). */
+    private fun codes(): List<String> =
+        status?.optJSONArray("codes")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+
+    private fun copyCode() {
+        val code = codes().firstOrNull() ?: return copyAddress()
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("WolfCraft", code))
+        Toast.makeText(this, "Код скопирован: $code", Toast.LENGTH_SHORT).show()
+    }
+
     private fun uptime(sec: Long): String = if (sec < 3600) "${sec / 60} мин ${sec % 60} с" else "${sec / 3600} ч ${sec % 3600 / 60} мин"
 
     // ---- Tabs -------------------------------------------------------------------------------
@@ -395,6 +405,7 @@ class MainActivity : Activity() {
                 })
                 addView(top)
                 addView(label("${p.kind} · нажми, чтобы редактировать${if (live) " (правки сразу у игроков)" else ""}", 13f, cMuted).apply { setPadding(0, dp(4), 0, 0) })
+                if (live) codes().firstOrNull()?.let { c -> addView(label("Код для входа: $c", 16f, cAccent, true).apply { setPadding(0, dp(6), 0, 0) }) }
                 if (live) addView(button("■  Остановить", 2) { ServerService.stop(this@MainActivity) })
                 else addView(button("▶  Запустить") { runPlace(p) })
             })
@@ -412,6 +423,20 @@ class MainActivity : Activity() {
         header("Сервер")
         val s = status
         val on = ServerService.running()
+        if (on) content.addView(card {
+            addView(caption("Код для входа"))
+            val cs = codes()
+            if (cs.isEmpty()) addView(label("Код появится, когда телефон в Wi‑Fi или раздаёт точку доступа", 14f, cMuted))
+            cs.forEach { c ->
+                addView(label(c, 40f, cText, true).apply {
+                    letterSpacing = 0.12f
+                    typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                    setTextIsSelectable(true)
+                })
+            }
+            addView(label("Друзья: WolfCraft → Миры → Игра по сети → «По коду». В одной сети с тобой.", 13.5f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
+            if (cs.isNotEmpty()) addView(button("Скопировать код", 1) { copyCode() })
+        })
         content.addView(card {
             addView(caption("Адрес для подключения"))
             if (on) {
