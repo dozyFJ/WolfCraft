@@ -1977,7 +1977,7 @@ impl App {
                 }
                 Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead | Screen::Map => {
                     if touch.seen && screen == Screen::Playing && !chat.open {
-                        if studio.as_ref().is_some_and(|st| !st.playtest) {
+                        if studio.as_ref().is_some_and(|st| !st.playtest) || touch.place_play {
                             touch.clear_hud();
                         } else {
                             touch.sync_hotbar(ctx.pixels_per_point());
@@ -2025,7 +2025,11 @@ impl App {
                         // controls stay.
                         let studio_edit = studio.as_ref().is_some_and(|st| !st.playtest);
                         if screen != Screen::Map && !studio_edit {
-                            hud::draw(ctx, &icons, &hud);
+                            // A place in play draws its own GUI: no hotbar, bars, minimap or
+                            // crosshair from the game (its mini-game panels and voice stay).
+                            if !touch.place_play {
+                                hud::draw(ctx, &icons, &hud);
+                            }
                             petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
                             voice_changed |= voice_ui(ctx, &icons, voice, voice_menu, settings, net_players, net.as_ref().map(|n| n.voice), time.elapsed() as f64);
                             buttonsim_overlay(ctx, &s.buttonsim);
@@ -2267,6 +2271,9 @@ impl App {
         // The studio's edit mode has its ribbon on top instead of the game's top bar; in
         // «Играть» the place runs as players see it, with the game's bar.
         self.touch.studio = self.studio.as_ref().is_some_and(|st| !st.playtest);
+        // A place played like in Roblox: its GUI is its own (scripts). That is «Играть» in
+        // the studio and a place joined over the network.
+        self.touch.place_play = self.place_play();
         if let Some(s) = &self.session {
             self.touch.creative = s.player.is_creative();
             self.touch.flying = s.player.body.flying;
@@ -2320,7 +2327,9 @@ impl App {
         let (w, h) = gfx.gpu.size();
         gfx.world.set_render_scale(self.settings.render_scale);
         gfx.world.resize(&gfx.gpu.device, w, h);
-        if self.screen.in_world() || (self.screen == Screen::Loading && self.session.is_some()) {
+        // While loading, the world is not drawn: the loading screen covers everything (a
+        // half-built world showed through the strips beside a notch).
+        if self.screen.in_world() {
             if let Some(s) = &mut self.session {
                 let up = s.player.up();
                 let sun = s.sun();
@@ -2710,7 +2719,11 @@ impl App {
             }
         } else {
             let p = theme_manager::palette(&gfx.gui.ctx);
-            let c = p.bg;
+            // The interface keeps clear of the notch and rounded corners (safe insets); the
+            // strips it leaves get the colour of the screen's own background, so the splash,
+            // loading and start screens fill the whole display.
+            let starry = matches!(self.screen, Screen::Splash | Screen::Loading | Screen::GameMenu);
+            let c = if starry { egui::Color32::from_rgb(2, 7, 13) } else { p.bg };
             let lin = |v: u8| v as f64 / 255.0;
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("menu-clear"),
@@ -3736,6 +3749,18 @@ fn studio_touch_size(size: (u32, u32), studio: Option<&wolfcraft_ui::studio_ui::
 
 /// «Питомник» on screen: the coin counter with the pets in the team, and the egg hatch
 /// animation (the capsule wobbles, cracks, bursts in the pet's rarity colour).
+impl App {
+    /// A studio place is being played (studio «Играть», or a place joined over the network):
+    /// none of WolfCraft's own HUD, only the stick, jump and the top bar.
+    fn place_play(&self) -> bool {
+        let Some(s) = &self.session else { return false };
+        match &self.studio {
+            Some(st) => st.playtest,
+            None => self.net.is_some() && s.cfg.studio_project,
+        }
+    }
+}
+
 /// Voice chat on screen: who is talking (top left, under the bar) and the menu of the
 /// microphone button. Returns true when a setting changed (to save it).
 fn voice_ui(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::GuiIcons, v: &mut crate::voice::Voice, open: &mut bool, st: &mut Settings, players: &[wolfcraft_net::PlayerState], server: Option<bool>, now: f64) -> bool {

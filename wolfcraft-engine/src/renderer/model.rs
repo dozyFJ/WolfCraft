@@ -426,6 +426,13 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
         add_char_box(&mut v, &frame, Vec3::new(x0, ty0 + 0.18, -0.115), Vec3::new(x0 + 0.23, shoulder + 0.02, 0.115), pivot, ang, sleeve_c);
         add_char_box(&mut v, &frame, Vec3::new(x0 - 0.005, ty0 + 0.13, -0.12), Vec3::new(x0 + 0.235, ty0 + 0.2, 0.12), pivot, ang, dark(sleeve_c, 0.72));
         add_char_box(&mut v, &frame, Vec3::new(x0 + 0.015, ty0 - 0.02, -0.1), Vec3::new(x0 + 0.215, ty0 + 0.14, 0.1), pivot, ang, skin_c);
+        // Five fingers: four in a row under the palm (front to back, the middle one longest),
+        // the thumb on the front, a little apart. The palm faces the body.
+        let (fx0, fx1) = if side < 0.0 { (x0 + 0.11, x0 + 0.21) } else { (x0 + 0.02, x0 + 0.12) };
+        for &(zc, len) in &[(-0.07f32, 0.055f32), (-0.024, 0.075), (0.022, 0.085), (0.066, 0.07)] {
+            add_char_box(&mut v, &frame, Vec3::new(fx0, ty0 - 0.02 - len, zc - 0.019), Vec3::new(fx1, ty0, zc + 0.019), pivot, ang, skin_c);
+        }
+        add_char_box(&mut v, &frame, Vec3::new(fx0, ty0 + 0.0, 0.09), Vec3::new(fx1, ty0 + 0.09, 0.135), pivot, ang, skin_c);
         if let Some(m) = pose.armor[1] {
             // Chestplate shoulder pads.
             add_box(&mut v, &frame, Vec3::new(x0 - 0.03, shoulder - 0.28, -0.155), Vec3::new(x0 + 0.26, shoulder + 0.03, 0.155), pivot, ang, armor_color(m));
@@ -1381,6 +1388,17 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
                 add_hand_box(&mut v, &frame, Vec3::new(x - 0.07, y - 0.07, z), Vec3::new(x + 0.07, y + 0.07, z + 0.15), pivot, angle, sleeve_c);
                 add_hand_box(&mut v, &frame, Vec3::new(x - 0.074, y - 0.074, z + 0.14), Vec3::new(x + 0.074, y + 0.074, z + 0.18), pivot, angle, cuff);
                 add_hand_box(&mut v, &frame, Vec3::new(x - 0.066, y - 0.066, z + 0.175), Vec3::new(x + 0.066, y + 0.066, z + 0.36), pivot, angle, skin_c);
+                // Five fingers: four from the end of the palm, slightly curled (a second,
+                // lower joint), the middle one longest; the thumb from the inner side.
+                let shade = [skin_c[0] * 0.93, skin_c[1] * 0.93, skin_c[2] * 0.93];
+                for (fxo, len) in [(-0.046f32, 0.055f32), (-0.0155, 0.07), (0.0155, 0.066), (0.046, 0.05)] {
+                    let fxx = x + fxo * side;
+                    add_hand_box(&mut v, &frame, Vec3::new(fxx - 0.0135, y - 0.02, z + 0.355), Vec3::new(fxx + 0.0135, y + 0.045, z + 0.355 + len), pivot, angle, skin_c);
+                    add_hand_box(&mut v, &frame, Vec3::new(fxx - 0.0125, y - 0.045, z + 0.345 + len), Vec3::new(fxx + 0.0125, y + 0.01, z + 0.37 + len), pivot, angle, shade);
+                }
+                let tx = x - 0.078 * side;
+                add_hand_box(&mut v, &frame, Vec3::new(tx - 0.016, y - 0.03, z + 0.24), Vec3::new(tx + 0.016, y + 0.03, z + 0.33), pivot, angle, skin_c);
+                add_hand_box(&mut v, &frame, Vec3::new(tx - 0.015 - 0.012 * side, y - 0.028, z + 0.32), Vec3::new(tx + 0.015 - 0.012 * side, y + 0.028, z + 0.37), pivot, angle, shade);
             }
         }
         let f = Vec3::new(x, y, z + 0.29); // fist centre before the tilt
