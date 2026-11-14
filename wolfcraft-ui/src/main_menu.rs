@@ -210,11 +210,17 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
         planet_backdrop(ui, planet, &p);
         let rect = ui.max_rect();
         // Dock of icon buttons on a half-circle at the bottom; the menu column is centred above it.
-        let arc_r = (rect.width() * 0.40).clamp(118.0, 170.0);
+        // Upright: the arc under the menu. Lying phone: the menu on the left, the arc on the right.
+        let wide = rect.width() > rect.height() * 1.2;
+        let (arc_r, arc_cx) = if wide {
+            ((rect.width() * 0.5 * 0.42).min(rect.height() - 110.0).clamp(90.0, 170.0), rect.left() + rect.width() * 0.75)
+        } else {
+            ((rect.width() * 0.40).clamp(118.0, 170.0), rect.center().x)
+        };
         let dock_h = arc_r + 70.0;
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("game-dock-h"), dock_h));
-        let above = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.bottom() - dock_h - 8.0));
-        let width = (rect.width() - 32.0).clamp(180.0, 360.0);
+        let above = if wide { Rect::from_min_max(rect.min, Pos2::new(rect.center().x, rect.bottom())) } else { Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.bottom() - dock_h - 8.0)) };
+        let width = (above.width() - 32.0).clamp(180.0, 360.0);
         let height = (above.height() - 16.0).clamp(150.0, 320.0);
         let col = Rect::from_center_size(above.center(), Vec2::new(width, height));
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col), |ui| {
@@ -237,7 +243,7 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
                 });
             });
         });
-        if let Some(a) = game_dock(ui, icons, &p, rect, arc_r, version) {
+        if let Some(a) = game_dock(ui, icons, &p, rect, arc_cx, arc_r, version) {
             action = a;
         }
     });
@@ -262,10 +268,10 @@ fn open_settings_at(ctx: &egui::Context, tab: usize) -> MenuAction {
 /// The dock under the game menu: Скины, Магазин, Сеть, Новости, Ещё on a half-circle, each a
 /// see-through round button with a soft icon and a caption; in the middle of the arc a small
 /// version badge.
-fn game_dock(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, arc_r: f32, version: &str) -> Option<MenuAction> {
+fn game_dock(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, cx: f32, arc_r: f32, version: &str) -> Option<MenuAction> {
     const ITEMS: [(u16, &str); 5] = [(icon::BRUSH, "Скины"), (icon::BACKPACK, "Магазин"), (icon::GLOBE, "Сеть"), (icon::STAR, "Новости"), (icon::PROPS, "Ещё")];
     const BTN: f32 = 27.0;
-    let c = Pos2::new(rect.center().x, rect.bottom() - 30.0);
+    let c = Pos2::new(cx, rect.bottom() - 30.0);
     let painter = ui.painter().clone();
     // The arc itself: a faint line through the buttons.
     let n = 48;
