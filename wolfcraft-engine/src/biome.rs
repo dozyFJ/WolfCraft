@@ -7,6 +7,10 @@ pub enum Biome {
     Ocean,
     DeepOcean,
     FrozenOcean,
+    /// Tropical shallow sea with coral reefs.
+    WarmOcean,
+    /// Cool sea with kelp forests and a gravel floor.
+    ColdOcean,
     Beach,
     Plains,
     Forest,
@@ -30,6 +34,8 @@ impl Biome {
             Biome::Ocean => "Океан",
             Biome::DeepOcean => "Глубокий океан",
             Biome::FrozenOcean => "Ледяной океан",
+            Biome::WarmOcean => "Тёплый океан",
+            Biome::ColdOcean => "Холодный океан",
             Biome::Beach => "Пляж",
             Biome::Plains => "Равнины",
             Biome::Forest => "Лес",
@@ -49,7 +55,7 @@ impl Biome {
     }
 
     pub fn is_ocean(self) -> bool {
-        matches!(self, Biome::Ocean | Biome::DeepOcean | Biome::FrozenOcean)
+        matches!(self, Biome::Ocean | Biome::DeepOcean | Biome::FrozenOcean | Biome::WarmOcean | Biome::ColdOcean)
     }
 
     /// (top block, filler block, deeper layer block) for land; the filler is 3 blocks thick.
@@ -66,6 +72,8 @@ impl Biome {
             Biome::SnowyPeaks => (Block::Snow, Block::Snow, Block::Stone),
             Biome::Volcano => (Block::Ash, Block::Basalt, Block::Basalt),
             Biome::Ocean | Biome::DeepOcean | Biome::FrozenOcean => (Block::Sand, Block::Sand, Block::Stone),
+            Biome::WarmOcean => (Block::Sand, Block::Sand, Block::Sandstone),
+            Biome::ColdOcean => (Block::Gravel, Block::Gravel, Block::Stone),
         }
     }
 }

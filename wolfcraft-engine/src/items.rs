@@ -98,7 +98,9 @@ pub mod ids {
     /// Riding: a saddle (put on a dragon) and the dragon's soul (spawns one).
     pub const SADDLE: ItemId = 381;
     pub const DRAGON_SOUL: ItemId = 382;
-    pub const LAST: ItemId = 382;
+    pub const RAW_FISH: ItemId = 383;
+    pub const COOKED_FISH: ItemId = 384;
+    pub const LAST: ItemId = 384;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -226,6 +228,8 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::SHELLS => ItemInfo { max_stack: 32, ..plain("Дробь", sp::SHELLS) },
         ids::SADDLE => ItemInfo { max_stack: 1, ..plain("Седло", sp::SADDLE) },
         ids::DRAGON_SOUL => ItemInfo { max_stack: 16, ..plain("Душа дракона", sp::DRAGON_SOUL) },
+        ids::RAW_FISH => ItemInfo { food: Some((2.0, 1.0)), ..plain("Сырая рыба", sp::RAW_FISH) },
+        ids::COOKED_FISH => ItemInfo { food: Some((6.0, 9.0)), ..plain("Жареная рыба", sp::COOKED_FISH) },
         ids::BOW => ItemInfo { max_stack: 1, durability: 384, ..plain("Лук", sp::BOW) },
         ids::ARROW => plain("Стрела", sp::ARROW),
         ids::STRING => plain("Нить", sp::STRING),
@@ -447,6 +451,10 @@ pub fn mob_drops(kind: crate::mobs::MobKind, salt: u64) -> Vec<ItemStack> {
         MobKind::Chicken => vec![ItemStack::new(ids::RAW_MEAT, 1)],
         MobKind::Wolf => vec![ItemStack::new(ids::LEATHER, 1 + (roll * 2.0) as u8)],
         MobKind::Slime => vec![ItemStack::new(ids::SLIME, 1 + (roll * 2.0) as u8)],
+        MobKind::Fish => vec![ItemStack::new(ids::RAW_FISH, 1)],
+        MobKind::Squid => vec![ItemStack::new(ids::RAW_FISH, 1 + (roll * 2.0) as u8)],
+        MobKind::Dolphin => vec![ItemStack::new(ids::RAW_FISH, 2)],
+        MobKind::Shark => vec![ItemStack::new(ids::RAW_FISH, 2 + (roll * 2.0) as u8), ItemStack::new(ids::BONE, 1 + (roll * 2.0) as u8)],
         MobKind::Dragon => vec![ItemStack::new(ids::LEATHER, 4 + (roll * 3.0) as u8), ItemStack::new(ids::RAW_MEAT, 3), ItemStack::new(ids::DRAGON_SOUL, 1)],
     }
 }

@@ -15,6 +15,8 @@ pub fn biome_color(c: &Column) -> [f32; 3] {
         Biome::Ocean => [0.10, 0.30, 0.65],
         Biome::DeepOcean => [0.05, 0.16, 0.45],
         Biome::FrozenOcean => [0.62, 0.78, 0.92],
+        Biome::WarmOcean => [0.10, 0.55, 0.75],
+        Biome::ColdOcean => [0.12, 0.26, 0.50],
         Biome::Beach => [0.86, 0.80, 0.58],
         Biome::Plains => [0.45, 0.70, 0.30],
         Biome::Forest => [0.20, 0.50, 0.20],

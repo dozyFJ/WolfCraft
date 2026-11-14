@@ -851,6 +851,7 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
         ids::RAW_URANIUM => ids::URANIUM_INGOT,
         ids::POTATO => ids::BAKED_POTATO,
         ids::RAW_MEAT => ids::COOKED_MEAT,
+        ids::RAW_FISH => ids::COOKED_FISH,
         x if x == Block::Cobblestone as items::ItemId => Block::Stone as items::ItemId,
         x if x == Block::Sand as items::ItemId => Block::Glass as items::ItemId,
         _ => return None,
