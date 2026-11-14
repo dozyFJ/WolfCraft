@@ -1,5 +1,4 @@
-//! Open the private repository's releases with the user's browser session.
-//! Native Android code is updated through a signed APK; resource packs use the existing ZIP downloader.
+//! Android OTA is owned by the signed APK shell; desktop retains the release-page link.
 const RELEASE_URL: &str = "https://github.com/dozyFJ/WolfCraft/releases/tag/latest";
 
 pub fn open_release() {
@@ -9,24 +8,25 @@ pub fn open_release() {
     if let Err(e) = open_android() { log::warn!("Could not open updates: {e}"); }
 }
 
+/// The stable APK shell owns downloads and restarts; Rust never replaces its own loaded code.
 #[cfg(target_os = "android")]
 fn open_android() -> Result<(), Box<dyn std::error::Error>> {
-    use jni::objects::{JObject, JValue};
-    let app = crate::orientation::app().ok_or("Android activity unavailable")?;
-    let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM)? };
-    let mut env = vm.attach_current_thread()?;
-    env.with_local_frame(16, |env| -> Result<(), jni::errors::Error> {
-        let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject) };
-        let result = (|| {
-            let url = JObject::from(env.new_string(RELEASE_URL)?);
-            let uri = env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&url)])?.l()?;
-            let action = JObject::from(env.new_string("android.intent.action.VIEW")?);
-            let intent = env.new_object("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V", &[JValue::Object(&action), JValue::Object(&uri)])?;
-            env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)])?;
-            Ok(())
-        })();
-        std::mem::forget(activity);
-        result
-    })?;
-    Ok(())
+    shell_call("checkForUpdates")
+}
+
+pub fn mark_ready() {
+    #[cfg(target_os="android")]
+    if let Err(e)=shell_call("markUpdateHealthy"){log::warn!("OTA boot marker: {e}");}
+}
+
+#[cfg(target_os="android")]
+fn shell_call(method:&str)->Result<(),Box<dyn std::error::Error>>{
+    let app=crate::orientation::app().ok_or("Android activity unavailable")?;
+    let vm=unsafe{jni::JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM)?};
+    let mut env=vm.attach_current_thread()?;
+    let activity=unsafe{jni::objects::JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject)};
+    let result=env.call_method(&activity,method,"()V",&[]);
+    std::mem::forget(activity);
+    if result.is_err(){let _=env.exception_clear();}
+    result?;Ok(())
 }

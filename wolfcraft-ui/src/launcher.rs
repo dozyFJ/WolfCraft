@@ -125,6 +125,10 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
+                    let update = if wide {
+                        crate::ui_components::pill_button(ui, icons, Some(icon::REFRESH), "Обновить", crate::ui_components::ButtonKind::Secondary, 0.0, true)
+                    } else { round_icon(ui, icons, &p, icon::REFRESH).on_hover_text("Обновить приложение") };
+                    if update.clicked() { action = MenuAction::CheckUpdates; }
                     if round_icon(ui, icons, &p, icon::GEAR).clicked() {
                         action = MenuAction::OpenSettings;
                     }
@@ -180,7 +184,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                         .show_ui(ui, |ui| {
                             ui.label(format!("{version} — установлена"));
                             ui.separator();
-                            ui.label("Другие версии доступны через обновление APK");
+                            ui.label("Обновить ядро можно кнопкой «Обновить» в шапке");
                         });
                     if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 108.0, true).clicked() {
                         action = MenuAction::LaunchVersion(version.to_string());
@@ -721,3 +725,4 @@ mod tests {
         assert_eq!(action, MenuAction::LaunchVersion("0.2.1".into()));
     }
 }
+

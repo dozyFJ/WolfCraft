@@ -1915,6 +1915,7 @@ impl App {
         }
         let splash_progress = (self.splash_t / 2.8).min(if self.menu_planet.is_some() { 1.0 } else { 0.9 + (self.splash_t / 6.0).min(0.1) });
         let mut pack_download: Option<String> = None;
+        let mut ota_requested = false;
         let mut close_inventory = false;
         let mut submitted: Vec<String> = Vec::new();
         let lua_gui: Vec<crate::lua::GuiElement> = self.lua.as_ref().map(|l| l.gui()).unwrap_or_default();
@@ -1997,7 +1998,7 @@ impl App {
                 Screen::Settings => {
                     let folder = if cfg!(target_os = "android") { ANDROID_PACKS_DIR.to_string() } else { data_dir_str.clone() + "/resourcepacks" };
                     let r = main_menu::settings_screen(ctx, &icons, settings, version, &main_menu::PacksView { list: packs, status: pack_status, folder: &folder });
-                    if r.open_updates { crate::updates::open_release(); }
+                    if r.open_updates { ota_requested = true; }
                     settings_changed |= r.changed;
                     settings_back |= r.back;
                     pack_refresh |= r.refresh_packs;
@@ -2282,6 +2283,7 @@ impl App {
             self.packs = wolfcraft_assets::packs::list(&self.pack_dirs());
             self.pack_status = format!("Найдено паков: {}", self.packs.iter().filter(|p| p.path.is_some()).count());
         }
+        if ota_requested { self.check_updates(); }
         if let Some(url) = pack_download {
             self.start_pack_download(url);
         }
@@ -2875,6 +2877,12 @@ impl App {
         log::info!("session started: {} (seed {}, {:?}, {:?})", s.cfg.name, s.cfg.seed, s.cfg.size, s.cfg.world_type);
     }
 
+    fn check_updates(&mut self) {
+        self.save_studio_script();
+        if let Some(session)=&mut self.session {session.save();}
+        crate::updates::open_release();
+    }
+
     fn handle_action(&mut self, a: MenuAction, gfx: &mut Gfx) {
         match a {
             MenuAction::None => {}
@@ -2903,6 +2911,7 @@ impl App {
                     self.push(Screen::Create);
                 }
             }
+            MenuAction::CheckUpdates => self.check_updates(),
             MenuAction::OpenSettings => self.push(Screen::Settings),
             MenuAction::Back => {
                 if self.screen == Screen::Loading {
@@ -3143,6 +3152,7 @@ impl ApplicationHandler for App {
         match self.create_gfx(event_loop) {
             Ok(g) => {
                 log::info!("window and GPU ready");
+                crate::updates::mark_ready();
                 g.gpu.set_refresh_rate(self.settings.refresh_rate);
                 self.gfx = Some(g);
             }
@@ -4039,3 +4049,4 @@ fn nearest_block(c: [u8; 4]) -> wolfcraft_engine::block::Block {
     let d = |q: [i32; 3]| 3 * (px[0] - q[0]).pow(2) + 4 * (px[1] - q[1]).pow(2) + 2 * (px[2] - q[2]).pow(2);
     PAL.iter().min_by_key(|(_, q)| d(*q)).map(|(b, _)| *b).unwrap_or(Wool)
 }
+
