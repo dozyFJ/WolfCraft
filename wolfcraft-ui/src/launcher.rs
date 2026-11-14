@@ -22,6 +22,19 @@ enum Tab {
     Skins,
 }
 
+/// The app's data folder (the «Сервер» page keeps its files under `server/` there).
+static DATA_DIR: std::sync::RwLock<Option<std::path::PathBuf>> = std::sync::RwLock::new(None);
+
+pub fn set_data_dir(dir: std::path::PathBuf) {
+    if let Ok(mut d) = DATA_DIR.write() {
+        *d = Some(dir);
+    }
+}
+
+fn data_dir() -> Option<std::path::PathBuf> {
+    DATA_DIR.read().ok().and_then(|d| d.clone())
+}
+
 static STUDIO_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Runs this build as the WolfStudio app (set once at start-up, before the first frame).
@@ -188,6 +201,17 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
             });
         });
 
+    // «Сервер»: its own tabs right under the toolbar.
+    let mut server_tab = 0;
+    if page == Tab::Server {
+        egui::TopBottomPanel::top("launcher-server-tabs")
+            .exact_height(46.0)
+            .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(10.0, 4.0)).stroke(Stroke::new(1.0_f32, p.outline)))
+            .show(ctx, |ui| {
+                server_tab = crate::server_page::tab_bar(ui, &p);
+            });
+    }
+
     // ---- Bottom navigation ----
     egui::TopBottomPanel::bottom("launcher-nav")
         .exact_height(NAV_H)
@@ -245,7 +269,10 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 Tab::Home => home(ui, icons, &p, planet, &mut action),
                 Tab::Settings => launcher_settings(ui, icons, &p, version, dark, &mut action),
                 Tab::Studio => studio(ui, icons, &p, version, worlds, &mut action),
-                Tab::Server => server(ui, icons, &p, worlds, &mut action),
+                Tab::Server => match (server_tab, data_dir()) {
+                    (0, _) | (_, None) => server(ui, icons, &p, worlds, &mut action),
+                    (t, Some(d)) => crate::server_page::page(ui, icons, &p, &d, t, worlds),
+                },
                 Tab::Skins => {
                     profile(ui, icons, &p, skin, nickname, worlds, &mut action);
                     if !is_studio_app() {
