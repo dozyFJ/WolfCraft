@@ -1509,7 +1509,7 @@ impl App {
                     let t = ScopeTimer::start();
                     s.fx_amount = self.settings.particles;
                     // Mini-games only on a server (online) or in the studio.
-                    s.minigames = self.net.is_some() || self.studio.is_some();
+                    s.minigames = s.cfg.studio_project && (self.net.is_some() || self.studio.is_some());
                     // Script: a tap on a block with a «block.on_interact» handler goes to the
                     // script instead of placing or opening.
                     if input.use_pressed && !frozen && !self.studio.as_ref().is_some_and(|st| !st.playtest) {
@@ -3906,3 +3906,4 @@ fn buttonsim_overlay(ctx: &egui::Context, b: &wolfcraft_engine::buttonsim::Butto
     painter.text(Pos2::new(r.left() + 14.0, r.bottom() - 16.0), Align2::LEFT_CENTER, format!("×{}", short(b.multiplier)), FontId::proportional(15.0), Color32::from_rgb(110, 170, 255));
     painter.text(Pos2::new(r.right() - 14.0, r.bottom() - 16.0), Align2::RIGHT_CENTER, format!("перерожд. {}", b.rebirths), FontId::proportional(15.0), Color32::from_rgb(190, 140, 255));
 }
+

@@ -12,7 +12,8 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use wolfcraft_engine::config::{GameMode, WorldConfig, slugify};
+use wolfcraft_engine::config::{GameMode, WorldConfig};
+mod worlds;
 use wolfcraft_net::server::{ServerHandle, lan_addresses};
 use wolfcraft_net::{DEFAULT_PORT, S2C};
 
@@ -100,6 +101,8 @@ fn handle_panel(server: &ServerHandle, cfg: &WorldConfig, token: &str, mut strea
                 "version": wolfcraft_common::VERSION,
                 "name": cfg.name,
                 "seed": (cfg.seed as i64).to_string(),
+                "world_id": cfg.id,
+                "kind": if cfg.studio_project { "place" } else { "world" },
                 "mode": if cfg.mode == GameMode::Creative { "Творческий" } else { "Выживание" },
                 "edits": s.edits[0].len() + s.edits[1].len(),
                 "uptime": s.started.elapsed().as_secs(),
@@ -174,7 +177,7 @@ fn open_browser(url: &str) {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("WolfCraft Сервер {}\n  --name <мир>      название мира (по умолчанию «Сервер»)\n  --seed <число>    seed нового мира\n  --port <порт>     порт игры (по умолчанию {DEFAULT_PORT})\n  --creative        творческий режим для нового мира\n  --background      запустить в фоне без окна\n  --no-browser      не открывать панель в браузере", wolfcraft_common::VERSION);
+        println!("WolfCraft Сервер {}\n  --name <мир>      название мира (по умолчанию «Сервер»)\n  --seed <число>    seed нового мира\n  --port <порт>     порт игры (по умолчанию {DEFAULT_PORT})\n  --creative        творческий режим для нового мира\n  --survival        выживание для нового мира\n  --place           новый плейс: пустая основа для студии\n  --planet          обычный мир-планета (по умолчанию)\n  --world <id>      папка существующего мира\n  --data <папка>    папка данных сервера\n  --background      запустить в фоне без окна\n  --no-browser      не открывать панель в браузере", wolfcraft_common::VERSION);
         return;
     }
     if args.iter().any(|a| a == "--background") {
@@ -188,38 +191,9 @@ fn main() {
     let port = arg_value(&args, "--port").and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
     // `--data`: where worlds live (the phone app passes its own files folder).
     let data = arg_value(&args, "--data").map(PathBuf::from).unwrap_or_else(data_dir);
-    // `--world <id>`: a place made in WolfStudio (its folder name); otherwise by the name.
-    let world_id = arg_value(&args, "--world").filter(|w| !w.trim().is_empty() && !w.contains(['/', '\\', '.']));
-    let dir = data.join("worlds").join(world_id.clone().unwrap_or_else(|| slugify(&name)));
-
-    // Existing world: keep its settings. New world: create them.
-    let cfg = match WorldConfig::load(&dir) {
-        Ok(c) => c,
-        Err(_) => {
-            let seed = arg_value(&args, "--seed").and_then(|s| s.parse::<i64>().ok()).map(|s| s as u64).unwrap_or_else(|| wolfcraft_common::platform::unix_now().wrapping_mul(6364136223846793005));
-            let mut c = WorldConfig::new(&name, seed);
-            c.id = world_id.clone().unwrap_or_else(|| slugify(&name));
-            c.studio_project = true;
-            // A new server world is a place, like in Roblox Studio: an empty flat baseplate
-            // without structures. `--planet` makes an ordinary WolfCraft planet instead.
-            if args.iter().any(|a| a == "--planet") {
-                if args.iter().any(|a| a == "--creative") {
-                    c.mode = GameMode::Creative;
-                }
-            } else {
-                c.world_type = wolfcraft_engine::config::WorldType::Baseplate;
-                c.structures = false;
-                c.size = wolfcraft_engine::config::PlanetSize::Small;
-                c.difficulty = wolfcraft_engine::config::Difficulty::Peaceful;
-                c.mode = if args.iter().any(|a| a == "--survival") { GameMode::Survival } else { GameMode::Creative };
-                c.studio_project = true;
-            }
-            if let Err(e) = c.save(&dir) {
-                eprintln!("Не удалось создать мир в {}: {e}", dir.display());
-                return;
-            }
-            c
-        }
+    let (dir,cfg)=match worlds::load_or_create(&data,&name,&args) {
+        Ok(world)=>world,
+        Err(e)=>{eprintln!("Сервер не запущен: {e}");return;}
     };
     let world_toml = match toml::to_string_pretty(&cfg) {
         Ok(t) => t,
@@ -289,3 +263,4 @@ mod tests {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(_app: winit::platform::android::activity::AndroidApp) {}
+
