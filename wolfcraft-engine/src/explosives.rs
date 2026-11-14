@@ -44,6 +44,10 @@ pub enum ShotKind {
     Bullet,
     /// A star called down from the sky by «Звёздный пульт»: falls straight, huge blast.
     Star,
+    /// A burning meteor of the meteor shower: falls at a slant, medium blast.
+    Meteor,
+    /// A bolt of the star blaster: fast, straight, glowing, small blast.
+    Plasma,
 }
 
 impl ShotKind {
@@ -53,6 +57,8 @@ impl ShotKind {
             ShotKind::Rocket => ROCKET_POWER,
             ShotKind::Bullet => 0.0,
             ShotKind::Star => STAR_POWER,
+            ShotKind::Meteor => 3.2,
+            ShotKind::Plasma => 2.0,
         }
     }
 }
@@ -120,6 +126,8 @@ pub fn weapon(id: ItemId) -> Option<(ItemId, ShotKind, f64, f32)> {
         ids::GRENADE_LAUNCHER => Some((ids::GRENADE, ShotKind::Grenade, 28.0, 0.8)),
         ids::BAZOOKA => Some((ids::ROCKET, ShotKind::Rocket, 45.0, 1.5)),
         ids::GRENADE => Some((ids::GRENADE, ShotKind::Grenade, 15.0, 0.6)),
+        // Needs no ammo (the session does not take any for it).
+        ids::STAR_BLASTER => Some((ids::STAR_BLASTER, ShotKind::Plasma, 90.0, 0.2)),
         _ => firearm(id).map(|f| (f.ammo, ShotKind::Bullet, f.speed, f.cooldown)),
     }
 }
@@ -220,7 +228,7 @@ impl Explosives {
                 ShotKind::Grenade => GRENADE_GRAVITY,
                 ShotKind::Rocket => ROCKET_GRAVITY,
                 ShotKind::Bullet => BULLET_GRAVITY,
-                ShotKind::Star => 0.0,
+                ShotKind::Star | ShotKind::Meteor | ShotKind::Plasma => 0.0,
             };
             s.vel -= up * g * dtd;
             let d = s.vel * dtd;
@@ -243,7 +251,8 @@ impl Explosives {
                 ShotKind::Grenade => GRENADE_LIFE,
                 ShotKind::Rocket => ROCKET_LIFE,
                 ShotKind::Bullet => BULLET_LIFE,
-                ShotKind::Star => 6.0,
+                ShotKind::Star | ShotKind::Meteor => 6.0,
+                ShotKind::Plasma => 2.5,
             };
             if s.kind == ShotKind::Bullet {
                 if let Some(p) = hit {
@@ -340,8 +349,10 @@ impl Explosives {
                 ShotKind::Bullet => ([1.0, 0.85, 0.45], 0.07),
                 // A blazing white-blue star.
                 ShotKind::Star => ([0.85, 0.92, 1.0], 1.2),
+                ShotKind::Meteor => ([1.0, 0.55, 0.15], 0.8),
+                ShotKind::Plasma => ([0.45, 0.95, 1.0], 0.22),
             };
-            v.push(Debris { pos: s.pos, vel: s.vel, color, size, age: 0.0, spin: s.age * 4.0, kind: FxKind::Fall, glow: matches!(s.kind, ShotKind::Bullet | ShotKind::Star) });
+            v.push(Debris { pos: s.pos, vel: s.vel, color, size, age: 0.0, spin: s.age * 4.0, kind: FxKind::Fall, glow: matches!(s.kind, ShotKind::Bullet | ShotKind::Star | ShotKind::Meteor | ShotKind::Plasma) });
         }
         v
     }
@@ -349,6 +360,21 @@ impl Explosives {
     /// Positions of falling stars (for their glowing trail).
     pub fn stars(&self) -> impl Iterator<Item = DVec3> + '_ {
         self.shots.iter().filter(|s| s.kind == ShotKind::Star).map(|s| s.pos)
+    }
+
+    /// Positions and kinds of meteors and plasma bolts (for their trails).
+    pub fn glowing(&self) -> impl Iterator<Item = (DVec3, ShotKind)> + '_ {
+        self.shots.iter().filter(|s| matches!(s.kind, ShotKind::Meteor | ShotKind::Plasma)).map(|s| (s.pos, s.kind))
+    }
+
+    /// A meteor at `at`, coming in at a slant from the side `from` (unit, along the ground).
+    pub fn call_meteor(&mut self, at: DVec3, from: DVec3) {
+        if self.shots.len() >= MAX_LIVE {
+            return;
+        }
+        let up = up_at(at);
+        let start = at + up * 60.0 + from * 35.0;
+        self.shots.push(Shot { kind: ShotKind::Meteor, pos: start, vel: (at - start).normalize_or_zero() * 48.0, age: 0.0, damage: 0.0 });
     }
 
     /// Calls a star down onto `at`: it appears high above and falls straight at it.
