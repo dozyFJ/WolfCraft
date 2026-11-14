@@ -68,25 +68,32 @@ class ServerService : Service() {
         }
     }
 
+    private val lifecycle = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    @Volatile private var latestRequest = 0
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestRequest = startId
         startForeground(NOTIF_ID, notification(if (running()) status else "Запуск…"))
         if (intent?.action == ACTION_STOP) {
-            Thread {
+            lifecycle.execute {
                 stopServer()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }.start()
+                if (latestRequest == startId) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
+                }
+            }
             return START_NOT_STICKY
         }
         val name = intent?.getStringExtra(EXTRA_NAME)?.trim()?.ifEmpty { null } ?: "Сервер"
         val creative = intent?.getBooleanExtra(EXTRA_CREATIVE, false) ?: false
         val worldId = intent?.getStringExtra(EXTRA_WORLD)?.trim()?.ifEmpty { null }
-        if (!running()) Thread { startServer(name, creative, worldId) }.start()
+        lifecycle.execute { if (!running()) startServer(name, creative, worldId) }
         return START_NOT_STICKY
     }
 
@@ -104,7 +111,9 @@ class ServerService : Service() {
         val data = File(filesDir, "wolfserver").apply { mkdirs() }
         token = java.util.UUID.randomUUID().toString().replace("-", "")
         val cmd = mutableListOf(exe.absolutePath, "--name", name, "--port", PORT.toString(), "--no-browser", "--data", data.absolutePath, "--token", token)
-        if (creative) cmd += "--creative"
+        // Stored worlds retain their profile; new quick servers are ordinary planets.
+        if (worldId == null) cmd += "--planet"
+        cmd += if (creative) "--creative" else "--survival"
         if (worldId != null) { cmd += "--world"; cmd += worldId }
         try {
             if (wakeLock == null) {
@@ -116,7 +125,8 @@ class ServerService : Service() {
                 wifiLock = (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
                     .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "wolfserver:wifi").apply { acquire() }
             }
-            addLog("▶ ${cmd.drop(1).dropLast(2).joinToString(" ")}")
+            // The world argument may follow --token, so never log the raw command line.
+            addLog("▶ WolfServer · $name · ${if (worldId == null) "обычный мир" else "мир $worldId"} · порт $PORT")
             val pb = ProcessBuilder(cmd).directory(data).redirectErrorStream(true)
             pb.environment()["HOME"] = data.absolutePath
             pb.environment()["TMPDIR"] = cacheDir.absolutePath
@@ -166,6 +176,7 @@ class ServerService : Service() {
     }
 
     override fun onDestroy() {
+        lifecycle.shutdown()
         releaseLocks()
         super.onDestroy()
     }
@@ -189,3 +200,4 @@ class ServerService : Service() {
             .build()
     }
 }
+

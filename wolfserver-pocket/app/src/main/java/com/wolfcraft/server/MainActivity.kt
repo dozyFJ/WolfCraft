@@ -308,47 +308,55 @@ class MainActivity : Activity() {
                 if (i <= 0) null else l.substring(0, i).trim() to l.substring(i + 1).trim().trim('"')
             }.toMap()
         } catch (_: Exception) { emptyMap() }
-        val kind = when (kv["world_type"]) { "baseplate" -> "Основа"; "flat" -> "Плоский мир"; else -> "Планета" }
-        Place(d.name, kv["name"] ?: d.name, kind, kv["created"]?.toLongOrNull() ?: 0L)
+        val kind = if (kv["studio_project"] == "true") "Плейс · " else "Обычный мир · "
+        val terrain = when (kv["world_type"]) { "baseplate" -> "Основа"; "flat" -> "Плоский мир"; else -> "Планета" }
+        Place(d.name, kv["name"] ?: d.name, kind + terrain, kv["created"]?.toLongOrNull() ?: 0L)
     }.sortedByDescending { it.made }
 
-    /** A new server like a new place in Roblox Studio: an empty baseplate, nothing built. */
-    private fun createPlace(name: String) {
+    /** Both world profiles share one server runtime, with separate folders and settings. */
+    private fun createPlace(name: String, isPlace: Boolean) {
         val now = System.currentTimeMillis() / 1000
-        val id = "server-$now"
+        val id = "server-${java.util.UUID.randomUUID()}"
         val dir = java.io.File(placesDir(), id).apply { mkdirs() }
-        val q = name.replace("\\", "\\\\").replace("\"", "\\\"")
+        val q = name.replace("\r", " ").replace("\n", " ").replace("\\", "\\\\").replace("\"", "\\\"")
         val seed = (System.nanoTime() and 0x3fffffff)
         java.io.File(dir, "world.toml").writeText(
             """
             id = "$id"
             name = "$q"
             seed = $seed
-            mode = "creative"
+            mode = "${if (isPlace) "creative" else "survival"}"
             size = "small"
-            world_type = "baseplate"
+            world_type = "${if (isPlace) "baseplate" else "standard"}"
             continents = "auto"
-            structures = false
-            difficulty = "peaceful"
+            structures = ${!isPlace}
+            difficulty = "${if (isPlace) "peaceful" else "normal"}"
             created = $now
             last_played = $now
             generator_version = 1
             format_version = 3
             shape = "sphere"
-            studio_project = true
+            studio_project = $isPlace
             """.trimIndent() + "\n"
         )
         render()
     }
 
     private fun askNewPlace() {
-        val name = input("Название сервера", "Сервер ${places().size + 1}")
-        val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(name) }
         AlertDialog.Builder(this)
-            .setTitle("Новый сервер")
-            .setMessage("Пустая основа с сеткой, без построек — как Baseplate в Roblox Studio.")
-            .setView(box)
-            .setPositiveButton("Создать") { _, _ -> name.text.toString().trim().ifEmpty { null }?.let { createPlace(it) } }
+            .setTitle("Что создать?")
+            .setItems(arrayOf("Обычный мир — планета и выживание", "Плейс — пустая основа и мини-игры")) { _, type ->
+                val isPlace = type == 1
+                val name = input("Название", "${if (isPlace) "Плейс" else "Мир"} ${places().size + 1}")
+                val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(name) }
+                AlertDialog.Builder(this)
+                    .setTitle(if (isPlace) "Новый плейс" else "Новый обычный мир")
+                    .setMessage(if (isPlace) "Пустая основа для своей игры в WolfStudio." else "Планета с природой и выживанием. Запускается тем же WolfServer.")
+                    .setView(box)
+                    .setPositiveButton("Создать") { _, _ -> name.text.toString().trim().ifEmpty { null }?.let { createPlace(it, isPlace) } }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            }
             .setNegativeButton("Отмена", null)
             .show()
     }
@@ -382,13 +390,13 @@ class MainActivity : Activity() {
 
     /** Студия: my servers like places in Roblox Studio — create, tap to edit, run. */
     private fun renderStudio() {
-        header("Мои серверы")
-        content.addView(button("＋  Создать сервер", 1) { askNewPlace() })
+        header("Миры и плейсы")
+        content.addView(button("＋  Создать мир или плейс", 1) { askNewPlace() })
         val list = places()
         if (list.isEmpty()) {
             content.addView(card {
-                addView(label("Пока нет серверов", 16f, cText, true))
-                addView(label("Сервер — это твоя игра со своим миром, отдельно от игровых миров. Создай его, нажми на карточку — откроется редактор: стройте, пишите скрипты на Luau. Потом «Запустить» — и друзья заходят.", 14f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
+                addView(label("Пока нет миров и плейсов", 16f, cText, true))
+                addView(label("Создай обычный мир для выживания или плейс для своей мини-игры. Каждый хранится отдельно. Нажми на карточку для редактирования, «Запустить» — чтобы позвать друзей.", 14f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
             })
         }
         for (p in list) {
@@ -456,6 +464,7 @@ class MainActivity : Activity() {
                 addView(caption("Мир"))
                 val rows = listOf(
                     "Название" to (s?.optString("name") ?: ServerService.world),
+                    "Тип" to (when (s?.optString("kind")) { "place" -> "Плейс"; "world" -> "Обычный мир"; else -> "…" }),
                     "Seed" to (s?.optString("seed") ?: "…"),
                     "Режим" to (s?.optString("mode") ?: "…"),
                     "Изменено блоков" to (s?.optInt("edits")?.toString() ?: "…"),
@@ -659,3 +668,4 @@ class MainActivity : Activity() {
         }
     }
 }
+
