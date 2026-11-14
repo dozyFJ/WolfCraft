@@ -88,6 +88,7 @@ jobs:
         run: |
           export OTA_SHELL_HASH="$(python3 tools/shell_hash.py studio)"
           python3 tools/build_ota.py --kind studio --input wolfserver-pocket/app/src/main/jniLibs/arm64-v8a --output studio-ota --build "$GITHUB_SHA" --sequence "$GITHUB_RUN_ID" --keystore ci/wolfcraft-release.keystore --shell-hash "$OTA_SHELL_HASH" --nm "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          bash tools/check_ota.sh studio studio-ota
           tag=server-test
           if [ "$GITHUB_REF_NAME" = "codex/ota-launchers" ]; then tag=studio-ota-bootstrap; fi
           gh release delete "$tag" -y --cleanup-tag || true

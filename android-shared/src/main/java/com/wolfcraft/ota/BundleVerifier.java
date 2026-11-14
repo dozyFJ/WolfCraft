@@ -30,7 +30,7 @@ public final class BundleVerifier {
         JSONArray files=m.getJSONArray("files");if(files.length()<1||files.length()>8)throw new SecurityException("Неверное число библиотек");
         Set<String> names=new HashSet<>();long total=0;
         for(int i=0;i<files.length();i++){JSONObject f=files.getJSONObject(i);String name=f.getString("name");
-            if(!name.matches("lib[a-zA-Z0-9_]+\\.so")||!names.add(name)||!f.getString("sha256").matches("[0-9a-f]{64}"))throw new SecurityException("Неверное имя библиотеки");
+            if(!name.matches("lib(?:[a-zA-Z0-9_]+|c\\+\\+_shared)\\.so")||!names.add(name)||!f.getString("sha256").matches("[0-9a-f]{64}"))throw new SecurityException("Неверное имя библиотеки");
             long size=f.getLong("size");if(size<20||size>MAX_BYTES)throw new SecurityException("Неверный размер библиотеки");total+=size;
         }
         if(total>MAX_BYTES)throw new SecurityException("Обновление слишком большое");

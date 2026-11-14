@@ -269,7 +269,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                         .show_ui(ui, |ui| {
                             ui.label(format!("{version} — установлена"));
                             ui.separator();
-                            ui.label("Обновить ядро можно кнопкой «Обновить» в шапке");
+                            ui.label("Обновить игру можно кнопкой «Обновить» в шапке");
                         });
                     if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 108.0, true).clicked() {
                         action = MenuAction::LaunchVersion(version.to_string());

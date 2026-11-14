@@ -82,6 +82,7 @@ jobs:
           python3 tools/check_shell_apk.py game WolfCraft.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs WolfCraft.apk
           python3 tools/build_ota.py --kind game --input game-pocket/app/src/main/jniLibs/arm64-v8a --output game-ota --build "$GITHUB_SHA" --sequence "$GITHUB_RUN_ID" --keystore ci/wolfcraft-release.keystore --shell-hash "$OTA_SHELL_HASH" --nm "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          bash tools/check_ota.sh game game-ota
 
       - uses: actions/upload-artifact@v4
         with:
