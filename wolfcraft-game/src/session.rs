@@ -135,6 +135,9 @@ pub struct GameSession {
     prev_use_held: bool,
     /// The dragon the player rides (index into the creatures).
     pub riding: Option<usize>,
+    /// «Звёздный пульт»: stars still to call down (where, seconds left) and its cooldown.
+    star_queue: Vec<(DVec3, f32)>,
+    star_cd: f32,
     /// A ritual of revival going on at an altar: (guardian, altar, seconds since it began).
     pub ritual: Option<(wolfcraft_engine::bosses::BossKind, wolfcraft_engine::cubesphere::Cell, f32)>,
     attack_cd: f32,
@@ -230,6 +233,8 @@ impl GameSession {
             mobs: wolfcraft_engine::mobs::MobManager::new(seed),
             riding: None,
             ritual: None,
+            star_queue: Vec::new(),
+            star_cd: 0.0,
             attack_cd: 0.0,
             death_burst_done: false,
             arrows: Default::default(),
@@ -979,6 +984,30 @@ impl GameSession {
                         keep.push(e);
                     }
                 }
+                InteractionEvent::Fire { weapon: id } if id == wolfcraft_engine::items::ids::STAR_REMOTE => {
+                    // Seven stars fall one after another on the spot you point at, in the shape
+                    // of the Big Dipper, each digging its own crater.
+                    if self.star_cd > 0.0 {
+                        self.item_name = Some((format!("Звёзды ещё не встали на место: {:.0} с", self.star_cd.ceil()), 1.5));
+                        continue;
+                    }
+                    let Some(h) = wolfcraft_engine::physics::raycast(&self.chunks, eye, look, 160.0) else {
+                        self.item_name = Some(("Наведите пульт на землю".into(), 1.5));
+                        continue;
+                    };
+                    let at = self.chunks.grid().cell_center(h.cell);
+                    let up = wolfcraft_engine::physics::up_at(at);
+                    let side = (look - up * look.dot(up)).normalize_or_zero();
+                    let side = if side.length_squared() < 0.5 { self.player.heading } else { side };
+                    let across = up.cross(side).normalize_or_zero();
+                    const DIPPER: [(f64, f64); 7] = [(-9.0, 3.0), (-5.5, 2.0), (-2.5, 0.5), (0.5, -0.5), (1.0, -4.5), (6.0, -5.0), (6.5, 0.0)];
+                    for (k, (a, b)) in DIPPER.iter().enumerate() {
+                        self.star_queue.push((at + side * *b + across * *a, 0.8 + k as f32 * 0.7));
+                    }
+                    self.star_cd = 12.0;
+                    self.item_name = Some(("Звёзды падают!".into(), 2.5));
+                    keep.push(e);
+                }
                 InteractionEvent::Fire { weapon: id } => {
                     let Some((ammo, kind, speed, cooldown)) = weapon(id) else { continue };
                     if !self.explosives.ready() {
@@ -1008,6 +1037,37 @@ impl GameSession {
             }
         }
         *events = keep;
+
+        // Stars due now appear high in the sky; a beam of light marks where each will land.
+        self.star_cd = (self.star_cd - dt).max(0.0);
+        let mut due = Vec::new();
+        for s in &mut self.star_queue {
+            s.1 -= dt;
+            if s.1 <= 0.0 {
+                due.push(s.0);
+            }
+        }
+        self.star_queue.retain(|s| s.1 > 0.0);
+        for (at, left) in self.star_queue.clone() {
+            if left < 1.2 && self.mobs.rand() < 0.5 {
+                let up = wolfcraft_engine::physics::up_at(at);
+                let h = self.mobs.rand() * 30.0;
+                self.mobs.fx_glow(at + up * h, up * 2.0, [0.75, 0.88, 1.0], 0.12, 0.4, wolfcraft_engine::mobs::FxKind::Rise);
+            }
+        }
+        for at in due {
+            self.explosives.call_star(at, 70.0);
+        }
+        // Their glowing tails.
+        let stars: Vec<DVec3> = self.explosives.stars().collect();
+        for p in stars {
+            let up = wolfcraft_engine::physics::up_at(p);
+            for k in 0..3 {
+                let jitter = DVec3::new(self.mobs.rand() - 0.5, self.mobs.rand() - 0.5, self.mobs.rand() - 0.5) * 0.8;
+                let col = [[0.85, 0.92, 1.0], [0.55, 0.75, 1.0], [1.0, 0.95, 0.75]][k];
+                self.mobs.fx_glow(p + up * (1.0 + k as f64) + jitter, up * 3.0 + jitter, col, 0.35 - k as f32 * 0.08, 0.7, wolfcraft_engine::mobs::FxKind::Rise);
+            }
+        }
 
         let targets: Vec<DVec3> = self.mobs.mobs.iter().map(|m| m.centre()).collect();
         let (blasts, broken) = self.explosives.update(&mut self.chunks, &targets, dt);
@@ -1067,10 +1127,47 @@ impl GameSession {
         let _ = n_broken;
         for b in blasts {
             events.push(InteractionEvent::Exploded { at: b.pos, power: b.power });
-            // Fireball, sparks and a cloud of smoke.
+            // A fallen star leaves its glowing core at the bottom of the crater.
+            if b.power >= wolfcraft_engine::explosives::STAR_POWER {
+                let up = wolfcraft_engine::physics::up_at(b.pos);
+                let core = self.chunks.grid().world_to_cell(b.pos - up * 3.5);
+                if self.chunks.get_block(core).is_some_and(|x| !x.is_fluid()) && self.chunks.set_block(core, wolfcraft_engine::block::Block::Glowstone) {
+                    self.net_out.push((core, wolfcraft_engine::block::Block::Glowstone));
+                }
+            }
+            // A 3D blast: a chunky fireball that swells and fades, a ring of dust racing out
+            // along the ground, and a mushroom of smoke rising over it (bigger for bigger blasts).
             {
                 use wolfcraft_engine::mobs::FxKind;
                 let up = wolfcraft_engine::physics::up_at(b.pos);
+                let k = (b.power / 4.0).clamp(0.6, 1.8) as f64;
+                let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+                let ta = up.cross(helper).normalize();
+                let tb = up.cross(ta);
+                let n_ball = (26.0 * k) as usize;
+                for i in 0..n_ball {
+                    let a = i as f64 * 2.399;
+                    let e = (i as f64 / n_ball as f64) * 2.0 - 1.0;
+                    let r = (1.0 - e * e).sqrt();
+                    let dir = ta * (a.cos() * r) + tb * (a.sin() * r) + up * e.abs();
+                    let col = [[1.0, 0.95, 0.70], [1.0, 0.70, 0.22], [0.98, 0.42, 0.10], [0.85, 0.22, 0.06]][i % 4];
+                    self.mobs.fx_glow(b.pos + dir * 0.3, dir * (4.0 + (i % 3) as f64) * k, col, (0.45 + (i % 4) as f32 * 0.15) * k as f32, 0.55 + (i % 3) as f32 * 0.15, FxKind::Rise);
+                }
+                let n_ring = (20.0 * k) as usize;
+                for i in 0..n_ring {
+                    let a = i as f64 * std::f64::consts::TAU / n_ring as f64;
+                    let dir = ta * a.cos() + tb * a.sin();
+                    self.mobs.fx(b.pos + dir * 0.5, dir * 9.0 * k + up * 0.6, [0.62, 0.58, 0.52], 0.4 * k as f32, 1.0, FxKind::Rise);
+                }
+                for i in 0..(14.0 * k) as usize {
+                    let a = i as f64 * 1.9;
+                    let dir = ta * a.cos() + tb * a.sin();
+                    let shade = 0.18 + (i % 4) as f32 * 0.06;
+                    // Stem, then the cap spreading out at the top.
+                    let cap = i % 2 == 0;
+                    let v = if cap { up * 5.0 * k + dir * 2.5 * k } else { up * 3.0 * k + dir * 0.4 };
+                    self.mobs.fx(b.pos + up * 0.5, v, [shade, shade * 0.97, shade * 0.95], (0.7 + (i % 3) as f32 * 0.25) * k as f32, 3.0, FxKind::Rise);
+                }
                 for i in 0..36 {
                     let a = i as f64 * 2.399;
                     let side = DVec3::new(a.cos(), (a * 1.3).sin(), a.sin());

@@ -301,8 +301,8 @@ impl Interaction {
             events.push(InteractionEvent::Hatch { tier: (stack.id - items::ids::EGG_BASE) as u8 });
             return events;
         }
-        // Grenade launcher, bazooka, grenade: the session fires (if there is ammo).
-        if crate::explosives::weapon(stack.id).is_some() {
+        // Grenade launcher, bazooka, grenade, the star remote: the session fires.
+        if crate::explosives::weapon(stack.id).is_some() || stack.id == items::ids::STAR_REMOTE {
             events.push(InteractionEvent::Fire { weapon: stack.id });
             return events;
         }

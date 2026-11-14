@@ -20,6 +20,8 @@ pub const DYNAMITE_FUSE: f32 = 4.0;
 pub const DYNAMITE_POWER: f32 = 4.0;
 pub const GRENADE_POWER: f32 = 2.6;
 pub const ROCKET_POWER: f32 = 4.5;
+/// «Звёздный пульт»: each falling star digs a big crater.
+pub const STAR_POWER: f32 = 6.0;
 /// Blocks at least this hard survive any blast (obsidian, metal blocks are below it).
 const BLAST_PROOF_HARDNESS: f32 = 30.0;
 /// Grenades fall like stones; rockets fly almost straight.
@@ -40,6 +42,8 @@ pub enum ShotKind {
     Rocket,
     /// A bullet or shotgun pellet: fast, nearly straight, hurts what it hits, no blast.
     Bullet,
+    /// A star called down from the sky by «Звёздный пульт»: falls straight, huge blast.
+    Star,
 }
 
 impl ShotKind {
@@ -48,6 +52,7 @@ impl ShotKind {
             ShotKind::Grenade => GRENADE_POWER,
             ShotKind::Rocket => ROCKET_POWER,
             ShotKind::Bullet => 0.0,
+            ShotKind::Star => STAR_POWER,
         }
     }
 }
@@ -215,6 +220,7 @@ impl Explosives {
                 ShotKind::Grenade => GRENADE_GRAVITY,
                 ShotKind::Rocket => ROCKET_GRAVITY,
                 ShotKind::Bullet => BULLET_GRAVITY,
+                ShotKind::Star => 0.0,
             };
             s.vel -= up * g * dtd;
             let d = s.vel * dtd;
@@ -237,6 +243,7 @@ impl Explosives {
                 ShotKind::Grenade => GRENADE_LIFE,
                 ShotKind::Rocket => ROCKET_LIFE,
                 ShotKind::Bullet => BULLET_LIFE,
+                ShotKind::Star => 6.0,
             };
             if s.kind == ShotKind::Bullet {
                 if let Some(p) = hit {
@@ -331,10 +338,26 @@ impl Explosives {
                 ShotKind::Rocket => ([0.60, 0.62, 0.66], 0.32),
                 // A bright tracer.
                 ShotKind::Bullet => ([1.0, 0.85, 0.45], 0.07),
+                // A blazing white-blue star.
+                ShotKind::Star => ([0.85, 0.92, 1.0], 1.2),
             };
-            v.push(Debris { pos: s.pos, vel: s.vel, color, size, age: 0.0, spin: s.age * 4.0, kind: FxKind::Fall, glow: s.kind == ShotKind::Bullet });
+            v.push(Debris { pos: s.pos, vel: s.vel, color, size, age: 0.0, spin: s.age * 4.0, kind: FxKind::Fall, glow: matches!(s.kind, ShotKind::Bullet | ShotKind::Star) });
         }
         v
+    }
+
+    /// Positions of falling stars (for their glowing trail).
+    pub fn stars(&self) -> impl Iterator<Item = DVec3> + '_ {
+        self.shots.iter().filter(|s| s.kind == ShotKind::Star).map(|s| s.pos)
+    }
+
+    /// Calls a star down onto `at`: it appears high above and falls straight at it.
+    pub fn call_star(&mut self, at: DVec3, height: f64) {
+        if self.shots.len() >= MAX_LIVE {
+            return;
+        }
+        let up = up_at(at);
+        self.shots.push(Shot { kind: ShotKind::Star, pos: at + up * height, vel: -up * 55.0, age: 0.0, damage: 0.0 });
     }
 
     /// Positions of rockets in flight (for the smoke trail).

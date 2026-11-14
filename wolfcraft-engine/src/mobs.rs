@@ -152,7 +152,7 @@ pub struct MobManager {
 
 const HOSTILE_CAP: usize = 8;
 /// Upper bound of live particles (death cubes + block chips).
-pub const MAX_DEBRIS: usize = 400;
+pub const MAX_DEBRIS: usize = 900;
 const PASSIVE_CAP: usize = 6;
 /// Fish, squid, dolphins and sharks at once.
 const AQUATIC_CAP: usize = 8;

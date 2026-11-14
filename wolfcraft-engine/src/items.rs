@@ -100,7 +100,9 @@ pub mod ids {
     pub const DRAGON_SOUL: ItemId = 382;
     pub const RAW_FISH: ItemId = 383;
     pub const COOKED_FISH: ItemId = 384;
-    pub const LAST: ItemId = 384;
+    /// «Звёздный пульт»: calls seven falling stars down on the spot you point at.
+    pub const STAR_REMOTE: ItemId = 385;
+    pub const LAST: ItemId = 385;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -229,6 +231,7 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::SADDLE => ItemInfo { max_stack: 1, ..plain("Седло", sp::SADDLE) },
         ids::DRAGON_SOUL => ItemInfo { max_stack: 16, ..plain("Душа дракона", sp::DRAGON_SOUL) },
         ids::RAW_FISH => ItemInfo { food: Some((2.0, 1.0)), ..plain("Сырая рыба", sp::RAW_FISH) },
+        ids::STAR_REMOTE => ItemInfo { max_stack: 1, ..plain("Звёздный пульт", sp::STAR_REMOTE) },
         ids::COOKED_FISH => ItemInfo { food: Some((6.0, 9.0)), ..plain("Жареная рыба", sp::COOKED_FISH) },
         ids::BOW => ItemInfo { max_stack: 1, durability: 384, ..plain("Лук", sp::BOW) },
         ids::ARROW => plain("Стрела", sp::ARROW),
@@ -601,7 +604,7 @@ pub fn category(id: ItemId) -> &'static str {
         if (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id) {
             return "Вооружение";
         }
-        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD | ids::GUNPOWDER | ids::LIGHTER | ids::GRENADE | ids::GRENADE_LAUNCHER | ids::ROCKET | ids::BAZOOKA | ids::PISTOL | ids::RIFLE | ids::SHOTGUN | ids::SNIPER | ids::BULLETS | ids::SHELLS) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
+        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD | ids::GUNPOWDER | ids::LIGHTER | ids::GRENADE | ids::GRENADE_LAUNCHER | ids::ROCKET | ids::BAZOOKA | ids::PISTOL | ids::RIFLE | ids::SHOTGUN | ids::SNIPER | ids::BULLETS | ids::SHELLS | ids::STAR_REMOTE) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
             return "Вооружение";
         }
         return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };
