@@ -26,6 +26,29 @@ public final class OtaVerifierTest {
             KeyPairGenerator g=KeyPairGenerator.getInstance("RSA");g.initialize(2048);KeyPair keys=g.generateKeyPair();byte[] elf=elf();File archive=zip(root,"libwolfcraft_game.so",elf);JSONObject m=manifest(archive,elf);byte[] raw=m.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);byte[] sig=sign(raw,keys.getPrivate());
             JSONObject verified=BundleVerifier.manifest(raw,sig,keys.getPublic(),"game");assert verified.getString("build").equals("1".repeat(40));checks++;
             File installed=new File(root,"installed");BundleVerifier.extract(archive,installed,verified);BundleVerifier.verifyDirectory(installed,verified);assert new File(installed,"libwolfcraft_game.so").length()==128;checks++;
+
+            for(String kind:new String[]{"game","studio"}){
+                String[] names=kind.equals("game")?new String[]{"libwolfcraft_game.so","libc++_shared.so"}:new String[]{"libwolfstudio.so","libwolfserver_runtime.so","libc++_shared.so"};
+                File bundle=new File(root,kind+"-with-cpp.zip");
+                JSONArray files=new JSONArray();
+                try(ZipOutputStream z=new ZipOutputStream(new FileOutputStream(bundle))){
+                    for(String name:names){
+                        z.putNextEntry(new ZipEntry(name));z.write(elf);z.closeEntry();
+                        files.put(new JSONObject().put("name",name).put("size",elf.length).put("sha256",m.getJSONArray("files").getJSONObject(0).getString("sha256")));
+                    }
+                }
+                JSONObject cpp=manifest(bundle,elf).put("kind",kind).put("archive",kind+"-runtime.zip").put("files",files);
+                byte[] cr=cpp.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                JSONObject cv=BundleVerifier.manifest(cr,sign(cr,keys.getPrivate()),keys.getPublic(),kind);
+                File target=new File(root,kind+"-with-cpp");
+                BundleVerifier.extract(bundle,target,cv);BundleVerifier.verifyDirectory(target,cv);
+                assert new File(target,"libc++_shared.so").length()==elf.length;checks++;
+            }
+            for(String name:new String[]{"libevil++.so","../libc++_shared.so","libc++_shared.so/evil","libc++_shared.so.so"}){
+                JSONObject bad=copy(m);bad.getJSONArray("files").put(new JSONObject(m.getJSONArray("files").getJSONObject(0).toString()).put("name",name));
+                byte[] b=bad.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                rejects(()->BundleVerifier.manifest(b,sign(b,keys.getPrivate()),keys.getPublic(),"game"));
+            }
             byte[] wrong=sig.clone();wrong[0]^=1;rejects(()->BundleVerifier.manifest(raw,wrong,keys.getPublic(),"game"));
             rejects(()->BundleVerifier.manifest(raw,sig,g.generateKeyPair().getPublic(),"game"));
             rejects(()->BundleVerifier.manifest(raw,sig,keys.getPublic(),"studio"));

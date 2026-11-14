@@ -55,7 +55,7 @@ public final class OtaManager {
                 if(!build.matches("[0-9a-f]{40}"))throw new SecurityException("Неверная версия");
                 File marker=pending(c,kind,part);
                 if(marker.exists()&&build.equals(new String(read(marker,80),StandardCharsets.UTF_8))) {
-                    rollback(c,kind,"Предыдущее ядро не завершило запуск — восстановлена прошлая версия");
+                    rollback(c,kind,"Предыдущая версия не завершила запуск — восстановлена прошлая версия");
                     a=active(c,kind);build=a.optString("build",BUILTIN);
                 }
                 if(!build.equals(BUILTIN)){
@@ -67,7 +67,7 @@ public final class OtaManager {
                         dir=null;build=BUILTIN;
                     } else write(pending(c,kind,part),build.getBytes(StandardCharsets.UTF_8));
                 }
-            }catch(Exception e){rollback(c,kind,"Не удалось проверить установленное ядро: "+e.getMessage());dir=null;build=BUILTIN;}
+            }catch(Exception e){rollback(c,kind,"Не удалось проверить установленную версию: "+e.getMessage());dir=null;build=BUILTIN;}
         }
         selected.put(cache,dir);selectedBuild.put(cache,build);return dir;
     }
@@ -94,16 +94,16 @@ public final class OtaManager {
         if(activity.isFinishing())return;
         if(busy.get()){Toast.makeText(activity,"Обновление уже проверяется",Toast.LENGTH_SHORT).show();return;}
         String previous=prefs(activity).getString("last_error","");
-        String text=(kind.equals("game")?"WolfCraft":"WolfStudio")+" · обновление ядра без APK\n"+
+        String text=(kind.equals("game")?"WolfCraft":"WolfStudio")+" · обновление без APK\n"+
             "Текущая версия: "+currentBuild(activity,kind).substring(0,Math.min(10,currentBuild(activity,kind).length()))+
             (previous.isEmpty()?"":"\n"+previous);
-        new AlertDialog.Builder(activity).setTitle("Обновление приложения").setMessage(text)
+        new AlertDialog.Builder(activity).setTitle(kind.equals("game")?"Обновление игры":"Обновление WolfStudio").setMessage(text)
             .setPositiveButton("Проверить",(d,w)->{
                 if(prefs(activity).getString("github_token","").isEmpty())askToken(activity,kind);else check(activity,kind);
             })
             .setNeutralButton("Ключ GitHub",(d,w)->askToken(activity,kind))
-            .setNegativeButton("Ещё",(d,w)->new AlertDialog.Builder(activity).setItems(new String[]{"Вернуть прошлое ядро","Закрыть"},(dd,which)->{
-                if(which==0)new AlertDialog.Builder(activity).setTitle("Откат ядра").setMessage("После перезапуска будет восстановлено предыдущее ядро. Миры и настройки останутся.").setPositiveButton("Вернуть",(ddd,www)->{rollback(activity,kind,"Откат выполнен пользователем");restart(activity);}).setNegativeButton("Отмена",null).show();
+            .setNegativeButton("Ещё",(d,w)->new AlertDialog.Builder(activity).setItems(new String[]{"Вернуть прошлую версию","Закрыть"},(dd,which)->{
+                if(which==0)new AlertDialog.Builder(activity).setTitle("Откат обновления").setMessage("После перезапуска будет восстановлена предыдущая версия. Миры и настройки останутся.").setPositiveButton("Вернуть",(ddd,www)->{rollback(activity,kind,"Откат выполнен пользователем");restart(activity);}).setNegativeButton("Отмена",null).show();
             }).show()).show();
     });}
     private static void askToken(Activity a,String kind){EditText field=new EditText(a);field.setSingleLine(true);field.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);field.setText(prefs(a).getString("github_token",""));
@@ -136,7 +136,7 @@ public final class OtaManager {
     private static void status(Activity a,ProgressDialog p,String text){a.runOnUiThread(()->{if(!a.isFinishing())p.setMessage(text);});}
     private static void check(Activity a,String kind){
         if(!busy.compareAndSet(false,true))return;
-        ProgressDialog progress=new ProgressDialog(a);progress.setTitle("Обновление ядра");progress.setMessage("Проверка GitHub…");progress.setCancelable(false);progress.show();
+        ProgressDialog progress=new ProgressDialog(a);progress.setTitle(kind.equals("game")?"Обновление игры":"Обновление WolfStudio");progress.setMessage("Проверка GitHub…");progress.setCancelable(false);progress.show();
         new Thread(()->{
             File archive=null,stage=null;String outcome=null;boolean installed=false;
             try(RandomAccessFile lockFile=new RandomAccessFile(new File(root(a),"update.lock"),"rw");FileChannel channel=lockFile.getChannel();FileLock lock=channel.tryLock()){
@@ -148,16 +148,16 @@ public final class OtaManager {
                 byte[] raw=get(asset(release,kind+"-ota.json").getString("url"),token,65536);
                 byte[] signature=get(asset(release,kind+"-ota.sig").getString("url"),token,8192);
                 JSONObject manifest=BundleVerifier.manifest(raw,signature,publicKey(a),kind);String build=manifest.getString("build");
-                if(manifest.getInt("save_format")!=saveFormat(a))throw new SecurityException("Изменился формат сохранений. Нужен новый APK; текущее ядро оставлено без изменений.");
-                if(!manifest.getString("shell_hash").equals(metadata(a,"wolf.ota.shellhash","development")))throw new SecurityException("Обновилась Android-оболочка. Для этой версии нужен новый APK-загрузчик; текущее ядро оставлено без изменений.");
-                if(build.equals(currentBuild(a,kind)))outcome="Уже установлено актуальное ядро.";
+                if(manifest.getInt("save_format")!=saveFormat(a))throw new SecurityException("Изменился формат сохранений. Нужен новый APK; текущая версия оставлена без изменений.");
+                if(!manifest.getString("shell_hash").equals(metadata(a,"wolf.ota.shellhash","development")))throw new SecurityException("Обновилась Android-оболочка. Для этой версии нужен новый APK-загрузчик; текущая версия оставлена без изменений.");
+                if(build.equals(currentBuild(a,kind)))outcome="Уже установлена актуальная версия.";
                 else{
                     long currentSequence=shellSequence(a);JSONObject old=active(a,kind);String oldBuild=old.optString("build",BUILTIN);
                     if(!oldBuild.equals(BUILTIN)){try{currentSequence=Math.max(currentSequence,verify(a,kind,new File(new File(root(a),kind),oldBuild)).getLong("sequence"));}catch(Exception ignored){}}
                     if(manifest.getLong("sequence")<=currentSequence)throw new SecurityException("Доступная версия не новее установленной. Понижение через обновление запрещено.");
                     JSONObject zip=asset(release,manifest.getString("archive"));long zipSize=zip.getLong("size");if(zipSize<=0||zipSize>BundleVerifier.MAX_BYTES)throw new SecurityException("Недопустимый размер архива");
                     archive=File.createTempFile("wolf-ota-",".zip",a.getCacheDir());HttpURLConnection download=request(zip.getString("url"),token,"application/octet-stream");
-                    try(InputStream in=download.getInputStream();FileOutputStream out=new FileOutputStream(archive)){byte[] b=new byte[65536];long received=0,deadline=SystemClock.elapsedRealtime()+180000;int n,last=-1;while((n=in.read(b))!=-1){if(SystemClock.elapsedRealtime()>deadline)throw new IOException("Превышено время загрузки");received+=n;if(received>zipSize||received>BundleVerifier.MAX_BYTES)throw new SecurityException("Архив больше ожидаемого");out.write(b,0,n);int pct=(int)(received*100/zipSize);if(pct!=last){status(a,progress,"Загрузка ядра: "+pct+" %");last=pct;}}if(received!=zipSize)throw new IOException("Загрузка прервалась");out.getFD().sync();}finally{download.disconnect();}
+                    try(InputStream in=download.getInputStream();FileOutputStream out=new FileOutputStream(archive)){byte[] b=new byte[65536];long received=0,deadline=SystemClock.elapsedRealtime()+180000;int n,last=-1;while((n=in.read(b))!=-1){if(SystemClock.elapsedRealtime()>deadline)throw new IOException("Превышено время загрузки");received+=n;if(received>zipSize||received>BundleVerifier.MAX_BYTES)throw new SecurityException("Архив больше ожидаемого");out.write(b,0,n);int pct=(int)(received*100/zipSize);if(pct!=last){status(a,progress,"Загрузка обновления: "+pct+" %");last=pct;}}if(received!=zipSize)throw new IOException("Загрузка прервалась");out.getFD().sync();}finally{download.disconnect();}
                     status(a,progress,"Проверка подписи и библиотек…");
                     File versions=new File(root(a),kind);versions.mkdirs();stage=new File(versions,"staging-"+UUID.randomUUID());BundleVerifier.extract(archive,stage,manifest);
                     write(new File(stage,"manifest.json"),raw);write(new File(stage,"manifest.sig"),signature);
@@ -165,12 +165,12 @@ public final class OtaManager {
                     if(ready.exists()){verify(a,kind,ready);BundleVerifier.delete(stage);stage=null;}else{if(!stage.renameTo(ready))throw new IOException("Не удалось завершить обновление");stage=null;}
                     JSONObject next=new JSONObject().put("build",build).put("previous",old.optString("build",BUILTIN));write(pointer(a,kind),next.toString().getBytes(StandardCharsets.UTF_8));
                     for(String part:new String[]{"native","server"})new AtomicFile(pending(a,kind,part)).delete();
-                    prefs(a).edit().remove("last_error").apply();installed=true;outcome="Ядро обновлено до "+build.substring(0,10)+". Перезапусти приложение, чтобы начать играть на новой версии.";
+                    prefs(a).edit().remove("last_error").apply();installed=true;outcome="Приложение обновлено до "+build.substring(0,10)+". Перезапусти приложение, чтобы начать играть на новой версии.";
                 }
             }catch(Exception e){outcome=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();}
             finally{if(archive!=null)archive.delete();if(stage!=null)BundleVerifier.delete(stage);busy.set(false);}
             String message=outcome;boolean restart=installed;
-            a.runOnUiThread(()->{try{progress.dismiss();if(!a.isFinishing()){AlertDialog.Builder dialog=new AlertDialog.Builder(a).setTitle(restart?"Обновление готово":"Обновление ядра").setMessage(message);if(restart)dialog.setPositiveButton("Перезапустить",(d,w)->restart(a)).setNegativeButton("Позже",null);else dialog.setPositiveButton("Понятно",null);dialog.show();}}catch(Exception ignored){}});
+            a.runOnUiThread(()->{try{progress.dismiss();if(!a.isFinishing()){AlertDialog.Builder dialog=new AlertDialog.Builder(a).setTitle(restart?"Обновление готово":kind.equals("game")?"Обновление игры":"Обновление WolfStudio").setMessage(message);if(restart)dialog.setPositiveButton("Перезапустить",(d,w)->restart(a)).setNegativeButton("Позже",null);else dialog.setPositiveButton("Понятно",null);dialog.show();}}catch(Exception ignored){}});
         },"wolf-ota").start();
     }
     public static void restart(Activity a){
