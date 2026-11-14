@@ -110,33 +110,79 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     let tabs = tabs();
     tab = tab.min(tabs.len() - 1);
 
-    // ---- Toolbar ----
+    // ---- Full-bleed background ----
+    // The phone's safe margins (and the strip under the status bar) are outside egui's
+    // screen; paint the page and bar colours out to the real edges so nothing looks cut.
+    {
+        let screen = ctx.screen_rect();
+        let full = screen.expand(160.0);
+        let bg = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(full);
+        bg.rect_filled(full, 0.0, p.bg);
+        bg.rect_filled(Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + TOOLBAR_H)), 0.0, p.surface);
+        bg.rect_filled(Rect::from_min_max(Pos2::new(full.left(), screen.bottom() - NAV_H), full.max), 0.0, p.surface);
+        bg.line_segment([Pos2::new(full.left(), screen.top() + TOOLBAR_H), Pos2::new(full.right(), screen.top() + TOOLBAR_H)], Stroke::new(1.0_f32, p.outline));
+        bg.line_segment([Pos2::new(full.left(), screen.bottom() - NAV_H), Pos2::new(full.right(), screen.bottom() - NAV_H)], Stroke::new(1.0_f32, p.outline));
+    }
+
+    // ---- Toolbar: each page has its own (title and its own buttons) ----
+    let page = tabs[tab].0;
     egui::TopBottomPanel::top("launcher-toolbar")
         .exact_height(TOOLBAR_H)
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(16.0, 8.0)))
+        .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(16.0, 8.0)))
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::hover());
-                icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
-                // Upright phone: room only for the name and the two buttons.
-                let wide = ui.ctx().screen_rect().width() > 480.0;
-                if wide {
-                    ui.label(egui::RichText::new(tabs[tab].1).size(14.0).color(p.text_muted));
+                if page == Tab::Home {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::hover());
+                    icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
+                } else {
+                    let title = match page {
+                        Tab::Studio => "Редактор",
+                        Tab::Server => "Сервер",
+                        Tab::Skins => "Профиль",
+                        Tab::Settings => "Настройки",
+                        Tab::Home => "",
+                    };
+                    ui.label(egui::RichText::new(title).font(bold_font(21.0)).color(p.text));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    if round_icon(ui, icons, &p, icon::GEAR).clicked() {
-                        action = MenuAction::OpenSettings;
-                    }
-                    if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).clicked() {
-                        action = MenuAction::ToggleTheme;
-                    }
-                    if wide {
-                        let (r, _) = ui.allocate_exact_size(Vec2::new(64.0, 26.0), Sense::hover());
-                        ui.painter().rect_stroke(r, Rounding::same(13.0), Stroke::new(1.5_f32, p.accent));
-                        ui.painter().text(r.center(), Align2::CENTER_CENTER, format!("v{version}"), FontId::proportional(12.0), p.accent);
+                    match page {
+                        Tab::Home => {
+                            if round_icon(ui, icons, &p, icon::GEAR).clicked() {
+                                action = MenuAction::OpenSettings;
+                            }
+                            if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).clicked() {
+                                action = MenuAction::ToggleTheme;
+                            }
+                            let (r, _) = ui.allocate_exact_size(Vec2::new(64.0, 26.0), Sense::hover());
+                            ui.painter().rect_stroke(r, Rounding::same(13.0), Stroke::new(1.5_f32, p.accent));
+                            ui.painter().text(r.center(), Align2::CENTER_CENTER, format!("v{version}"), FontId::proportional(12.0), p.accent);
+                        }
+                        Tab::Studio => {
+                            // «+ Новый» opens the new-place form on the page.
+                            if pill_button(ui, icons, Some(icon::PLUS), "Новый", ButtonKind::Primary, 110.0, true).clicked() {
+                                let n = worlds.iter().filter(|w| w.cfg.studio_project || is_studio_app()).count() + 1;
+                                ui.ctx().data_mut(|d| d.insert_temp(Id::new("studio-new-form"), Some((format!("Сервер {n}"), 0u8))));
+                            }
+                        }
+                        Tab::Server => {
+                            if round_icon(ui, icons, &p, icon::SEARCH).clicked() {
+                                action = MenuAction::OpenNetwork;
+                            }
+                            if round_icon(ui, icons, &p, icon::PLUS).clicked() {
+                                action = MenuAction::HostServer(None);
+                            }
+                        }
+                        Tab::Skins | Tab::Settings => {
+                            if round_icon(ui, icons, &p, icon::GEAR).clicked() {
+                                action = MenuAction::OpenSettings;
+                            }
+                            if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).clicked() {
+                                action = MenuAction::ToggleTheme;
+                            }
+                        }
                     }
                 });
             });
@@ -456,8 +502,7 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
             add(ui);
         });
     };
-    ui.label(egui::RichText::new("Сервер").font(bold_font(22.0)).color(p.text));
-    // Join or edit by code / address.
+    // Join or edit by code / address (the page title is in the toolbar).
     card(ui, &mut |ui| {
         ui.label(egui::RichText::new("ВОЙТИ НА СЕРВЕР").size(11.5).color(p.text_muted));
         let w = ui.available_width();
@@ -523,14 +568,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     // In the WolfStudio app every world is a server (its own folder, apart from game worlds).
     let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project || is_studio_app()).collect();
 
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Мои серверы").font(bold_font(22.0)).color(p.text));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if form.is_none() && pill_button(ui, icons, Some(icon::PLUS), "Новый", ButtonKind::Primary, 120.0, true).clicked() {
-                form = Some((format!("Сервер {}", projects.len() + 1), 0));
-            }
-        });
-    });
+    // «+ Новый» is in the page's toolbar.
 
     // Creating a server: name and template, right here in the menu (not in the editor).
     if let Some((name, template)) = &mut form {
