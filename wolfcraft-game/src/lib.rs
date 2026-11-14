@@ -200,6 +200,50 @@ pub mod text_input {
 }
 
 /// Screen orientation on phones: the launcher stands upright, the game lies in landscape.
+/// The system clipboard (phones: Android's ClipboardManager; the game's own text fields
+/// cannot paste there).
+pub mod clipboard {
+    /// Text on the clipboard, if any.
+    pub fn get() -> Option<String> {
+        #[cfg(target_os = "android")]
+        {
+            use jni::objects::{JObject, JString, JValue};
+            let app = super::orientation::app()?;
+            let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) }.ok()?;
+            let mut env = vm.attach_current_thread().ok()?;
+            let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject) };
+            let r = (|| -> jni::errors::Result<Option<String>> {
+                let name = env.new_string("clipboard")?;
+                let cm = env.call_method(&activity, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", &[JValue::Object(&name)])?.l()?;
+                if cm.is_null() {
+                    return Ok(None);
+                }
+                let clip = env.call_method(&cm, "getPrimaryClip", "()Landroid/content/ClipData;", &[])?.l()?;
+                if clip.is_null() || env.call_method(&clip, "getItemCount", "()I", &[])?.i()? < 1 {
+                    return Ok(None);
+                }
+                let item = env.call_method(&clip, "getItemAt", "(I)Landroid/content/ClipData$Item;", &[JValue::Int(0)])?.l()?;
+                let cs = env.call_method(&item, "coerceToText", "(Landroid/content/Context;)Ljava/lang/CharSequence;", &[JValue::Object(&activity)])?.l()?;
+                if cs.is_null() {
+                    return Ok(None);
+                }
+                let s = env.call_method(&cs, "toString", "()Ljava/lang/String;", &[])?.l()?;
+                Ok(Some(env.get_string(&JString::from(s))?.into()))
+            })();
+            std::mem::forget(activity);
+            match r {
+                Ok(t) => t,
+                Err(_) => {
+                    let _ = env.exception_clear();
+                    None
+                }
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        None
+    }
+}
+
 /// Microphone permission (Android asks the player once; desktops always allow).
 pub mod mic {
     /// The microphone may be used now. On Android the first call shows the system request;

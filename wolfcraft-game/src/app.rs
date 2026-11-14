@@ -2236,6 +2236,19 @@ impl App {
             self.near_table = false;
             self.container = None;
         }
+        if std::mem::take(&mut self.world_select.paste_request) {
+            // «Вставить» in «По коду»: the first line of the clipboard (a code or an address).
+            match crate::clipboard::get().map(|t| t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").to_string()).filter(|t| !t.is_empty()) {
+                Some(text) => {
+                    let text = text.trim_start_matches("Код для входа:").trim_start_matches("Код:").trim().to_string();
+                    self.world_select.address = text.chars().take(64).collect();
+                    self.world_select.net_error = None;
+                }
+                None => {
+                    self.world_select.net_error = Some(if cfg!(target_os = "android") { "Буфер обмена пуст — скопируйте код или адрес сервера".into() } else { "Вставьте код в поле: Ctrl+V".into() });
+                }
+            }
+        }
         if self.world_select.servers_changed {
             self.world_select.servers_changed = false;
             self.settings.servers = self.world_select.servers.clone();
@@ -2748,7 +2761,8 @@ impl App {
             // Stream the starting area; enter the world once the ground around the player is meshed.
             let view = (self.settings.render_distance as i32).clamp(3, 6);
             s.update(&InputFrame::default(), self.time.delta(), view, true);
-            let (done, total) = s.chunks.progress(s.player_chunk(), 3);
+            // Enter as soon as the nearest ground is ready; the rest streams in while playing.
+            let (done, total) = s.chunks.progress(s.player_chunk(), 2);
             if l.progress != (done, total) {
                 l.progress = (done, total);
                 l.progress_at = Instant::now();
@@ -2758,7 +2772,7 @@ impl App {
             if stalled {
                 log::warn!("loading stalled at {done}/{total} (player {:?}, chunk {:?}); entering anyway", s.player.body.pos, s.player_chunk());
             }
-            if (done >= total && s.ground_ready()) || stalled {
+            if (done * 100 >= total * 90 && s.ground_ready()) || stalled {
                 self.load = None;
                 self.screen = Screen::Playing;
                 self.near_table = false;
@@ -2983,8 +2997,9 @@ impl App {
 fn loading_view(l: &LoadState, session: Option<&GameSession>) -> (usize, f32, String) {
     let sh = &l.shared;
     if let Some(s) = session {
-        let (done, total) = s.chunks.progress(s.player_chunk(), 3);
-        let f = done as f32 / total.max(1) as f32;
+        let (done, total) = s.chunks.progress(s.player_chunk(), 2);
+        // 90 % of the nearest chunks is enough to enter (see the loading step).
+        let f = (done as f32 / (total.max(1) as f32 * 0.9)).min(1.0);
         (6, 0.40 + 0.60 * f, format!("Чанки вокруг игрока: {done}/{total} · в работе: {}", s.chunks.stats.gen_inflight))
     } else {
         (sh.stage().min(5), sh.fraction().min(0.4), sh.detail())
