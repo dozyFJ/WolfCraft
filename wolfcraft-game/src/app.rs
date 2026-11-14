@@ -1969,7 +1969,11 @@ impl App {
                 }
                 Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead | Screen::Map => {
                     if touch.seen && screen == Screen::Playing && !chat.open {
-                        touch.sync_hotbar(ctx.pixels_per_point());
+                        if studio.as_ref().is_some_and(|st| !st.playtest) {
+                            touch.clear_hud();
+                        } else {
+                            touch.sync_hotbar(ctx.pixels_per_point());
+                        }
                         touch.draw(&ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("touch"))), touch_size, ctx.pixels_per_point());
                     }
                     if let Some(s) = session {
@@ -2008,7 +2012,11 @@ impl App {
                             crosshair: !(touch.seen && settings.tap_aim),
                             effects: p.effects.iter().map(|a| (format!("{} {}", a.effect.name(), wolfcraft_engine::magic::roman(a.level)), a.effect.color(), a.left)).collect(),
                         };
-                        if screen != Screen::Map {
+                        // Studio edit mode: no game GUI (hotbar, bars, minimap) — like Roblox
+                        // Studio, the place's own GUI comes from its scripts; only the phone
+                        // controls stay.
+                        let studio_edit = studio.as_ref().is_some_and(|st| !st.playtest);
+                        if screen != Screen::Map && !studio_edit {
                             hud::draw(ctx, &icons, &hud);
                             petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
                             voice_changed |= voice_ui(ctx, &icons, voice, voice_menu, settings, net_players, net.as_ref().map(|n| n.voice), time.elapsed() as f64);
@@ -2235,7 +2243,9 @@ impl App {
         }
         // Studio panels: keep the touch controls off them, then do what the ribbon asked.
         let ppp = gfx.gui.ctx.pixels_per_point();
-        self.touch.studio = self.studio.is_some();
+        // The studio's edit mode has its ribbon on top instead of the game's top bar; in
+        // «Играть» the place runs as players see it, with the game's bar.
+        self.touch.studio = self.studio.as_ref().is_some_and(|st| !st.playtest);
         if let Some(s) = &self.session {
             self.touch.creative = s.player.is_creative();
             self.touch.flying = s.player.body.flying;
