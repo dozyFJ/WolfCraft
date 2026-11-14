@@ -131,6 +131,10 @@ pub struct GameSession {
     /// Camera feel: dip after a hard landing, last vertical speed (to spot the landing),
     /// third-person shoulder offset (smoothed, shrinks near walls).
     land_dip: f64,
+    /// View bobbing: step phase, smoothed strength, time off the ground.
+    bob_phase: f64,
+    bob_amp: f64,
+    air_t: f64,
     prev_vy: f64,
     shoulder: f64,
     prev_radius: f64,
@@ -284,6 +288,9 @@ impl GameSession {
             rest_camera: None,
             cam_lag: 0.0,
             land_dip: 0.0,
+            bob_phase: 0.0,
+            bob_amp: 0.0,
+            air_t: 0.0,
             prev_vy: 0.0,
             shoulder: 0.0,
             prev_radius: 0.0,
@@ -589,6 +596,18 @@ impl GameSession {
             }
             self.prev_vy = if self.player.body.on_ground { 0.0 } else { vy };
             self.land_dip *= (-7.0 * dt as f64).exp();
+        }
+        // View bobbing that does not twitch: "on the ground" flickers on the cube planet, so
+        // a short time in the air still counts as walking, and the strength eases in and out.
+        {
+            let up = self.player.up();
+            let v = self.player.body.vel;
+            let speed = (v - up * v.dot(up)).length();
+            self.air_t = if self.player.body.on_ground { 0.0 } else { self.air_t + dt as f64 };
+            let walking = self.air_t < 0.25 && !self.player.body.flying && self.riding.is_none() && self.cutscene.is_none();
+            let target = if walking { (speed / 4.3).min(1.2) } else { 0.0 };
+            self.bob_amp += (target - self.bob_amp) * (1.0 - (-6.0 * dt as f64).exp());
+            self.bob_phase += speed.min(8.0) * dt as f64 * 1.9;
         }
         // Third person behind: over the right shoulder (Fortnite/GTA), closer to the middle
         // when a wall is on the right.
@@ -2011,9 +2030,14 @@ impl GameSession {
         let right0 = look.cross(up).normalize_or_zero();
         let up = if roll > 0.0 && right0.length_squared() > 0.5 { (up * roll.cos() + right0 * roll.sin()).normalize() } else { up };
         match self.camera_mode {
-            // No view bobbing: on the cube planet "on the ground" flickers between frames and the
-            // bob made the whole view twitch.
-            CameraMode::First => Camera { eye, forward: look, up },
+            // Gentle view bobbing (Minecraft-like): a small dip on every step and a sway
+            // from side to side, scaled by the smoothed walking strength.
+            CameraMode::First => {
+                let a = self.bob_amp;
+                let ph = self.bob_phase;
+                let eye = eye + right0 * (ph.sin() * 0.03 * a) - up * (ph.cos().abs() * 0.045 * a);
+                Camera { eye, forward: look, up }
+            }
             CameraMode::ThirdBack | CameraMode::ThirdFront => {
                 let sign = if self.camera_mode == CameraMode::ThirdBack { -1.0 } else { 1.0 };
                 let want = 4.2;

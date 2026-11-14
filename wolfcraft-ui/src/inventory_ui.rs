@@ -186,7 +186,6 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         }
     }
 
-    let left_w = 9.0 * (CELL + GAP) - GAP;
     if creative {
         // Full screen, no title bar: cells as big as fit, as many columns as fit beside the
         // sidebar (back, search, categories), as many rows as fit above the hotbar.
@@ -209,21 +208,43 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
             result.close = true;
         }
     } else {
-    // The table window is wider: the recipe book sits next to the grid.
-    let left_w = if near_table { left_w + 160.0 } else { left_w };
-    let width = left_w + 8.0;
-    let title = if near_table { "Верстак" } else { "Инвентарь" };
-    let dismissed = crate::ui_components::game_screen(ctx, "inventory", title, width.min(ctx.screen_rect().width() - 40.0), |ui| {
-        let (banner,_)=ui.allocate_exact_size(Vec2::new(width.min(ui.available_width()),28.),Sense::hover());
-        icons.paint_panel(ui.painter(),banner,if near_table{wolfcraft_assets::gui::PANEL_WOOD}else{wolfcraft_assets::gui::PANEL_DARK},Color32::WHITE);
-        ui.painter().text(banner.center(),Align2::CENTER_CENTER,title,FontId::proportional(15.),Color32::WHITE);
-        ui.add_space(6.);
-        state.tab = 0;
-        result.crafted = survival_layout(ui, icons, &p, state, inv, near_table, left_w, &mut slot_rects);
-    });
-    if dismissed {
-        result.close = true;
-    }
+        // Full screen like the creative one: back on the left, the inventory in the middle
+        // (scrolls on short screens), the hotbar and the bin as a sidebar on the right.
+        let ins = crate::gui_renderer::SAFE_INSETS.read().map(|i| *i).unwrap_or([0.0; 4]);
+        let h = ctx.screen_rect().height() - ins[1] - ins[3] - 32.0;
+        let s = ((h - 4.0 * GAP) / 5.0).clamp(40.0, 84.0).floor();
+        let tab = (s * 0.92).floor();
+        let title = if near_table { "Верстак" } else { "Инвентарь" };
+        let esc = crate::ui_components::full_screen(ctx, "inventory", |ui| {
+            let content_h = ui.available_height();
+            state.tab = 0;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                ui.allocate_ui_with_layout(Vec2::new(tab, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
+                    hud_button(ui, rect, false, resp.hovered() || resp.is_pointer_button_down_on(), &p);
+                    icons.paint(ui.painter(), rect.shrink(tab * 0.24), icon::ARROW_LEFT, Color32::from_white_alpha(225));
+                    if resp.clicked() {
+                        result.close = true;
+                    }
+                });
+                let mid_w = (ui.available_width() - (2.0 * s + GAP) - 10.0).max(CELL * 4.0);
+                ui.allocate_ui_with_layout(Vec2::new(mid_w, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.set_width(mid_w);
+                    ui.label(egui::RichText::new(title).font(bold_font(16.0)).color(p.text));
+                    ui.add_space(6.0);
+                    egui::ScrollArea::vertical().id_salt("survival-inv").auto_shrink([false, false]).max_height(content_h - 30.0).show(ui, |ui| {
+                        result.crafted = survival_layout(ui, icons, &p, state, inv, near_table, mid_w - 16.0, &mut slot_rects, false);
+                    });
+                });
+                ui.allocate_ui_with_layout(Vec2::new(2.0 * s + GAP, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    hotbar_column(ui, icons, &p, state, inv, s, &mut slot_rects, &mut trash_rect);
+                });
+            });
+        });
+        if esc || result.close {
+            result.close = true;
+        }
     }
 
     // ---- Drag & drop resolution ----
@@ -243,7 +264,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         }
         if ctx.input(|i| i.pointer.any_released()) {
             // Slots are recorded in the window's own coordinates (it may be scaled to fit).
-            let pointer = if creative { pointer } else { pointer.map(|q| crate::ui_components::to_body(ctx, "inventory", q)) };
+            // Both inventories are full screen: slots are in screen coordinates.
             let target = pointer.and_then(|pos| slot_rects.iter().find(|(_, r)| r.contains(pos)).map(|(s, _)| *s));
             if let Some(src) = state.drag_slot.take() {
                 if let Some(dst) = target {
@@ -395,7 +416,8 @@ fn construction_panel(ui: &mut Ui, icons: &GuiIcons, state: &mut InventoryUiStat
 /// Survival inventory: character (with the second-hand slot) and crafting on top,
 /// the whole backpack below, the hotbar at the bottom.
 #[allow(clippy::too_many_arguments)]
-fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, near_table: bool, width: f32, slot_rects: &mut Vec<(usize, Rect)>) -> Option<String> {
+#[allow(clippy::too_many_arguments)]
+fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, near_table: bool, width: f32, slot_rects: &mut Vec<(usize, Rect)>, hotbar: bool) -> Option<String> {
     let mut crafted = None;
     ui.set_width(width);
     if near_table {
@@ -480,6 +502,9 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 draw_slot(ui, icons, p, state, inv, slot, rect);
             }
         });
+    }
+    if !hotbar {
+        return crafted;
     }
     ui.add_space(10.0);
     section_label(ui, "Панель быстрого доступа");
@@ -772,7 +797,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
         egui::ScrollArea::vertical().id_salt("creative-survival-inv").auto_shrink([false, false]).show(&mut ui2, |ui| {
-            if let Some(msg) = survival_layout(ui, icons, p, state, inv, false, grid_w - 16.0, slot_rects) {
+            if let Some(msg) = survival_layout(ui, icons, p, state, inv, false, grid_w - 16.0, slot_rects, false) {
                 result.crafted = Some(msg);
             }
         });
