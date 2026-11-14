@@ -106,6 +106,8 @@ pub struct TouchState {
     /// A studio place in «Играть» (Roblox style): its GUI is the place's own (scripts); of
     /// the game's controls only the stick, «Прыжок» and the top bar (chat, voice, menu) stay.
     pub place_play: bool,
+    /// Width covered on the left (the studio's tools sidebar), physical pixels.
+    pub left_inset: f32,
 }
 
 /// Joystick throw radius (physical pixels): grows with the screen like the buttons.
@@ -256,7 +258,7 @@ impl TouchState {
                         Btn::Next => out.push(TouchAction::Hotbar(-1)),
                     }
                     Role::Button(b)
-                } else if p.0 < w * 0.4 && p.1 > h * 0.3 && !self.fingers.iter().any(|f| f.role == Role::Joystick) {
+                } else if p.0 > self.left_inset && p.0 < self.left_inset + w * 0.4 && p.1 > h * 0.3 && !self.fingers.iter().any(|f| f.role == Role::Joystick) {
                     Role::Joystick
                 } else {
                     Role::Look
@@ -399,7 +401,7 @@ impl TouchState {
             // The knob sits under the thumb.
             Some(f) => (f.start.0, f.start.1, f.last.0, f.last.1),
             None => {
-                let (x, y) = (150.0 * u, size.1 as f32 - 150.0 * u);
+                let (x, y) = (self.left_inset + 150.0 * u, size.1 as f32 - 150.0 * u);
                 (x, y, x, y)
             }
         };
