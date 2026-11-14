@@ -57,6 +57,8 @@ class MainActivity : Activity() {
     @Volatile private var polling = false
 
     private var tab = 0
+    /** Дашборд: 0 servers (ordinary worlds), 1 places. */
+    private var listTab = 0
     private lateinit var content: LinearLayout
     private lateinit var scroll: ScrollView
     private val navButtons = mutableListOf<TextView>()
@@ -141,7 +143,7 @@ class MainActivity : Activity() {
             setBackgroundColor(cCard)
             setPadding(dp(8), dp(8), dp(8), dp(10))
         }
-        val items = listOf("✎" to "Студия", "▶" to "Сервер", "›_" to "Консоль", "⚙" to "Настройки")
+        val items = listOf("▦" to "Дашборд", "▶" to "Сервер", "›_" to "Консоль", "⚙" to "Настройки")
         items.forEachIndexed { i, (icon, name) ->
             val b = TextView(this).apply {
                 this.text = "$icon\n$name"
@@ -459,30 +461,60 @@ class MainActivity : Activity() {
         })
     }
 
-    /** Студия: places (own games, like Roblox Studio) and servers (ordinary worlds), apart. */
+    /** Two-way switch (a pill with a sliding highlight): «Серверы» | «Плейсы». */
+    private fun segmented(items: List<String>, selected: Int, onPick: (Int) -> Unit): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        background = rounded(cCard, 24, cLine)
+        setPadding(dp(4), dp(4), dp(4), dp(4))
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) }
+        items.forEachIndexed { i, s ->
+            addView(TextView(this@MainActivity).apply {
+                text = s
+                gravity = Gravity.CENTER
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(if (i == selected) Color.WHITE else cMuted)
+                background = if (i == selected) rounded(cAccent, 20) else null
+                setPadding(0, dp(12), 0, dp(12))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { if (i != selected) onPick(i) }
+            })
+        }
+    }
+
+    /** Дашборд: servers (ordinary worlds) and places (own games, like Roblox Studio) on two tabs. */
     private fun renderStudio() {
-        header("Миры и плейсы")
-        content.addView(button("＋  Создать мир или плейс", 1) { askNewPlace() })
+        header("Дашборд")
         val list = places()
         val placesList = list.filter { it.isPlace }
         val worldsList = list.filter { !it.isPlace }
-        if (list.isEmpty()) {
+        content.addView(segmented(listOf("Серверы · ${worldsList.size}", "Плейсы · ${placesList.size}"), listTab) { listTab = it; render() })
+        val isPlace = listTab == 1
+        content.addView(button(if (isPlace) "＋  Создать плейс" else "＋  Создать сервер", 1) { askNew(isPlace) }.apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) }
+        })
+        val shown = if (isPlace) placesList else worldsList
+        if (shown.isEmpty()) {
             content.addView(card {
-                addView(label("Пока нет миров и плейсов", 16f, cText, true))
-                addView(label("Создай обычный мир для выживания или плейс для своей мини-игры. Каждый хранится отдельно. Нажми на карточку для редактирования, «Запустить» — чтобы позвать друзей.", 14f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
+                addView(label(if (isPlace) "Пока нет плейсов" else "Пока нет серверов", 16f, cText, true))
+                addView(label(if (isPlace) "Плейс — твоя игра: пустая основа, скрипты на Luau, мини-игры из Тулбокса. Нажми на карточку — откроется редактор." else "Сервер — обычный мир WolfCraft: планета, природа, выживание. «Запустить» — и друзья заходят по коду.", 14f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
             })
         }
-        if (placesList.isNotEmpty()) {
-            content.addView(label("ПЛЕЙСЫ · ${placesList.size}", 12.5f, cMuted, true).apply { setPadding(dp(4), dp(18), dp(4), dp(6)); letterSpacing = 0.1f })
-            content.addView(label("Свои игры: основа, скрипты, мини-игры", 13f, cMuted).apply { setPadding(dp(4), 0, dp(4), dp(8)) })
-            placesList.forEach { placeCard(it) }
-        }
-        if (worldsList.isNotEmpty()) {
-            content.addView(label("СЕРВЕРЫ · ${worldsList.size}", 12.5f, cMuted, true).apply { setPadding(dp(4), dp(18), dp(4), dp(6)); letterSpacing = 0.1f })
-            content.addView(label("Обычные миры: планета и выживание", 13f, cMuted).apply { setPadding(dp(4), 0, dp(4), dp(8)) })
-            worldsList.forEach { placeCard(it) }
-        }
-        content.addView(label("Удерживай карточку или нажми 🗑, чтобы удалить; ✎ — переименовать. Серверы других людей в твоей сети студия показывает сама: «Миры на серверах» внутри студии.", 13f, cMuted).apply { setPadding(dp(4), dp(14), dp(4), 0) })
+        shown.forEach { placeCard(it) }
+        content.addView(label("✎ — переименовать, 🗑 или удержание карточки — удалить.", 13f, cMuted).apply { setPadding(dp(4), dp(14), dp(4), 0) })
+    }
+
+    /** New server or place straight from the current tab: just a name. */
+    private fun askNew(isPlace: Boolean) {
+        val name = input("Название", "${if (isPlace) "Плейс" else "Сервер"} ${places().count { it.isPlace == isPlace } + 1}")
+        val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(name) }
+        AlertDialog.Builder(this)
+            .setTitle(if (isPlace) "Новый плейс" else "Новый сервер")
+            .setMessage(if (isPlace) "Пустая основа для своей игры в WolfStudio." else "Обычный мир: планета с природой и выживанием.")
+            .setView(box)
+            .setPositiveButton("Создать") { _, _ -> name.text.toString().trim().ifEmpty { null }?.let { createPlace(it, isPlace) } }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     /** Сервер: the dashboard and the server controls on one screen. */
