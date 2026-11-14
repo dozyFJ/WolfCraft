@@ -74,13 +74,26 @@ pub fn close(state: &mut InventoryUiState, inv: &mut Inventory) {
     state.drag_item = None;
 }
 
+/// Slot tile of the HUD hotbar (and its hovered/pressed shade).
+const HUD_TILE: Color32 = Color32::from_rgba_premultiplied(12, 14, 19, 200);
+const HUD_TILE_HOT: Color32 = Color32::from_rgba_premultiplied(30, 36, 50, 220);
+
+/// A sidebar button in the style of the top bar's islands: a round-cornered dark glass pill.
+fn hud_button(ui: &Ui, rect: Rect, on: bool, hot: bool, p: &Palette) {
+    let fill = if on { p.accent.gamma_multiply(0.30) } else if hot { HUD_TILE_HOT } else { HUD_TILE };
+    ui.painter().rect_filled(rect, Rounding::same(rect.height() * 0.28), fill);
+    ui.painter().rect_stroke(rect, Rounding::same(rect.height() * 0.28), Stroke::new(if on { 2.5_f32 } else { 1.5 }, if on { p.accent } else { Color32::from_white_alpha(45) }));
+}
+
 /// Draws one slot and returns its response. `rect` is where the slot sits.
 fn slot_widget(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, stack: Option<&ItemStack>, selected: bool, id: Id, sense: Sense) -> egui::Response {
     let resp = ui.interact(rect, id, sense);
-    let hv = ui.ctx().animate_bool_with_time(id.with("hv"), resp.hovered(), ANIM_TIME);
-    let fill = p.surface_hi.lerp_to_gamma(p.surface_hover, hv);
-    ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
-    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(if selected { 2.0_f32 } else { 1.0 }, if selected { p.accent } else { p.outline.lerp_to_gamma(p.accent, hv * 0.8) }));
+    let hv = ui.ctx().animate_bool_with_time(id.with("hv"), resp.hovered() || resp.is_pointer_button_down_on(), ANIM_TIME);
+    // Like the hotbar: a dark see-through tile, a faint light edge, the accent when chosen.
+    let fill = HUD_TILE.lerp_to_gamma(HUD_TILE_HOT, hv);
+    ui.painter().rect_filled(rect, Rounding::same(8.0), fill);
+    let edge = if selected { Stroke::new(2.5_f32, p.accent) } else { Stroke::new(1.5_f32, Color32::from_white_alpha(40).lerp_to_gamma(p.accent, hv * 0.6)) };
+    ui.painter().rect_stroke(rect, Rounding::same(8.0), edge);
     if let Some(s) = stack {
         draw_stack(ui.painter(), icons, rect, s, p);
     }
@@ -612,10 +625,8 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 for (k, ic) in [(0usize, icon::ARROW_LEFT), (1, icon::SEARCH)] {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
                     let on = k == 1 && state.search_open;
-                    let fill = if on { p.accent.gamma_multiply(0.35) } else if resp.hovered() || resp.is_pointer_button_down_on() { p.surface_hover } else { p.surface_hi };
-                    ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
-                    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, if on { p.accent } else { p.outline }));
-                    icons.paint(ui.painter(), rect.shrink(tab * 0.24), ic, if on { p.accent } else { p.text });
+                    hud_button(ui, rect, on, resp.hovered() || resp.is_pointer_button_down_on(), p);
+                    icons.paint(ui.painter(), rect.shrink(tab * 0.24), ic, if on { p.accent } else { Color32::from_white_alpha(225) });
                     if resp.clicked() {
                         if k == 0 {
                             result.close = true;
@@ -631,13 +642,7 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 for (i, name) in CREATIVE_TABS.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
                     let sel = state.tab == i;
-                    let fill = if sel { p.surface_hover } else if resp.hovered() { p.surface_hi.lerp_to_gamma(p.surface_hover, 0.5) } else { p.surface_hi };
-                    ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
-                    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, if sel { p.accent } else { p.outline }));
-                    if sel {
-                        // Selected category: an accent bar on its outer edge.
-                        ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), Rounding::same(10.0), p.accent);
-                    }
+                    hud_button(ui, rect, sel, resp.hovered() || resp.is_pointer_button_down_on(), p);
                     let inner = rect.shrink(tab * 0.18);
                     match i {
                         0 => icons.paint(ui.painter(), inner, icon::STAR, if sel { p.accent } else { p.text }),
@@ -765,9 +770,10 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
                                 let stack = ItemStack::new(*head, 1);
                                 let resp = slot_widget(ui, icons, p, rect, Some(&stack), *open, Id::new(("pal-group", *form)), Sense::click());
                                 let badge = Rect::from_min_size(rect.right_top() + Vec2::new(-20.0, 2.0), Vec2::splat(18.0));
-                                ui.painter().rect_filled(badge, Rounding::same(4.0), p.accent);
+                                ui.painter().circle_filled(badge.center(), 9.0, p.accent.gamma_multiply(0.92));
+                                ui.painter().circle_stroke(badge.center(), 9.0, Stroke::new(1.0_f32, Color32::from_white_alpha(90)));
                                 ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, if *open { "−" } else { "+" }, bold_font(15.0), p.on_accent);
-                                ui.painter().text(rect.left_bottom() + Vec2::new(4.0, -3.0), egui::Align2::LEFT_BOTTOM, count.to_string(), egui::FontId::proportional(11.0), p.text_muted);
+                                ui.painter().text(rect.left_bottom() + Vec2::new(5.0, -3.0), egui::Align2::LEFT_BOTTOM, count.to_string(), egui::FontId::proportional(10.5), Color32::from_white_alpha(130));
                                 if resp.clicked() {
                                     state.open_group = if *open { None } else { Some(*form) };
                                 }
