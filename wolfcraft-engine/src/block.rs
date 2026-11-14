@@ -1940,7 +1940,19 @@ impl Block {
     /// The selection outline of a block in its cell (i, j, k = up): the union of what is drawn.
     pub fn outline_box(self) -> [f32; 6] {
         let union = |list: &[[f32; 6]]| list.iter().fold([1.0f32, 1.0, 1.0, 0.0, 0.0, 0.0], |a, s| [a[0].min(s[0]), a[1].min(s[1]), a[2].min(s[2]), a[3].max(s[3]), a[4].max(s[4]), a[5].max(s[5])]);
-        if let Some(t) = self.torch_boxes() {
+        if let Some((e, r)) = crate::construction::entry(self as u16) {
+            // Construction pieces: around everything drawn (an arch or a wardrobe is taller
+            // than one cell, a bed longer), not just the part that collides.
+            let g = crate::construction::geometry::model(e.form, r, 0);
+            let mut o = [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN];
+            for p in g.faces.iter().flat_map(|q| q.points.iter()) {
+                for k in 0..3 {
+                    o[k] = o[k].min(p[k]);
+                    o[k + 3] = o[k + 3].max(p[k]);
+                }
+            }
+            if o[0] <= o[3] { o } else { union(self.boxes()) }
+        } else if let Some(t) = self.torch_boxes() {
             union(t)
         } else if !self.boxes().is_empty() {
             union(self.boxes())
