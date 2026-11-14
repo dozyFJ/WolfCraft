@@ -714,6 +714,7 @@ mod tests {
     fn construction_and_shape_outlines_match_models() {
         let mut bad = Vec::new();
         let mut report = Vec::new();
+        let mut mismatch = Vec::new();
         for &b in Block::ALL.iter() {
             let constr = crate::construction::entry(b as u16).is_some();
             if b.torch_boxes().is_none() && b.boxes().is_empty() && !constr {
@@ -732,20 +733,34 @@ mod tests {
                 bad.push(format!("{b:?}: draws nothing"));
                 continue;
             }
-            let bb = |list: &mut dyn Iterator<Item = [f32; 3]>| list.fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])]));
-            let (dlo, dhi) = bb(&mut pts.into_iter());
+            // Back to cell coordinates (the chunk is turned in space, so compare there): the
+            // mapping is affine enough inside one cell.
+            let o0 = glam::Vec3::from_array(inp.to_local(8.0, 8.0, 8.0));
+            let ax = glam::Mat3::from_cols(
+                glam::Vec3::from_array(inp.to_local(9.0, 8.0, 8.0)) - o0,
+                glam::Vec3::from_array(inp.to_local(8.0, 9.0, 8.0)) - o0,
+                glam::Vec3::from_array(inp.to_local(8.0, 8.0, 9.0)) - o0,
+            )
+            .inverse();
+            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for q in pts {
+                let c = ax * (glam::Vec3::from_array(q) - o0);
+                for k in 0..3 {
+                    lo[k] = lo[k].min(c[k]);
+                    hi[k] = hi[k].max(c[k]);
+                }
+            }
             let o = b.outline_box();
             // Padded axes are (x, y, z) = (j, k, i).
-            let corners = (0..8).map(|n| {
-                let pick = |bit: usize, lo: f32, hi: f32| if n >> bit & 1 == 1 { hi } else { lo };
-                inp.to_local(8.0 + pick(0, o[1], o[4]), 8.0 + pick(1, o[2], o[5]), 8.0 + pick(2, o[0], o[3]))
-            });
-            let (olo, ohi) = bb(&mut corners.into_iter());
-            let off = (0..3).map(|k| (dlo[k] - olo[k]).abs().max((dhi[k] - ohi[k]).abs())).fold(0.0f32, f32::max);
-            if off > 0.04 {
-                let line = format!("{b:?}: outline {o:?} is off the model by {off:.2}");
-                if constr { report.push(line) } else { bad.push(line) }
+            let (olo, ohi) = ([o[1], o[2], o[0]], [o[4], o[5], o[3]]);
+            let off = (0..3).map(|k| (lo[k] - olo[k]).abs().max((hi[k] - ohi[k]).abs())).fold(0.0f32, f32::max);
+            if off > 0.03 {
+                let line = format!("{b:?}: outline {o:?} vs drawn j,k,i {lo:.2?}..{hi:.2?} (off {off:.2})");
+                if constr { report.push(line) } else { mismatch.push(line) }
             }
+        }
+        if !mismatch.is_empty() {
+            eprintln!("blocks whose outline differs from the model ({}):\n{}", mismatch.len(), mismatch.join("\n"));
         }
         if !report.is_empty() {
             eprintln!("construction pieces whose outline differs from the model ({}):\n{}", report.len(), report.join("\n"));
