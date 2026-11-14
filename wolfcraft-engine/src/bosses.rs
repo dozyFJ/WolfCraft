@@ -91,6 +91,10 @@ impl BossBook {
         let r=self.records.entry((kind,home)).or_insert(Record{hp:kind.max_hp(),defeated:false});
         if r.defeated{return false;}r.hp=0.;r.defeated=true;true
     }
+    /// Ritual of revival: a defeated guardian may be fought again (full health, rewards again).
+    pub fn revive(&mut self,kind:BossKind,home:Cell)->bool{
+        match self.records.get_mut(&(kind,home)){Some(r) if r.defeated=>{r.defeated=false;r.hp=kind.max_hp();true},_=>false}
+    }
     pub fn load(path:&Path)->Self{
         let mut book=Self::default();let Ok(text)=std::fs::read_to_string(path)else{return book};
         for line in text.lines().take(10000){let n:Vec<&str>=line.split_whitespace().collect();if n.len()!=7{continue;}

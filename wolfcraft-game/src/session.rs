@@ -135,6 +135,8 @@ pub struct GameSession {
     prev_use_held: bool,
     /// The dragon the player rides (index into the creatures).
     pub riding: Option<usize>,
+    /// A ritual of revival going on at an altar: (guardian, altar, seconds since it began).
+    pub ritual: Option<(wolfcraft_engine::bosses::BossKind, wolfcraft_engine::cubesphere::Cell, f32)>,
     attack_cd: f32,
     death_burst_done: bool,
     /// Contents of chests (27 slots) and electric furnaces (0 input, 1 output) by block cell.
@@ -227,6 +229,7 @@ impl GameSession {
             tp_dist: 4.2,
             mobs: wolfcraft_engine::mobs::MobManager::new(seed),
             riding: None,
+            ritual: None,
             attack_cd: 0.0,
             death_burst_done: false,
             arrows: Default::default(),
@@ -707,6 +710,7 @@ impl GameSession {
                 let _=self.boss_book.save(&self.dir.join("bosses.txt"));
             }
         }
+        self.tick_ritual(dt);
         for mob in &self.mobs.mobs {if let Some(role)=&mob.boss {if let Some(record)=self.boss_book.records.get_mut(&(role.kind,role.home)){if !record.defeated{record.hp=mob.hp.max(1.0);}}}}
         // Ore loot jumps out higher and sparkles.
         let ores: Vec<_> = events.iter().filter_map(|e| match e {
@@ -1421,7 +1425,18 @@ impl GameSession {
                 if self.cfg.difficulty==wolfcraft_engine::config::Difficulty::Peaceful {self.item_name=Some(("Для боя отключите мирную сложность".into(),3.));continue;}
                 if self.hell {self.item_name=Some(("Алтари действуют только на родной планете".into(),3.));continue;}
                 if self.mobs.mobs.iter().any(|m|m.boss.is_some()){self.item_name=Some(("Сначала завершите текущий бой".into(),3.));continue;}
-                let hp=match self.boss_book.begin(kind,pos){Ok(hp)=>hp,Err(text)=>{self.item_name=Some((text.into(),3.));continue;}};
+                if self.ritual.is_some(){self.item_name=Some(("Ритуал уже идёт".into(),2.));continue;}
+                let hp=match self.boss_book.begin(kind,pos){Ok(hp)=>hp,Err(_)=>{
+                    // Defeated: a ritual of revival brings the guardian back (seal + resonance rune).
+                    let creative=self.player.is_creative();
+                    if !creative&&(self.player.inventory.count(ids::RITUAL_SEAL)==0||self.player.inventory.count(ids::RESONANCE_RUNE)==0){
+                        self.item_name=Some((format!("{} повержен. Ритуал возрождения: Печать древних + Руна резонанса",kind.name()),5.));continue;
+                    }
+                    if !creative{self.player.inventory.take(ids::RITUAL_SEAL,1);self.player.inventory.take(ids::RESONANCE_RUNE,1);}
+                    self.ritual=Some((kind,pos,0.0));
+                    self.item_name=Some(("Ритуал возрождения начался… отойдите от алтаря".into(),4.));
+                    continue;
+                }};
                 if !self.player.is_creative()&&self.player.inventory.count(ids::RITUAL_SEAL)==0{self.item_name=Some(("Для вызова нужна Печать древних из подземелья".into(),4.));continue;}
                 if !self.player.is_creative(){self.player.inventory.take(ids::RITUAL_SEAL,1);}
                 let anchor=self.chunks.grid().cell_center(pos);let up=wolfcraft_engine::physics::up_at(anchor);let at=anchor+up*1.2;
@@ -2016,6 +2031,61 @@ impl GameSession {
     fn next_arrow(&self) -> Option<wolfcraft_engine::items::ItemId> {
         use wolfcraft_engine::items::ids;
         self.player.inventory.slots.iter().flatten().map(|s| s.id).find(|id| *id == ids::ARROW || (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(id))
+    }
+
+    /// The ritual of revival at an altar, about six seconds:
+    /// 1) four flames circle the altar, spiralling in and up;
+    /// 2) a pillar of light rises from it and the ground trembles with sparks;
+    /// 3) a shock ring bursts out — and the guardian stands up again at full health.
+    fn tick_ritual(&mut self, dt: f32) {
+        use wolfcraft_engine::mobs::FxKind;
+        let Some((kind, pos, t)) = self.ritual else { return };
+        let t1 = t + dt;
+        self.ritual = Some((kind, pos, t1));
+        let g = self.chunks.grid();
+        let at = g.cell_center(pos);
+        let up = wolfcraft_engine::physics::up_at(at);
+        let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let a = up.cross(helper).normalize();
+        let b = up.cross(a);
+        let col = kind.color();
+        let bright = [(col[0] + 0.6).min(1.0), (col[1] + 0.6).min(1.0), (col[2] + 0.6).min(1.0)];
+        let ring = |ang: f64| a * ang.cos() + b * ang.sin();
+        if t1 < 2.5 {
+            // Flames spiral in.
+            let k = (t1 / 2.5) as f64;
+            for n in 0..4 {
+                let ang = n as f64 * std::f64::consts::FRAC_PI_2 + t1 as f64 * 3.0;
+                let p = at + ring(ang) * (4.0 - 3.0 * k) + up * (0.5 + 2.0 * k);
+                self.mobs.fx_glow(p, up * 0.2, if n % 2 == 0 { col } else { bright }, 0.12, 0.6, FxKind::Rise);
+            }
+        } else if t1 < 5.0 {
+            // A pillar of light and sparks from the ground.
+            for n in 0..3 {
+                let h = (t1 as f64 * 7.0 + n as f64 * 3.3) % 12.0;
+                let ang = t1 as f64 * 9.0 + n as f64 * 2.1;
+                self.mobs.fx_glow(at + up * (0.6 + h) + ring(ang) * 0.4, up * 2.5, bright, 0.16, 0.8, FxKind::Rise);
+            }
+            let ang = t1 as f64 * 17.0;
+            self.mobs.fx(at + ring(ang) * 2.5, up * 1.5 + ring(ang) * 0.5, [0.45, 0.42, 0.40], 0.1, 0.7, FxKind::Fall);
+        }
+        // Shock ring and the guardian's return.
+        if t < 5.0 && t1 >= 5.0 {
+            for n in 0..32 {
+                let ang = n as f64 * std::f64::consts::TAU / 32.0;
+                self.mobs.fx_glow(at + up * 0.6 + ring(ang) * 0.8, ring(ang) * 6.0 + up * 0.8, bright, 0.18, 1.0, FxKind::Rise);
+            }
+            self.ritual = None;
+            if self.boss_book.revive(kind, pos) {
+                let _ = self.boss_book.save(&self.dir.join("bosses.txt"));
+                let spot = at + up * 1.2;
+                let mut mob = wolfcraft_engine::mobs::Mob::new(wolfcraft_engine::mobs::MobKind::Ghoul, spot, self.player.heading);
+                mob.hp = kind.max_hp();
+                mob.boss = Some(wolfcraft_engine::bosses::BossRole::new(kind, pos, spot));
+                self.mobs.mobs.push(mob);
+                self.item_name = Some((format!("{} возрождён!", kind.name()), 4.0));
+            }
+        }
     }
 
     /// Saddles, mounts or leaves the dragon in the crosshair. True when the tap was used.
@@ -3209,9 +3279,22 @@ mod tests {
         s.player.inventory.add(wolfcraft_engine::items::ItemStack::new(ids::RITUAL_SEAL, 1));
         let mut ev = vec![InteractionEvent::ActivateBoss { pos: altar, kind: BossKind::Stone }];
         s.handle_building_events(&mut ev, None);
-        assert!(s.mobs.mobs.iter().all(|m| m.boss.is_none()), "a defeated guardian does not come back");
-        assert_eq!(s.player.inventory.count(ids::RITUAL_SEAL), 1, "and the seal is kept");
+        assert!(s.mobs.mobs.iter().all(|m| m.boss.is_none()), "a defeated guardian does not come back at once");
         assert_eq!(s.player.inventory.count(ids::REVIVAL_HEART), 1);
+        // With a seal and a resonance rune the ritual of revival begins and, after a few
+        // seconds of light and sparks, the guardian stands up again at full health.
+        assert!(s.ritual.is_some(), "the ritual begins");
+        assert_eq!(s.player.inventory.count(ids::RITUAL_SEAL), 0, "the seal is spent");
+        assert_eq!(s.player.inventory.count(ids::RESONANCE_RUNE), 0, "and the rune");
+        for _ in 0..(6 * 60) {
+            s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
+            if s.ritual.is_none() {
+                break;
+            }
+        }
+        assert!(s.ritual.is_none());
+        assert!(s.mobs.mobs.iter().any(|m| m.boss.is_some()), "the guardian is back");
+        assert!(s.boss_book.records.values().all(|r| !r.defeated));
     }
 
     #[test]
