@@ -77,7 +77,10 @@ pub mod items {
     pub const SNIPER: u16 = 122;
     pub const BULLETS: u16 = 123;
     pub const SHELLS: u16 = 124;
-    pub const COUNT: u16 = 125;
+    /// Riding: a saddle and the dragon's soul (spawns a dragon).
+    pub const SADDLE: u16 = 125;
+    pub const DRAGON_SOUL: u16 = 126;
+    pub const COUNT: u16 = 127;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -296,6 +299,24 @@ const BULLETS_TPL: [&str; 16] = [
     "..CCC...CCC.ccc.",
     ".............ccc",
     "............CCC.",
+    "................",
+    "................",
+];
+const SADDLE_TPL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "...DD......DD...",
+    "..DLLD....DLLD..",
+    "..DLlLDDDDLlLD..",
+    "..DLllllllllLD..",
+    "...DLllllllLD...",
+    "....DLLLLLLD....",
+    ".....DDDDDD.....",
+    "......D..D......",
+    "......D..D......",
+    ".....MM..MM.....",
+    ".....MM..MM.....",
     "................",
     "................",
 ];
@@ -958,6 +979,33 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(SNIPER, "sniper", p(|q| q.template(&SNIPER_TPL[..], &gpal)));
     l.add(BULLETS, "bullets", p(|q| q.template(&BULLETS_TPL[..], &gpal)));
     l.add(SHELLS, "shells", p(|q| q.template(&SHELLS_TPL[..], &gpal)));
+    l.add(SADDLE, "saddle", p(|q| q.template(&SADDLE_TPL[..], &|ch: char| match ch {
+        'L' => Some(Rgb(0.55, 0.32, 0.16)),
+        'l' => Some(Rgb(0.70, 0.45, 0.24)),
+        'D' => Some(Rgb(0.36, 0.20, 0.10)),
+        'M' => Some(Rgb(0.75, 0.76, 0.80)),
+        _ => None,
+    })));
+    l.add(DRAGON_SOUL, "dragon_soul", p(|q| {
+        // A green-gold dragon's eye in a flame wisp.
+        let c = Rgb(0.20, 0.80, 0.45);
+        for y in 0..16u32 {
+            for x in 0..16u32 {
+                let dx = x as f32 - 7.5;
+                let dy = y as f32 - 9.5;
+                let d = (dx * dx + dy * dy).sqrt();
+                let flame = y < 9 && dx.abs() < (9.0 - y as f32) * 0.45 + if (x + y) % 3 == 0 { 0.6 } else { 0.0 } && y > 1;
+                if d < 5.4 {
+                    q.put(x, y, c.lerp(Rgb(1.0, 0.85, 0.30), (1.0 - d / 5.4) * 0.8), 1.0);
+                } else if flame {
+                    q.put(x, y, Rgb(0.95, 0.55, 0.15), 1.0);
+                }
+            }
+        }
+        for y in 7..13u32 {
+            q.put(8, y, Rgb(0.08, 0.10, 0.06), 1.0);
+        }
+    }));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

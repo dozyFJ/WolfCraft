@@ -414,6 +414,7 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::GUNPOWDER, 3), (ids::IRON_INGOT, 1), (ids::COPPER_INGOT, 1)], (ids::ROCKET, 2), true, "Вооружение"));
         v.push(r(&[(ids::IRON_INGOT, 8), (ids::BRONZE_INGOT, 2), (ids::GUNPOWDER, 2)], (ids::BAZOOKA, 1), true, "Вооружение"));
         v.push(r(&[(ids::GUNPOWDER, 1), (ids::COPPER_INGOT, 1)], (ids::BULLETS, 16), true, "Вооружение"));
+        v.push(r(&[(ids::LEATHER, 3), (ids::IRON_INGOT, 1), (ids::STRING, 2)], (ids::SADDLE, 1), true, "Мобы"));
         v.push(r(&[(ids::GUNPOWDER, 1), (ids::IRON_INGOT, 1), (ids::LEATHER, 1)], (ids::SHELLS, 8), true, "Вооружение"));
         v.push(r(&[(ids::IRON_INGOT, 3), (b(Block::OakPlanks), 1)], (ids::PISTOL, 1), true, "Вооружение"));
         v.push(r(&[(ids::IRON_INGOT, 6), (ids::BRONZE_INGOT, 1), (b(Block::OakPlanks), 2)], (ids::RIFLE, 1), true, "Вооружение"));
