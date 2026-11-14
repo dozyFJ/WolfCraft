@@ -7,11 +7,43 @@ use std::time::{Duration, Instant};
 pub const TICKS_PER_SECOND: u32 = 60;
 pub const TICK_DT: f32 = 1.0 / TICKS_PER_SECOND as f32;
 
+/// Smooths frame times. Small jitter is averaged away; the difference with real time is paid
+/// back over the next frames, so the game never runs slower or faster than the clock. A real
+/// hitch (a frame much longer than usual) passes straight through.
+#[derive(Default, Clone, Copy, Debug)]
+pub struct Pacer {
+    smooth: f32,
+    debt: f32,
+}
+
+impl Pacer {
+    pub fn step(&mut self, raw: f32) -> f32 {
+        if self.smooth <= 0.0 || raw > self.smooth * 2.5 || raw < self.smooth * 0.4 {
+            self.smooth = raw;
+            self.debt = 0.0;
+            return raw;
+        }
+        self.smooth += (raw - self.smooth) * 0.1;
+        let mut d = self.smooth + self.debt * 0.2;
+        self.debt += raw - d;
+        // Never let the game drift more than a few frames from the clock.
+        let cap = self.smooth * 3.0;
+        if self.debt.abs() > cap {
+            let extra = self.debt - self.debt.signum() * cap;
+            d += extra;
+            self.debt -= extra;
+        }
+        d.max(0.0)
+    }
+}
+
 /// Frame timing information and FPS statistics.
 pub struct Time {
     start: Instant,
     last_frame: Instant,
     delta: f32,
+    /// Frame pacing: the smoothed frame time and the real time not yet given to the game.
+    pacer: Pacer,
     frame_count: u64,
     fps_window_start: Instant,
     fps_window_frames: u32,
@@ -34,6 +66,7 @@ impl Time {
             start: now,
             last_frame: now,
             delta: 0.0,
+            pacer: Pacer::default(),
             frame_count: 0,
             fps_window_start: now,
             fps_window_frames: 0,
@@ -48,7 +81,10 @@ impl Time {
     pub fn tick(&mut self) {
         let now = Instant::now();
         // Clamp huge deltas (window drag, breakpoints) so simulation does not explode.
-        self.delta = (now - self.last_frame).as_secs_f32().min(0.25);
+        let raw = (now - self.last_frame).as_secs_f32().min(0.25);
+        // The game moves by a smoothed frame time (like Minecraft's frame pacing): timer noise
+        // and vsync jitter no longer shake the camera, and no real time is ever lost.
+        self.delta = self.pacer.step(raw);
         self.last_frame = now;
         self.frame_count += 1;
         self.fps_window_frames += 1;
@@ -208,5 +244,38 @@ mod tests {
         q.push(2);
         assert_eq!(q.drain().collect::<Vec<_>>(), vec![1, 2]);
         assert!(q.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::Pacer;
+
+    #[test]
+    fn jittery_frames_come_out_even_and_keep_real_time() {
+        let mut p = Pacer::default();
+        let (mut real, mut sim) = (0.0f32, 0.0f32);
+        let mut spread: f32 = 0.0;
+        for i in 0..600 {
+            // 60 Hz with timer noise: 15.1 / 18.2 / 16.7 ms.
+            let raw = [0.0151, 0.0182, 0.0167][i % 3];
+            let d = p.step(raw);
+            real += raw;
+            sim += d;
+            if i > 120 {
+                spread = spread.max((d - 0.01667).abs());
+            }
+        }
+        assert!(spread < 0.0012, "smoothed frames still jitter by {spread}");
+        assert!((real - sim).abs() < 0.06, "game time drifted: real {real} sim {sim}");
+    }
+
+    #[test]
+    fn a_hitch_passes_through() {
+        let mut p = Pacer::default();
+        for _ in 0..60 {
+            p.step(0.0167);
+        }
+        assert!((p.step(0.2) - 0.2).abs() < 1e-6);
     }
 }
