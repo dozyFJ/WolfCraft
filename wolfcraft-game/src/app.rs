@@ -2558,6 +2558,10 @@ impl App {
                 self.settings.skin = n;
                 self.settings.save(&self.data_dir);
             }
+            MenuAction::SetNickname(n) => {
+                self.settings.nickname = n.trim().chars().take(16).collect();
+                self.settings.save(&self.data_dir);
+            }
             MenuAction::ToggleTheme => {
                 self.settings.theme = if self.settings.theme == ThemeMode::Dark { ThemeMode::Light } else { ThemeMode::Dark };
                 self.apply_settings(gfx);
