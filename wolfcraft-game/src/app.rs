@@ -3488,10 +3488,10 @@ fn enchant_offers(ui: &mut egui::Ui, icons: &wolfcraft_ui::GuiIcons, slots: &mut
 /// Size the touch controls lay themselves out in: the whole screen, or in the upright studio
 /// only the world view above its dock (physical pixels).
 fn studio_touch_size(size: (u32, u32), studio: Option<&wolfcraft_ui::studio_ui::StudioState>, ppp: f32) -> (u32, u32) {
-    match studio.and_then(|s| if s.playtest { None } else { s.view_bottom }) {
-        Some(vb) => (size.0, ((vb * ppp) as u32).clamp(200, size.1)),
-        None => size,
-    }
+    let Some(s) = studio.filter(|s| !s.playtest) else { return size };
+    let w = s.view_right.map(|vr| ((vr * ppp) as u32).clamp(200, size.0)).unwrap_or(size.0);
+    let h = s.view_bottom.map(|vb| ((vb * ppp) as u32).clamp(200, size.1)).unwrap_or(size.1);
+    (w, h)
 }
 
 /// «Питомник» on screen: the coin counter with the pets in the team, and the egg hatch

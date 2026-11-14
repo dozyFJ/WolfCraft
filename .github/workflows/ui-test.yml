@@ -18,4 +18,4 @@ jobs:
         with:
           key: ui-test
       - name: Tap on a nearby server joins it
-        run: cargo test -p wolfcraft-ui --lib main_menu -- --nocapture
+        run: cargo test -p wolfcraft-ui --lib -- main_menu studio_ui --nocapture
