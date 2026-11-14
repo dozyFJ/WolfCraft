@@ -2091,7 +2091,8 @@ impl App {
                             let holding = screen == Screen::Playing && s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::STAR_REMOTE);
                             let flash = s.flash;
                             let cinema = s.cinema;
-                            let o = wolfcraft_ui::stellar_ui::draw(ctx, &icons, &mut s.stellar_ui, holding, flash, cinema);
+                            let title = s.title.clone();
+                            let o = wolfcraft_ui::stellar_ui::draw(ctx, &icons, &mut s.stellar_ui, holding, flash, cinema, title.as_ref().map(|t| (t.0.as_str(), t.1.as_str(), t.2)));
                             if o.skip {
                                 s.skip_film = true;
                                 s.cutscene = None;
