@@ -3742,6 +3742,25 @@ fn world_map_ui(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::GuiIcon
 fn held_visual(inv: &wolfcraft_engine::inventory::Inventory, tile_colors: &[[[f32; 3]; 3]]) -> wolfcraft_engine::renderer::model::Held {
     use wolfcraft_engine::renderer::model::Held;
     let Some(st) = inv.held() else { return Held::Nothing };
+    // Weapons: box-built 3D models in the hand.
+    {
+        use wolfcraft_engine::items::ids;
+        let gun = match st.id {
+            ids::GRENADE_LAUNCHER => Some(0),
+            ids::BAZOOKA => Some(1),
+            ids::PISTOL => Some(2),
+            ids::RIFLE => Some(3),
+            ids::SHOTGUN => Some(4),
+            ids::SNIPER => Some(5),
+            ids::STAR_BLASTER => Some(6),
+            ids::STAR_REMOTE => Some(7),
+            ids::STAR_HAMMER => Some(8),
+            _ => None,
+        };
+        if let Some(k) = gun {
+            return Held::Gun(k);
+        }
+    }
     if let Some((kind, mat)) = wolfcraft_engine::items::tool_shape(st.id) {
         return Held::Tool(kind, mat);
     }
