@@ -559,10 +559,18 @@ impl App {
     /// Connects to a WolfServer and loads its world (generated locally from the server settings).
     fn join_server(&mut self, addr: &str) {
         // An invite code ("ABCD-EFGH") or an address.
-        let resolved = wolfcraft_net::lan::resolve_input(addr);
+        // A role key is never part of the address, world-cache ID or ordinary invite code.
+        let (address,explicit_key)=addr.split_once('#').map(|(a,k)|(a,Some(k.to_string()))).unwrap_or((addr,None));
+        let resolved = wolfcraft_net::lan::resolve_input(address);
+        let local_access = if wolfcraft_ui::launcher::is_studio_app() {
+            let path=self.data_dir.join("open_access.json");
+            let data=std::fs::read_to_string(&path).ok();let _=std::fs::remove_file(path);
+            data.and_then(|s|serde_json::from_str::<serde_json::Value>(&s).ok()).filter(|v|v["address"].as_str().is_some_and(|a|wolfcraft_net::with_port(a)==wolfcraft_net::with_port(&resolved))).and_then(|v|v["key"].as_str().map(str::to_owned))
+        }else{None};
+        let access=explicit_key.or(local_access);
         let addr = resolved.as_str();
         let nick = if self.settings.nickname.trim().is_empty() { "Игрок" } else { self.settings.nickname.trim() };
-        let client = match wolfcraft_net::Client::connect(addr, nick, self.settings.skin) {
+        let client = match wolfcraft_net::Client::connect_with_access(addr, nick, self.settings.skin,access) {
             Ok(c) => c,
             Err(e) => {
                 self.world_select.net_error = Some(e);

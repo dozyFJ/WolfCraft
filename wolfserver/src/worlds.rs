@@ -19,8 +19,9 @@ pub fn load_or_create(data:&Path,name:&str,args:&[String])->Result<(PathBuf,Worl
     }
     // An explicit folder means open that world, never silently create a replacement.
     if has("--world"){return Err(format!("мир «{id}» не найден"));}
-    let seed=if has("--seed"){value("--seed").ok_or("после --seed нужно число")?.parse::<i64>().map_err(|_|"неверный seed")? as u64}
-        else{wolfcraft_common::platform::unix_now().wrapping_mul(6364136223846793005)};
+    let seed=if has("--seed"){value("--seed").ok_or("после --seed нужно число")?.parse::<u64>().map_err(|_|"seed должен быть целым числом от 0 до 9223372036854775807")?}
+        else{wolfcraft_common::platform::unix_now().wrapping_mul(6364136223846793005)&(i64::MAX as u64)};
+    if seed>i64::MAX as u64{return Err("seed больше поддерживаемого диапазона TOML".into());}
     let mut cfg=WorldConfig::new(name,seed);cfg.id=id;
     let place=has("--place");cfg.studio_project=place;
     if place {

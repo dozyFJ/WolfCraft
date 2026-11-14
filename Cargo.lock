@@ -3952,6 +3952,7 @@ dependencies = [
  "oboe",
  "rayon",
  "rodio",
+ "serde_json",
  "ureq",
  "wgpu",
  "winit",
@@ -4009,6 +4010,9 @@ dependencies = [
 name = "wolfserver"
 version = "0.3.0"
 dependencies = [
+ "getrandom 0.3.4",
+ "mlua",
+ "serde",
  "serde_json",
  "toml",
  "wolfcraft-common",
@@ -4226,3 +4230,4 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
+
