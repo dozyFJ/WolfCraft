@@ -277,6 +277,8 @@ pub struct App {
     hand_place: f32,
     /// Weapon kick after a shot: 1 → 0.
     gun_recoil: f32,
+    /// Chat commands to send soon (the server's «Команды при запуске»).
+    queued_chat: Vec<String>,
     /// Hit marker after a bullet struck a creature (seconds left).
     hit_marker: f32,
     /// Collapse sounds: at most one thud every few hundredths of a second.
@@ -324,6 +326,7 @@ pub struct App {
 impl App {
     pub fn new(args: LaunchArgs) -> Self {
         let data_dir = args.resolved_data_dir();
+        wolfcraft_ui::launcher::set_data_dir(data_dir.clone());
         let crash_report = std::fs::read_to_string(data_dir.join("logs").join("crash.txt")).ok();
         // WolfStudio app: servers are places with their own worlds, apart from game worlds —
         // the same folder the bundled WolfServer runs them from, so every server made on the
@@ -419,6 +422,7 @@ impl App {
             hand_block: 0.0,
             hand_place: 0.0,
             gun_recoil: 0.0,
+            queued_chat: Vec::new(),
             hit_marker: 0.0,
             thud_cd: 0.0,
             studio_target: None,
@@ -634,7 +638,9 @@ impl App {
             }
         };
         let port = wolfcraft_net::DEFAULT_PORT;
-        match wolfcraft_net::server::start(&cfg.name, toml, &dir, port, false) {
+        // The «Сервер» page's settings: max players.
+        let options = wolfcraft_net::server::ServerOptions { max_players: wolfcraft_ui::server_page::max_players(&self.data_dir), ..Default::default() };
+        match wolfcraft_net::server::start_with_options(&cfg.name, toml, &dir, port, false, options) {
             Ok(h) => self.host = Some(h),
             Err(e) => {
                 self.world_select.net_error = Some(format!("сервер не запущен: {e}"));
@@ -651,6 +657,8 @@ impl App {
         for line in wolfcraft_net::lan::host_lines(port) {
             self.chat.push(ChatKind::System, line, now);
         }
+        // «Сервер → Консоль → Команды при запуске».
+        self.queued_chat.extend(wolfcraft_ui::server_page::autoexec(&self.data_dir));
     }
 
     /// Network step while a session exists: receive edits/players/chat, send our state.
@@ -1922,6 +1930,7 @@ impl App {
         let mut lua_clicks: Vec<String> = Vec::new();
         let mut studio_actions: Vec<wolfcraft_ui::studio_ui::StudioAction> = Vec::new();
         let mut studio_cover: Vec<egui::Rect> = Vec::new();
+        let mut stellar_cover: Vec<egui::Rect> = Vec::new();
         let icons = gfx.gui.icons.clone();
         let version = wolfcraft_common::VERSION;
         let data_dir_str = self.data_dir.display().to_string();
@@ -2087,6 +2096,17 @@ impl App {
                             petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
                             voice_changed |= voice_ui(ctx, &icons, voice, voice_menu, settings, net_players, net.as_ref().map(|n| n.voice), time.elapsed() as f64);
                             buttonsim_overlay(ctx, &s.buttonsim);
+                            // «Звёздный пульт»: its button and skill menu, cinema bars, flashes.
+                            let holding = screen == Screen::Playing && s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::STAR_REMOTE);
+                            let flash = s.flash;
+                            let cinema = s.cinema;
+                            let title = s.title.clone();
+                            let o = wolfcraft_ui::stellar_ui::draw(ctx, &icons, &mut s.stellar_ui, holding, flash, cinema, title.as_ref().map(|t| (t.0.as_str(), t.1.as_str(), t.2)));
+                            if o.skip {
+                                s.skip_film = true;
+                                s.cutscene = None;
+                            }
+                            stellar_cover = o.cover;
                             if let Some(mob)=s.mobs.mobs.iter().find(|m|m.boss.is_some()&&m.hp>0.0) {
                                 let role=mob.boss.as_ref().unwrap();
                                 egui::Area::new(egui::Id::new("guardian_health")).anchor(egui::Align2::CENTER_TOP,egui::vec2(0.,10.)).interactable(false).show(ctx,|ui|{
@@ -2334,7 +2354,7 @@ impl App {
             self.touch.flying = s.player.body.flying;
         }
         if self.screen == Screen::Playing {
-            self.touch.blocked = studio_cover.iter().map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
+            self.touch.blocked = studio_cover.iter().chain(stellar_cover.iter()).map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
             // The studio's tools sidebar on the left: the stick moves out from under it.
             self.touch.left_inset = self.studio.as_ref().filter(|st| !st.playtest).and_then(|st| st.view_left).map(|x| x * ppp).unwrap_or(0.0);
         }
@@ -2345,6 +2365,9 @@ impl App {
             self.handle_action(a, gfx);
         }
         let now = self.time.elapsed() as f64;
+        if self.session.is_some() && self.screen == Screen::Playing && !self.queued_chat.is_empty() {
+            submitted.extend(std::mem::take(&mut self.queued_chat));
+        }
         for line in submitted {
             // Online: plain chat lines go to the server, which sends them back to everyone.
             if let Some(net) = &mut self.net {
@@ -4049,4 +4072,5 @@ fn nearest_block(c: [u8; 4]) -> wolfcraft_engine::block::Block {
     let d = |q: [i32; 3]| 3 * (px[0] - q[0]).pow(2) + 4 * (px[1] - q[1]).pow(2) + 2 * (px[2] - q[2]).pow(2);
     PAL.iter().min_by_key(|(_, q)| d(*q)).map(|(b, _)| *b).unwrap_or(Wool)
 }
+
 
