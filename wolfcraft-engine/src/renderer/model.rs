@@ -1700,13 +1700,20 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
     // Pump / bolt cycle after the shot: 0 → 1 → 0.
     let cycle = (g.reload.clamp(0.0, 1.0) * std::f32::consts::PI).sin();
     let anchor = match g.kind {
-        2 => Vec3::new(0.15, -0.16, 0.30),
+        2 | 6 => Vec3::new(0.15, -0.16, 0.30),
+        7 => Vec3::new(0.17, -0.15, 0.32),
+        8 => Vec3::new(0.24, -0.08, 0.36),
         5 => Vec3::new(0.17, -0.19, 0.12),
         _ => Vec3::new(0.18, -0.20, 0.16),
     };
     let heavy = matches!(g.kind, 4 | 5);
     let base = anchor + off + Vec3::new(0.0, 0.02 * kick, -(if heavy { 0.12 } else { 0.07 }) * kick);
-    let angle = -(if heavy { 0.28 } else { 0.18 }) * kick + btilt * 0.5;
+    let angle = if g.kind == 8 {
+        // The hammer comes down: the head swings forward over the grip.
+        1.4 * (shot * std::f32::consts::PI).sin() + btilt * 0.5
+    } else {
+        -(if heavy { 0.28 } else { 0.18 }) * kick + btilt * 0.5
+    };
     let pivot = base;
     let mut v: Vec<ModelVertex> = Vec::with_capacity(1500);
     let bx = |v: &mut Vec<ModelVertex>, a: [f32; 3], b: [f32; 3], c: [f32; 3]| {
@@ -1786,6 +1793,77 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             bx(&mut v, [-0.065, -0.11, 0.48 + pump], [0.065, 0.0, 0.62 + pump], skin_c);
             bx(&mut v, [-0.30, -0.55, 0.38 + pump], [-0.04, -0.09, 0.56 + pump], sleeve_c);
         }
+        6 => {
+            // Star blaster: a chunky sci-fi pistol — white-steel body, a glowing cyan energy
+            // cell on the side, a ribbed emitter at the front, a gold trigger guard.
+            const WHITE: [f32; 3] = [0.82, 0.85, 0.92];
+            const CYAN: [f32; 3] = [0.40, 0.95, 1.0];
+            const GOLD: [f32; 3] = [1.0, 0.82, 0.30];
+            bx(&mut v, [-0.045, -0.020, -0.04], [0.045, 0.075, 0.34], WHITE);
+            bx(&mut v, [-0.046, 0.075, 0.00], [0.046, 0.095, 0.28], GUN);
+            for (k, z) in [0.34f32, 0.38, 0.42].iter().enumerate() {
+                let r = 0.040 - k as f32 * 0.006;
+                bx(&mut v, [-r, 0.028 - r, *z], [r, 0.028 + r, z + 0.03], if k % 2 == 0 { GUN } else { WHITE });
+            }
+            let glow_from = v.len();
+            bx(&mut v, [0.046, 0.005, 0.06], [0.062, 0.060, 0.24], CYAN);
+            bx(&mut v, [-0.012, 0.016, 0.45], [0.012, 0.040, 0.46], CYAN);
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            bx(&mut v, [-0.030, -0.17, -0.02], [0.030, -0.020, 0.08], GUN);
+            bx(&mut v, [-0.008, -0.075, 0.08], [0.008, -0.020, 0.15], GOLD);
+            bx(&mut v, [-0.006, -0.08, 0.08], [0.006, -0.07, 0.16], GOLD);
+            muzzle_z = 0.47;
+            bx(&mut v, [-0.052, -0.15, -0.03], [0.052, -0.04, 0.09], skin_c);
+            bx(&mut v, [-0.062, -0.46, -0.22], [0.062, -0.14, 0.01], sleeve_c);
+            bx(&mut v, [-0.115, -0.15, -0.01], [-0.032, -0.05, 0.10], skin_c);
+            bx(&mut v, [-0.32, -0.46, -0.10], [-0.08, -0.13, 0.06], sleeve_c);
+        }
+        7 => {
+            // Star remote: a dark handheld box with a screen, a flip cover lifted over the red
+            // button, a little antenna with a glowing star on top. Held in one hand.
+            const BODY: [f32; 3] = [0.12, 0.13, 0.18];
+            const GREY: [f32; 3] = [0.32, 0.34, 0.40];
+            bx(&mut v, [-0.055, -0.030, -0.02], [0.055, 0.020, 0.18], BODY);
+            bx(&mut v, [-0.050, 0.020, 0.10], [0.050, 0.024, 0.165], GREY);
+            // Flip cover, open: stands up at the back of the button.
+            bx(&mut v, [-0.030, 0.020, 0.025], [0.030, 0.085, 0.032], [0.55, 0.60, 0.70]);
+            bx(&mut v, [-0.003, 0.090, 0.150], [0.003, 0.17, 0.156], GREY);
+            let glow_from = v.len();
+            bx(&mut v, [-0.022, 0.020, 0.040], [0.022, 0.034, 0.080], [0.95, 0.12, 0.10]);
+            bx(&mut v, [-0.045, 0.025, 0.110], [0.045, 0.027, 0.158], [0.45, 0.70, 1.0]);
+            bx(&mut v, [-0.014, 0.165, 0.139], [0.014, 0.19, 0.167], [1.0, 0.92, 0.45]);
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            muzzle_z = 0.2;
+            bx(&mut v, [-0.065, -0.07, -0.04], [0.065, -0.005, 0.10], skin_c);
+            bx(&mut v, [-0.065, -0.46, -0.24], [0.065, -0.06, 0.0], sleeve_c);
+        }
+        8 => {
+            // Star hammer: a long handle wrapped in leather, a massive steel head with a glowing
+            // blue star core on both faces; swung down hard (the recoil lifts it high first).
+            const STEELW: [f32; 3] = [0.70, 0.73, 0.80];
+            const LEATHER: [f32; 3] = [0.42, 0.26, 0.14];
+            bx(&mut v, [-0.020, -0.30, -0.02], [0.020, 0.30, 0.02], LEATHER);
+            for y in [-0.24f32, -0.12, 0.0, 0.12] {
+                bx(&mut v, [-0.023, y, -0.023], [0.023, y + 0.03, 0.023], [0.30, 0.18, 0.10]);
+            }
+            bx(&mut v, [-0.13, 0.30, -0.075], [0.13, 0.46, 0.075], STEELW);
+            bx(&mut v, [-0.15, 0.32, -0.085], [-0.13, 0.44, 0.085], STEEL);
+            bx(&mut v, [0.13, 0.32, -0.085], [0.15, 0.44, 0.085], STEEL);
+            let glow_from = v.len();
+            bx(&mut v, [-0.155, 0.35, -0.04], [-0.15, 0.41, 0.04], [0.55, 0.85, 1.0]);
+            bx(&mut v, [0.15, 0.35, -0.04], [0.155, 0.41, 0.04], [0.55, 0.85, 1.0]);
+            bx(&mut v, [-0.04, 0.35, 0.075], [0.04, 0.41, 0.08], [0.55, 0.85, 1.0]);
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            muzzle_z = 0.0;
+            bx(&mut v, [-0.045, -0.20, -0.045], [0.045, -0.08, 0.045], skin_c);
+            bx(&mut v, [-0.06, -0.55, -0.20], [0.06, -0.18, 0.02], sleeve_c);
+        }
         _ => {
             // Sniper rifle: long barrel, big scope, bolt that is worked after every shot.
             let bolt = -0.08 * cycle;
@@ -1818,7 +1896,7 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             bx(&mut v, [-0.30, -0.56, 0.40], [-0.04, -0.11, 0.58], sleeve_c);
         }
     }
-    if shot > 0.45 {
+    if shot > 0.45 && !matches!(g.kind, 7 | 8) {
         // Muzzle flash: a bright star for the first moments, unlit.
         let start = v.len();
         let k = (shot - 0.45) / 0.55;

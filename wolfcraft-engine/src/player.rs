@@ -112,6 +112,9 @@ pub struct Player {
     pub anim_amount: f32,
     anim_prev: DVec3,
     air_time: f32,
+    /// Smoothing of a step up (stairs, slabs, a block): the eye starts this far below the
+    /// body and catches up, instead of the view jumping a whole block at once.
+    pub step_smooth: f64,
     fall_peak: f64,
     /// Potion effects running now (not saved).
     pub effects: Vec<crate::magic::Active>,
@@ -147,6 +150,7 @@ impl Player {
             anim_amount: 0.0,
             anim_prev: spawn,
             air_time: 0.0,
+            step_smooth: 0.0,
             fall_peak: 0.0,
             effects: Vec::new(),
             effect_tick: 0.0,
@@ -160,7 +164,7 @@ impl Player {
 
     pub fn eye_pos(&self) -> DVec3 {
         let h = if self.sneaking { EYE_HEIGHT - 0.3 } else { EYE_HEIGHT };
-        self.body.pos + self.up() * h
+        self.body.pos + self.up() * (h + self.step_smooth)
     }
 
     pub fn right(&self) -> DVec3 {
@@ -359,6 +363,18 @@ impl Player {
         let before = self.body.pos;
         let impact = physics::step(world, &mut self.body, &input, dt);
         let _ = altitude_before;
+        // Stepped up onto a stair or a block: ease the view up instead of jumping.
+        {
+            let up = physics::up_at(self.body.pos);
+            let rise = (self.body.pos - before).dot(up);
+            if was_grounded && self.body.on_ground && rise > 0.25 && rise <= physics::STEP_HEIGHT + 0.05 {
+                self.step_smooth = (self.step_smooth - rise).max(-1.2);
+            }
+            self.step_smooth *= (-14.0 * dt).exp();
+            if self.step_smooth.abs() < 0.002 {
+                self.step_smooth = 0.0;
+            }
+        }
         // Sneaking keeps you on the edge, as on Bedrock: a step that would leave you with
         // nothing under your feet is undone (you can lean out about a third of a block and
         // place blocks under the edge to build a bridge).
@@ -412,8 +428,16 @@ impl Player {
         self.anim_prev = self.body.pos;
         let speed = ((d - up * d.dot(up)).length() / dt.max(1e-4) as f64) as f32;
         // Brief hops over steps still count as walking.
-        self.air_time = if self.body.on_ground || self.body.in_water { 0.0 } else { self.air_time + dt };
+        let swimming = (self.body.in_water || self.body.in_lava) && !self.body.on_ground && !self.body.flying;
+        self.air_time = if self.body.on_ground || self.body.in_water || self.body.in_lava { 0.0 } else { self.air_time + dt };
         let moving = self.air_time < 0.3 && speed > 0.2 && speed < 40.0;
+        if swimming {
+            // Treading water (or lava): arms and legs keep paddling even in place; faster
+            // when actually swimming.
+            self.anim_amount += (1.0 - self.anim_amount) * (1.0 - (-8.0 * dt).exp());
+            self.anim_phase = (self.anim_phase + (2.2 + speed * 1.6) * dt).rem_euclid(std::f32::consts::TAU);
+            return;
+        }
         let target = if moving { (speed / 4.3).clamp(0.0, 1.0) } else { 0.0 };
         self.anim_amount += (target - self.anim_amount) * (1.0 - (-12.0 * dt).exp());
         if moving {
@@ -690,6 +714,22 @@ mod tests {
         assert!(frames < 20000, "never completed a lap (angle {angle})");
         assert!((p.body.pos - start).length() < 14.0, "lap did not return to the start: {}", (p.body.pos - start).length());
         assert!(!p.survival.dead);
+    }
+
+    #[test]
+    fn paddles_in_lava_and_water_even_in_place() {
+        for lava in [true, false] {
+            let mut p = Player::new(DVec3::new(0.0, 46.0, 0.0), GameMode::Survival);
+            p.body.on_ground = false;
+            p.body.in_lava = lava;
+            p.body.in_water = !lava;
+            let ph = p.anim_phase;
+            for _ in 0..30 {
+                p.animate(1.0 / 60.0);
+            }
+            assert!(p.anim_amount > 0.5, "swim strokes must play (lava: {lava})");
+            assert!((p.anim_phase - ph).abs() > 0.3, "arms must keep paddling (lava: {lava})");
+        }
     }
 
     #[test]

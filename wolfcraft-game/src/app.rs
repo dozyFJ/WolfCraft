@@ -735,7 +735,7 @@ impl App {
                 phase: p.anim_phase,
                 amount: p.anim_amount,
                 sneak: p.sneaking,
-                swim: p.body.in_water && !p.body.on_ground && !p.body.flying,
+                swim: (p.body.in_water || p.body.in_lava) && !p.body.on_ground && !p.body.flying,
                 hell: s.hell,
             }));
         }
@@ -2493,14 +2493,14 @@ impl App {
                         None => (None, None),
                     };
                     let pose = PlayerPose {
-                        feet: rest_at.unwrap_or(s.player.body.pos),
+                        feet: rest_at.unwrap_or(s.player.body.pos + s.player.up() * s.player.step_smooth),
                         heading: rest_dir.unwrap_or(s.player.heading),
                         up: s.player.up(),
                         pitch: s.player.pitch as f32,
                         phase: if s.rest.is_some() { self.time.elapsed() * 2.0 } else { s.player.anim_phase },
                         amount: s.player.anim_amount,
                         sneaking: s.player.sneaking,
-                        swimming: s.rest.is_none() && s.player.body.in_water && !s.player.body.on_ground && !s.player.body.flying,
+                        swimming: s.rest.is_none() && (s.player.body.in_water || s.player.body.in_lava) && !s.player.body.on_ground && !s.player.body.flying,
                         rest: match s.rest { Some(crate::session::Rest::Sleep { .. }) => 1, Some(crate::session::Rest::Sit { .. }) => 2, None => 0 },
                         skin: self.settings.skin,
                         // Mining/attacking swings; placing a block is a short push of the arm.
@@ -2749,6 +2749,10 @@ impl App {
                                 ids::RIFLE => 3,
                                 ids::SHOTGUN => 4,
                                 ids::SNIPER => 5,
+                                // Box-built 3D models too, not flat icons.
+                                ids::STAR_BLASTER => 6,
+                                ids::STAR_REMOTE => 7,
+                                ids::STAR_HAMMER => 8,
                                 _ => return None,
                             };
                             let ammo = wolfcraft_engine::explosives::weapon(st.id).map(|w| w.0).unwrap_or(0);
