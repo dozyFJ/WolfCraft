@@ -2462,7 +2462,7 @@ impl App {
                     view_distance_blocks: (self.settings.render_distance * 16) as f32,
                     time: self.time.elapsed(),
                     // The outline hugs the block's shape (torches, plants, slabs, doors…).
-                    outline: if self.screen == Screen::Playing { s.hit.map(|h| block_outline(&s.chunks.grid(), h.cell, h.block)) } else { None },
+                    outline: if self.screen == Screen::Playing { s.hit.map(|h| block_outline(&s.chunks, h.cell, h.block)) } else { None },
                     crack: if self.screen == Screen::Playing { s.interaction.mining_fraction() } else { 0.0 },
                     viewmodel_fov_y: self.settings.vm_fov.to_radians(),
                 };
@@ -3778,9 +3778,14 @@ fn held_visual(inv: &wolfcraft_engine::inventory::Inventory, tile_colors: &[[[f3
 /// Worn armour per slot as material index (leather, bronze, iron, diamond).
 /// Corners of the box the outline is drawn around: the union of the block's shape boxes, a
 /// slim box for plants and torches, the whole cell for full blocks.
-fn block_outline(g: &wolfcraft_engine::cubesphere::Grid, c: wolfcraft_engine::cubesphere::Cell, b: wolfcraft_engine::block::Block) -> [glam::DVec3; 8] {
+fn block_outline(world: &impl wolfcraft_engine::physics::Voxels, c: wolfcraft_engine::cubesphere::Cell, b: wolfcraft_engine::block::Block) -> [glam::DVec3; 8] {
     use wolfcraft_engine::block::{Block, RenderKind};
-    let bx: [f32; 6] = if !b.boxes().is_empty() {
+    let g = &world.grid();
+    // The second leaf of a double door hangs on the far jamb: outline it there (as drawn).
+    let mirrored = b.door_mirror().filter(|(axis, _)| g.neighbor(c, *axis, -1).is_some_and(|n| b.door_mirrored_by(world.cell_block(n)))).map(|(_, mb)| mb);
+    let bx: [f32; 6] = if let Some(mb) = mirrored {
+        mb
+    } else if !b.boxes().is_empty() {
         b.boxes().iter().fold([1.0, 1.0, 1.0, 0.0, 0.0, 0.0], |a, s| [a[0].min(s[0]), a[1].min(s[1]), a[2].min(s[2]), a[3].max(s[3]), a[4].max(s[4]), a[5].max(s[5])])
     } else if matches!(b, Block::Torch | Block::IskritTorch) {
         [0.40, 0.40, 0.0, 0.60, 0.60, 0.65]
