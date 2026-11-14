@@ -1320,6 +1320,16 @@ impl App {
         }
         // WolfStudio app: «Открыть в студии» on the server dashboard leaves the address here.
         if wolfcraft_ui::launcher::is_studio_app() && self.screen == Screen::Main {
+            // A server card tapped in the app's «Мои серверы»: straight into its editor scene.
+            let f = self.data_dir.join("open_place.txt");
+            if let Ok(id) = std::fs::read_to_string(&f) {
+                let _ = std::fs::remove_file(&f);
+                let id = id.trim().to_string();
+                if !id.is_empty() {
+                    self.refresh_worlds(&gfx.gui.ctx);
+                    self.handle_action(MenuAction::OpenStudio(id), gfx);
+                }
+            }
             let f = self.data_dir.join("open_server.txt");
             if let Ok(addr) = std::fs::read_to_string(&f) {
                 let _ = std::fs::remove_file(&f);

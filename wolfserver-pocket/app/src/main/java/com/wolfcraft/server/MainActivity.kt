@@ -283,25 +283,123 @@ class MainActivity : Activity() {
         content.addView(bar)
     }
 
-    /** Студия: open the engine's studio, on its own projects or on this server's world. */
+    /** A server (place): its folder name, title and world kind. */
+    private data class Place(val id: String, val name: String, val kind: String, val made: Long)
+
+    private fun placesDir() = java.io.File(filesDir, "wolfserver/worlds").apply { mkdirs() }
+
+    /** Every server world: made here, in the studio or by «Запустить» on the Сервер tab. */
+    private fun places(): List<Place> = (placesDir().listFiles() ?: emptyArray()).mapNotNull { d ->
+        val toml = java.io.File(d, "world.toml")
+        if (!toml.isFile) return@mapNotNull null
+        val kv = try {
+            toml.readLines().mapNotNull { l ->
+                val i = l.indexOf('=')
+                if (i <= 0) null else l.substring(0, i).trim() to l.substring(i + 1).trim().trim('"')
+            }.toMap()
+        } catch (_: Exception) { emptyMap() }
+        val kind = when (kv["world_type"]) { "baseplate" -> "Основа"; "flat" -> "Плоский мир"; else -> "Планета" }
+        Place(d.name, kv["name"] ?: d.name, kind, kv["created"]?.toLongOrNull() ?: 0L)
+    }.sortedByDescending { it.made }
+
+    /** A new server like a new place in Roblox Studio: an empty baseplate, nothing built. */
+    private fun createPlace(name: String) {
+        val now = System.currentTimeMillis() / 1000
+        val id = "server-$now"
+        val dir = java.io.File(placesDir(), id).apply { mkdirs() }
+        val q = name.replace("\\", "\\\\").replace("\"", "\\\"")
+        val seed = (System.nanoTime() and 0x3fffffff)
+        java.io.File(dir, "world.toml").writeText(
+            """
+            id = "$id"
+            name = "$q"
+            seed = $seed
+            mode = "creative"
+            size = "small"
+            world_type = "baseplate"
+            continents = "auto"
+            structures = false
+            difficulty = "peaceful"
+            created = $now
+            last_played = $now
+            generator_version = 1
+            format_version = 3
+            shape = "sphere"
+            studio_project = true
+            """.trimIndent() + "\n"
+        )
+        render()
+    }
+
+    private fun askNewPlace() {
+        val name = input("Название сервера", "Сервер ${places().size + 1}")
+        val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(name) }
+        AlertDialog.Builder(this)
+            .setTitle("Новый сервер")
+            .setMessage("Пустая основа с сеткой, без построек — как Baseplate в Roblox Studio.")
+            .setView(box)
+            .setPositiveButton("Создать") { _, _ -> name.text.toString().trim().ifEmpty { null }?.let { createPlace(it) } }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    /** Opens the editor scene on a place (a running server's world is edited live). */
+    private fun editPlace(p: Place) {
+        if (isLive(p)) {
+            openStudio("127.0.0.1:${ServerService.PORT}")
+            return
+        }
+        try {
+            java.io.File(filesDir, "open_place.txt").writeText(p.id)
+            java.io.File(filesDir, "open_server.txt").delete()
+            startActivity(Intent(this, android.app.NativeActivity::class.java))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Студия не открылась: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun isLive(p: Place) = ServerService.running() &&
+        (ServerService.worldId == p.id || (ServerService.worldId.isEmpty() && ServerService.world == p.name))
+
+    private fun runPlace(p: Place) {
+        val go = { ServerService.start(this, p.name, true, p.id) }
+        if (ServerService.running()) {
+            ServerService.stop(this)
+            handler.postDelayed({ go() }, 1500)
+        } else go()
+        Toast.makeText(this, "Запуск сервера «${p.name}»…", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Студия: my servers like places in Roblox Studio — create, tap to edit, run. */
     private fun renderStudio() {
-        header("Студия")
-        content.addView(card {
-            addView(caption("WolfCraft Студия"))
-            addView(label("Свои миры и игры: стройте из блоков, кистью и WorldEdit, пишите скрипты на Luau.", 14.5f, cMuted))
-            addView(button("✎  Открыть студию", 1) { openStudio(null) })
-        })
-        content.addView(card {
-            addView(caption("Мир сервера"))
-            if (ServerService.running()) {
-                addView(label("«${status?.optString("name") ?: ServerService.world}» — правки сразу видят все игроки на сервере.", 14.5f, cText))
-                addView(button("Открыть мир сервера в студии", 1) { openStudio("127.0.0.1:${ServerService.PORT}") })
-            } else {
-                addView(label("Сервер выключен. Запусти его, и его мир можно будет менять в студии.", 14.5f, cMuted))
-                addView(button("▶  Запустить сервер") { startServer() })
-            }
-            addView(label("Миры других серверов в твоей сети студия показывает сама: Проекты → «Миры на серверах».", 13f, cMuted).apply { setPadding(0, dp(10), 0, 0) })
-        })
+        header("Мои серверы")
+        content.addView(button("＋  Создать сервер", 1) { askNewPlace() })
+        val list = places()
+        if (list.isEmpty()) {
+            content.addView(card {
+                addView(label("Пока нет серверов", 16f, cText, true))
+                addView(label("Сервер — это твоя игра со своим миром, отдельно от игровых миров. Создай его, нажми на карточку — откроется редактор: стройте, пишите скрипты на Luau. Потом «Запустить» — и друзья заходят.", 14f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
+            })
+        }
+        for (p in list) {
+            val live = isLive(p)
+            content.addView(card {
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { editPlace(p) }
+                val top = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                top.addView(label(p.name, 17f, cText, true).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
+                if (live) top.addView(label("РАБОТАЕТ", 11f, cGreen, true).apply {
+                    setPadding(dp(10), dp(4), dp(10), dp(4))
+                    background = rounded(Color.TRANSPARENT, 10, cGreen)
+                })
+                addView(top)
+                addView(label("${p.kind} · нажми, чтобы редактировать${if (live) " (правки сразу у игроков)" else ""}", 13f, cMuted).apply { setPadding(0, dp(4), 0, 0) })
+                if (live) addView(button("■  Остановить", 2) { ServerService.stop(this@MainActivity) })
+                else addView(button("▶  Запустить") { runPlace(p) })
+            })
+        }
+        content.addView(label("Серверы других людей в твоей сети студия показывает сама: «Миры на серверах» внутри студии.", 13f, cMuted).apply { setPadding(dp(4), dp(14), dp(4), 0) })
     }
 
     /** Сервер: the dashboard and the server controls on one screen. */

@@ -36,6 +36,8 @@ class ServerService : Service() {
         @Volatile var proc: Process? = null
         @Volatile var status: String = "Остановлен"
         @Volatile var world: String = ""
+        /** Folder of the running world (a place), for the studio list. */
+        @Volatile var worldId: String = ""
         /** Key for the server's control API (the dashboard calls it on 127.0.0.1). */
         @Volatile var token: String = ""
         private val lines = ArrayDeque<String>()
@@ -121,6 +123,7 @@ class ServerService : Service() {
             val p = pb.start()
             proc = p
             world = name
+            Companion.worldId = worldId ?: ""
             setStatus("Работает: мир «$name», порт $PORT")
             // Server output into the log; when it ends, say how.
             Thread {
