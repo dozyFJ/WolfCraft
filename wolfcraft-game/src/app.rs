@@ -285,6 +285,8 @@ pub struct App {
     studio_target: Option<wolfcraft_engine::cubesphere::Cell>,
     /// Studio: where the edit camera was when «Играть» started (position, heading, pitch).
     studio_cam: Option<(glam::DVec3, glam::DVec3, f64)>,
+    /// Block the player last stepped onto (for the script's «block.on_step»).
+    lua_step: Option<wolfcraft_engine::cubesphere::Cell>,
     /// Fraction of a crumble particle owed while mining (see the mining effects).
     mine_dust: f32,
     /// Ink of sign texts, drawn on the signs in the world.
@@ -418,6 +420,7 @@ impl App {
             thud_cd: 0.0,
             studio_target: None,
             studio_cam: None,
+            lua_step: None,
             mine_dust: 0.0,
             sign_texts: Default::default(),
             hand_switch: 0.0,
@@ -1481,7 +1484,31 @@ impl App {
                     s.fx_amount = self.settings.particles;
                     // Mini-games only on a server (online) or in the studio.
                     s.minigames = self.net.is_some() || self.studio.is_some();
+                    // Script: a tap on a block with a «block.on_interact» handler goes to the
+                    // script instead of placing or opening.
+                    if input.use_pressed && !frozen && !self.studio.as_ref().is_some_and(|st| !st.playtest) {
+                        if let (Some(l), Some(h)) = (&mut self.lua, s.hit) {
+                            if l.has_block_event("interact", h.block) && l.block_event(s, "interact", h.block, h.cell) {
+                                input.use_pressed = false;
+                            }
+                        }
+                    }
                     let events = s.update(&input, dt, view, frozen);
+                    // Script: «block.on_step» when the player steps onto a new block.
+                    if let Some(l) = &mut self.lua {
+                        let g = s.chunks.grid();
+                        let under = g.world_to_cell(s.player.body.pos - s.player.up() * 0.3);
+                        if self.lua_step != Some(under) && s.player.body.on_ground {
+                            self.lua_step = Some(under);
+                            if let Some(b) = s.chunks.get_block(under) {
+                                if l.has_block_event("step", b) {
+                                    l.block_event(s, "step", b, under);
+                                }
+                            }
+                        } else if !s.player.body.on_ground {
+                            self.lua_step = None;
+                        }
+                    }
                     if self.studio.is_some() {
                         if let Some(h) = s.hit {
                             self.studio_target = Some(h.cell);
@@ -1507,8 +1534,14 @@ impl App {
                         }
                         for e in &events {
                             match e {
-                                InteractionEvent::Broken { block, .. } => l.event(s, "block_broken", block.info().name),
-                                InteractionEvent::Placed { block, .. } => l.event(s, "block_placed", block.info().name),
+                                InteractionEvent::Broken { block, pos } => {
+                                    l.event(s, "block_broken", block.info().name);
+                                    l.block_event(s, "broken", *block, *pos);
+                                }
+                                InteractionEvent::Placed { block, pos } => {
+                                    l.event(s, "block_placed", block.info().name);
+                                    l.block_event(s, "placed", *block, *pos);
+                                }
                                 _ => {}
                             }
                         }
