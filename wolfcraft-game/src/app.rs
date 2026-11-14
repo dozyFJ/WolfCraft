@@ -285,6 +285,9 @@ pub struct App {
     studio_target: Option<wolfcraft_engine::cubesphere::Cell>,
     /// Studio: where the edit camera was when «Играть» started (position, heading, pitch).
     studio_cam: Option<(glam::DVec3, glam::DVec3, f64)>,
+    /// Voice chat on servers, and its menu (the microphone in the top bar).
+    voice: crate::voice::Voice,
+    voice_menu: bool,
     /// Block the player last stepped onto (for the script's «block.on_step»).
     lua_step: Option<wolfcraft_engine::cubesphere::Cell>,
     /// Fraction of a crumble particle owed while mining (see the mining effects).
@@ -421,6 +424,8 @@ impl App {
             studio_target: None,
             studio_cam: None,
             lua_step: None,
+            voice: crate::voice::Voice::default(),
+            voice_menu: false,
             mine_dust: 0.0,
             sign_texts: Default::default(),
             hand_switch: 0.0,
@@ -673,8 +678,26 @@ impl App {
                     }
                 }
                 wolfcraft_net::S2C::Kick(reason) => kicked = Some(reason),
+                wolfcraft_net::S2C::Voice { id, data } => self.voice.receive(self.audio.handle(), id, &data, now),
                 wolfcraft_net::S2C::Welcome { .. } | wolfcraft_net::S2C::Ready => {}
             }
+        }
+        // Voice chat: the settings, the microphone (push-to-talk: V or holding the 🎤),
+        // frames out to the server, volumes by distance.
+        {
+            let v = &mut self.voice;
+            v.enabled = self.settings.voice_enabled;
+            v.push_to_talk = self.settings.voice_push_to_talk;
+            v.threshold = self.settings.voice_threshold;
+            v.volume = self.settings.voice_volume;
+            v.proximity = self.settings.voice_proximity;
+            v.ptt_held = self.touch.voice_held || (self.screen == Screen::Playing && self.input.keys.contains(&KeyCode::KeyV));
+            let allowed = v.enabled && net.voice && crate::mic::granted();
+            for frame in v.capture(allowed, dt) {
+                net.send(&wolfcraft_net::C2S::Voice(frame));
+            }
+            v.update(s.player.body.pos, &self.net_players, now);
+            self.touch.voice_state = if !v.enabled { 0 } else if v.talking { 2 } else { 1 };
         }
         // After a dimension change every known edit of the new dimension applies again.
         if s.hell != self.net_hell {
@@ -953,6 +976,8 @@ impl App {
         self.net = None;
         self.host = None;
         self.net_players.clear();
+        self.voice.reset();
+        self.voice_menu = false;
         if let Some(mut s) = self.session.take() {
             s.save();
         }
@@ -1114,6 +1139,7 @@ impl App {
                 self.container = None;
                 self.screen = Screen::Playing;
             }
+            (Screen::Playing, KeyCode::KeyB) => self.voice_menu = !self.voice_menu,
             (Screen::Playing, KeyCode::KeyT) => {
                 self.input.keys.clear();
                 self.chat.open("");
@@ -1816,6 +1842,7 @@ impl App {
         let t_ui = ScopeTimer::start();
         let mut actions: Vec<MenuAction> = Vec::new();
         let mut settings_changed = false;
+        let mut voice_changed = false;
         let mut settings_back = false;
         let mut pack_refresh = false;
         let mut splash_skip = false;
@@ -1888,7 +1915,7 @@ impl App {
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
         let studio_view = if self.studio.is_some() { self.studio_view() } else { None };
         let frame = {
-            let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, studio, studio_world, .. } = self;
+            let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, studio, studio_world, voice, voice_menu, net_players, net, .. } = self;
             let touch_size = studio_touch_size(gfx.gpu.size(), studio.as_ref(), gfx.gui.ctx.pixels_per_point());
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
@@ -1984,6 +2011,7 @@ impl App {
                         if screen != Screen::Map {
                             hud::draw(ctx, &icons, &hud);
                             petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
+                            voice_changed |= voice_ui(ctx, &icons, voice, voice_menu, settings, net_players, net.as_ref().map(|n| n.voice), time.elapsed() as f64);
                             buttonsim_overlay(ctx, &s.buttonsim);
                             if let Some(mob)=s.mobs.mobs.iter().find(|m|m.boss.is_some()&&m.hp>0.0) {
                                 let role=mob.boss.as_ref().unwrap();
@@ -2187,6 +2215,9 @@ impl App {
         self.poll_pack_download();
         if settings_changed {
             self.apply_settings(gfx);
+        }
+        if voice_changed {
+            self.settings.save(&self.data_dir);
         }
         if settings_back {
             self.apply_settings(gfx);
@@ -3114,6 +3145,7 @@ impl ApplicationHandler for App {
                             TouchAction::Hotbar(d) => self.input.scroll += d as f32,
                             TouchAction::Camera => self.handle_key(KeyCode::F5, true, false),
                             TouchAction::Chat => self.chat.open(""),
+                            TouchAction::Voice => self.voice_menu = !self.voice_menu,
                             TouchAction::HotbarSet(i) => self.input.hotbar_set = Some(i),
                             TouchAction::Inventory => self.handle_key(KeyCode::KeyE, true, false),
                             TouchAction::Map => {
@@ -3669,6 +3701,96 @@ fn studio_touch_size(size: (u32, u32), studio: Option<&wolfcraft_ui::studio_ui::
 
 /// «Питомник» on screen: the coin counter with the pets in the team, and the egg hatch
 /// animation (the capsule wobbles, cracks, bursts in the pet's rarity colour).
+/// Voice chat on screen: who is talking (top left, under the bar) and the menu of the
+/// microphone button. Returns true when a setting changed (to save it).
+fn voice_ui(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::GuiIcons, v: &mut crate::voice::Voice, open: &mut bool, st: &mut Settings, players: &[wolfcraft_net::PlayerState], server: Option<bool>, now: f64) -> bool {
+    use egui::{Color32, Vec2};
+    use wolfcraft_ui::ui_components::{ButtonKind, pill_button};
+    let p = wolfcraft_ui::theme_manager::palette(ctx);
+    // Speaking: a green dot and the nick for each voice heard right now.
+    let speaking = v.speaking(now);
+    if !speaking.is_empty() || v.talking {
+        egui::Area::new(egui::Id::new("voice-speaking")).anchor(egui::Align2::LEFT_TOP, Vec2::new(14.0, 64.0)).interactable(false).show(ctx, |ui| {
+            let mut names: Vec<String> = speaking.iter().filter_map(|id| players.iter().find(|p| p.id == *id).map(|p| p.nick.clone())).collect();
+            if v.talking {
+                names.insert(0, "Вы".into());
+            }
+            for n in names {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::hover());
+                    ui.painter().circle_filled(r.center(), 5.0, Color32::from_rgb(90, 230, 120));
+                    ui.label(egui::RichText::new(n).size(14.0).color(Color32::WHITE));
+                });
+            }
+        });
+    }
+    if !*open {
+        return false;
+    }
+    let before = (st.voice_enabled, st.voice_push_to_talk, st.voice_threshold, st.voice_volume, st.voice_proximity);
+    let mut close = false;
+    egui::Window::new("Голосовой чат").id(egui::Id::new("voice-menu")).collapsible(false).resizable(false).anchor(egui::Align2::LEFT_TOP, Vec2::new(16.0, 96.0)).default_width(300.0).show(ctx, |ui| {
+        match server {
+            None => {
+                ui.label(egui::RichText::new("Голос работает на сервере: зайдите через «Игра по сети».").color(p.text_muted));
+            }
+            Some(false) => {
+                ui.label(egui::RichText::new("Этот сервер старой версии и не передаёт голос.").color(p.text_muted));
+            }
+            Some(true) => {}
+        }
+        if let Some(e) = &v.error {
+            ui.label(egui::RichText::new(format!("Микрофон: {e}")).color(p.danger));
+        }
+        ui.checkbox(&mut st.voice_enabled, "Микрофон включён");
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut st.voice_push_to_talk, false, "Активация голосом");
+            ui.radio_value(&mut st.voice_push_to_talk, true, "Нажми и говори");
+        });
+        if st.voice_push_to_talk {
+            ui.label(egui::RichText::new("Держите кнопку 🎤 вверху (или V на клавиатуре), пока говорите.").size(12.5).color(p.text_muted));
+        } else {
+            ui.label(egui::RichText::new("Порог: голос громче отметки уходит в чат").size(12.5).color(p.text_muted));
+            ui.add(egui::Slider::new(&mut st.voice_threshold, 0.003..=0.15).logarithmic(true).show_value(false));
+        }
+        // Level meter with the threshold mark.
+        let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 10.0), egui::Sense::hover());
+        ui.painter().rect_filled(r, 5.0, p.bg);
+        let lv = (v.level / 0.15).clamp(0.0, 1.0).sqrt();
+        ui.painter().rect_filled(egui::Rect::from_min_size(r.min, Vec2::new(r.width() * lv, r.height())), 5.0, if v.talking { Color32::from_rgb(90, 230, 120) } else { p.accent });
+        if !st.voice_push_to_talk {
+            let x = r.left() + r.width() * (st.voice_threshold / 0.15).clamp(0.0, 1.0).sqrt();
+            ui.painter().line_segment([egui::pos2(x, r.top() - 2.0), egui::pos2(x, r.bottom() + 2.0)], egui::Stroke::new(2.0, Color32::WHITE));
+        }
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Громкость голосов").size(12.5).color(p.text_muted));
+        ui.add(egui::Slider::new(&mut st.voice_volume, 0.0..=2.0).show_value(false));
+        ui.checkbox(&mut st.voice_proximity, "Только рядом (тише с расстоянием)");
+        if !players.is_empty() {
+            ui.separator();
+            ui.label(egui::RichText::new("Игроки").size(12.5).color(p.text_muted));
+            for pl in players {
+                let mut muted = v.muted.contains(&pl.id);
+                if ui.checkbox(&mut muted, format!("Заглушить {}", pl.nick)).changed() {
+                    if muted {
+                        v.muted.insert(pl.id);
+                    } else {
+                        v.muted.remove(&pl.id);
+                    }
+                }
+            }
+        }
+        ui.add_space(4.0);
+        if pill_button(ui, icons, None, "Готово", ButtonKind::Primary, ui.available_width(), true).clicked() {
+            close = true;
+        }
+    });
+    if close {
+        *open = false;
+    }
+    before != (st.voice_enabled, st.voice_push_to_talk, st.voice_threshold, st.voice_volume, st.voice_proximity)
+}
+
 fn petsim_overlay(ctx: &egui::Context, p: &wolfcraft_engine::petsim::PetSim, lobby: bool) {
     use egui::{Align2, Color32, FontId, Pos2, Shape, Stroke, Vec2};
     use wolfcraft_engine::petsim::PETS;

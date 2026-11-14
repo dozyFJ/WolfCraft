@@ -40,16 +40,32 @@ pub type Edit = ([i32; 4], u16);
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum C2S {
-    Hello { protocol: u32, nick: String, skin: u8 },
+    /// `voice`: this client speaks the voice chat (older ones leave it out).
+    Hello {
+        protocol: u32,
+        nick: String,
+        skin: u8,
+        #[serde(default)]
+        voice: bool,
+    },
     State(PlayerState),
     Edit { cell: [i32; 4], block: u16, hell: bool },
     Chat(String),
+    /// Voice chat: one frame of the speaker's voice (see `voice` in the game), base64.
+    Voice(String),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum S2C {
     /// `world_toml` is the server's `world.toml` (seed, planet size, mode…).
-    Welcome { id: u32, world_toml: String, motd: String },
+    Welcome {
+        id: u32,
+        world_toml: String,
+        motd: String,
+        /// The server relays voice chat (older servers leave it out).
+        #[serde(default)]
+        voice: bool,
+    },
     /// A batch of the edits made so far.
     Edits { hell: bool, list: Vec<Edit> },
     /// All earlier edits have been sent.
@@ -58,6 +74,8 @@ pub enum S2C {
     Edit { cell: [i32; 4], block: u16, hell: bool },
     Chat { from: String, text: String },
     Kick(String),
+    /// A voice frame from player `id` (sent only to clients that said `voice` in Hello).
+    Voice { id: u32, data: String },
 }
 
 pub fn write_msg<T: Serialize>(w: &mut impl Write, m: &T) -> std::io::Result<()> {
@@ -92,6 +110,8 @@ pub struct Client {
     pub id: u32,
     pub world_toml: String,
     pub motd: String,
+    /// The server relays voice chat.
+    pub voice: bool,
     stream: TcpStream,
     rx: Receiver<S2C>,
     alive: Arc<AtomicBool>,
@@ -106,10 +126,10 @@ impl Client {
         let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
         let _ = stream.set_read_timeout(Some(Duration::from_secs(8)));
         let mut w = stream.try_clone().map_err(|e| e.to_string())?;
-        write_msg(&mut w, &C2S::Hello { protocol: PROTOCOL, nick: nick.to_string(), skin }).map_err(|e| e.to_string())?;
+        write_msg(&mut w, &C2S::Hello { protocol: PROTOCOL, nick: nick.to_string(), skin, voice: true }).map_err(|e| e.to_string())?;
         let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-        let (id, world_toml, motd) = match read_msg::<S2C>(&mut reader).map_err(|e| format!("сервер не ответил: {e}"))? {
-            Some(S2C::Welcome { id, world_toml, motd }) => (id, world_toml, motd),
+        let (id, world_toml, motd, voice) = match read_msg::<S2C>(&mut reader).map_err(|e| format!("сервер не ответил: {e}"))? {
+            Some(S2C::Welcome { id, world_toml, motd, voice }) => (id, world_toml, motd, voice),
             Some(S2C::Kick(reason)) => return Err(format!("сервер отказал: {reason}")),
             _ => return Err("сервер ответил не по протоколу WolfCraft".into()),
         };
@@ -128,7 +148,7 @@ impl Client {
                 alive2.store(false, Ordering::SeqCst);
             })
             .map_err(|e| e.to_string())?;
-        Ok(Client { id, world_toml, motd, stream, rx, alive })
+        Ok(Client { id, world_toml, motd, voice, stream, rx, alive })
     }
 
     pub fn send(&mut self, m: &C2S) {

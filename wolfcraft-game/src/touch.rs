@@ -19,6 +19,8 @@ pub enum TouchAction {
     Hotbar(i32),
     /// Tap on the minimap: open the world map.
     Map,
+    /// Short tap on the microphone: the voice chat menu.
+    Voice,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -42,6 +44,8 @@ enum Btn {
     Chat,
     Camera,
     Tab,
+    /// Voice chat: tap for the menu, hold to talk.
+    Voice,
     Prev,
     Next,
     /// Creative: flight on/off (separate from jump).
@@ -95,6 +99,10 @@ pub struct TouchState {
     pub throws: u32,
     /// Where the last short tap landed (physical pixels), for the frame that handles it.
     pub tap_point: Option<(f32, f32)>,
+    /// The microphone button is held (push-to-talk).
+    pub voice_held: bool,
+    /// Microphone icon: 0 off (crossed out), 1 on, 2 sending now. Set by the game.
+    pub voice_state: u8,
 }
 
 pub const STICK_R: f32 = 110.0;
@@ -129,7 +137,7 @@ fn button_rect(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>) -
         Btn::Sprint => (w - 255.0 * u, h - 200.0 * u, 40.0 * u),
         Btn::Fly => (w - 255.0 * u, h - 85.0 * u, 36.0 * u),
         Btn::Inventory => (w - 70.0 * u, h - 50.0 * u, 34.0 * u),
-        Btn::Chat | Btn::Camera | Btn::Tab | Btn::Pause => {
+        Btn::Chat | Btn::Voice | Btn::Camera | Btn::Tab | Btn::Pause => {
             let i = ISLAND.iter().position(|x| *x == b).unwrap_or(0) as f32;
             let (x0, y, step) = island_layout(size);
             (x0 + step * (i + 0.5), y, 30.0 * u)
@@ -140,7 +148,7 @@ fn button_rect(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>) -
 }
 
 /// Buttons of the top "island", left to right.
-const ISLAND: [Btn; 4] = [Btn::Chat, Btn::Camera, Btn::Tab, Btn::Pause];
+const ISLAND: [Btn; 5] = [Btn::Chat, Btn::Voice, Btn::Camera, Btn::Tab, Btn::Pause];
 
 /// Island: (left x, centre y, slot width) in physical pixels, centred at the top.
 fn island_layout(size: (u32, u32)) -> (f32, f32, f32) {
@@ -153,7 +161,7 @@ fn island_layout(size: (u32, u32)) -> (f32, f32, f32) {
 }
 
 /// Round on-screen buttons (the inventory is a tile next to the hotbar, drawn by the HUD).
-const BUTTONS: [Btn; 9] = [Btn::Jump, Btn::Sneak, Btn::Sprint, Btn::Place, Btn::Fly, Btn::Pause, Btn::Chat, Btn::Camera, Btn::Tab];
+const BUTTONS: [Btn; 10] = [Btn::Jump, Btn::Sneak, Btn::Sprint, Btn::Place, Btn::Fly, Btn::Pause, Btn::Chat, Btn::Voice, Btn::Camera, Btn::Tab];
 
 fn hit(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>, p: (f32, f32)) -> bool {
     let (cx, cy, r) = button_rect(b, size, hotbar);
@@ -172,7 +180,7 @@ impl TouchState {
                 let (w, h) = (size.0 as f32, size.1 as f32);
                 let on_hotbar = self.hotbar.is_some_and(|(l, t, r, bt)| p.0 >= l - 6.0 && p.0 <= r + 6.0 && p.1 >= t - 6.0 && p.1 <= bt + 6.0);
                 let inside = |r: Option<(f32, f32, f32, f32)>| r.is_some_and(|(l, t, rr, b)| p.0 >= l - 4.0 && p.0 <= rr + 4.0 && p.1 >= t - 4.0 && p.1 <= b + 4.0);
-                let island = |b: &Btn| matches!(b, Btn::Pause | Btn::Chat | Btn::Camera | Btn::Tab);
+                let island = |b: &Btn| matches!(b, Btn::Pause | Btn::Chat | Btn::Voice | Btn::Camera | Btn::Tab);
                 let role = if self.blocked.iter().any(|r| inside(Some(*r))) {
                     // A studio panel is there: not a game touch (an inert role so it does nothing).
                     Role::Hotbar
@@ -216,6 +224,7 @@ impl TouchState {
                         Btn::Inventory => out.push(TouchAction::Inventory),
                         Btn::Pause => out.push(TouchAction::Pause),
                         Btn::Chat => out.push(TouchAction::Chat),
+                        Btn::Voice => self.voice_held = true,
                         Btn::Camera => out.push(TouchAction::Camera),
                         Btn::Tab => out.push(TouchAction::Debug),
                         Btn::Prev => out.push(TouchAction::Hotbar(1)),
@@ -264,6 +273,13 @@ impl TouchState {
                         Role::Button(Btn::Jump) => self.jump_held = false,
                         Role::Button(Btn::Sneak) => self.down_held = false,
                         Role::Button(Btn::Place) => self.place_held = false,
+                        Role::Button(Btn::Voice) => {
+                            self.voice_held = false;
+                            // A short tap opens the menu; holding was talking.
+                            if f.t0.elapsed().as_millis() < 350 && t.phase == TouchPhase::Ended {
+                                out.push(TouchAction::Voice);
+                            }
+                        }
                         Role::Button(_) | Role::Hotbar | Role::Slot => {}
                     }
                 }
@@ -367,6 +383,32 @@ impl TouchState {
                         let bubble = egui::Rect::from_center_size(c - egui::vec2(0.0, k * 0.15), egui::vec2(k * 2.0, k * 1.4));
                         painter.rect_stroke(bubble, k * 0.35, st);
                         painter.add(egui::Shape::convex_polygon(vec![bubble.left_bottom() + egui::vec2(k * 0.35, 0.0), bubble.left_bottom() + egui::vec2(k * 0.85, 0.0), bubble.left_bottom() + egui::vec2(k * 0.2, k * 0.55)], white, Stroke::NONE));
+                    }
+                    Btn::Voice => {
+                        // Microphone: capsule, cradle and stand; red while sending, crossed
+                        // out when off.
+                        let col = match self.voice_state {
+                            2 => Color32::from_rgb(90, 230, 120),
+                            1 => white,
+                            _ => Color32::from_rgba_unmultiplied(240, 245, 250, 140),
+                        };
+                        let cap = egui::Rect::from_center_size(c - egui::vec2(0.0, k * 0.35), egui::vec2(k * 0.8, k * 1.2));
+                        if self.voice_state == 2 {
+                            painter.rect_filled(cap, k * 0.4, col);
+                        } else {
+                            painter.rect_stroke(cap, k * 0.4, Stroke::new(2.2, col));
+                        }
+                        let s2 = Stroke::new(2.2, col);
+                        let pts: Vec<egui::Pos2> = (0..=10).map(|i| {
+                            let a = std::f32::consts::PI * (i as f32 / 10.0);
+                            c + egui::vec2(-a.cos() * k * 0.7, -k * 0.2 + a.sin() * k * 0.55)
+                        }).collect();
+                        painter.add(egui::Shape::line(pts, s2));
+                        painter.line_segment([c + egui::vec2(0.0, k * 0.35), c + egui::vec2(0.0, k * 0.8)], s2);
+                        painter.line_segment([c + egui::vec2(-k * 0.4, k * 0.8), c + egui::vec2(k * 0.4, k * 0.8)], s2);
+                        if self.voice_state == 0 {
+                            painter.line_segment([c + egui::vec2(-k * 0.9, -k * 0.9), c + egui::vec2(k * 0.9, k * 0.9)], Stroke::new(2.6, Color32::from_rgb(240, 90, 90)));
+                        }
                     }
                     Btn::Camera => {
                         // Eye: switch between first and third person.

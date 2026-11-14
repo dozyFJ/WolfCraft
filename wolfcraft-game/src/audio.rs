@@ -333,6 +333,11 @@ impl Audio {
     }
 
     /// Plays an effect; `pitch` varies it a little so repeats do not sound identical.
+    /// The output, for other players' voices.
+    pub fn handle(&self) -> Option<&OutputStreamHandle> {
+        self.handle.as_ref()
+    }
+
     pub fn play(&mut self, sfx: Sfx, gain: f32) {
         let Some(h) = &self.handle else { return };
         if self.volume <= 0.001 {

@@ -10,6 +10,7 @@ mod preview;
 mod session;
 mod signs;
 mod touch;
+mod voice;
 mod worldedit;
 
 use winit::event_loop::EventLoop;
@@ -199,6 +200,62 @@ pub mod text_input {
 }
 
 /// Screen orientation on phones: the launcher stands upright, the game lies in landscape.
+/// Microphone permission (Android asks the player once; desktops always allow).
+pub mod mic {
+    /// The microphone may be used now. On Android the first call shows the system request;
+    /// later calls see the answer.
+    pub fn granted() -> bool {
+        #[cfg(target_os = "android")]
+        {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            static OK: AtomicBool = AtomicBool::new(false);
+            static ASKED: AtomicBool = AtomicBool::new(false);
+            if OK.load(Ordering::Relaxed) {
+                return true;
+            }
+            // Ask Android at most once a second while waiting for the answer.
+            static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+            if let Ok(mut last) = LAST.lock() {
+                if last.is_some_and(|t| t.elapsed().as_secs_f32() < 1.0) {
+                    return false;
+                }
+                *last = Some(std::time::Instant::now());
+            }
+            let Some(app) = super::orientation::app() else { return false };
+            let Ok(vm) = (unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) }) else { return false };
+            let Ok(mut env) = vm.attach_current_thread() else { return false };
+            let activity = unsafe { jni::objects::JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject) };
+            let r = (|| -> jni::errors::Result<bool> {
+                use jni::objects::JValue;
+                let perm = env.new_string("android.permission.RECORD_AUDIO")?;
+                let state = env.call_method(&activity, "checkSelfPermission", "(Ljava/lang/String;)I", &[JValue::Object(&perm)])?.i()?;
+                if state == 0 {
+                    return Ok(true);
+                }
+                if !ASKED.swap(true, Ordering::Relaxed) {
+                    let arr = env.new_object_array(1, "java/lang/String", &perm)?;
+                    env.call_method(&activity, "requestPermissions", "([Ljava/lang/String;I)V", &[JValue::Object(&arr), JValue::Int(7)])?;
+                }
+                Ok(false)
+            })();
+            std::mem::forget(activity);
+            match r {
+                Ok(ok) => {
+                    OK.store(ok, Ordering::Relaxed);
+                    ok
+                }
+                Err(e) => {
+                    let _ = env.exception_clear();
+                    log::warn!("микрофон: разрешение: {e}");
+                    false
+                }
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        true
+    }
+}
+
 pub mod orientation {
     #[cfg(target_os = "android")]
     static APP: std::sync::OnceLock<winit::platform::android::activity::AndroidApp> = std::sync::OnceLock::new();
