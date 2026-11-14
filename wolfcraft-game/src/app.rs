@@ -277,6 +277,8 @@ pub struct App {
     hand_place: f32,
     /// Weapon kick after a shot: 1 → 0.
     gun_recoil: f32,
+    /// Chat commands to send soon (the server's «Команды при запуске»).
+    queued_chat: Vec<String>,
     /// Hit marker after a bullet struck a creature (seconds left).
     hit_marker: f32,
     /// Collapse sounds: at most one thud every few hundredths of a second.
@@ -324,6 +326,7 @@ pub struct App {
 impl App {
     pub fn new(args: LaunchArgs) -> Self {
         let data_dir = args.resolved_data_dir();
+        wolfcraft_ui::launcher::set_data_dir(data_dir.clone());
         let crash_report = std::fs::read_to_string(data_dir.join("logs").join("crash.txt")).ok();
         // WolfStudio app: servers are places with their own worlds, apart from game worlds —
         // the same folder the bundled WolfServer runs them from, so every server made on the
@@ -419,6 +422,7 @@ impl App {
             hand_block: 0.0,
             hand_place: 0.0,
             gun_recoil: 0.0,
+            queued_chat: Vec::new(),
             hit_marker: 0.0,
             thud_cd: 0.0,
             studio_target: None,
@@ -634,7 +638,9 @@ impl App {
             }
         };
         let port = wolfcraft_net::DEFAULT_PORT;
-        match wolfcraft_net::server::start(&cfg.name, toml, &dir, port, false) {
+        // The «Сервер» page's settings: max players.
+        let options = wolfcraft_net::server::ServerOptions { max_players: wolfcraft_ui::server_page::max_players(&self.data_dir), ..Default::default() };
+        match wolfcraft_net::server::start_with_options(&cfg.name, toml, &dir, port, false, options) {
             Ok(h) => self.host = Some(h),
             Err(e) => {
                 self.world_select.net_error = Some(format!("сервер не запущен: {e}"));
@@ -651,6 +657,8 @@ impl App {
         for line in wolfcraft_net::lan::host_lines(port) {
             self.chat.push(ChatKind::System, line, now);
         }
+        // «Сервер → Консоль → Команды при запуске».
+        self.queued_chat.extend(wolfcraft_ui::server_page::autoexec(&self.data_dir));
     }
 
     /// Network step while a session exists: receive edits/players/chat, send our state.
@@ -2355,6 +2363,9 @@ impl App {
             self.handle_action(a, gfx);
         }
         let now = self.time.elapsed() as f64;
+        if self.session.is_some() && self.screen == Screen::Playing && !self.queued_chat.is_empty() {
+            submitted.extend(std::mem::take(&mut self.queued_chat));
+        }
         for line in submitted {
             // Online: plain chat lines go to the server, which sends them back to everyone.
             if let Some(net) = &mut self.net {
