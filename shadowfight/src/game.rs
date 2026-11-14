@@ -347,14 +347,14 @@ impl Game {
         dim(ctx, 0.25);
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
             let r = ui.max_rect();
-            let p = ui.painter();
+            let p = ui.painter().clone();
             let c = Pos2::new(r.left() + r.width() * 0.3, r.center().y - 30.0);
             let glow = 0.6 + 0.4 * (t * 1.6).sin();
             for k in 1..4 {
                 p.text(c + EV::new(0.0, 0.0), Align2::CENTER_CENTER, "БОЙ С ТЕНЬЮ", FontId::proportional(50.0 + k as f32 * 1.5), Color32::from_rgba_unmultiplied(255, 120, 60, (14.0 * glow) as u8));
             }
-            shadow_text(p, c, "БОЙ С ТЕНЬЮ", 50.0, Color32::from_rgb(245, 235, 225));
-            shadow_text(p, c + EV::new(0.0, 44.0), "Хроники Врат", 20.0, Color32::from_rgb(255, 160, 110));
+            shadow_text(&p, c, "БОЙ С ТЕНЬЮ", 50.0, Color32::from_rgb(245, 235, 225));
+            shadow_text(&p, c + EV::new(0.0, 44.0), "Хроники Врат", 20.0, Color32::from_rgb(255, 160, 110));
             let col = Rect::from_center_size(Pos2::new(r.left() + r.width() * 0.76, r.center().y), EV::new(280.0, 260.0));
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col), |ui| {
                 ui.vertical_centered(|ui| {
@@ -398,7 +398,7 @@ impl Game {
                     let done = i + 1 < self.open;
                     let aura = ch.theme.aura;
                     let accent = Color32::from_rgb((aura[0] * 255.0) as u8, (aura[1] * 255.0) as u8, (aura[2] * 255.0) as u8);
-                    let frame = egui::Frame::none().fill(Color32::from_black_alpha(if open { 170 } else { 110 })).rounding(14.0).stroke(Stroke::new(1.5, if open { accent } else { Color32::from_white_alpha(30) })).inner_margin(12.0);
+                    let frame = egui::Frame::none().fill(Color32::from_black_alpha(if open { 170 } else { 110 })).rounding(14.0).stroke(Stroke::new(1.5_f32, if open { accent } else { Color32::from_white_alpha(30) })).inner_margin(12.0);
                     let resp = frame
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
@@ -536,8 +536,8 @@ impl Game {
         for k in 0..2u8 {
             let on_p = d.wins[0] > k;
             let on_e = d.wins[1] > k;
-            p.circle(Pos2::new(16.0 + bw - 8.0 - k as f32 * 16.0, 38.0), 5.0, if on_p { Color32::from_rgb(255, 210, 90) } else { Color32::from_black_alpha(120) }, Stroke::new(1.0, Color32::from_white_alpha(120)));
-            p.circle(Pos2::new(w - 16.0 - bw + 8.0 + k as f32 * 16.0, 38.0), 5.0, if on_e { Color32::from_rgb(255, 210, 90) } else { Color32::from_black_alpha(120) }, Stroke::new(1.0, Color32::from_white_alpha(120)));
+            p.circle(Pos2::new(16.0 + bw - 8.0 - k as f32 * 16.0, 38.0), 5.0, if on_p { Color32::from_rgb(255, 210, 90) } else { Color32::from_black_alpha(120) }, Stroke::new(1.0_f32, Color32::from_white_alpha(120)));
+            p.circle(Pos2::new(w - 16.0 - bw + 8.0 + k as f32 * 16.0, 38.0), 5.0, if on_e { Color32::from_rgb(255, 210, 90) } else { Color32::from_black_alpha(120) }, Stroke::new(1.0_f32, Color32::from_white_alpha(120)));
         }
         // Shadow power.
         let full = d.player.power >= 1.0;
@@ -545,7 +545,7 @@ impl Game {
         bar(&p, pw, d.player.power, if full { Color32::from_rgb(170, 110, 255) } else { Color32::from_rgb(110, 80, 180) }, false);
         if full {
             let g = 0.5 + 0.5 * (self.time * 6.0).sin();
-            p.rect_stroke(pw.expand(2.0), 4.0, Stroke::new(1.5, Color32::from_rgba_unmultiplied(200, 160, 255, (200.0 * g) as u8)));
+            p.rect_stroke(pw.expand(2.0), 4.0, Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(200, 160, 255, (200.0 * g) as u8)));
         }
         // Pause + timer.
         let pr = self.pause_rect();
@@ -584,7 +584,7 @@ impl Game {
         // Joystick.
         let (u, btns) = self.layout();
         let (o, c) = self.joystick().unwrap_or((Pos2::new(2.2 * u, h - 2.0 * u), Pos2::new(2.2 * u, h - 2.0 * u)));
-        p.circle(o, u * 1.1, Color32::from_black_alpha(70), Stroke::new(1.5, Color32::from_white_alpha(70)));
+        p.circle(o, u * 1.1, Color32::from_black_alpha(70), Stroke::new(1.5_f32, Color32::from_white_alpha(70)));
         let d2 = { let v = c - o; let l = v.length(); if l > u * 1.1 { v * (u * 1.1 / l) } else { v } };
         p.circle_filled(o + d2, u * 0.45, Color32::from_white_alpha(110));
         // Buttons.
@@ -598,7 +598,7 @@ impl Game {
                 (_, true) => Color32::from_white_alpha(110),
                 _ => Color32::from_black_alpha(110),
             };
-            p.circle(pos, r, fill, Stroke::new(2.0, Color32::from_white_alpha(if ready { 150 } else { 50 })));
+            p.circle(pos, r, fill, Stroke::new(2.0_f32, Color32::from_white_alpha(if ready { 150 } else { 50 })));
             p.text(pos, Align2::CENTER_CENTER, label, FontId::proportional((r * 0.32).clamp(11.0, 18.0)), Color32::from_white_alpha(if ready { 235 } else { 90 }));
         }
         let _ = State::Idle;
@@ -611,7 +611,7 @@ fn dim(ctx: &egui::Context, k: f32) {
 }
 
 fn big(ui: &mut egui::Ui, text: &str) -> bool {
-    let b = egui::Button::new(RichText::new(text).size(21.0).strong().color(Color32::WHITE)).min_size(EV::new(260.0, 50.0)).rounding(14.0).fill(Color32::from_rgba_unmultiplied(20, 14, 18, 200)).stroke(Stroke::new(1.5, Color32::from_rgb(200, 90, 60)));
+    let b = egui::Button::new(RichText::new(text).size(21.0).strong().color(Color32::WHITE)).min_size(EV::new(260.0, 50.0)).rounding(14.0).fill(Color32::from_rgba_unmultiplied(20, 14, 18, 200)).stroke(Stroke::new(1.5_f32, Color32::from_rgb(200, 90, 60)));
     let r = ui.add(b).clicked();
     ui.add_space(8.0);
     r
