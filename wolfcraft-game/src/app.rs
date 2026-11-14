@@ -1542,9 +1542,8 @@ impl App {
             self.discovery = None;
             self.world_select.nearby.clear();
         }
-        // Portrait for the game's launcher; the WolfStudio app and the editor are landscape
-        // (its windows dock beside the world).
-        let portrait = matches!(self.screen, Screen::Splash | Screen::Main) && !wolfcraft_ui::launcher::is_studio_app();
+        // Keep phone menu screens upright; gameplay and the editor use landscape.
+        let portrait = matches!(self.screen, Screen::Splash | Screen::Main | Screen::GameMenu | Screen::WorldSelect | Screen::Settings) && !wolfcraft_ui::launcher::is_studio_app() && self.studio.is_none();
         if self.portrait != Some(portrait) {
             self.portrait = Some(portrait);
             crate::orientation::set_portrait(portrait);
