@@ -480,67 +480,77 @@ fn square_button(ui: &mut Ui, icons: &GuiIcons, ic: u16, active: bool) -> egui::
     resp
 }
 
-/// World selection uses a full-width header: navigation, play-mode tabs and tools.
-fn world_select_header(ui: &mut Ui, icons: &GuiIcons, st: &mut WorldSelectState, worlds: &[WorldEntry], version: &str) -> MenuAction {
+/// World-select left sidebar, vertical: back, play modes, world actions (create, play,
+/// search, sort) and settings. Search field and sort options open inside the sidebar.
+fn world_select_side(ui: &mut Ui, icons: &GuiIcons, st: &mut WorldSelectState, worlds: &[WorldEntry], version: &str) -> MenuAction {
     let p = palette(ui.ctx());
     let mut action = MenuAction::None;
-    let wide = ui.available_width() >= 640.0;
-    ui.spacing_mut().item_spacing.y = 6.0;
+    let w = ui.available_width();
+    ui.spacing_mut().item_spacing.y = 8.0;
+    let section = |ui: &mut Ui, text: &str| {
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new(text).size(11.5).color(p.text_muted));
+    };
     ui.horizontal(|ui| {
         if square_button(ui, icons, icon::ARROW_LEFT, false).on_hover_text("Назад").clicked() {
             action = MenuAction::Back;
         }
-        ui.label(egui::RichText::new("Миры").font(bold_font(21.0)).color(p.text));
-        if wide {
-            ui.add_space(16.0);
-            tab_bar(ui, "play-mode-tabs", &["Одиночная игра", "Игра по сети"], &mut st.mode);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if square_button(ui, icons, icon::GEAR, false).on_hover_text("Настройки").clicked() {
-                action = MenuAction::OpenSettings;
-            }
-            if wide { ui.label(egui::RichText::new(format!("v{version}")).size(12.0).color(p.text_muted)); }
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.label(egui::RichText::new("Миры").font(bold_font(20.0)).color(p.text));
+            ui.label(egui::RichText::new(format!("v{version}")).size(11.0).color(p.text_muted));
         });
     });
-    if !wide {
-        egui::ScrollArea::horizontal().id_salt("play-mode-tabs-scroll").auto_shrink([false, true]).show(ui, |ui| {
-            tab_bar(ui, "play-mode-tabs", &["Одиночная игра", "Игра по сети"], &mut st.mode);
-        });
+    section(ui, "РЕЖИМ");
+    for (i, ic, label) in [(0usize, icon::CUBE, "Одиночная игра"), (1, icon::GLOBE, "Игра по сети")] {
+        let kind = if st.mode == i { ButtonKind::Primary } else { ButtonKind::Secondary };
+        if pill_button(ui, icons, Some(ic), label, kind, w, true).clicked() {
+            st.mode = i;
+        }
     }
     if st.mode == 0 {
-        egui::ScrollArea::horizontal().id_salt("world-tools-scroll").auto_shrink([false, true]).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if pill_button(ui, icons, Some(icon::PLUS), "Создать мир", ButtonKind::Primary, 150.0, true).clicked() {
-                    action = MenuAction::OpenCreate;
-                }
-                let can = st.selected.as_ref().is_some_and(|id| worlds.iter().any(|w| &w.cfg.id == id));
-                if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Secondary, 130.0, can).clicked() {
-                    if let Some(id) = &st.selected { action = MenuAction::PlayWorld(id.clone()); }
-                }
-                if square_button(ui, icons, icon::SEARCH, st.search_open).on_hover_text("Поиск миров").clicked() {
-                    st.search_open = !st.search_open;
-                    st.search_focus = st.search_open;
-                    if !st.search_open { st.search.clear(); }
-                }
-                if square_button(ui, icons, icon::SORT, st.sort_open).on_hover_text("Сортировка").clicked() {
-                    st.sort_open = !st.sort_open;
-                }
-            });
-        });
+        section(ui, "МИРЫ");
+        if pill_button(ui, icons, Some(icon::PLUS), "Создать мир", ButtonKind::Primary, w, true).clicked() {
+            action = MenuAction::OpenCreate;
+        }
+        let can = st.selected.as_ref().is_some_and(|id| worlds.iter().any(|w| &w.cfg.id == id));
+        if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Secondary, w, can).clicked() {
+            if let Some(id) = &st.selected {
+                action = MenuAction::PlayWorld(id.clone());
+            }
+        }
+        let kind = if st.search_open { ButtonKind::Primary } else { ButtonKind::Secondary };
+        if pill_button(ui, icons, Some(if st.search_open { icon::CLOSE } else { icon::SEARCH }), "Поиск", kind, w, true).clicked() {
+            st.search_open = !st.search_open;
+            st.search_focus = st.search_open;
+            if !st.search_open {
+                st.search.clear();
+            }
+        }
         if st.search_open {
-            let width = ui.available_width();
-            let response = text_input(ui, icons, &mut st.search, "Поиск по названию мира…", width, Some(icon::SEARCH));
-            if st.search_focus { st.search_focus = false; response.request_focus(); }
+            let r = text_input(ui, icons, &mut st.search, "Название…", w, None);
+            if st.search_focus {
+                st.search_focus = false;
+                r.request_focus();
+            }
+        }
+        let kind = if st.sort_open { ButtonKind::Primary } else { ButtonKind::Secondary };
+        if pill_button(ui, icons, Some(icon::SORT), "Сортировка", kind, w, true).clicked() {
+            st.sort_open = !st.sort_open;
         }
         if st.sort_open {
-            egui::ScrollArea::horizontal().id_salt("world-sort-scroll").auto_shrink([false, true]).show(ui, |ui| {
-                tab_bar(ui, "world-sort-tabs", &SORT_NAMES, &mut st.sort);
-            });
+            for (i, name) in SORT_NAMES.iter().enumerate() {
+                let kind = if st.sort == i { ButtonKind::Primary } else { ButtonKind::Ghost };
+                if pill_button(ui, icons, if st.sort == i { Some(icon::CHECK) } else { None }, name, kind, w, true).clicked() {
+                    st.sort = i;
+                    st.sort_open = false;
+                }
+            }
         }
-    } else {
-        egui::ScrollArea::horizontal().id_salt("network-tabs-scroll").auto_shrink([false, true]).show(ui, |ui| {
-            tab_bar(ui, "network-tabs", &["Рядом", "Создать сервер", "По коду", "Мои серверы"], &mut st.net_tab);
-        });
+    }
+    section(ui, "ЕЩЁ");
+    if pill_button(ui, icons, Some(icon::GEAR), "Настройки", ButtonKind::Secondary, w, true).clicked() {
+        action = MenuAction::OpenSettings;
     }
     action
 }
@@ -548,11 +558,37 @@ fn world_select_header(ui: &mut Ui, icons: &GuiIcons, st: &mut WorldSelectState,
 pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectState, worlds: &[WorldEntry], version: &str) -> MenuAction {
     let p = palette(ctx);
     let mut action = MenuAction::None;
-    egui::TopBottomPanel::top("world-select-header")
-        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 8.0)))
+    // Left sidebar: every control, stacked vertically.
+    let side_w = (ctx.screen_rect().width() * 0.24).clamp(170.0, 230.0);
+    egui::SidePanel::left("play-mode-side")
+        .resizable(false)
+        .exact_width(side_w)
+        .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(12.0)))
         .show(ctx, |ui| {
-            action = world_select_header(ui, icons, st, worlds, version);
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                action = world_select_side(ui, icons, st, worlds, version);
+            });
         });
+    if st.mode == 1 {
+        // Right sidebar in "Игра по сети": its sections, mirroring the left one.
+        egui::SidePanel::right("net-side")
+            .resizable(false)
+            .exact_width(side_w)
+            .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(12.0)))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new("СЕТЬ").size(11.5).color(p.text_muted));
+                    for (i, ic, label) in [(0usize, icon::SEARCH, "Рядом"), (1, icon::STAR, "Создать сервер"), (2, icon::EDIT, "По коду"), (3, icon::GLOBE, "Мои серверы")] {
+                        let kind = if st.net_tab == i { ButtonKind::Primary } else { ButtonKind::Secondary };
+                        if pill_button(ui, icons, Some(ic), label, kind, ui.available_width(), true).clicked() {
+                            st.net_tab = i;
+                        }
+                    }
+                });
+            });
+    }
     egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
         if st.mode == 1 {
             if let Some(a) = online_tab(ui, icons, &p, st, worlds) {
@@ -566,8 +602,10 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
             ui.vertical_centered(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
                 icons.paint(ui.painter(), r, icon::GLOBE, p.text_muted.gamma_multiply(0.5));
-                ui.label(egui::RichText::new(if worlds.is_empty() { "Миров пока нет" } else { "Ничего не найдено" }).font(bold_font(20.0)).color(p.text));
-                ui.label(egui::RichText::new(if worlds.is_empty() { "Создайте первую планету — нажмите «Создать мир»" } else { "Измените запрос поиска" }).color(p.text_muted));
+                // Studio projects are not shown here, so "no worlds" counts only game worlds.
+                let none = st.search.trim().is_empty() || !worlds.iter().any(|w| !w.cfg.studio_project);
+                ui.label(egui::RichText::new(if none { "Миров пока нет" } else { "Ничего не найдено" }).font(bold_font(20.0)).color(p.text));
+                ui.label(egui::RichText::new(if none { "Создайте первую планету — нажмите «Создать мир»" } else { "Измените запрос поиска" }).color(p.text_muted));
             });
             return;
         }
@@ -1338,28 +1376,32 @@ mod tests {
     }
 
     #[test]
-    fn world_selection_has_header_tabs_and_full_width_list() {
+    fn world_selection_has_vertical_sidebars() {
         let (ctx, icons) = setup();
-        let worlds = vec![WorldEntry { cfg: WorldConfig::new("Header test world", 42), preview: None }];
+        let worlds = vec![WorldEntry { cfg: WorldConfig::new("Side test world", 42), preview: None }];
         let mut st = WorldSelectState::default();
         let mut action = MenuAction::None;
         let mut render = |events| ctx.run(egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 540.0))),
             events, ..Default::default()
         }, |ctx| { action = world_select(ctx, &icons, &mut st, &worlds, "0.2.1"); });
-        render(vec![]); // Let the header settle before inspecting its layout.
+        render(vec![]);
         let out = render(vec![]);
-        let text = |label: &str| out.shapes.iter().find_map(|s| match &s.shape {
-            egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t), _ => None
-        }).expect("world-select label");
-        let title = text("Header test world");
-        assert!(title.pos.x < 180.0, "world list must use the former sidebar space");
-        let network = text("Игра по сети");
-        assert!(network.pos.y < 70.0, "play modes must be header tabs");
-        let pos = network.pos + network.galley.size() * 0.5;
-        render(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
-        render(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+        let text = |out: &egui::FullOutput, label: &str| out.shapes.iter().find_map(|s| match &s.shape {
+            egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t.pos + t.galley.size() * 0.5), _ => None
+        }).expect(label);
+        let single = text(&out, "Одиночная игра");
+        let network = text(&out, "Игра по сети");
+        let create = text(&out, "Создать мир");
+        assert!(single.x < 240.0 && network.x < 240.0 && create.x < 240.0, "controls in the left sidebar");
+        assert!(single.y < network.y && network.y < create.y, "stacked vertically");
+        assert!(text(&out, "Side test world").x > 240.0, "list right of the sidebar");
+        render(vec![egui::Event::PointerMoved(network), egui::Event::PointerButton { pos: network, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+        render(vec![egui::Event::PointerButton { pos: network, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
         assert_eq!(st.mode, 1);
+        render(vec![]);
+        let out = render(vec![]);
+        assert!(text(&out, "По коду").x > 720.0, "network sections in the right sidebar");
     }
 
     #[test]
