@@ -196,8 +196,19 @@ fn main() {
             let seed = arg_value(&args, "--seed").and_then(|s| s.parse::<i64>().ok()).map(|s| s as u64).unwrap_or_else(|| wolfcraft_common::platform::unix_now().wrapping_mul(6364136223846793005));
             let mut c = WorldConfig::new(&name, seed);
             c.id = slugify(&name);
-            if args.iter().any(|a| a == "--creative") {
-                c.mode = GameMode::Creative;
+            // A new server world is a place, like in Roblox Studio: an empty flat baseplate
+            // without structures. `--planet` makes an ordinary WolfCraft planet instead.
+            if args.iter().any(|a| a == "--planet") {
+                if args.iter().any(|a| a == "--creative") {
+                    c.mode = GameMode::Creative;
+                }
+            } else {
+                c.world_type = wolfcraft_engine::config::WorldType::Baseplate;
+                c.structures = false;
+                c.size = wolfcraft_engine::config::PlanetSize::Small;
+                c.difficulty = wolfcraft_engine::config::Difficulty::Peaceful;
+                c.mode = if args.iter().any(|a| a == "--survival") { GameMode::Survival } else { GameMode::Creative };
+                c.studio_project = true;
             }
             if let Err(e) = c.save(&dir) {
                 eprintln!("Не удалось создать мир в {}: {e}", dir.display());

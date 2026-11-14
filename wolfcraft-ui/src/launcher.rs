@@ -438,7 +438,6 @@ fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
 /// running server. Worlds of WolfServer in the network can be edited live too.
 fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[crate::main_menu::WorldEntry], action: &mut MenuAction) {
     let _ = version;
-    const TEMPLATES: [(&str, &str); 3] = [("Основа", "Серая плита с сеткой — пустое место для своей игры"), ("Плоский мир", "Ровная земля до горизонта"), ("Планета", "Обычный мир WolfCraft: горы, леса, вода")];
     let form_id = Id::new("studio-new-form");
     let mut form: Option<(String, u8)> = ui.ctx().data(|d| d.get_temp(form_id)).unwrap_or(None);
     let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project).collect();
@@ -459,18 +458,8 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
             ui.set_width(ui.available_width());
             ui.label(egui::RichText::new("НОВЫЙ СЕРВЕР").size(11.5).color(p.text_muted));
             ui.add(egui::TextEdit::singleline(name).char_limit(32).hint_text("Название").desired_width(ui.available_width()));
-            ui.add_space(4.0);
-            for (i, (t, d)) in TEMPLATES.iter().enumerate() {
-                let on = *template == i as u8;
-                let resp = Frame::none().fill(if on { p.accent.gamma_multiply(0.15) } else { p.surface_hi }).rounding(Rounding::same(12.0)).stroke(Stroke::new(1.0_f32, if on { p.accent } else { p.outline })).inner_margin(Margin::same(10.0)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(egui::RichText::new(*t).font(bold_font(15.0)).color(if on { p.accent } else { p.text }));
-                    ui.label(egui::RichText::new(*d).size(12.5).color(p.text_muted));
-                }).response.interact(Sense::click());
-                if resp.clicked() {
-                    *template = i as u8;
-                }
-            }
+            ui.label(egui::RichText::new("Пустая плоская основа с сеткой, без построек — как Baseplate в Roblox Studio").size(12.5).color(p.text_muted));
+            *template = 0;
             ui.horizontal(|ui| {
                 if pill_button(ui, icons, None, "Отмена", ButtonKind::Secondary, 120.0, true).clicked() {
                     close = true;
