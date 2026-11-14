@@ -752,15 +752,47 @@ mod tests {
 
 
 fn build_volcano(b:&mut Builder){
-    for u in -22i32..=22 {for v in -22i32..=22 {
-        let radius=((u*u+v*v) as f64).sqrt();if radius>22. {continue;}
-        let height=((22.-radius)*1.2).max(0.) as i32;
-        b.bx(u,u,-8,height,v,v,Block::Obsidian,Mode::Set);
-        if radius<5.0 {b.bx(u,u,17,29,v,v,Block::Air,Mode::Set);b.set(u,16,v,Block::Lava);}
+    // A real volcano: a basalt cone (rooted deep, so it never hangs in the air) with glowing
+    // magma veins and an ash cap; its crater is a shaft with a spiral stair that leads down
+    // into the planet, to a magma cave with a lava lake — the lair of «Сердце вулкана».
+    const R:i32=26;
+    const CAVE:i32=-30; // centre height of the cave
+    for u in -R..=R {for v in -R..=R {
+        let r=((u*u+v*v) as f64).sqrt();
+        if r>R as f64 {continue;}
+        let height=((R as f64-r)*1.15) as i32;
+        let vein=(u*7+v*13).rem_euclid(11)==0;
+        b.bx(u,u,-44,height,v,v,if vein {Block::Magma} else {Block::Basalt},Mode::Set);
+        if height>14 {b.set(u,height,v,Block::Ash);}
+        // Crater and shaft: open from the top down to the cave.
+        if r<5.0 {b.bx(u,u,CAVE,height+3,v,v,Block::Air,Mode::Set);}
+        else if r<6.0 && height>8 {b.set(u,height,v,Block::Magma);}
     }}
-    // Safe altar ledge and approach above the crater, away from lava.
-    b.bx(-4,4,22,22,-10,-6,Block::StoneBricks,Mode::Set);
-    b.bx(-3,3,23,26,-10,-6,Block::Air,Mode::Set);
-    b.set(0,23,-8,crate::construction::block(crate::construction::Form::EmberAltar,6,0).unwrap());
-    b.set(-3,23,-8,Block::Chest);
+    // The cave: a magma shell, hollow inside, lava lake on the floor, a basalt island with the altar.
+    for u in -16i32..=16 {for v in -16i32..=16 {for w in -10i32..=10 {
+        let d=(u*u+v*v) as f64/196.0+(w*w) as f64/64.0;
+        if d<=1.0 {b.set(u,CAVE+w,v,Block::Air);}
+        else if d<=1.35 {b.set(u,CAVE+w,v,Block::Magma);}
+    }}}
+    for u in -14i32..=14 {for v in -14i32..=14 {
+        let r=((u*u+v*v) as f64).sqrt();
+        if r>13.5 {continue;}
+        b.bx(u,u,CAVE-9,CAVE-8,v,v,Block::Basalt,Mode::Set);
+        if r<6.0 {b.bx(u,u,CAVE-7,CAVE-6,v,v,Block::Basalt,Mode::Set);} else {b.set(u,CAVE-7,v,Block::Lava);}
+    }}
+    // Spiral stair down the shaft and on through the cave to the island.
+    let top=(R as f64*1.15) as i32;
+    let mut a=0.0f64;
+    let mut w=top;
+    while w>CAVE-6 {
+        let (u,v)=((4.3*a.cos()).round() as i32,(4.3*a.sin()).round() as i32);
+        b.set(u,w,v,Block::Basalt);
+        b.bx(u,u,w+1,w+3,v,v,Block::Air,Mode::Set);
+        a+=0.42;w-=1;
+    }
+    // Lava falls from the cave walls.
+    for (u,v) in [(12,0),(-12,3),(2,-12),(-4,12)] {b.bx(u,u,CAVE-6,CAVE+4,v,v,Block::Lava,Mode::Set);}
+    b.set(0,CAVE-5,0,crate::construction::block(crate::construction::Form::EmberAltar,6,0).unwrap());
+    b.set(-3,CAVE-5,2,Block::Chest);
+    for (u,v) in [(4,4),(-4,-4)] {b.bx(u,u,CAVE-5,CAVE-3,v,v,Block::Basalt,Mode::Set);b.set(u,CAVE-2,v,Block::Lantern);}
 }
