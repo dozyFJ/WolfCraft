@@ -35,6 +35,9 @@ pub enum MenuAction {
     SetSkin(u8),
     /// New nickname from the launcher profile.
     SetNickname(String),
+    /// Studio: create a server (place) in the menu without opening the editor.
+    /// `template`: 0 baseplate, 1 flat, 2 planet.
+    CreateStudioProject { name: String, template: u8 },
     /// Open this world in the studio (editor).
     OpenStudio(String),
     /// Join a server's world (address) with the studio tools: edits go straight to the server.

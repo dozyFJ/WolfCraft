@@ -2610,13 +2610,41 @@ impl App {
                     }
                 }
             }
+            MenuAction::CreateStudioProject { name, template } => {
+                // A new server (place) on disk only; it opens in the editor from the list.
+                let mut cfg = WorldConfig::new(&name, splitmix(self.random_seed ^ platform::unix_now()) % 1_000_000_000);
+                cfg.world_type = match template {
+                    0 => wolfcraft_engine::config::WorldType::Baseplate,
+                    1 => wolfcraft_engine::config::WorldType::Flat,
+                    _ => wolfcraft_engine::config::WorldType::Standard,
+                };
+                cfg.mode = wolfcraft_engine::config::GameMode::Creative;
+                if template == 0 {
+                    cfg.difficulty = wolfcraft_engine::config::Difficulty::Peaceful;
+                    cfg.structures = false;
+                    cfg.size = wolfcraft_engine::config::PlanetSize::Small;
+                }
+                cfg.studio_project = true;
+                cfg.id = wolfcraft_engine::config::unique_world_id(&self.worlds_dir, &cfg.name);
+                let dir = self.worlds_dir.join(&cfg.id);
+                let ok = std::fs::create_dir_all(&dir).map_err(|e| e.to_string()).and_then(|_| cfg.save(&dir));
+                if let Err(e) = ok {
+                    log::error!("new studio project: {e}");
+                }
+                let _ = std::fs::write(dir.join(SCRIPT_FILE), crate::lua::TEMPLATE);
+                self.refresh_worlds(&gfx.gui.ctx);
+            }
             MenuAction::OpenStudio(id) => {
                 self.net = None;
                 if let Some(w) = self.worlds.iter().find(|w| w.cfg.id == id) {
                     let cfg = w.cfg.clone();
-                    let script = read_world_script(&self.worlds_dir.join(&id));
-                    self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, script, ..Default::default() });
+                    let dir = self.worlds_dir.join(&id);
+                    let script = read_world_script(&dir);
+                    // Created in the menu and never opened: only world.toml (and the script).
+                    let fresh = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).all(|e| { let n = e.file_name(); n == "world.toml" || n == SCRIPT_FILE })).unwrap_or(false);
+                    self.studio = Some(wolfcraft_ui::studio_ui::StudioState { assets_open: true, script_open: fresh, script, ..Default::default() });
                     self.studio_world = Some(id);
+                    // Not `is_new`: that would make another folder; an empty world loads fine.
                     self.start_load(cfg, false);
                 }
             }
