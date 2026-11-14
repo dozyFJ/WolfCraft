@@ -279,6 +279,8 @@ pub struct App {
     gun_recoil: f32,
     /// Hit marker after a bullet struck a creature (seconds left).
     hit_marker: f32,
+    /// Studio: the block last tapped or aimed at (shown in «Выбранный блок»).
+    studio_target: Option<wolfcraft_engine::cubesphere::Cell>,
     /// Fraction of a crumble particle owed while mining (see the mining effects).
     mine_dust: f32,
     /// Ink of sign texts, drawn on the signs in the world.
@@ -409,6 +411,7 @@ impl App {
             hand_place: 0.0,
             gun_recoil: 0.0,
             hit_marker: 0.0,
+            studio_target: None,
             mine_dust: 0.0,
             sign_texts: Default::default(),
             hand_switch: 0.0,
@@ -723,6 +726,10 @@ impl App {
             output: self.chat.lines.iter().rev().take(80).rev().map(|l| (l.kind, l.text.clone())).collect(),
             held_block,
             selection: (cell(s.we.pos1), cell(s.we.pos2)),
+            target: self.studio_target.and_then(|c| {
+                let b = s.chunks.get_block(c)?;
+                (b != wolfcraft_engine::block::Block::Air).then(|| (b as u16, b.info().name.to_string(), [c.i, c.j, c.k]))
+            }),
             script_running: self.lua.is_some(),
             compact: cfg!(target_os = "android") || self.touch.seen,
             now: 0.0,
@@ -750,7 +757,16 @@ impl App {
         match a {
             StudioAction::Exit => {
                 self.save_studio_script();
-                actions.push(MenuAction::SaveAndQuit);
+                if wolfcraft_ui::launcher::is_studio_app() {
+                    // WolfStudio: back to «Мои серверы» in the app (like closing a place in
+                    // Roblox Studio), with everything saved.
+                    if let Some(s) = &mut self.session {
+                        s.save();
+                    }
+                    self.quit = true;
+                } else {
+                    actions.push(MenuAction::SaveAndQuit);
+                }
             }
             StudioAction::RunScript => {
                 // A fresh Luau state each run: the old GUI, handlers and timers go away.
@@ -811,13 +827,43 @@ impl App {
                     s.player.body.vel = glam::DVec3::ZERO;
                 }
             }
+            StudioAction::TargetCorner(n) => {
+                if let (Some(s), Some(c)) = (&mut self.session, self.studio_target) {
+                    if n == 1 {
+                        s.we.pos1 = Some(c);
+                    } else {
+                        s.we.pos2 = Some(c);
+                    }
+                    status(self, if n == 1 { "Точка 1 выбрана" } else { "Точка 2 выбрана" });
+                }
+            }
+            StudioAction::PickTarget => {
+                if let (Some(s), Some(c)) = (&mut self.session, self.studio_target) {
+                    if let Some(b) = s.chunks.get_block(c).filter(|b| *b != wolfcraft_engine::block::Block::Air) {
+                        let id = b.base_item() as u16;
+                        let sel = s.player.inventory.selected;
+                        s.player.inventory.slots[sel] = Some(wolfcraft_engine::items::ItemStack::new(id, wolfcraft_engine::items::info(id).max_stack));
+                    }
+                }
+            }
+            StudioAction::RemoveTarget => {
+                if let (Some(s), Some(c)) = (&mut self.session, self.studio_target) {
+                    use wolfcraft_engine::interaction::WorldEdit;
+                    if s.chunks.set_block(c, wolfcraft_engine::block::Block::Air) {
+                        if let Some(net) = &mut self.net {
+                            net.send(&wolfcraft_net::C2S::Edit { cell: [c.f as i32, c.i, c.j, c.k], block: 0, hell: s.hell });
+                        }
+                    }
+                }
+            }
             StudioAction::Playtest(on) => {
                 if let Some(st) = &mut self.studio {
                     st.playtest = on;
                     st.brush_on = false;
                 }
                 if on {
-                    // Play the place as players will: its script runs fresh.
+                    // Play the place as players will: its script runs fresh (saved first).
+                    self.save_studio_script();
                     let script = self.studio.as_ref().map(|s| s.script.clone()).unwrap_or_default();
                     self.start_lua(&script);
                 } else {
@@ -1395,6 +1441,11 @@ impl App {
                     // Mini-games only on a server (online) or in the studio.
                     s.minigames = self.net.is_some() || self.studio.is_some();
                     let events = s.update(&input, dt, view, frozen);
+                    if self.studio.is_some() {
+                        if let Some(h) = s.hit {
+                            self.studio_target = Some(h.cell);
+                        }
+                    }
                     self.profile.chunks_ms = t.ms();
                     if let Some((op, r, cube)) = brush {
                         crate::worldedit::stroke(s, brush_fire);

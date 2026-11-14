@@ -53,6 +53,8 @@ pub enum Node {
     Lighting,
     Scripts,
     Script,
+    /// The block last tapped in the world.
+    Target,
 }
 
 /// Names of the brush operations, in the order of the game's `BrushOp::ALL`.
@@ -154,6 +156,8 @@ pub struct StudioView {
     /// Block id in the hand (for brush and model tools) and its name.
     pub held_block: Option<(u16, String)>,
     pub selection: (Option<[i32; 3]>, Option<[i32; 3]>),
+    /// The block last tapped or aimed at: (block id, name, cell).
+    pub target: Option<(u16, String, [i32; 3])>,
     pub script_running: bool,
     /// Phone layout: columns end above the touch controls.
     pub compact: bool,
@@ -180,6 +184,12 @@ pub enum StudioAction {
     SetSpawning(bool),
     RemoveMob(usize),
     GoTo([f64; 3]),
+    /// The selected block becomes corner 1 or 2 of the model selection.
+    TargetCorner(u8),
+    /// The selected block's kind into the hand.
+    PickTarget,
+    /// Remove the selected block.
+    RemoveTarget,
     /// Start or stop play-testing.
     Playtest(bool),
 }
@@ -415,6 +425,20 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
                         }
                     }
                 }
+                // Always at hand on the right: exit, publish (run as a server), save.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    for (ic, hint, act) in [(icon::EXIT, "Выйти (сохранит)", StudioAction::Exit), (icon::GLOBE, "Запустить сервер", StudioAction::Publish), (icon::DOWNLOAD, "Сохранить", StudioAction::Save)] {
+                        let (r, resp) = ui.allocate_exact_size(Vec2::new(30.0, MENU_H), Sense::click());
+                        if resp.hovered() || resp.is_pointer_button_down_on() {
+                            ui.painter().rect_filled(r.shrink(2.0), Rounding::same(6.0), p.surface_hover);
+                        }
+                        icons.paint(ui.painter(), Rect::from_center_size(r.center(), Vec2::splat(16.0)), ic, p.text);
+                        if resp.on_hover_text(hint).clicked() {
+                            actions.push(act);
+                        }
+                    }
+                });
             });
         });
         // Window pills under the ribbon: a tap opens that window in the dock below, a tap
@@ -562,11 +586,11 @@ fn ribbon(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, view
                 }
             }
             sep(ui, p);
-            if tool(ui, icons, p, icon::CUBE, "Тулбокс", st.show_toolbox).clicked() {
-                st.show_toolbox = !st.show_toolbox;
+            if tool(ui, icons, p, icon::CUBE, "Тулбокс", st.dock_open && st.dock_tab == 0).clicked() {
+                toggle_dock(st, 0);
             }
-            if tool(ui, icons, p, icon::CODE, "Скрипт", st.center == Center::Script).clicked() {
-                st.center = if st.center == Center::Script { Center::World } else { Center::Script };
+            if tool(ui, icons, p, icon::CODE, "Скрипт", st.dock_open && st.dock_tab == 4).clicked() {
+                toggle_dock(st, 4);
             }
             if tool(ui, icons, p, icon::UNDO, "Отменить", false).clicked() {
                 actions.push(StudioAction::Command("//undo".into()));
@@ -656,20 +680,26 @@ fn ribbon(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, view
             }
         }
         Tab::View => {
-            for (ic, name, flag) in [
-                (icon::CUBE, "Тулбокс", &mut st.show_toolbox),
-                (icon::TREE, "Проводник", &mut st.show_explorer),
-                (icon::PROPS, "Свойства", &mut st.show_props),
-                (icon::OUTPUT, "Вывод", &mut st.show_output),
-            ] {
-                if tool(ui, icons, p, ic, name, *flag).clicked() {
-                    *flag = !*flag;
+            // The windows of the dock (same as the pills under the ribbon).
+            for (i, (name, ic)) in DOCK_TABS.iter().enumerate() {
+                if tool(ui, icons, p, *ic, name, st.dock_open && st.dock_tab == i).clicked() {
+                    toggle_dock(st, i);
                 }
             }
-            if tool(ui, icons, p, icon::CODE, "Скрипт", st.center == Center::Script).clicked() {
-                st.center = if st.center == Center::Script { Center::World } else { Center::Script };
+            if tool(ui, icons, p, icon::CLOSE, "Скрыть всё", false).clicked() {
+                st.dock_open = false;
             }
         }
+    }
+}
+
+/// Opens window `tab` in the dock, or hides the dock if that window is already shown.
+fn toggle_dock(st: &mut StudioState, tab: usize) {
+    if st.dock_open && st.dock_tab == tab {
+        st.dock_open = false;
+    } else {
+        st.dock_tab = tab;
+        st.dock_open = true;
     }
 }
 
@@ -782,7 +812,14 @@ fn explorer(ui: &mut Ui, p: &Palette, st: &mut StudioState, view: &StudioView) {
             ui.painter().circle_filled(Pos2::new(x + 4.0, r.center().y), 4.0, color);
             ui.painter().text(Pos2::new(x + 14.0, r.center().y), Align2::LEFT_CENTER, label, FontId::proportional(13.0), if on { p.accent } else { p.text });
             if resp.clicked() {
+                // On a phone the dock shows one window: the tap goes on to its Свойства
+                // (the script opens straight in the code window).
                 st.selected = node;
+                if node == Node::Script {
+                    st.dock_tab = 4;
+                } else if !matches!(node, Node::Players | Node::Mobs) {
+                    st.dock_tab = 2;
+                }
             }
         };
         row(ui, 0, Node::Workspace, format!("Мир «{}»", view.project), Color32::from_rgb(90, 170, 255));
@@ -795,6 +832,8 @@ fn explorer(ui: &mut Ui, p: &Palette, st: &mut StudioState, view: &StudioView) {
             row(ui, 2, Node::Mob(i), format!("{n} {:.0}/{:.0}", hp, max), Color32::from_rgb(240, 150, 90));
         }
         row(ui, 1, Node::Drops, format!("Предметы на земле ({})", view.drops), Color32::from_rgb(230, 210, 110));
+        let target = view.target.as_ref().map(|t| format!("Выбранный блок: {}", t.1)).unwrap_or_else(|| "Выбранный блок: —".into());
+        row(ui, 1, Node::Target, target, Color32::from_rgb(150, 200, 255));
         row(ui, 0, Node::Lighting, "Освещение".into(), Color32::from_rgb(255, 220, 90));
         row(ui, 0, Node::Scripts, "Скрипты".into(), Color32::from_rgb(190, 140, 255));
         row(ui, 1, Node::Script, "script.lua".into(), Color32::from_rgb(190, 140, 255));
@@ -832,6 +871,9 @@ fn properties(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, 
         }
         Node::Players | Node::Mobs | Node::Drops | Node::Scripts => {
             ui.label(egui::RichText::new("Выберите элемент в Проводнике").size(12.5).color(p.text_muted));
+            if pill_button(ui, icons, Some(icon::TREE), "Проводник", ButtonKind::Secondary, w, true).clicked() {
+                st.dock_tab = 1;
+            }
         }
         Node::Player(i) => {
             if let Some((n, at, hp)) = view.players.get(i) {
@@ -887,6 +929,31 @@ fn properties(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, 
                 }
             });
         }
+        Node::Target => match &view.target {
+            Some((id, name, at)) => {
+                prop(ui, "Блок", name.clone());
+                prop(ui, "ID", id.to_string());
+                prop(ui, "Ячейка", format!("{} {} {}", at[0], at[1], at[2]));
+                ui.horizontal(|ui| {
+                    let half = (w - 8.0) / 2.0;
+                    if pill_button(ui, icons, Some(icon::CROSSHAIR), "Точка 1", ButtonKind::Secondary, half, true).clicked() {
+                        actions.push(StudioAction::TargetCorner(1));
+                    }
+                    if pill_button(ui, icons, Some(icon::CROSSHAIR), "Точка 2", ButtonKind::Secondary, half, true).clicked() {
+                        actions.push(StudioAction::TargetCorner(2));
+                    }
+                });
+                if pill_button(ui, icons, Some(icon::CUBE), "Взять в руку", ButtonKind::Secondary, w, true).clicked() {
+                    actions.push(StudioAction::PickTarget);
+                }
+                if pill_button(ui, icons, Some(icon::TRASH), "Удалить блок", ButtonKind::Danger, w, true).clicked() {
+                    actions.push(StudioAction::RemoveTarget);
+                }
+            }
+            None => {
+                ui.label(egui::RichText::new("Наведите прицел или нажмите на блок в мире — здесь появятся его свойства").size(12.5).color(p.text_muted));
+            }
+        },
         Node::Script => {
             prop(ui, "Язык", "Luau".into());
             prop(ui, "Строк", st.script.lines().count().to_string());
@@ -909,6 +976,7 @@ fn code_window(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState,
         }
         if pill_button(ui, icons, Some(icon::CLOSE), "Закрыть", ButtonKind::Ghost, 0.0, true).clicked() {
             st.center = Center::World;
+            st.dock_open = false;
         }
     });
     ui.add_space(4.0);
