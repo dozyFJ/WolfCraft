@@ -127,6 +127,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.wolfcraft.ota.OtaManager.registerPid(this, "main")
         window.statusBarColor = cBg
         window.navigationBarColor = cCard
         tab = savedInstanceState?.getInt("tab") ?: 0
@@ -225,7 +226,7 @@ class MainActivity : Activity() {
     private fun pollLoop() {
         while (polling) {
             status = if (ServerService.running() && ServerService.token.isNotEmpty()) {
-                api("GET", "/api/status")?.let { runCatching { JSONObject(it) }.getOrNull() }
+                api("GET", "/api/status")?.let { runCatching { JSONObject(it).also { com.wolfcraft.ota.OtaManager.markHealthy(this, "studio", "server") } }.getOrNull() }
             } else {
                 null
             }
@@ -374,7 +375,7 @@ class MainActivity : Activity() {
         try {
             java.io.File(filesDir, "open_place.txt").writeText(p.id)
             java.io.File(filesDir, "open_server.txt").delete()
-            startActivity(Intent(this, android.app.NativeActivity::class.java))
+            startActivity(Intent(this, com.wolfcraft.ota.NativeHostActivity::class.java))
         } catch (e: Exception) {
             Toast.makeText(this, "Студия не открылась: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -891,6 +892,7 @@ class MainActivity : Activity() {
 
     private fun renderSettings() {
         header("Настройки")
+        content.addView(button("↻  Обновить WolfStudio без APK", 1) { com.wolfcraft.ota.OtaManager.show(this, "studio") })
         content.addView(card {
             addView(caption("Работа в фоне"))
             val ok = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
@@ -964,7 +966,7 @@ class MainActivity : Activity() {
             if (server == "127.0.0.1:${ServerService.PORT}" && ServerService.running()) {
                 access.writeText(JSONObject().put("address", server).put("key", ServerService.token).toString())
             } else access.delete()
-            startActivity(Intent(this, android.app.NativeActivity::class.java))
+            startActivity(Intent(this, com.wolfcraft.ota.NativeHostActivity::class.java))
         } catch (e: Exception) {
             Toast.makeText(this, "Студия не открылась: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -1039,4 +1041,5 @@ class MainActivity : Activity() {
         }
     }
 }
+
 

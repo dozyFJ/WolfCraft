@@ -2,7 +2,7 @@ name: UI tap test
 
 on:
   push:
-    branches: [mobile-explosives]
+    branches: [mobile-explosives, codex/ota-launchers]
   workflow_dispatch:
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
         with:
           key: ui-test
       - name: Tap on a nearby server joins it
-        run: cargo test -p wolfcraft-ui --lib -- main_menu studio_ui texture_editor --nocapture
+        run: cargo test -p wolfcraft-ui --lib -- main_menu studio_ui texture_editor server_page --nocapture
       - name: Destruction physics and weapons
         run: cargo test -p wolfcraft-engine --lib -- collapse explosives bosses mobs --nocapture
       - name: Invite codes
@@ -31,3 +31,18 @@ jobs:
       - name: Server profiles, plugins and access roles
         run: cargo test -p wolfserver -p wolfcraft-net -- --nocapture
 
+
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: OTA signature and archive validation
+        run: |
+          curl -fsSL --retry 3 https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar -o "$RUNNER_TEMP/wolf-json.jar"
+          echo "3cf6cd6892e32e2b4c1c39e0f52f5248a2f5b37646fdfbb79a66b46b618414ed  $RUNNER_TEMP/wolf-json.jar" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/wolf-ota-tests"
+          javac --release 17 -cp "$RUNNER_TEMP/wolf-json.jar" -d "$RUNNER_TEMP/wolf-ota-tests" android-shared/src/main/java/com/wolfcraft/ota/BundleVerifier.java tools/OtaVerifierTest.java
+          java -ea -cp "$RUNNER_TEMP/wolf-ota-tests:$RUNNER_TEMP/wolf-json.jar" OtaVerifierTest
+          python3 -m py_compile tools/build_ota.py tools/shell_hash.py tools/check_shell_apk.py
+          python3 tools/test_ota_producer.py
