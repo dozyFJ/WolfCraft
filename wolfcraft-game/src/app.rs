@@ -2619,9 +2619,10 @@ impl App {
                     _ => wolfcraft_engine::config::WorldType::Standard,
                 };
                 cfg.mode = wolfcraft_engine::config::GameMode::Creative;
-                if template == 0 {
+                // Empty flat place without structures (the planet template keeps them).
+                cfg.structures = template == 2;
+                if template != 2 {
                     cfg.difficulty = wolfcraft_engine::config::Difficulty::Peaceful;
-                    cfg.structures = false;
                     cfg.size = wolfcraft_engine::config::PlanetSize::Small;
                 }
                 cfg.studio_project = true;
