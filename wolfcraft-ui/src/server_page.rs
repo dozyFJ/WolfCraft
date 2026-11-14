@@ -1,5 +1,5 @@
-//! The launcher's «Сервер» page: tabs under its toolbar — Сервер, Плагины, Моды, Ядро,
-//! Настройки, Статистика, Логи, Консоль. Files live in `<data>/server/` in the same layout
+//! The launcher's «Сервер» page: tabs under its toolbar — Дашборд, Плагины, Моды, Ядро,
+//! Настройки, Консоль, Логи. Files live in `<data>/server/` in the same layout
 //! as WolfServer (server.toml, plugins/<id>/, modules/<id>.lua, core/<id>/), so a set-up
 //! made here also works on the PC server.
 
@@ -10,7 +10,12 @@ use egui::{Color32, FontId, Frame, Id, Margin, Rounding, Stroke, Ui, Vec2};
 use std::path::{Path, PathBuf};
 use wolfcraft_assets::gui as icon;
 
-pub const TABS: [&str; 8] = ["Сервер", "Плагины", "Моды", "Ядро", "Настройки", "Статистика", "Логи", "Консоль"];
+pub const TABS: [&str; 7] = ["Дашборд", "Плагины", "Моды", "Ядро", "Настройки", "Консоль", "Логи"];
+
+/// Keep the place profile apart from the ordinary server, preserving existing server files.
+pub fn profile_data(data: &Path, place: bool) -> PathBuf {
+    if place { data.join("place") } else { data.to_path_buf() }
+}
 
 /// The server's folder (created on first use).
 pub fn root(data: &Path) -> PathBuf {
@@ -59,27 +64,6 @@ fn safe_id(s: &str) -> String {
     s.trim().to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>().trim_matches('_').chars().take(32).collect()
 }
 
-fn folder_size(p: &Path) -> u64 {
-    let mut n = 0;
-    if let Ok(rd) = std::fs::read_dir(p) {
-        for e in rd.flatten() {
-            let path = e.path();
-            n += if path.is_dir() { folder_size(&path) } else { e.metadata().map(|m| m.len()).unwrap_or(0) };
-        }
-    }
-    n
-}
-
-fn size_text(b: u64) -> String {
-    if b > 1 << 30 {
-        format!("{:.1} ГБ", b as f64 / (1u64 << 30) as f64)
-    } else if b > 1 << 20 {
-        format!("{:.1} МБ", b as f64 / (1u64 << 20) as f64)
-    } else {
-        format!("{} КБ", b / 1024)
-    }
-}
-
 fn card(ui: &mut Ui, p: &Palette, add: impl FnOnce(&mut Ui)) {
     Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -95,6 +79,7 @@ fn caption(ui: &mut Ui, p: &Palette, t: &str) {
 pub fn tab_bar(ui: &mut Ui, p: &Palette) -> usize {
     let id = Id::new("server-page-tab");
     let mut cur: usize = ui.ctx().data(|d| d.get_temp(id)).unwrap_or(0);
+    cur = cur.min(TABS.len() - 1);
     egui::ScrollArea::horizontal().id_salt("server-tabs").drag_to_scroll(true).show(ui, |ui| {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -114,16 +99,16 @@ pub fn tab_bar(ui: &mut Ui, p: &Palette) -> usize {
     cur
 }
 
-/// One of the tabs (0, «Сервер», is drawn by the launcher itself).
-pub fn page(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path, tab: usize, worlds: &[crate::main_menu::WorldEntry]) {
+/// One of the tabs (0, «Дашборд», is drawn by the launcher itself).
+pub fn page(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path, tab: usize) {
     match tab {
         1 => plugins(ui, icons, p, data),
         2 => modules(ui, icons, p, data),
         3 => core(ui, icons, p, data),
         4 => settings(ui, icons, p, data),
-        5 => stats(ui, p, data, worlds),
+        5 => console(ui, icons, p, data),
         6 => logs(ui, icons, p, data),
-        _ => console(ui, icons, p, data),
+        _ => {},
     }
 }
 
@@ -132,7 +117,7 @@ fn plugins(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
     let mut on = enabled_plugins(data);
     let mut list: Vec<String> = std::fs::read_dir(&dir).map(|rd| rd.flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().to_string()).collect()).unwrap_or_default();
     list.sort();
-    let new_id = Id::new("server-new-plugin");
+    let new_id = Id::new(("server-new-plugin", data));
     let mut name: String = ui.ctx().data(|d| d.get_temp(new_id)).unwrap_or_default();
     card(ui, p, |ui| {
         caption(ui, p, "НОВЫЙ ПЛАГИН");
@@ -184,7 +169,7 @@ fn modules(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
     let dir = root(data).join("modules");
     let mut list: Vec<String> = std::fs::read_dir(&dir).map(|rd| rd.flatten().filter_map(|e| e.file_name().to_string_lossy().strip_suffix(".lua").map(str::to_string)).collect()).unwrap_or_default();
     list.sort();
-    let new_id = Id::new("server-new-module");
+    let new_id = Id::new(("server-new-module", data));
     let mut name: String = ui.ctx().data(|d| d.get_temp(new_id)).unwrap_or_default();
     card(ui, p, |ui| {
         caption(ui, p, "НОВЫЙ МОД");
@@ -239,7 +224,7 @@ fn core(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
 }
 
 fn settings(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
-    let id = Id::new("server-settings-form");
+    let id = Id::new(("server-settings-form", data));
     let (mut name, mut motd, mut max, mut pvp): (String, String, f32, bool) = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_else(|| {
         (
             config_value(data, "name").unwrap_or_else(|| "Мой сервер".into()),
@@ -279,43 +264,6 @@ fn wolfcraft_net_port() -> u16 {
     25570
 }
 
-fn stats(ui: &mut Ui, p: &Palette, data: &Path, worlds: &[crate::main_menu::WorldEntry]) {
-    // Folder sizes are slow to count: once per few seconds.
-    let id = Id::new("server-stats-cache");
-    let now = ui.ctx().input(|i| i.time);
-    let cached: Option<(f64, u64, u64, u64)> = ui.ctx().data(|d| d.get_temp(id));
-    let (worlds_b, server_b, logs_b) = match cached {
-        Some((t, a, b, c)) if now - t < 5.0 => (a, b, c),
-        _ => {
-            let v = (folder_size(&data.join("worlds")), folder_size(&root(data)), folder_size(&data.join("logs")));
-            ui.ctx().data_mut(|d| d.insert_temp(id, (now, v.0, v.1, v.2)));
-            v
-        }
-    };
-    let places = worlds.iter().filter(|w| w.cfg.studio_project).count();
-    let plugins = std::fs::read_dir(root(data).join("plugins")).map(|r| r.count()).unwrap_or(0);
-    let mods = std::fs::read_dir(root(data).join("modules")).map(|r| r.count()).unwrap_or(0);
-    card(ui, p, |ui| {
-        caption(ui, p, "СТАТИСТИКА");
-        let row = |ui: &mut Ui, k: &str, v: String| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(k).color(p.text_muted));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(v).font(bold_font(14.0)).color(p.text));
-                });
-            });
-        };
-        row(ui, "Миров", (worlds.len() - places).to_string());
-        row(ui, "Плейсов", places.to_string());
-        row(ui, "Плагинов", plugins.to_string());
-        row(ui, "Модов", mods.to_string());
-        row(ui, "Включено плагинов", enabled_plugins(data).len().to_string());
-        row(ui, "Миры на диске", size_text(worlds_b));
-        row(ui, "Папка сервера", size_text(server_b));
-        row(ui, "Логи", size_text(logs_b));
-    });
-}
-
 fn read_log(data: &Path, filter: Option<&[&str]>, n: usize) -> String {
     let text = std::fs::read_to_string(data.join("logs").join("latest.log")).unwrap_or_default();
     let lines: Vec<&str> = text.lines().filter(|l| filter.is_none_or(|f| f.iter().any(|w| l.to_lowercase().contains(w)))).collect();
@@ -323,7 +271,7 @@ fn read_log(data: &Path, filter: Option<&[&str]>, n: usize) -> String {
 }
 
 fn logs(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
-    let id = Id::new("server-log-cache");
+    let id = Id::new(("server-log-cache", data));
     let now = ui.ctx().input(|i| i.time);
     let mut cache: (f64, String) = ui.ctx().data(|d| d.get_temp(id)).unwrap_or((-10.0, String::new()));
     let refresh = pill_button(ui, icons, Some(icon::REFRESH), "Обновить", ButtonKind::Secondary, ui.available_width(), true).clicked();
@@ -339,12 +287,12 @@ fn logs(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
 
 fn console(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
     let auto = root(data).join("autoexec.txt");
-    let id = Id::new("server-console-line");
+    let id = Id::new(("server-console-line", data));
     let mut line: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
     card(ui, p, |ui| {
         caption(ui, p, "КОНСОЛЬ");
         let text = read_log(data, Some(&["server", "сервер", "net", "join", "игрок"]), 40);
-        ui.label(egui::RichText::new(if text.is_empty() { "Пока тихо. Запустите сервер на вкладке «Сервер».".to_string() } else { text }).font(FontId::monospace(11.0)).color(Color32::from_rgb(190, 198, 208)));
+        ui.label(egui::RichText::new(if text.is_empty() { "Пока тихо. Запустите сервер или плейс на вкладке «Дашборд».".to_string() } else { text }).font(FontId::monospace(11.0)).color(Color32::from_rgb(190, 198, 208)));
     });
     card(ui, p, |ui| {
         caption(ui, p, "КОМАНДЫ ПРИ ЗАПУСКЕ");
@@ -387,4 +335,36 @@ pub fn autoexec(data: &Path) -> Vec<String> {
 /// Max players from server.toml (16 if not set).
 pub fn max_players(data: &Path) -> usize {
     config_value(data, "max_players").and_then(|v| v.parse().ok()).unwrap_or(16).clamp(1, 64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_and_place_profiles_keep_their_settings_and_files_separate() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let data = std::env::temp_dir().join(format!("wolf-host-profiles-{}-{unique}", std::process::id()));
+        let server = profile_data(&data, false);
+        let place = profile_data(&data, true);
+        set_config(&server, "max_players", "24");
+        set_config(&place, "max_players", "8");
+        set_config(&server, "core", "\"survival\"");
+        set_config(&place, "core", "\"arena\"");
+        set_plugins(&server, &["claims".into()]);
+        set_plugins(&place, &["rounds".into()]);
+        std::fs::write(root(&server).join("autoexec.txt"), "/time set день\n").unwrap();
+        std::fs::write(root(&place).join("autoexec.txt"), "/gamemode creative\n").unwrap();
+        assert_eq!(max_players(&server), 24);
+        assert_eq!(max_players(&place), 8);
+        assert_eq!(config_value(&server, "core").as_deref(), Some("survival"));
+        assert_eq!(config_value(&place, "core").as_deref(), Some("arena"));
+        assert_eq!(enabled_plugins(&server), vec!["claims"]);
+        assert_eq!(enabled_plugins(&place), vec!["rounds"]);
+        assert_eq!(autoexec(&server), vec!["/time set день"]);
+        assert_eq!(autoexec(&place), vec!["/gamemode creative"]);
+        assert!(data.join("server/server.toml").is_file());
+        assert!(data.join("place/server/server.toml").is_file());
+        std::fs::remove_dir_all(data).unwrap();
+    }
 }

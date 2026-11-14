@@ -638,8 +638,9 @@ impl App {
             }
         };
         let port = wolfcraft_net::DEFAULT_PORT;
-        // The «Сервер» page's settings: max players.
-        let options = wolfcraft_net::server::ServerOptions { max_players: wolfcraft_ui::server_page::max_players(&self.data_dir), ..Default::default() };
+        // Use the selected world's profile, never the last visible launcher tab.
+        let profile_data = wolfcraft_ui::server_page::profile_data(&self.data_dir, cfg.studio_project);
+        let options = wolfcraft_net::server::ServerOptions { max_players: wolfcraft_ui::server_page::max_players(&profile_data), ..Default::default() };
         match wolfcraft_net::server::start_with_options(&cfg.name, toml, &dir, port, false, options) {
             Ok(h) => self.host = Some(h),
             Err(e) => {
@@ -658,7 +659,7 @@ impl App {
             self.chat.push(ChatKind::System, line, now);
         }
         // «Сервер → Консоль → Команды при запуске».
-        self.queued_chat.extend(wolfcraft_ui::server_page::autoexec(&self.data_dir));
+        self.queued_chat.extend(wolfcraft_ui::server_page::autoexec(&profile_data));
     }
 
     /// Network step while a session exists: receive edits/players/chat, send our state.
