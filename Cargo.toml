@@ -10,6 +10,7 @@ members = [
     "wolfcraft-net",
     "wolfserver",
     "wolfstudio",
+    "shadowfight",
 ]
 
 [workspace.package]

@@ -1,0 +1,49 @@
+[package]
+name = "shadowfight"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "shadowfight"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "shadowfight"
+path = "src/main.rs"
+
+[dependencies]
+wolfcraft-common.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+log.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { workspace = true, features = ["android-native-activity"] }
+android_logger = "0.14"
+
+[package.metadata.android]
+package = "com.wolfcraft.shadow"
+apk_name = "ShadowFight"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[package.metadata.android.application]
+label = "Бой с Тенью"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+orientation = "sensorLandscape"
+config_changes = "orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode"
+
+[dev-dependencies]
+naga = { version = "22", features = ["wgsl-in"] }
