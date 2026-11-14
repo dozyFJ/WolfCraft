@@ -896,6 +896,48 @@ impl App {
                     }
                 }
             }
+            StudioAction::Paint(wolfcraft_ui::texture_editor::PaintAction::Save { name, size, rgba, item }) => {
+                let Some(id) = self.studio_world.clone() else { return };
+                let safe: String = name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+                let safe = if safe.is_empty() { "texture".to_string() } else { safe };
+                let dir = self.worlds_dir.join(id).join("textures").join(if item { "items" } else { "blocks" });
+                let _ = std::fs::create_dir_all(&dir);
+                let bytes: Vec<u8> = rgba.iter().flatten().copied().collect();
+                let path = dir.join(format!("{safe}.png"));
+                match image::RgbaImage::from_raw(size, size, bytes).map(|img| img.save(&path)) {
+                    Some(Ok(())) => status(self, &format!("Текстура сохранена: textures/{}/{safe}.png", if item { "items" } else { "blocks" })),
+                    _ => status(self, "Не удалось сохранить текстуру"),
+                }
+            }
+            StudioAction::Paint(wolfcraft_ui::texture_editor::PaintAction::ToBlocks { size, rgba }) => {
+                let Some(s) = &mut self.session else { return };
+                use wolfcraft_engine::interaction::WorldEdit;
+                let up = s.player.up();
+                let fwd = s.player.heading;
+                let right = s.player.right();
+                let grid = s.chunks.grid();
+                let base = s.player.body.pos + fwd * (size as f64 * 0.5 + 4.0) - right * (size as f64 * 0.5);
+                let mut n = 0;
+                for (k, c) in rgba.iter().enumerate() {
+                    if c[3] < 128 {
+                        continue;
+                    }
+                    let x = (k as u32 % size) as f64;
+                    let y = (size - 1 - k as u32 / size) as f64;
+                    let cell = grid.world_to_cell(base + right * (x + 0.5) + up * (y + 0.5));
+                    let b = nearest_block(*c);
+                    if s.chunks.set_block(cell, b) {
+                        n += 1;
+                        if let Some(net) = &mut self.net {
+                            net.send(&wolfcraft_net::C2S::Edit { cell: [cell.f as i32, cell.i, cell.j, cell.k], block: b as u16, hell: s.hell });
+                        }
+                    }
+                }
+                if let Some(st) = &mut self.studio {
+                    st.paint.open = false;
+                }
+                status(self, &format!("Из текстуры построено блоков: {n}"));
+            }
             StudioAction::SpawnHere => {
                 if let Some(s) = &mut self.session {
                     s.player.spawn = s.player.body.pos;
@@ -3942,3 +3984,47 @@ fn buttonsim_overlay(ctx: &egui::Context, b: &wolfcraft_engine::buttonsim::Butto
     painter.text(Pos2::new(r.right() - 14.0, r.bottom() - 16.0), Align2::RIGHT_CENTER, format!("перерожд. {}", b.rebirths), FontId::proportional(15.0), Color32::from_rgb(190, 140, 255));
 }
 
+/// The building block whose colour is closest to a pixel (for «В блоки» in the texture editor).
+fn nearest_block(c: [u8; 4]) -> wolfcraft_engine::block::Block {
+    use wolfcraft_engine::block::Block::*;
+    const PAL: [(wolfcraft_engine::block::Block, [i32; 3]); 34] = [
+        (Wool, [235, 235, 235]),
+        (RedWool, [180, 40, 40]),
+        (BlueWool, [50, 70, 170]),
+        (YellowWool, [225, 200, 50]),
+        (Stone, [125, 125, 125]),
+        (Cobblestone, [105, 105, 105]),
+        (Dirt, [120, 85, 60]),
+        (MossBlock, [90, 130, 50]),
+        (OakPlanks, [170, 135, 85]),
+        (SprucePlanks, [115, 85, 55]),
+        (BirchPlanks, [205, 190, 140]),
+        (Sand, [220, 205, 150]),
+        (RedSand, [190, 105, 50]),
+        (Terracotta, [160, 90, 65]),
+        (Bricks, [150, 75, 60]),
+        (Snow, [248, 250, 252]),
+        (CoalBlock, [25, 25, 28]),
+        (IronBlock, [210, 210, 214]),
+        (GoldBlock, [240, 200, 60]),
+        (DiamondBlock, [100, 220, 215]),
+        (CopperBlock, [190, 110, 75]),
+        (Obsidian, [30, 20, 45]),
+        (Basalt, [70, 70, 75]),
+        (Clay, [160, 165, 180]),
+        (Marble, [230, 228, 222]),
+        (Granite, [150, 100, 85]),
+        (Pumpkin, [215, 125, 30]),
+        (Melon, [110, 150, 40]),
+        (Netherrack, [120, 40, 40]),
+        (PackedIce, [160, 190, 240]),
+        (Slate, [70, 80, 90]),
+        (Limestone, [200, 195, 170]),
+        (OakLog, [110, 85, 55]),
+        (Mud, [80, 65, 55]),
+    ];
+    let px = [c[0] as i32, c[1] as i32, c[2] as i32];
+    // Weighted distance (the eye sees green best).
+    let d = |q: [i32; 3]| 3 * (px[0] - q[0]).pow(2) + 4 * (px[1] - q[1]).pow(2) + 2 * (px[2] - q[2]).pow(2);
+    PAL.iter().min_by_key(|(_, q)| d(*q)).map(|(b, _)| *b).unwrap_or(Wool)
+}

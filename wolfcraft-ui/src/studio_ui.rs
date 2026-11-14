@@ -101,6 +101,8 @@ pub struct StudioState {
     pub view_right: Option<f32>,
     /// Left edge of the world view (points): the tools sidebar in landscape.
     pub view_left: Option<f32>,
+    /// «Текстуры»: the pixel-art editor (kept while closed, so work is not lost).
+    pub paint: crate::texture_editor::PaintState,
 }
 
 impl Default for StudioState {
@@ -136,6 +138,7 @@ impl Default for StudioState {
             view_bottom: None,
             view_right: None,
             view_left: None,
+            paint: Default::default(),
         }
     }
 }
@@ -198,6 +201,8 @@ pub enum StudioAction {
     Playtest(bool),
     /// The character appears here when «Играть» starts.
     SpawnHere,
+    /// From the texture editor: build it from blocks or save it.
+    Paint(crate::texture_editor::PaintAction),
 }
 
 /// Commands of a script: trimmed lines without comments, each starting with "/".
@@ -222,6 +227,14 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &
     let screen = ctx.screen_rect();
     let mut actions = Vec::new();
     let mut covered = Vec::new();
+
+    // The texture editor takes the whole screen while it is open.
+    if st.paint.open && !st.playtest {
+        covered.push(screen);
+        st.view_left = None;
+        actions.extend(crate::texture_editor::draw(ctx, icons, &p, &mut st.paint).into_iter().map(StudioAction::Paint));
+        return (actions, covered);
+    }
 
     if st.playtest {
         // Play-testing: only a small bar with the stop button.
@@ -665,6 +678,10 @@ fn ribbon(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, view
     match st.tab {
         Tab::Home => {
             if tool(ui, icons, p, icon::SELECT, "Выбор", !st.brush_on).clicked() {
+                st.brush_on = false;
+            }
+            if tool(ui, icons, p, icon::EDIT, "Текстуры", st.paint.open).clicked() {
+                st.paint.open = true;
                 st.brush_on = false;
             }
             if tool(ui, icons, p, icon::BRUSH, "Кисть", st.brush_on).clicked() {
