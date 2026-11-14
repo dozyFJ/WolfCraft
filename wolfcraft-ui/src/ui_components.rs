@@ -235,6 +235,16 @@ pub fn section_label(ui: &mut Ui, text: &str) {
 
 /// Label on the left, control on the right.
 pub fn setting_row(ui: &mut Ui, label: &str, hint: Option<&str>, add: impl FnOnce(&mut Ui)) {
+    if ui.available_width() < 600.0 {
+        let p = palette(ui.ctx());
+        ui.label(egui::RichText::new(label).font(FontId::proportional(15.0)).color(p.text));
+        if let Some(h) = hint {
+            ui.label(egui::RichText::new(h).font(FontId::proportional(12.5)).color(p.text_muted));
+        }
+        ui.add_space(4.0);
+        egui::ScrollArea::horizontal().id_salt(("setting-control", label)).auto_shrink([false, true]).show(ui, add);
+        return;
+    }
     let p = palette(ui.ctx());
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
