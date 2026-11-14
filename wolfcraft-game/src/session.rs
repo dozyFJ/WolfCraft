@@ -17,6 +17,14 @@ use wolfcraft_engine::physics::{Hit, Voxels, raycast};
 use wolfcraft_engine::planet::{Planet, smoothstep};
 use wolfcraft_engine::player::{Controls, Player, clock_string, local_sun};
 
+/// A guardian's cut-scene: where, how long it has run, how long it lasts.
+#[derive(Clone, Copy, Debug)]
+struct BossFilm {
+    at: DVec3,
+    t: f32,
+    dur: f32,
+}
+
 /// The remote's skills, in the order sneak + tap cycles them.
 pub const STELLAR_NAMES: [&str; 11] = ["Рельсотрон", "Игла", "Семь звёзд", "Тессеракт", "Чёрная дыра", "Метеоритный дождь", "Солнечное копьё", "Ледяная комета", "Сверхновая", "Раскол планеты", "Орбитальный обстрел"];
 
@@ -176,6 +184,10 @@ pub struct GameSession {
     slowmo: f32,
     /// «Звёздный молот» cooldown.
     hammer_cd: f32,
+    /// A guardian's cut-scene (awakening, rage, defeat) and what was last seen of the
+    /// guardian (health, phase) to notice hits and phase changes.
+    boss_film: Option<BossFilm>,
+    boss_seen: Option<(f32, u8)>,
     pub title: Option<(String, String, f32)>,
     embers: Vec<(DVec3, f32, f64)>,
     booms: Vec<(DVec3, f32, f32)>,
@@ -290,6 +302,8 @@ impl GameSession {
             shake: 0.0,
             slowmo: 0.0,
             hammer_cd: 0.0,
+            boss_film: None,
+            boss_seen: None,
             title: None,
             embers: Vec::new(),
             booms: Vec::new(),
@@ -655,6 +669,11 @@ impl GameSession {
                 self.player.body.on_ground = false;
             }
             if dealt > 0.0 {
+                // A guardian's blow lands: red flash and a jolt.
+                if self.mobs.mobs.iter().any(|m| m.boss.is_some()) {
+                    self.flash = Some(([1.0, 0.15, 0.1], 0.35));
+                    self.shake = self.shake.max(0.6);
+                }
                 let armor = self.player.armor_points();
                 // «Защита» on worn pieces: another 3 % per level.
                 let prot: u32 = self.player.inventory.armor.iter().flatten().map(|s| s.ench_level(wolfcraft_engine::magic::Ench::Protection) as u32).sum();
@@ -801,6 +820,16 @@ impl GameSession {
         self.handle_building_events(&mut events, used_stack);
         // Boss kills pay once per altar, even when delivered by a projectile.
         for death in std::mem::take(&mut self.mobs.boss_deaths) {
+            // The guardian falls: slow motion, a burst of its colour, «ПОВЕРЖЕН».
+            {
+                let c = death.kind.color();
+                self.epic_impact(death.at, 8.0, c, 0.8);
+                self.slowmo = 1.4;
+                self.skip_film = false;
+                self.boss_film = Some(BossFilm { at: death.at, t: 0.0, dur: 4.0 });
+                self.title = Some((format!("{} ПОВЕРЖЕН", death.kind.name().to_uppercase()), "Победа!".into(), 0.0));
+                self.boss_seen = None;
+            }
             if self.boss_book.finish(death.kind,death.home) {
                 for reward in death.kind.rewards() {if let Some(rest)=self.player.inventory.add(reward){self.drops.pop_shiny(rest,death.at);}}
                 self.player.survival.add_xp(100);
@@ -809,6 +838,7 @@ impl GameSession {
             }
         }
         self.tick_ritual(dt);
+        self.tick_boss_film(dt);
         for mob in &self.mobs.mobs {if let Some(role)=&mob.boss {if let Some(record)=self.boss_book.records.get_mut(&(role.kind,role.home)){if !record.defeated{record.hp=mob.hp.max(1.0);}}}}
         // Ore loot jumps out higher and sparkles.
         let ores: Vec<_> = events.iter().filter_map(|e| match e {
@@ -2325,6 +2355,85 @@ impl GameSession {
         }
     }
 
+    /// Guardians in cut-scenes: when one wakes (summoned, revived, or you come into its fight)
+    /// the camera circles it under its name — «Бой начался!»; every new phase (rage) gets a
+    /// short scene too; a hit on it throws sparks of its colour and jolts the view; while it
+    /// winds up an attack, energy gathers around it.
+    fn tick_boss_film(&mut self, dt: f32) {
+        use wolfcraft_engine::mobs::FxKind;
+        let boss = self.mobs.mobs.iter().find(|m| m.boss.is_some() && m.hp > 0.0).map(|m| {
+            let r = m.boss.as_ref().unwrap();
+            (m.centre(), m.hp, r.kind, r.casting)
+        });
+        if let Some((at, hp, kind, casting)) = boss {
+            let phase = kind.phase(hp);
+            match self.boss_seen {
+                None => {
+                    self.skip_film = false;
+                    self.boss_film = Some(BossFilm { at, t: 0.0, dur: 3.6 });
+                    self.title = Some((kind.name().to_uppercase(), "Бой начался!".into(), 0.0));
+                    self.flash = Some((kind.color(), 0.5));
+                    self.shake = 0.7;
+                    self.booms.push((at, 5.0, 0.3));
+                }
+                Some((seen_hp, seen_phase)) => {
+                    if phase > seen_phase {
+                        self.skip_film = false;
+                        self.boss_film = Some(BossFilm { at, t: 0.0, dur: 2.4 });
+                        self.title = Some((format!("ЯРОСТЬ · ФАЗА {phase}"), kind.name().into(), 0.0));
+                        self.slowmo = 0.8;
+                        self.shake = 0.9;
+                        self.flash = Some(([1.0, 0.3, 0.1], 0.45));
+                    } else if hp < seen_hp - 0.01 {
+                        // Hit: sparks and a jolt, bigger for bigger blows.
+                        let k = ((seen_hp - hp) / 12.0).clamp(0.15, 1.0);
+                        self.shake = self.shake.max(0.25 * k);
+                        let c = kind.color();
+                        for i in 0..(8.0 + 16.0 * k) as usize {
+                            let a = i as f64 * 2.399;
+                            let v = DVec3::new(a.cos(), 0.6 + (i % 3) as f64 * 0.3, a.sin()) * 7.0;
+                            self.mobs.fx_glow(at, v, if i % 2 == 0 { [1.0, 1.0, 0.9] } else { c }, 0.18, 0.5, FxKind::Fall);
+                        }
+                    }
+                }
+            }
+            self.boss_seen = Some((hp, phase));
+            // Winding up an attack: energy pulled into the guardian.
+            if casting > 0.0 {
+                let up = wolfcraft_engine::physics::up_at(at);
+                for _ in 0..3 {
+                    let v = DVec3::new(self.mobs.rand() - 0.5, self.mobs.rand() - 0.5, self.mobs.rand() - 0.5).normalize_or_zero();
+                    let from = at + v * 4.0 + up * 0.5;
+                    self.mobs.fx_glow(from, (at - from) * 3.0, kind.color(), 0.14, 0.35, FxKind::Rise);
+                }
+            }
+        } else if self.boss_film.as_ref().is_none_or(|f| f.dur < 3.9) {
+            // Gone without a death scene (left, despawned): forget it.
+            self.boss_seen = None;
+        }
+        // The film's camera: circling the guardian, slowly pulling away.
+        if let Some(mut f) = self.boss_film.take() {
+            f.t += dt;
+            if f.t < f.dur {
+                if self.stellar_ui.cutscenes && !self.skip_film && self.stellar.is_none() {
+                    let at = boss.map(|b| b.0).unwrap_or(f.at);
+                    let up = wolfcraft_engine::physics::up_at(at);
+                    let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+                    let ta = up.cross(helper).normalize();
+                    let tb = up.cross(ta);
+                    let a = f.t as f64 * 0.55;
+                    let r = 9.0 + f.t as f64 * 1.8;
+                    let eye = at + up * (3.5 + f.t as f64 * 0.8) + (ta * a.cos() + tb * a.sin()) * r;
+                    let target = at + up * 1.5;
+                    self.cutscene = Some(Camera { eye, forward: (target - eye).normalize_or_zero(), up });
+                }
+                self.boss_film = Some(f);
+            } else if self.stellar.is_none() {
+                self.cutscene = None;
+            }
+        }
+    }
+
     /// A quick ring of light on the ground (each shot of the orbital barrage).
     fn explosives_flash_ring(&mut self, at: DVec3, r: f64) {
         let up = wolfcraft_engine::physics::up_at(at);
@@ -2496,7 +2605,7 @@ impl GameSession {
             self.flash = (a > 0.02).then_some((c, a - dt * 1.6));
         }
         // The orbital barrage is aimed by hand: no film for it.
-        let film = self.stellar.as_ref().is_some_and(|s| s.mode != 10) && self.stellar_ui.cutscenes && !self.skip_film;
+        let film = (self.stellar.as_ref().is_some_and(|s| s.mode != 10) || self.boss_film.is_some()) && self.stellar_ui.cutscenes && !self.skip_film;
         self.cinema = (self.cinema + if film { dt * 3.0 } else { -dt * 3.0 }).clamp(0.0, 1.0);
         if !film {
             self.cutscene = None;
@@ -4397,7 +4506,7 @@ mod tests {
         assert!(s.ritual.is_some(), "the ritual begins");
         assert_eq!(s.player.inventory.count(ids::RITUAL_SEAL), 0, "the seal is spent");
         assert_eq!(s.player.inventory.count(ids::RESONANCE_RUNE), 0, "and the rune");
-        for _ in 0..(6 * 60) {
+        for _ in 0..(10 * 60) {
             s.update(&InputFrame::default(), 1.0 / 60.0, 4, false);
             if s.ritual.is_none() {
                 break;
