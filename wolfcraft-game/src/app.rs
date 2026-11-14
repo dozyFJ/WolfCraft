@@ -2320,7 +2320,9 @@ impl App {
                 let d = up.dot(sun);
                 let twilight = (-(d / 0.18).powi(2)).exp() as f32;
                 let r = wolfcraft_engine::cubesphere::radial(s.player.eye_pos());
-                let altitude = ((r - s.planet.radius - 300.0) / (s.planet.radius * 0.4)).clamp(0.0, 1.0) as f32;
+                // Server places (baseplate) are flat worlds: always under the sky, never space.
+                let flat = s.cfg.world_type == wolfcraft_engine::config::WorldType::Baseplate && !s.hell;
+                let altitude = if flat { 0.0 } else { ((r - s.planet.radius - 300.0) / (s.planet.radius * 0.4)).clamp(0.0, 1.0) as f32 };
                 let underwater = s.eye_in_water();
                 let mut sky = sky_color(day, twilight, altitude);
                 // Voxel look: creatures and items keep sharp cube edges (no rounded plastic).
