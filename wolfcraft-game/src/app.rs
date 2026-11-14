@@ -171,7 +171,7 @@ fn draw_lua_gui(ctx: &egui::Context, icons:&wolfcraft_ui::GuiIcons, els: &[crate
 }
 
 /// Phone folder for the player's resource packs (the app's own shared-storage folder).
-const ANDROID_PACKS_DIR: &str = "/storage/emulated/0/Android/data/com.wolfcraft.mobile/files/resourcepacks";
+const ANDROID_PACKS_DIR: &str = "/storage/emulated/0/Android/data/com.strikearena.mobile/files/resourcepacks";
 
 /// Preview-channel id of the main menu backdrop planet.
 const MENU_PLANET_ID: &str = "__menu_planet";
