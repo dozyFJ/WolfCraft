@@ -309,8 +309,8 @@ fn game_menu_sheet(ctx: &egui::Context, icons: &GuiIcons, p: &Palette) -> Option
                 Sheet::News => {
                     egui::ScrollArea::vertical().max_height((screen.height() * 0.45).max(120.0)).show(ui, |ui| {
                         for (title, text) in NEWS {
-                            ui.label(egui::RichText::new(*title).font(bold_font(14.5)).color(p.text));
-                            ui.label(egui::RichText::new(*text).size(13.0).color(p.text_muted));
+                            ui.label(egui::RichText::new(title).font(bold_font(14.5)).color(p.text));
+                            ui.label(egui::RichText::new(text).size(13.0).color(p.text_muted));
                             ui.add_space(6.0);
                         }
                     });
