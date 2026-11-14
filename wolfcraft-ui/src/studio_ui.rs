@@ -191,7 +191,7 @@ pub fn script_commands(script: &str) -> Vec<String> {
         .collect()
 }
 
-const CATS: [&str; 11] = ["Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы"];
+const CATS: [&str; 12] = ["Шаблоны", "Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы"];
 
 /// Draws the studio over the world. Returns the actions and the screen areas (points) that
 /// its windows cover, so touches there do not steer the game.
@@ -308,7 +308,7 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &
     // ---- Тулбокс ----
     if let Some(rect) = left {
         covered.push(rect);
-        window(ctx, "studio-toolbox", rect, &p, icons, icon::CUBE, "Тулбокс", |ui| toolbox(ui, icons, &p, st, inv));
+        window(ctx, "studio-toolbox", rect, &p, icons, icon::CUBE, "Тулбокс", |ui| toolbox(ui, icons, &p, st, inv, &mut actions));
         if let Some(dx) = splitter(ctx, "studio-split-left", Rect::from_min_max(Pos2::new(rect.right() - 2.0, rect.top() + 30.0), Pos2::new(rect.right() + 8.0, rect.bottom())), true, &p) {
             st.left_w += dx;
         }
@@ -499,7 +499,7 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
                 ui.set_height(h);
                 ui.set_max_height(h);
                 ui.vertical(|ui| match st.dock_tab {
-                    0 => toolbox(ui, icons, p, st, inv),
+                    0 => toolbox(ui, icons, p, st, inv, &mut actions),
                     1 => explorer(ui, p, st, view),
                     2 => properties(ui, icons, p, st, view, &mut actions),
                     3 => output(ui, p, view),
@@ -650,7 +650,13 @@ fn ribbon(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, view
     }
 }
 
-fn toolbox(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, inv: &mut Inventory) {
+/// Ready-made server mini-games: (name, description, command that builds it in front of you).
+const TEMPLATES: [(&str, &str, &str); 2] = [
+    ("Питомник", "Монетные блоки, инкубаторы, капсулы-яйца и питомцы, которые ходят за игроком", "/питомник"),
+    ("Симулятор кнопок", "Деньги, множитель, перерождения и кнопки на полу", "/кнопки"),
+];
+
+fn toolbox(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, inv: &mut Inventory, actions: &mut Vec<StudioAction>) {
     ui.add(egui::TextEdit::singleline(&mut st.search).hint_text("Поиск…").desired_width(f32::INFINITY));
     ui.add_space(3.0);
     // Category chips (blocks, items, creatures, weapons…) in one row that scrolls sideways.
@@ -670,10 +676,46 @@ fn toolbox(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, inv
     ui.add_space(3.0);
     let q = st.search.trim().to_lowercase();
     let cat = CATS[st.toolbox_cat.min(CATS.len() - 1)];
+    if cat == "Шаблоны" && q.is_empty() {
+        // Templates: a mini-game is built in front of you; their blocks are below.
+        egui::ScrollArea::vertical().id_salt("studio-templates-scroll").max_height(ui.available_height()).auto_shrink([false, false]).show(ui, |ui| {
+            for (name, desc, cmd) in TEMPLATES {
+                let out = Frame::none().fill(p.bg).rounding(Rounding::same(8.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(8.0)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(egui::RichText::new(name).font(bold_font(13.5)).color(p.text));
+                    ui.label(egui::RichText::new(desc).size(11.5).color(p.text_muted));
+                    ui.label(egui::RichText::new("Нажмите — построится перед вами").size(11.0).color(p.accent));
+                });
+                if ui.interact(out.response.rect, Id::new(("studio-template", cmd)), Sense::click()).clicked() {
+                    actions.push(StudioAction::Command(cmd.to_string()));
+                }
+                ui.add_space(4.0);
+            }
+            ui.label(egui::RichText::new("Блоки мини-игр").size(11.5).color(p.text_muted));
+            let cell = 42.0;
+            let cols = ((ui.available_width() + 3.0) / (cell + 3.0)).floor().max(1.0) as usize;
+            for row in items::minigame_items().chunks(cols) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    for id in row {
+                        let (r, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+                        ui.painter().rect_filled(r, Rounding::same(5.0), if resp.hovered() { p.surface_hover } else { p.bg });
+                        ui.painter().rect_stroke(r, Rounding::same(5.0), Stroke::new(1.0_f32, p.outline));
+                        icons.paint_item(ui.painter(), r.shrink(6.0), *id);
+                        if resp.clicked() {
+                            inv.slots[inv.selected] = Some(ItemStack::new(*id, items::info(*id).max_stack));
+                        }
+                        resp.on_hover_text(items::info(*id).name);
+                    }
+                });
+            }
+        });
+        return;
+    }
     let mut list: Vec<u16> = items::creative_palette()
         .into_iter()
         .filter(|id| q.is_empty() || items::info(*id).name.to_lowercase().contains(&q))
-        .filter(|id| cat == "Все" || !q.is_empty() || items::category(*id) == cat)
+        .filter(|id| cat == "Все" || cat == "Шаблоны" || !q.is_empty() || items::category(*id) == cat)
         .collect();
     list.sort_by_key(|id| !items::is_new(*id));
     let cell = 42.0;

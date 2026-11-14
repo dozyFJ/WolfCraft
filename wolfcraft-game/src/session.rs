@@ -155,6 +155,9 @@ pub struct GameSession {
     spawn_checked: bool,
     /// Opened in the studio: creative rules without changing the world's saved mode.
     pub studio: bool,
+    /// Mini-games («Питомник», «Кнопки») run only on servers and in the studio, not in
+    /// ordinary single-player worlds. The app sets it every frame.
+    pub minigames: bool,
     /// Pressed buttons and the seconds until they spring back.
     buttons: Vec<(wolfcraft_engine::cubesphere::Cell, f32)>,
     /// Pressed pressure plates and the seconds until they spring back up.
@@ -245,6 +248,7 @@ impl GameSession {
             furnace_fuel: Default::default(),
             spawn_checked: false,
             studio: false,
+            minigames: false,
             buttons: Vec::new(),
             plates: Vec::new(),
             tick_acc: 0.0,
@@ -627,10 +631,16 @@ impl GameSession {
         // Explosives: light dynamite, fire weapons, then fuses, flight and blasts.
         self.explosives_step(&mut events, dt);
         // «Питомник»: eggs, pets, coin blocks.
-        self.petsim_step(&mut events, dt);
+        if self.minigames || self.studio {
+            self.petsim_step(&mut events, dt);
+        } else {
+            events.retain(|e| !matches!(e, InteractionEvent::BuyEgg { .. } | InteractionEvent::Hatch { .. }));
+        }
         // «Кнопки»: income, and buying by standing on a floor button.
-        self.buttonsim.tick(dt);
-        if !self.player.survival.dead && self.player.body.on_ground {
+        if self.minigames || self.studio {
+            self.buttonsim.tick(dt);
+        }
+        if (self.minigames || self.studio) && !self.player.survival.dead && self.player.body.on_ground {
             let under = self.chunks.block_at_world(self.player.body.pos - self.player.up() * 0.3);
             if let Some(pad) = wolfcraft_engine::buttonsim::pad(under) {
                 match self.buttonsim.stand_on(under) {

@@ -513,6 +513,16 @@ pub fn is_new(id: ItemId) -> bool {
     id >= 1024 || (98..ITEM_BASE).contains(&id) || (ids::BOW..=ids::LAST).contains(&id)
 }
 
+/// Blocks and items of the server mini-games («Питомник», «Кнопки»). They come with the
+/// studio templates, not from the game's creative palette or recipes.
+pub fn is_minigame(id: ItemId) -> bool {
+    (ids::EGG_BASE..=ids::PET_LAST).contains(&id)
+        || matches!(
+            Block::from_id(id),
+            Block::CoinBlock | Block::IncubatorCommon | Block::IncubatorRare | Block::IncubatorLegendary | Block::ButtonMult1 | Block::ButtonMult2 | Block::ButtonMult3 | Block::ButtonMult4 | Block::ButtonRebirth
+        ) && (id >= 1024 || id < ITEM_BASE)
+}
+
 /// All blocks that make sense in the creative palette.
 pub fn creative_palette() -> Vec<ItemId> {
     let mut v: Vec<ItemId> = Block::ALL
@@ -524,6 +534,14 @@ pub fn creative_palette() -> Vec<ItemId> {
         .map(|b| *b as ItemId)
         .collect();
     v.extend(ITEM_BASE..=ids::LAST);
+    v.retain(|id| !is_minigame(*id));
+    v
+}
+
+/// The mini-game blocks and items, for the studio's «Шаблоны».
+pub fn minigame_items() -> Vec<ItemId> {
+    let mut v: Vec<ItemId> = Block::ALL.iter().map(|b| *b as ItemId).filter(|id| is_minigame(*id)).collect();
+    v.extend(ids::EGG_BASE..=ids::PET_LAST);
     v
 }
 
