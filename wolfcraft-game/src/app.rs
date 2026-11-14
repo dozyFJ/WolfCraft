@@ -233,6 +233,8 @@ pub struct App {
     grabbed: bool,
     pending_meshes: VecDeque<(ChunkKey, MeshData)>,
     next_frame: Instant,
+    /// Last touch, click or key: menus slow down to 30 FPS when nobody touches the phone.
+    last_input: Instant,
     quit: bool,
     frames: u64,
     last_cpu: f32,
@@ -397,6 +399,7 @@ impl App {
             grabbed: false,
             pending_meshes: VecDeque::new(),
             next_frame: Instant::now(),
+            last_input: Instant::now(),
             quit: false,
             frames: 0,
             last_cpu: 0.0,
@@ -3208,6 +3211,9 @@ impl ApplicationHandler for App {
         let Some(mut gfx) = self.gfx.take() else { return };
         let resp = gfx.gui.on_event(&gfx.window, &event);
         let typing = gfx.gui.wants_keyboard();
+        if matches!(event, WindowEvent::Touch(_) | WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::KeyboardInput { .. }) {
+            self.last_input = Instant::now();
+        }
         let over_ui = gfx.gui.wants_pointer() && self.screen != Screen::Playing;
         match event {
             WindowEvent::CloseRequested => {
@@ -3345,7 +3351,11 @@ impl ApplicationHandler for App {
         let Some(gfx) = &self.gfx else { return };
         // Menus run at the screen rate on phones (vsync paces them), 60 FPS elsewhere;
         // in game honour VSync / the FPS limiter.
-        let cap = if !self.screen.in_world() && !cfg!(target_os = "android") {
+        let idle_menu = !self.screen.in_world() && self.last_input.elapsed() > Duration::from_secs(5);
+        let cap = if idle_menu {
+            // Live backgrounds keep moving, but at half the rate: the phone stays cool.
+            30
+        } else if !self.screen.in_world() && !cfg!(target_os = "android") {
             60
         } else if gfx.gpu.vsync() {
             0
