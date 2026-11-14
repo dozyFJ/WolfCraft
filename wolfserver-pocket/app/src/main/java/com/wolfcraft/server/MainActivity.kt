@@ -294,7 +294,7 @@ class MainActivity : Activity() {
     }
 
     /** A server (place): its folder name, title and world kind. */
-    private data class Place(val id: String, val name: String, val kind: String, val made: Long)
+    private data class Place(val id: String, val name: String, val kind: String, val made: Long, val isPlace: Boolean)
 
     private fun placesDir() = java.io.File(filesDir, "wolfserver/worlds").apply { mkdirs() }
 
@@ -310,7 +310,7 @@ class MainActivity : Activity() {
         } catch (_: Exception) { emptyMap() }
         val kind = if (kv["studio_project"] == "true") "Плейс · " else "Обычный мир · "
         val terrain = when (kv["world_type"]) { "baseplate" -> "Основа"; "flat" -> "Плоский мир"; else -> "Планета" }
-        Place(d.name, kv["name"] ?: d.name, kind + terrain, kv["created"]?.toLongOrNull() ?: 0L)
+        Place(d.name, kv["name"] ?: d.name, kind + terrain, kv["created"]?.toLongOrNull() ?: 0L, kv["studio_project"] == "true")
     }.sortedByDescending { it.made }
 
     /** Both world profiles share one server runtime, with separate folders and settings. */
@@ -388,37 +388,101 @@ class MainActivity : Activity() {
         Toast.makeText(this, "Запуск сервера «${p.name}»…", Toast.LENGTH_SHORT).show()
     }
 
-    /** Студия: my servers like places in Roblox Studio — create, tap to edit, run. */
+    /** Deletes a world or place folder for good (after asking). A running one must stop first. */
+    private fun askDelete(p: Place) {
+        if (isLive(p)) {
+            Toast.makeText(this, "Сначала останови сервер «${p.name}»", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Удалить «${p.name}»?")
+            .setMessage(if (p.isPlace) "Плейс со всеми постройками, скриптами и данными удалится без возврата." else "Мир со всеми постройками и вещами игроков удалится без возврата.")
+            .setPositiveButton("Удалить") { _, _ ->
+                val dir = java.io.File(placesDir(), p.id)
+                // Only inside the worlds folder, never above it.
+                if (dir.canonicalPath.startsWith(placesDir().canonicalPath + java.io.File.separator) && dir.deleteRecursively()) {
+                    Toast.makeText(this, "«${p.name}» удалён", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Не удалось удалить «${p.name}»", Toast.LENGTH_LONG).show()
+                }
+                render()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    /** Renames a world or place (its `name` in world.toml). */
+    private fun askRename(p: Place) {
+        val name = input("Название", p.name)
+        val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(name) }
+        AlertDialog.Builder(this)
+            .setTitle("Переименовать")
+            .setView(box)
+            .setPositiveButton("Готово") { _, _ ->
+                val n = name.text.toString().trim().replace("\r", " ").replace("\n", " ")
+                if (n.isNotEmpty()) {
+                    val f = java.io.File(placesDir(), "${p.id}/world.toml")
+                    try {
+                        val q = n.replace("\\", "\\\\").replace("\"", "\\\"")
+                        f.writeText(f.readLines().joinToString("\n") { if (it.trim().startsWith("name") && it.contains('=')) "name = \"$q\"" else it } + "\n")
+                    } catch (_: Exception) {}
+                    render()
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    /** One card: tap to edit, «Запустить»/«Остановить», ⋮ for rename and delete. */
+    private fun placeCard(p: Place) {
+        val live = isLive(p)
+        content.addView(card {
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { editPlace(p) }
+            setOnLongClickListener { askDelete(p); true }
+            val top = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            top.addView(label(p.name, 17f, cText, true).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
+            if (live) top.addView(label("РАБОТАЕТ", 11f, cGreen, true).apply {
+                setPadding(dp(10), dp(4), dp(10), dp(4))
+                background = rounded(Color.TRANSPARENT, 10, cGreen)
+            })
+            addView(top)
+            addView(label("${p.kind} · нажми, чтобы редактировать${if (live) " (правки сразу у игроков)" else ""}", 13f, cMuted).apply { setPadding(0, dp(4), 0, 0) })
+            if (live) codes().firstOrNull()?.let { c -> addView(label("Код для входа: $c", 16f, cAccent, true).apply { setPadding(0, dp(6), 0, 0) }) }
+            val row = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val main = if (live) button("■  Остановить", 2) { ServerService.stop(this@MainActivity) } else button("▶  Запустить") { runPlace(p) }
+            row.addView(main.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
+            row.addView(button("✎") { askRename(p) }.apply { layoutParams = LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) } })
+            row.addView(button("🗑", 2) { askDelete(p) }.apply { layoutParams = LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) } })
+            addView(row)
+        })
+    }
+
+    /** Студия: places (own games, like Roblox Studio) and servers (ordinary worlds), apart. */
     private fun renderStudio() {
         header("Миры и плейсы")
         content.addView(button("＋  Создать мир или плейс", 1) { askNewPlace() })
         val list = places()
+        val placesList = list.filter { it.isPlace }
+        val worldsList = list.filter { !it.isPlace }
         if (list.isEmpty()) {
             content.addView(card {
                 addView(label("Пока нет миров и плейсов", 16f, cText, true))
                 addView(label("Создай обычный мир для выживания или плейс для своей мини-игры. Каждый хранится отдельно. Нажми на карточку для редактирования, «Запустить» — чтобы позвать друзей.", 14f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
             })
         }
-        for (p in list) {
-            val live = isLive(p)
-            content.addView(card {
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { editPlace(p) }
-                val top = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                top.addView(label(p.name, 17f, cText, true).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
-                if (live) top.addView(label("РАБОТАЕТ", 11f, cGreen, true).apply {
-                    setPadding(dp(10), dp(4), dp(10), dp(4))
-                    background = rounded(Color.TRANSPARENT, 10, cGreen)
-                })
-                addView(top)
-                addView(label("${p.kind} · нажми, чтобы редактировать${if (live) " (правки сразу у игроков)" else ""}", 13f, cMuted).apply { setPadding(0, dp(4), 0, 0) })
-                if (live) codes().firstOrNull()?.let { c -> addView(label("Код для входа: $c", 16f, cAccent, true).apply { setPadding(0, dp(6), 0, 0) }) }
-                if (live) addView(button("■  Остановить", 2) { ServerService.stop(this@MainActivity) })
-                else addView(button("▶  Запустить") { runPlace(p) })
-            })
+        if (placesList.isNotEmpty()) {
+            content.addView(label("ПЛЕЙСЫ · ${placesList.size}", 12.5f, cMuted, true).apply { setPadding(dp(4), dp(18), dp(4), dp(6)); letterSpacing = 0.1f })
+            content.addView(label("Свои игры: основа, скрипты, мини-игры", 13f, cMuted).apply { setPadding(dp(4), 0, dp(4), dp(8)) })
+            placesList.forEach { placeCard(it) }
         }
-        content.addView(label("Серверы других людей в твоей сети студия показывает сама: «Миры на серверах» внутри студии.", 13f, cMuted).apply { setPadding(dp(4), dp(14), dp(4), 0) })
+        if (worldsList.isNotEmpty()) {
+            content.addView(label("СЕРВЕРЫ · ${worldsList.size}", 12.5f, cMuted, true).apply { setPadding(dp(4), dp(18), dp(4), dp(6)); letterSpacing = 0.1f })
+            content.addView(label("Обычные миры: планета и выживание", 13f, cMuted).apply { setPadding(dp(4), 0, dp(4), dp(8)) })
+            worldsList.forEach { placeCard(it) }
+        }
+        content.addView(label("Удерживай карточку или нажми 🗑, чтобы удалить; ✎ — переименовать. Серверы других людей в твоей сети студия показывает сама: «Миры на серверах» внутри студии.", 13f, cMuted).apply { setPadding(dp(4), dp(14), dp(4), 0) })
     }
 
     /** Сервер: the dashboard and the server controls on one screen. */
