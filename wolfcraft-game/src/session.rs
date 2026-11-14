@@ -133,6 +133,8 @@ pub struct GameSession {
     /// Seed of the Чаровальня offers (changes after each enchanting).
     pub ench_seed: u32,
     prev_use_held: bool,
+    /// The dragon the player rides (index into the creatures).
+    pub riding: Option<usize>,
     attack_cd: f32,
     death_burst_done: bool,
     /// Contents of chests (27 slots) and electric furnaces (0 input, 1 output) by block cell.
@@ -224,6 +226,7 @@ impl GameSession {
             eye_r: 0.0,
             tp_dist: 4.2,
             mobs: wolfcraft_engine::mobs::MobManager::new(seed),
+            riding: None,
             attack_cd: 0.0,
             death_burst_done: false,
             arrows: Default::default(),
@@ -453,10 +456,12 @@ impl GameSession {
             }
         }
 
+        // Riding a dragon: the stick steers it, «Прыжок» climbs, «Присесть» dives.
+        self.tick_ride(input, dt);
         // Resting: asleep (the night passes in a few seconds) or sitting until you move.
         let resting = self.tick_rest(input, dt);
         // Physics, split into steps of at most 1/30 s.
-        if self.ground_ready() && !self.player.survival.dead && !resting {
+        if self.ground_ready() && !self.player.survival.dead && !resting && self.riding.is_none() {
             let controls = Controls { forward: input.forward, strafe: input.strafe, jump: input.jump, sprint: input.sprint, sneak: input.sneak };
             let mut left = dt.min(0.25) as f64;
             while left > 1e-6 {
@@ -520,8 +525,10 @@ impl GameSession {
                     events.push(InteractionEvent::Fire { weapon: id });
                 }
             }
+            // A tap on a dragon: put a saddle on it, climb on or get off.
+            let mounted = input.use_pressed && self.try_mount();
             // A tap on a creature in the crosshair hits it (touch screens: a short tap is "use").
-            if input.use_pressed && !self.try_attack(0.25) {
+            if input.use_pressed && !mounted && !self.try_attack(0.25) {
                 used_stack=self.player.inventory.held();
                 events.extend(self.interaction.use_item(&mut self.chunks, &mut self.player, hit));
             }
@@ -2011,6 +2018,88 @@ impl GameSession {
         self.player.inventory.slots.iter().flatten().map(|s| s.id).find(|id| *id == ids::ARROW || (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(id))
     }
 
+    /// Saddles, mounts or leaves the dragon in the crosshair. True when the tap was used.
+    fn try_mount(&mut self) -> bool {
+        use wolfcraft_engine::items::ids;
+        use wolfcraft_engine::mobs::MobKind;
+        let Some(look) = self.aim_dir else { return false };
+        let eye = self.player.eye_pos();
+        let Some((i, _)) = self.mobs.raycast(eye, look, Interaction::reach(&self.player)) else { return false };
+        // In the saddle: a tap on your dragon gets you off.
+        if self.riding.is_some() {
+            if self.riding == Some(i) {
+                self.dismount();
+                return true;
+            }
+            return false;
+        }
+        let Some(m) = self.mobs.mobs.get_mut(i) else { return false };
+        if m.kind != MobKind::Dragon || m.hp <= 0.0 {
+            return false;
+        }
+        if !m.saddled {
+            if self.player.inventory.held().is_some_and(|s| s.id == ids::SADDLE) {
+                m.saddled = true;
+                if !self.player.is_creative() {
+                    self.player.inventory.consume_selected();
+                }
+                return true;
+            }
+            return false;
+        }
+        m.ridden = true;
+        m.body.vel = DVec3::ZERO;
+        self.riding = Some(i);
+        true
+    }
+
+    pub fn dismount(&mut self) {
+        if let Some(m) = self.riding.take().and_then(|i| self.mobs.mobs.get_mut(i)) {
+            m.ridden = false;
+        }
+        self.player.body.vel = DVec3::ZERO;
+    }
+
+    fn tick_ride(&mut self, input: &InputFrame, dt: f32) {
+        use wolfcraft_engine::mobs::MobKind;
+        let Some(i) = self.riding else { return };
+        let ok = self.mobs.mobs.get(i).is_some_and(|m| m.kind == MobKind::Dragon && m.ridden && m.hp > 0.0);
+        if !ok || self.player.survival.dead {
+            self.riding = None;
+            for m in &mut self.mobs.mobs {
+                m.ridden = false;
+            }
+            return;
+        }
+        let up = self.player.up();
+        let fwd = self.player.heading;
+        let right = self.player.right();
+        let mut wish = fwd * input.forward as f64 + right * input.strafe as f64;
+        if wish.length_squared() > 1.0 {
+            wish = wish.normalize();
+        }
+        let speed = if input.sprint { 22.0 } else { 13.0 };
+        let m = &mut self.mobs.mobs[i];
+        m.body.flying = true;
+        let mut left = dt.min(0.25) as f64;
+        while left > 1e-6 {
+            let step = left.min(1.0 / 30.0);
+            wolfcraft_engine::physics::step(&self.chunks, &mut m.body, &wolfcraft_engine::physics::MoveInput { wish, speed, jump: false, up: input.jump, down: input.sneak }, step);
+            left -= step;
+        }
+        // The dragon looks where it flies (or where the rider looks while hovering).
+        let dir = if wish.length_squared() > 0.01 { wish } else { fwd };
+        let h = dir - up * dir.dot(up);
+        if h.length_squared() > 1e-6 {
+            m.heading = h.normalize();
+        }
+        // The rider sits in the saddle.
+        let seat = m.body.pos + wolfcraft_engine::physics::up_at(m.body.pos) * 1.9;
+        self.player.body.pos = seat;
+        self.player.body.vel = m.body.vel;
+        self.player.body.on_ground = false;
+    }
+
     fn try_attack(&mut self, cooldown: f32) -> bool {
         if self.player.survival.dead || !self.ground_ready() {
             return false;
@@ -2019,6 +2108,10 @@ impl GameSession {
         let Some(look) = self.aim_dir else { return false };
         let reach = Interaction::reach(&self.player) - 1.5;
         let Some((i, t)) = self.mobs.raycast(eye, look, reach) else { return false };
+        // Never your own mount.
+        if self.riding == Some(i) {
+            return false;
+        }
         // A block in front of the creature protects it.
         if self.hit.is_some_and(|h| h.dist <= t) {
             return false;

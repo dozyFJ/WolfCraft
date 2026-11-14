@@ -753,6 +753,77 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3
                     add_box(&mut v, &f, Vec3::new(ex, hy + 0.18, hz + 0.24), Vec3::new(ex + 0.07, hy + 0.23, hz + 0.252), z, 0.0, eye);
                 }
             }
+            MobKind::Dragon => {
+                // Green dragon: long body, neck and horned head in front, a tapering tail
+                // behind, four short legs tucked up in flight and two big wings that flap.
+                let scale = tint([0.16, 0.55, 0.38]);
+                let belly = tint([0.85, 0.75, 0.40]);
+                let dark = tint([0.10, 0.30, 0.22]);
+                let membrane = tint([0.30, 0.68, 0.48]);
+                let horn = [0.92, 0.88, 0.76];
+                let bob = (m.anim * 0.5).sin() * 0.08;
+                let h = 1.0 + bob;
+                add_box(&mut v, &f, Vec3::new(-0.5, h, -0.9), Vec3::new(0.5, h + 0.8, 0.9), z, 0.0, scale);
+                add_box(&mut v, &f, Vec3::new(-0.4, h - 0.04, -0.7), Vec3::new(0.4, h + 0.1, 0.8), z, 0.0, belly);
+                // Spikes along the back.
+                for i in 0..6 {
+                    let zz = -0.8 + i as f32 * 0.32;
+                    add_box(&mut v, &f, Vec3::new(-0.06, h + 0.8, zz), Vec3::new(0.06, h + 1.0, zz + 0.14), z, 0.0, dark);
+                }
+                // Saddle when worn.
+                if m.saddled {
+                    add_box(&mut v, &f, Vec3::new(-0.52, h + 0.78, -0.2), Vec3::new(0.52, h + 0.9, 0.4), z, 0.0, [0.55, 0.32, 0.16]);
+                    add_box(&mut v, &f, Vec3::new(-0.2, h + 0.9, 0.3), Vec3::new(0.2, h + 1.05, 0.42), z, 0.0, [0.36, 0.20, 0.10]);
+                }
+                // Neck and head.
+                add_box(&mut v, &f, Vec3::new(-0.24, h + 0.4, 0.8), Vec3::new(0.24, h + 1.2, 1.3), Vec3::new(0.0, h + 0.5, 0.9), -0.5, scale);
+                let hy = h + 1.1;
+                let hz = 1.45;
+                add_box(&mut v, &f, Vec3::new(-0.3, hy, hz - 0.2), Vec3::new(0.3, hy + 0.45, hz + 0.3), z, 0.0, scale);
+                add_box(&mut v, &f, Vec3::new(-0.2, hy, hz + 0.3), Vec3::new(0.2, hy + 0.25, hz + 0.75), z, 0.0, scale);
+                add_box(&mut v, &f, Vec3::new(-0.18, hy - 0.08, hz + 0.3), Vec3::new(0.18, hy + 0.02, hz + 0.7), z, 0.0, belly);
+                for nx in [-0.14f32, 0.08] {
+                    add_box(&mut v, &f, Vec3::new(nx, hy + 0.18, hz + 0.75), Vec3::new(nx + 0.06, hy + 0.23, hz + 0.76), z, 0.0, [0.05, 0.05, 0.05]);
+                }
+                for ex in [-0.31f32, 0.25] {
+                    add_box(&mut v, &f, Vec3::new(ex, hy + 0.24, hz + 0.05), Vec3::new(ex + 0.06, hy + 0.34, hz + 0.18), z, 0.0, [1.0, 0.80, 0.15]);
+                }
+                for sx in [-0.24f32, 0.14] {
+                    add_box(&mut v, &f, Vec3::new(sx, hy + 0.4, hz - 0.3), Vec3::new(sx + 0.1, hy + 0.5, hz + 0.0), Vec3::new(sx, hy + 0.45, hz), 0.5, horn);
+                }
+                // Tail: segments that get thinner and sway.
+                let sway = (m.anim * 0.7).sin() * 0.15;
+                for i in 0..5 {
+                    let k = i as f32;
+                    let w = 0.3 - k * 0.05;
+                    let zz = -0.9 - k * 0.45;
+                    let dx = sway * k * k * 0.15;
+                    add_box(&mut v, &f, Vec3::new(-w + dx, h + 0.3 - k * 0.05, zz - 0.45), Vec3::new(w + dx, h + 0.3 + w * 1.4 - k * 0.05, zz), z, 0.0, if i % 2 == 0 { scale } else { dark });
+                }
+                // Legs, tucked under in flight.
+                let tuck = if m.body.flying { 0.9 } else { swing };
+                for (x0, z0) in [(-0.5f32, -0.6f32), (0.32, -0.6), (-0.5, 0.5), (0.32, 0.5)] {
+                    add_box(&mut v, &f, Vec3::new(x0, h - 0.7, z0), Vec3::new(x0 + 0.18, h + 0.1, z0 + 0.22), Vec3::new(x0 + 0.09, h, z0 + 0.11), tuck, scale);
+                    add_box(&mut v, &f, Vec3::new(x0 - 0.02, h - 0.76, z0 - 0.02), Vec3::new(x0 + 0.2, h - 0.66, z0 + 0.3), Vec3::new(x0 + 0.09, h, z0 + 0.11), tuck, dark);
+                }
+                // Wings: each in its own frame rolled about the body's length, so they flap.
+                let flap = (m.anim * 1.2).sin() * 0.7;
+                for side in [-1.0f64, 1.0] {
+                    let a = flap as f64;
+                    let (s, c) = a.sin_cos();
+                    let r = f.right * c + f.up * s * side;
+                    let u = f.up * c - f.right * s * side;
+                    let wf = Frame { origin: f.to_world(Vec3::new(side as f32 * 0.45, h + 0.7, 0.2)), right: r, up: u, fwd: f.fwd };
+                    let sx = side as f32;
+                    let (x0, x1) = if side < 0.0 { (-2.6, 0.0) } else { (0.0, 2.6) };
+                    add_box(&mut v, &wf, Vec3::new(x0, -0.03, -0.9), Vec3::new(x1, 0.03, 0.5), z, 0.0, membrane);
+                    add_box(&mut v, &wf, Vec3::new(if side < 0.0 { -2.7 } else { 0.0 }, -0.06, 0.4), Vec3::new(if side < 0.0 { 0.0 } else { 2.7 }, 0.08, 0.58), z, 0.0, dark);
+                    for k in 1..4 {
+                        let xx = sx * k as f32 * 0.75;
+                        add_box(&mut v, &wf, Vec3::new(xx - 0.04, -0.05, -0.9 + k as f32 * 0.15), Vec3::new(xx + 0.04, 0.05, 0.5), z, 0.0, dark);
+                    }
+                }
+            }
             MobKind::Slime => {
                 // Jelly cube: a see-through-looking green shell with a darker core and big
                 // cartoon eyes; squashes while it is on the ground, stretches in the air.

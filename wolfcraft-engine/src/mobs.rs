@@ -15,6 +15,8 @@ pub enum MobKind {
     Chicken,
     Wolf,
     Slime,
+    /// A big flying dragon: peaceful unless hit; with a saddle it can be ridden.
+    Dragon,
 }
 
 /// Every kind of creature (spawn souls, tests).
@@ -34,6 +36,7 @@ impl MobKind {
             MobKind::Chicken => "Курица",
             MobKind::Wolf => "Волк",
             MobKind::Slime => "Слизень",
+            MobKind::Dragon => "Дракон",
         }
     }
     pub fn max_hp(self) -> f32 {
@@ -46,6 +49,7 @@ impl MobKind {
             MobKind::Chicken => 4.0,
             MobKind::Wolf => 12.0,
             MobKind::Slime => 10.0,
+            MobKind::Dragon => 60.0,
         }
     }
     /// Walking speed, blocks per second.
@@ -59,6 +63,7 @@ impl MobKind {
             MobKind::Chicken => 2.0,
             MobKind::Wolf => 4.8,
             MobKind::Slime => 2.4,
+            MobKind::Dragon => 5.0,
         }
     }
     pub fn damage(self) -> f32 {
@@ -92,15 +97,19 @@ pub struct Mob {
     /// Seconds of poison (damage over time, never kills) and of slowness left.
     pub poison: f32,
     pub slow: f32,
+    /// Dragons: wears a saddle (can be ridden).
+    pub saddled: bool,
+    /// Someone sits on it: the rider steers, the creature's own mind rests.
+    pub ridden: bool,
 }
 
 impl Mob {
     pub fn new(kind: MobKind, pos: DVec3, heading: DVec3) -> Self {
-        Self { kind, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0 }
+        Self { kind, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0, saddled: false, ridden: false }
     }
     /// Centre of the body, for aiming.
     pub fn centre(&self) -> DVec3 {
-        self.body.pos + up_at(self.body.pos) * if self.boss.is_some(){1.6}else{0.9}
+        self.body.pos + up_at(self.body.pos) * if self.boss.is_some(){1.6}else if self.kind == MobKind::Dragon {1.3}else{0.9}
     }
 }
 
@@ -302,7 +311,9 @@ impl MobManager {
                 _ => MobKind::Slime,
             }
         } else {
+            // Now and then a dragon (one at a time).
             match pick {
+                p if p > 0.965 && !self.mobs.iter().any(|m| m.kind == MobKind::Dragon) => MobKind::Dragon,
                 p if p < 0.25 => MobKind::Boar,
                 p if p < 0.5 => MobKind::Sheep,
                 p if p < 0.75 => MobKind::Cow,
@@ -335,6 +346,11 @@ impl MobManager {
         let mut rolls: Vec<f64> = (0..self.mobs.len() * 2).map(|_| self.rand()).collect();
         for (i, m) in self.mobs.iter_mut().enumerate() {
             if m.hp<=0. {continue;}
+            if m.ridden {
+                m.amount = 1.0;
+                m.anim += 4.0 * dt as f32;
+                continue;
+            }
             let up = up_at(m.body.pos);
             let to_player = player - m.body.pos;
             let flat = tangent(to_player, up);
@@ -480,6 +496,29 @@ impl MobManager {
                     m.heading = wish;
                 }
             }
+            // Dragons fly: they keep 8–18 blocks above the ground and circle about.
+            if m.kind == MobKind::Dragon {
+                m.body.flying = true;
+                let low = (2..8).any(|h| world.block_at_world(m.body.pos - up * h as f64).is_solid());
+                let ground = (2..20).any(|h| world.block_at_world(m.body.pos - up * h as f64).is_solid());
+                if wish.length_squared() == 0.0 {
+                    wish = m.heading;
+                }
+                let before = m.body.pos;
+                step(world, &mut m.body, &MoveInput { wish, speed: 6.0, jump: false, up: low, down: !ground }, dt);
+                if (m.body.pos - before).length() < 0.6 * dt {
+                    // Bumped into a hill: turn around and climb.
+                    m.heading = -m.heading;
+                    m.body.vel += up * 3.0;
+                }
+                m.amount = 1.0;
+                m.anim += 4.0 * dt as f32;
+                m.heading = tangent(m.heading, up).normalize_or_zero();
+                if m.heading.length_squared() < 0.5 {
+                    m.heading = tangent(DVec3::Y, up).normalize_or_zero();
+                }
+                continue;
+            }
             // Slimes travel in hops (and squash when they land).
             if m.kind == MobKind::Slime && wish.length_squared() > 0.0 && m.body.on_ground && m.attack_cd < 0.6 {
                 m.body.vel += up * 6.5;
@@ -546,7 +585,7 @@ impl MobManager {
             if t < 0.0 || t > reach {
                 continue;
             }
-            if (to - dir * t).length() < (if m.boss.is_some(){1.5}else{0.75}) && best.is_none_or(|(_, bt)| t < bt) {
+            if (to - dir * t).length() < (if m.boss.is_some(){1.5}else if m.kind == MobKind::Dragon {1.6}else{0.75}) && best.is_none_or(|(_, bt)| t < bt) {
                 best = Some((i, t));
             }
         }
@@ -638,6 +677,7 @@ impl MobKind {
             MobKind::Chicken => vec![[0.98, 0.97, 0.94], [0.95, 0.20, 0.18], [1.0, 0.75, 0.20]],
             MobKind::Wolf => vec![[0.55, 0.56, 0.60], [0.40, 0.41, 0.45], [0.85, 0.85, 0.86]],
             MobKind::Slime => vec![[0.45, 0.90, 0.40], [0.30, 0.75, 0.28], [0.65, 1.0, 0.55]],
+            MobKind::Dragon => vec![[0.16, 0.55, 0.38], [0.85, 0.75, 0.40], [0.10, 0.30, 0.22]],
         }
     }
 
@@ -650,6 +690,7 @@ impl MobKind {
             MobKind::Boar | MobKind::Sheep | MobKind::Cow | MobKind::Wolf => 0.62,
             MobKind::Chicken => 0.3,
             MobKind::Slime => 0.45,
+            MobKind::Dragon => 1.9,
         }
     }
 
@@ -661,6 +702,7 @@ impl MobKind {
             MobKind::Cow => 1.3,
             MobKind::Chicken => 0.6,
             MobKind::Slime => 0.8,
+            MobKind::Dragon => 2.2,
         }
     }
 }

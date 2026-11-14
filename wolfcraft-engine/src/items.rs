@@ -95,7 +95,10 @@ pub mod ids {
     pub const SNIPER: ItemId = 378;
     pub const BULLETS: ItemId = 379;
     pub const SHELLS: ItemId = 380;
-    pub const LAST: ItemId = 380;
+    /// Riding: a saddle (put on a dragon) and the dragon's soul (spawns one).
+    pub const SADDLE: ItemId = 381;
+    pub const DRAGON_SOUL: ItemId = 382;
+    pub const LAST: ItemId = 382;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -221,6 +224,8 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::SNIPER => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Снайперская винтовка", sp::SNIPER) },
         ids::BULLETS => ItemInfo { max_stack: 64, ..plain("Патроны", sp::BULLETS) },
         ids::SHELLS => ItemInfo { max_stack: 32, ..plain("Дробь", sp::SHELLS) },
+        ids::SADDLE => ItemInfo { max_stack: 1, ..plain("Седло", sp::SADDLE) },
+        ids::DRAGON_SOUL => ItemInfo { max_stack: 16, ..plain("Душа дракона", sp::DRAGON_SOUL) },
         ids::BOW => ItemInfo { max_stack: 1, durability: 384, ..plain("Лук", sp::BOW) },
         ids::ARROW => plain("Стрела", sp::ARROW),
         ids::STRING => plain("Нить", sp::STRING),
@@ -402,6 +407,9 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
 
 /// The creature a spawn soul brings to life.
 pub fn soul_mob(id: ItemId) -> Option<crate::mobs::MobKind> {
+    if id == ids::DRAGON_SOUL {
+        return Some(crate::mobs::MobKind::Dragon);
+    }
     (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&id).then(|| crate::mobs::ALL_MOBS[(id - ids::SOUL_BASE) as usize])
 }
 
@@ -439,6 +447,7 @@ pub fn mob_drops(kind: crate::mobs::MobKind, salt: u64) -> Vec<ItemStack> {
         MobKind::Chicken => vec![ItemStack::new(ids::RAW_MEAT, 1)],
         MobKind::Wolf => vec![ItemStack::new(ids::LEATHER, 1 + (roll * 2.0) as u8)],
         MobKind::Slime => vec![ItemStack::new(ids::SLIME, 1 + (roll * 2.0) as u8)],
+        MobKind::Dragon => vec![ItemStack::new(ids::LEATHER, 4 + (roll * 3.0) as u8), ItemStack::new(ids::RAW_MEAT, 3), ItemStack::new(ids::DRAGON_SOUL, 1)],
     }
 }
 
@@ -572,7 +581,7 @@ pub fn category(id: ItemId) -> &'static str {
         if (ids::HOE_BASE..=ids::HOE_LAST).contains(&id) {
             return "Инструменты";
         }
-        if (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&id) || (ids::EGG_BASE..=ids::PET_LAST).contains(&id) {
+        if (ids::SOUL_BASE..=ids::SOUL_LAST).contains(&id) || (ids::EGG_BASE..=ids::PET_LAST).contains(&id) || matches!(id, ids::SADDLE | ids::DRAGON_SOUL) {
             return "Мобы";
         }
         if matches!(id, ids::WHEAT_SEEDS | ids::WHEAT | ids::CARROT | ids::POTATO) {
