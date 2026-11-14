@@ -195,9 +195,12 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
     egui::CentralPanel::default().frame(Frame::none()).show(ctx, |ui| {
         planet_backdrop(ui, planet, &p);
         let rect = ui.max_rect();
+        // Dock of icon buttons along the bottom; the menu column is centred above it.
+        const DOCK_H: f32 = 70.0;
+        let above = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.bottom() - DOCK_H - 16.0));
         let width = (rect.width() - 32.0).clamp(180.0, 360.0);
-        let height = (rect.height() - 48.0).clamp(180.0, 320.0);
-        let col = Rect::from_center_size(rect.center(), Vec2::new(width, height));
+        let height = (above.height() - 16.0).clamp(150.0, 320.0);
+        let col = Rect::from_center_size(above.center(), Vec2::new(width, height));
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col), |ui| {
             egui::ScrollArea::vertical().id_salt("game-main-menu").show(ui, |ui| {
                 ui.vertical_centered(|ui| {
@@ -220,9 +223,129 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
         });
         ui.painter().text(Pos2::new(rect.right() - 16.0, rect.bottom() - 14.0), Align2::RIGHT_BOTTOM,
             format!("v{version}"), FontId::proportional(12.0), Color32::from_gray(190));
+        if let Some(a) = game_dock(ui, icons, &p, rect, DOCK_H) {
+            action = a;
+        }
     });
+    if let Some(a) = game_menu_sheet(ctx, icons, &p) {
+        action = a;
+    }
     action
 }
+
+/// What the dock's «Новости» and «Ещё» open over the menu.
+#[derive(Clone, Copy, PartialEq)]
+enum Sheet {
+    News,
+    More,
+}
+
+fn open_settings_at(ctx: &egui::Context, tab: usize) -> MenuAction {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("settings-tab"), tab));
+    MenuAction::OpenSettings
+}
+
+/// The dock under the game menu: Скины, Магазин, Сеть, Новости, Ещё — an icon over a caption.
+fn game_dock(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, h: f32) -> Option<MenuAction> {
+    const ITEMS: [(u16, &str); 5] = [(icon::BRUSH, "Скины"), (icon::BACKPACK, "Магазин"), (icon::GLOBE, "Сеть"), (icon::STAR, "Новости"), (icon::PROPS, "Ещё")];
+    let item_w = 82.0;
+    let w = (item_w * ITEMS.len() as f32 + 16.0).min(rect.width() - 24.0);
+    let dock = Rect::from_min_size(Pos2::new(rect.center().x - w / 2.0, rect.bottom() - h - 12.0), Vec2::new(w, h));
+    let painter = ui.painter().clone();
+    painter.rect_filled(dock.translate(Vec2::new(0.0, 3.0)), Rounding::same(22.0), Color32::from_black_alpha(90));
+    painter.rect_filled(dock, Rounding::same(22.0), p.surface.gamma_multiply(0.92));
+    painter.rect_stroke(dock, Rounding::same(22.0), Stroke::new(1.0_f32, p.outline));
+    let sheet_id = egui::Id::new("game-menu-sheet");
+    let open: Option<Sheet> = ui.ctx().data(|d| d.get_temp(sheet_id)).flatten();
+    let step = (dock.width() - 16.0) / ITEMS.len() as f32;
+    let mut out = None;
+    for (i, (ic, label)) in ITEMS.iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(dock.left() + 8.0 + step * i as f32, dock.top() + 4.0), Vec2::new(step, h - 8.0));
+        let resp = ui.interact(r, egui::Id::new(("game-dock", i)), Sense::click());
+        let on = (i == 3 && open == Some(Sheet::News)) || (i == 4 && open == Some(Sheet::More));
+        if on || resp.hovered() || resp.is_pointer_button_down_on() {
+            ui.painter().rect_filled(r.shrink2(Vec2::new(4.0, 0.0)), Rounding::same(16.0), if on { p.accent.gamma_multiply(0.25) } else { p.surface_hover });
+        }
+        let col = if on { p.accent } else { p.text };
+        icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 22.0), Vec2::splat(24.0)), *ic, col);
+        ui.painter().text(Pos2::new(r.center().x, r.bottom() - 12.0), Align2::CENTER_CENTER, *label, FontId::proportional(12.5), if on { p.accent } else { p.text_muted });
+        if resp.clicked() {
+            match i {
+                0 => out = Some(open_settings_at(ui.ctx(), 0)),
+                1 => out = Some(open_settings_at(ui.ctx(), 2)),
+                2 => out = Some(MenuAction::OpenNetwork),
+                _ => {
+                    let want = if i == 3 { Sheet::News } else { Sheet::More };
+                    let next = if open == Some(want) { None } else { Some(want) };
+                    ui.ctx().data_mut(|d| d.insert_temp(sheet_id, next));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// «Новости» and «Ещё»: a card above the dock.
+fn game_menu_sheet(ctx: &egui::Context, icons: &GuiIcons, p: &Palette) -> Option<MenuAction> {
+    let sheet_id = egui::Id::new("game-menu-sheet");
+    let open: Sheet = ctx.data(|d| d.get_temp::<Option<Sheet>>(sheet_id)).flatten()?;
+    let screen = ctx.screen_rect();
+    let w = (screen.width() - 32.0).min(420.0);
+    let mut out = None;
+    let mut close = false;
+    egui::Area::new(egui::Id::new("game-menu-sheet-area")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -96.0)).show(ctx, |ui| {
+        Frame::none().fill(p.surface).rounding(Rounding::same(20.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+            ui.set_width(w - 32.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(if open == Sheet::News { "Что нового" } else { "Ещё" }).font(bold_font(18.0)).color(p.text));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if square_button(ui, icons, icon::CLOSE, false).clicked() {
+                        close = true;
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            match open {
+                Sheet::News => {
+                    egui::ScrollArea::vertical().max_height((screen.height() * 0.45).max(120.0)).show(ui, |ui| {
+                        for (title, text) in NEWS {
+                            ui.label(egui::RichText::new(*title).font(bold_font(14.5)).color(p.text));
+                            ui.label(egui::RichText::new(*text).size(13.0).color(p.text_muted));
+                            ui.add_space(6.0);
+                        }
+                    });
+                }
+                Sheet::More => {
+                    let bw = ui.available_width();
+                    for (ic, label, tab) in [(icon::REFRESH, "Обновления", 6usize), (icon::CROSSHAIR, "Управление", 5), (icon::EDIT, "Интерфейс", 4), (icon::SUN, "Графика", 1), (icon::HAMMER, "Рука и вид", 3)] {
+                        if pill_button(ui, icons, Some(ic), label, ButtonKind::Secondary, bw, true).clicked() {
+                            out = Some(open_settings_at(ctx, tab));
+                            close = true;
+                        }
+                    }
+                    if pill_button(ui, icons, Some(icon::ARROW_LEFT), "В лаунчер", ButtonKind::Ghost, bw, true).clicked() {
+                        out = Some(MenuAction::Back);
+                        close = true;
+                    }
+                }
+            }
+        });
+    });
+    if close {
+        ctx.data_mut(|d| d.insert_temp::<Option<Sheet>>(sheet_id, None));
+    }
+    out
+}
+
+/// «Новости» in the game menu: what came in recent updates.
+const NEWS: [(&str, &str); 6] = [
+    ("Оружие", "Пистолет, автомат, дробовик и снайперская винтовка с 3D-моделями, прицелами и отдачей. Патроны и дробь — в «Вооружении»."),
+    ("Разрушаемость", "Постройки без опоры рушатся, блоки падают и разбиваются, взрывы раскидывают обломки."),
+    ("Игра по сети", "Короткие коды входа: введите код сервера во вкладке «По коду»."),
+    ("WolfStudio", "Свои серверы как плейсы: редактор, свободная камера, «Играть», скрипты блоков на Luau."),
+    ("Мини-игры", "«Питомник» и «Симулятор кнопок» — шаблоны для серверов в Тулбоксе студии."),
+    ("Взрывчатка", "Динамит с зажигалкой, гранаты, гранатомёт и базука."),
+];
 
 /// Home screen: the mobile launcher (toolbar, pages, bottom navigation).
 pub fn main_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, data_dir: &str, dark: bool, planet: Option<&TextureHandle>, skin: u8, nickname: &str, worlds: &[WorldEntry]) -> MenuAction {
@@ -1372,6 +1495,23 @@ mod tests {
                 frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
                 assert_eq!(action, expected, "{label}, {size:?}");
             }
+            // The dock under the menu.
+            for (label, expected) in [("Сеть", MenuAction::OpenNetwork), ("Магазин", MenuAction::OpenSettings), ("Скины", MenuAction::OpenSettings)] {
+                let mut action = MenuAction::None;
+                let mut frame = |events| ctx.run(egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), events, ..Default::default()
+                }, |ctx| { action = game_menu(ctx, &icons, "0.2.1", None); });
+                let out = frame(vec![]);
+                let text = out.shapes.iter().find_map(|s| match &s.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t), _ => None
+                }).expect("dock item");
+                let pos = text.pos + text.galley.size() * 0.5;
+                frame(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+                frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+                assert_eq!(action, expected, "{label}, {size:?}");
+            }
+            let tab: usize = ctx.data(|d| d.get_temp(egui::Id::new("settings-tab"))).unwrap_or(99);
+            assert_eq!(tab, 0, "«Скины» opens the profile settings");
         }
     }
 
