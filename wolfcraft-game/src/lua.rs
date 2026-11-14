@@ -8,6 +8,14 @@
 //!   (right, up, forward in cells) · `world.time()` / `world.set_time(hours)`
 //! * events: `on("start" | "tick" | "chat" | "block_broken" | "block_placed", fn)`
 //! * timers: `task.delay(seconds, fn)` (also `wait(seconds, fn)`)
+//! * block events (like VoxelCore's block scripts): `block.on_placed(name, fn)`,
+//!   `block.on_broken(name, fn)`, `block.on_interact(name, fn)` (a tap on the block: the
+//!   usual action — placing, opening — is skipped unless the handler returns `false`),
+//!   `block.on_step(name, fn)` (a player steps onto it).
+//!   `name` is the block's name ("Дубовые доски") or `"*"` for any block; the handler gets
+//!   `(pos, nick)`. `pos` has `x, y, z` (world) and the cell; `block.get(pos)`,
+//!   `block.set(pos, name)` (`"air"` clears), `block.offset(pos, di, up, dj)` (along the
+//!   cell grid), `block.above(pos, n)`.
 //! * GUI like ScreenGui: `gui.frame{}`, `gui.label{}`, `gui.button{ on_click = fn }` with `id`,
 //!   `text`, `x`, `y` (centre, 0..1 of the screen), `w`, `h` (0..1), `color = {r, g, b}`
 //!   (0..255), `text_color`, `size` (font px); `gui.text(id, s)`, `gui.show(id, on)`,
@@ -108,6 +116,40 @@ end
 function __has_tick()
     return (handlers.tick ~= nil) or (#timers > 0)
 end
+block = {}
+local block_handlers = { placed = {}, broken = {}, interact = {}, step = {} }
+local function on_block(kind, name, fn)
+    local list = block_handlers[kind]
+    name = __lower(name)
+    list[name] = list[name] or {}
+    table.insert(list[name], fn)
+end
+function block.on_placed(name, fn) on_block("placed", name, fn) end
+function block.on_broken(name, fn) on_block("broken", name, fn) end
+function block.on_interact(name, fn) on_block("interact", name, fn) end
+function block.on_step(name, fn) on_block("step", name, fn) end
+function block.get(p) return __bget(p.f, p.i, p.j, p.k) end
+function block.set(p, name) return __bset(p.f, p.i, p.j, p.k, name) end
+function block.above(p, n) return __boff(p.f, p.i, p.j, p.k, 0, 0, n or 1) end
+function block.offset(p, di, dk, dj) return __boff(p.f, p.i, p.j, p.k, di or 0, dj or 0, dk or 0) end
+function __block_has(kind, name)
+    local list = block_handlers[kind]
+    return list[name] ~= nil or list["*"] ~= nil
+end
+function __block_fire(kind, name, pos, nick)
+    local stop = false
+    for _, key in ipairs({ name, "*" }) do
+        for _, fn in ipairs(block_handlers[kind][key] or {}) do
+            local ok, res = pcall(fn, pos, nick)
+            if not ok then
+                __error(tostring(res))
+            elseif res == true or (kind == "interact" and res ~= false) then
+                stop = true
+            end
+        end
+    end
+    return stop
+end
 gui = {}
 function gui.frame(t) __gui_add("frame", t) end
 function gui.label(t) __gui_add("label", t) end
@@ -154,6 +196,8 @@ impl LuaHost {
             sh.lock().unwrap().out.push((ChatKind::System, text.join(" ")));
             Ok(())
         }).map_err(|e| e.to_string())?)?;
+        // Block names in scripts ignore case (Cyrillic too: Lua's own lower() is ASCII only).
+        set("__lower", lua.create_function(|_, s: String| Ok(s.to_lowercase())).map_err(|e| e.to_string())?)?;
         let sh = shared.clone();
         set("__error", lua.create_function(move |_, msg: String| {
             sh.lock().unwrap().out.push(chat_err(msg));
@@ -337,6 +381,31 @@ impl LuaHost {
                 s.player.world_time = (day + (h / 24.0).rem_euclid(1.0)) * wolfcraft_engine::player::DAY_LENGTH;
                 Ok(())
             })?)?;
+            // Blocks by cell (the `pos` tables of block events).
+            let cell_of = |f: u8, i: i32, j: i32, k: i32| wolfcraft_engine::cubesphere::Cell::new(f, i, j, k);
+            g.set("__bget", scope.create_function(move |_, (f, i, j, k): (u8, i32, i32, i32)| {
+                let s = c.borrow();
+                Ok(s.chunks.get_block(cell_of(f, i, j, k)).map(|b| b.info().name.to_string()))
+            })?)?;
+            g.set("__bset", scope.create_function_mut(move |_, (f, i, j, k, name): (u8, i32, i32, i32, String)| {
+                let b = if matches!(name.to_lowercase().as_str(), "air" | "воздух" | "") { Some(wolfcraft_engine::block::Block::Air) } else { crate::worldedit::parse_block(&name) };
+                let Some(b) = b else { return Ok(false) };
+                let mut s = c.borrow_mut();
+                let cell = cell_of(f, i, j, k);
+                let ok = s.chunks.set_block(cell, b);
+                if ok {
+                    s.net_out.push((cell, b));
+                }
+                Ok(ok)
+            })?)?;
+            g.set("__boff", scope.create_function(move |lua, (f, i, j, k, di, dj, dk): (u8, i32, i32, i32, i32, i32, i32)| {
+                let s = c.borrow();
+                let g = s.chunks.grid();
+                match g.offset(cell_of(f, i, j, k), di, dj, dk) {
+                    Some(n) => Ok(Some(pos_table(lua, &g, n)?)),
+                    None => Ok(None),
+                }
+            })?)?;
             g.set("player", player)?;
             g.set("world", world)?;
             f(&self.lua)
@@ -370,11 +439,48 @@ impl LuaHost {
         self.with_world(s, |lua| lua.globals().get::<mlua::Function>("__fire")?.call::<()>((n, a)));
     }
 
+    /// The script handles this block event (so the game can skip work when it does not).
+    pub fn has_block_event(&self, kind: &str, block: wolfcraft_engine::block::Block) -> bool {
+        self.lua.globals().get::<mlua::Function>("__block_has").and_then(|f| f.call::<bool>((kind, block.info().name.to_lowercase()))).unwrap_or(false)
+    }
+
+    /// Fires a block event ("placed", "broken", "interact", "step") on `cell`. Returns true
+    /// if a handler asked to stop the usual action.
+    pub fn block_event(&mut self, s: &mut GameSession, kind: &str, block: wolfcraft_engine::block::Block, cell: wolfcraft_engine::cubesphere::Cell) -> bool {
+        if !self.has_block_event(kind, block) {
+            return false;
+        }
+        let nick = s.nickname.clone();
+        let grid = s.chunks.grid();
+        let (k, name) = (kind.to_string(), block.info().name.to_lowercase());
+        let mut stop = false;
+        self.with_world(s, |lua| {
+            let pos = pos_table(lua, &grid, cell)?;
+            stop = lua.globals().get::<mlua::Function>("__block_fire")?.call::<bool>((k, name, pos, nick))?;
+            Ok(())
+        });
+        stop
+    }
+
     /// A GUI button was pressed.
     pub fn click(&mut self, s: &mut GameSession, id: &str) {
         let id = id.to_string();
         self.with_world(s, |lua| lua.globals().get::<mlua::Function>("__click")?.call::<()>(id));
     }
+}
+
+/// `pos` of a block for scripts: world coordinates of its centre and its cell.
+fn pos_table(lua: &Lua, grid: &wolfcraft_engine::cubesphere::Grid, c: wolfcraft_engine::cubesphere::Cell) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    let p = grid.cell_center(c);
+    t.set("x", (p.x * 100.0).round() / 100.0)?;
+    t.set("y", (p.y * 100.0).round() / 100.0)?;
+    t.set("z", (p.z * 100.0).round() / 100.0)?;
+    t.set("f", c.f)?;
+    t.set("i", c.i)?;
+    t.set("j", c.j)?;
+    t.set("k", c.k)?;
+    Ok(t)
 }
 
 /// Turns an old command-list script (one chat command per line) into Luau.
@@ -419,6 +525,22 @@ end)
 task.delay(3, function()
     chat("Прошло 3 секунды")
 end)
+
+-- Скрипты блоков: уберите «--», чтобы включить.
+-- Нажатие на золотой блок — награда, и блок становится камнем:
+-- block.on_interact("Золотой блок", function(pos, nick)
+--     chat(nick .. " нашёл клад!")
+--     player.give("алмаз", 1)
+--     block.set(pos, "камень")
+-- end)
+-- Встал на белую шерсть — сообщение:
+-- block.on_step("Белая шерсть", function(pos, nick)
+--     print(nick .. " на батуте")
+-- end)
+-- Поставили факел — над ним появляется светокамень:
+-- block.on_placed("Факел", function(pos)
+--     block.set(block.above(pos, 2), "светокамень")
+-- end)
 "#;
 
 #[cfg(test)]
@@ -484,6 +606,27 @@ mod tests {
         assert!(lua.take_output().iter().any(|(k, t)| *k == ChatKind::Error && t.contains("долго")));
         lua.run(&mut s, "nope(");
         assert!(lua.take_output().iter().any(|(k, _)| *k == ChatKind::Error));
+        // Block events: a tap on stone runs the script instead of placing a block.
+        let g = s.chunks.grid();
+        let here = g.world_to_cell(s.player.body.pos);
+        let spot = g.offset(here, 0, 0, 3).unwrap();
+        use wolfcraft_engine::interaction::WorldEdit;
+        s.chunks.set_block(spot, wolfcraft_engine::block::Block::Stone);
+        lua.run(&mut s, r#"
+            block.on_interact("Камень", function(pos, nick)
+                block.set(block.above(pos, 1), "камень")
+                print("нажали " .. block.get(pos) .. " " .. type(pos.x))
+            end)
+            block.on_placed("*", function(pos) print("поставили") end)
+        "#);
+        assert!(lua.has_block_event("interact", wolfcraft_engine::block::Block::Stone));
+        assert!(!lua.has_block_event("step", wolfcraft_engine::block::Block::Stone));
+        assert!(lua.block_event(&mut s, "interact", wolfcraft_engine::block::Block::Stone, spot), "the tap is taken by the script");
+        assert_eq!(s.chunks.get_block(g.offset(spot, 0, 0, 1).unwrap()), Some(wolfcraft_engine::block::Block::Stone));
+        assert!(!lua.block_event(&mut s, "placed", wolfcraft_engine::block::Block::Torch, spot));
+        let out = lua.take_output();
+        assert!(out.iter().any(|(_, t)| t == "нажали Камень number"), "{out:?}");
+        assert!(out.iter().any(|(_, t)| t == "поставили"), "{out:?}");
         // Old command-list scripts are translated.
         assert!(from_command_list("/time set день\n# x").contains("command(\"/time set день\")"));
     }

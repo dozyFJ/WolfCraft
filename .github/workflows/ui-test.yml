@@ -23,3 +23,7 @@ jobs:
         run: cargo test -p wolfcraft-engine --lib -- collapse explosives --nocapture
       - name: Invite codes
         run: cargo test -p wolfcraft-net --lib -- invite --nocapture
+      - name: Luau block events
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q libasound2-dev pkg-config
+          cargo test -p wolfcraft-game --lib -- luau_scripts --nocapture
