@@ -1,7 +1,6 @@
 //! Resource packs, like in the classic block game.
 //!
-//! * Built-in packs: the original procedural art at 16× and smooth HD versions of it
-//!   (32× "HD", 64× "Full HD", 128× "4K") made with Scale2x upscaling plus fine grain.
+//! * Built-in packs: the cartoon style at 16×, 32×, 64× and 128×.
 //! * User packs: a folder or a `.zip` in a `resourcepacks` directory with sprites in
 //!   `blocks/`, `items/`, `entities/`, `gui/`, `particles/` (`<sprite>.png`, any size) and an
 //!   optional `pack.json` `{"name": "...", "description": "..."}`. A user pack is drawn on top
@@ -13,15 +12,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Built-in packs: (id, name, upscale factor).
-pub const BUILTIN: [(&str, &str, u32); 8] = [
+pub const BUILTIN: [(&str, &str, u32); 4] = [
     ("builtin:toon16", "Мультяшный Лайт 16× (основной)", 1),
     ("builtin:toon32", "Мультяшный 32×", 2),
     (TOON_PACK, "Мультяшный HD 64×", 4),
     ("builtin:toon128", "Мультяшный 4K 128×", 8),
-    ("builtin:16", "Старый пак 16×", 1),
-    ("builtin:32", "Старый пак HD 32×", 2),
-    ("builtin:64", "Старый пак Full HD 64×", 4),
-    ("builtin:128", "Старый пак 4K 128×", 8),
 ];
 
 /// The game's main look: the light 16× cartoon pack (fast on every phone).
@@ -49,7 +44,7 @@ pub struct PackInfo {
 pub fn list(dirs: &[PathBuf]) -> Vec<PackInfo> {
     let mut v: Vec<PackInfo> = BUILTIN
         .iter()
-        .map(|(id, name, f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == DEFAULT_PACK { "Основной стиль игры: мультяшные блоки 16×16, лёгкие шейдеры, быстро на любом телефоне".into() } else if *id == TOON_PACK { "Мультяшный в HD: мягче края и детали".into() } else if *id == "builtin:toon32" { "Мультяшный чуть чётче основного".into() } else if *id == "builtin:toon128" { "Мультяшный в высоком разрешении (128×128 на блок): чёткие края, для сильных устройств".into() } else if *f == 1 { "Дополнение: старые пиксельные текстуры".into() } else { format!("Дополнение: старые текстуры, {}×{} пикселей на блок", 16 * f, 16 * f) }, path: None })
+        .map(|(id, name, _f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == DEFAULT_PACK { "Основной стиль игры: мультяшные блоки 16×16, лёгкие шейдеры, быстро на любом телефоне".into() } else if *id == TOON_PACK { "Мультяшный в HD: мягче края и детали".into() } else if *id == "builtin:toon32" { "Мультяшный чуть чётче основного".into() } else if *id == "builtin:toon128" { "Мультяшный в высоком разрешении (128×128 на блок): чёткие края, для сильных устройств".into() } else { "Мультяшные текстуры".into() }, path: None })
         .collect();
     let mut users = Vec::new();
     for dir in dirs {
@@ -500,7 +495,10 @@ mod tests {
         }
         let l = list(&[]);
         assert_eq!(l.len(), BUILTIN.len());
-        assert_eq!(base_scale("builtin:64"), 4);
+        assert_eq!(base_scale(TOON_PACK), 4);
+        assert_eq!(l.len(), 4);
+        assert!(l.iter().all(|p| is_toon(&p.id)));
+        assert_eq!(l[0].id, DEFAULT_PACK);
         assert_eq!(base_scale("user:x"), 1);
     }
 

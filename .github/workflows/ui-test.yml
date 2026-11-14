@@ -20,7 +20,9 @@ jobs:
       - name: Tap on a nearby server joins it
         run: cargo test -p wolfcraft-ui --lib -- main_menu studio_ui texture_editor server_page --nocapture
       - name: Destruction physics and weapons
-        run: cargo test -p wolfcraft-engine --lib -- collapse explosives bosses mobs --nocapture
+        run: cargo test -p wolfcraft-engine --lib -- collapse explosives bosses mobs config --nocapture
+      - name: Cartoon resource packs
+        run: cargo test -p wolfcraft-assets --lib -- packs --nocapture
       - name: Invite codes
         run: cargo test -p wolfcraft-net --lib -- invite --nocapture
       - name: Luau block events
