@@ -283,6 +283,8 @@ pub struct App {
     thud_cd: f32,
     /// Studio: the block last tapped or aimed at (shown in «Выбранный блок»).
     studio_target: Option<wolfcraft_engine::cubesphere::Cell>,
+    /// Studio: where the edit camera was when «Играть» started (position, heading, pitch).
+    studio_cam: Option<(glam::DVec3, glam::DVec3, f64)>,
     /// Fraction of a crumble particle owed while mining (see the mining effects).
     mine_dust: f32,
     /// Ink of sign texts, drawn on the signs in the world.
@@ -415,6 +417,7 @@ impl App {
             hit_marker: 0.0,
             thud_cd: 0.0,
             studio_target: None,
+            studio_cam: None,
             mine_dust: 0.0,
             sign_texts: Default::default(),
             hand_switch: 0.0,
@@ -859,10 +862,45 @@ impl App {
                     }
                 }
             }
+            StudioAction::SpawnHere => {
+                if let Some(s) = &mut self.session {
+                    s.player.spawn = s.player.body.pos;
+                    status(self, "Точка появления — здесь (сюда встанет игрок по «Играть»)");
+                }
+            }
             StudioAction::Playtest(on) => {
                 if let Some(st) = &mut self.studio {
                     st.playtest = on;
                     st.brush_on = false;
+                }
+                if let Some(s) = &mut self.session {
+                    if on {
+                        // Like Roblox Studio's Play: the camera waits here, a character appears at
+                        // the spawn point and plays by the world's own rules.
+                        self.studio_cam = Some((s.player.body.pos, s.player.heading, s.player.pitch));
+                        s.player.noclip = false;
+                        s.player.body.flying = false;
+                        s.studio = false;
+                        s.player.mode = s.cfg.mode;
+                        s.player.survival = Default::default();
+                        let spawn = s.player.spawn;
+                        let dir = wolfcraft_engine::cubesphere::col_dir(spawn);
+                        let pos = s.planet.stand_position(dir).unwrap_or(spawn);
+                        s.teleport(pos);
+                    } else {
+                        // Back to the edit camera where it was; what happened in play stays
+                        // (blocks broken in play stay broken, like a saved test run).
+                        s.studio = true;
+                        s.player.mode = wolfcraft_engine::config::GameMode::Creative;
+                        s.player.survival = Default::default();
+                        if let Some((pos, heading, pitch)) = self.studio_cam.take() {
+                            s.teleport(pos);
+                            s.player.heading = heading;
+                            s.player.pitch = pitch;
+                        }
+                        s.player.noclip = true;
+                        s.player.body.flying = true;
+                    }
                 }
                 if on {
                     // Play the place as players will: its script runs fresh (saved first).
@@ -2487,7 +2525,9 @@ impl App {
                 self.hand_switch = (self.hand_switch - dt * 6.0).max(0.0);
                 let block_target = if s.player.blocking { 1.0 } else { 0.0 };
                 self.hand_block += (block_target - self.hand_block) * (1.0 - (-16.0 * dt).exp());
-                if first_person {
+                // The studio's edit camera has no hands (the character exists only in «Играть»).
+                let studio_edit = self.studio.as_ref().is_some_and(|st| !st.playtest);
+                if first_person && !studio_edit {
                     let hand_pose = HandsPose {
                         forward: cam.forward.as_vec3(),
                         up: cam.up.as_vec3(),
@@ -2653,6 +2693,8 @@ impl App {
                     s.studio = true;
                     s.player.mode = wolfcraft_engine::config::GameMode::Creative;
                     s.player.body.flying = true;
+                    // Edit mode is a free camera, as in Roblox Studio: no character until «Играть».
+                    s.player.noclip = true;
                 }
                 // The world's Luau script (written in the studio) runs every time the world starts.
                 if self.net.is_none() {
@@ -3067,6 +3109,13 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                // Android: a rotation (the studio turns to landscape) does not always send
+                // `Resized`; the surface would stay upright. Follow the window's real size.
+                let real = gfx.window.inner_size();
+                if real.width > 0 && real.height > 0 && (real.width, real.height) != gfx.gpu.size() {
+                    gfx.gpu.resize(real.width, real.height);
+                    gfx.world.resize(&gfx.gpu.device, real.width, real.height);
+                }
                 self.redraw(&mut gfx);
             }
             _ => {}
