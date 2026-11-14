@@ -1332,9 +1332,9 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
 pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, version: &str, packs: &PacksView) -> SettingsResult {
     let p = palette(ctx);
     let mut res = SettingsResult::default();
+    // Other screens may ask to open a section (e.g. «Скины» → Профиль): scroll to it once.
     let tab_id = egui::Id::new("settings-tab");
-    let mut tab: usize = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
-    tab = tab.min(SETTINGS_TABS.len() - 1);
+    let jump: Option<usize> = ctx.data_mut(|d| d.remove_temp::<usize>(tab_id)).map(|t| t.min(SETTINGS_TABS.len() - 1));
     egui::TopBottomPanel::top("settings-header")
         .frame(Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(14.0, 8.0)))
         .show(ctx, |ui| {
@@ -1350,16 +1350,30 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                     }
                 });
             });
-            ui.add_space(4.0);
-            egui::ScrollArea::horizontal().id_salt("settings-tabs-scroll").auto_shrink([false, true]).show(ui, |ui| {
-                let labels: Vec<&str> = SETTINGS_TABS.iter().map(|(_, label)| *label).collect();
-                tab_bar(ui, "settings-section-tabs", &labels, &mut tab);
-            });
         });
-    ctx.data_mut(|d| d.insert_temp(tab_id, tab));
-    egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
+    // All sections one under another, in a centred column: each a card with its title on top
+    // and its options (sliders, switches, buttons) inside.
+    egui::CentralPanel::default().frame(Frame::none().fill(p.bg).inner_margin(Margin::symmetric(12.0, 14.0))).show(ctx, |ui| {
         egui::ScrollArea::vertical().id_salt("settings-body").auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_width(ui.available_width());
+            let full = ui.available_width();
+            let col_w = full.min(620.0);
+            ui.horizontal(|ui| {
+            ui.add_space(((full - col_w) / 2.0).max(0.0));
+            ui.vertical(|ui| {
+            ui.set_width(col_w);
+            for tab in 0..SETTINGS_TABS.len() {
+            let (sec_icon, sec_name) = SETTINGS_TABS[tab];
+            let card = Frame::none().fill(p.surface).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+            ui.set_width(col_w - 32.0);
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+                icons.paint(ui.painter(), r, sec_icon, p.accent);
+                ui.label(egui::RichText::new(sec_name).font(bold_font(18.0)).color(p.text));
+            });
+            ui.add_space(4.0);
+            let (line, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+            ui.painter().rect_filled(line, 0.0, p.outline);
+            ui.add_space(10.0);
             match tab {
                 6 => {
                     ui.label(format!("Установлена WolfCraft {version}"));
@@ -1492,6 +1506,14 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                     });
                 }
             }
+            });
+            if jump == Some(tab) {
+                card.response.scroll_to_me(Some(egui::Align::TOP));
+            }
+            ui.add_space(12.0);
+            }
+            });
+            });
         });
     });
     res
@@ -1796,7 +1818,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_sections_are_tabs_below_the_header() {
+    fn settings_sections_are_cards_in_a_centred_column() {
         let (ctx, icons) = setup();
         let mut settings = Settings::default();
         let packs = PacksView { list: &[], status: "", folder: "" };
@@ -1810,13 +1832,14 @@ mod tests {
             egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t), _ => None
         }).expect("settings label");
         let title = text("Настройки");
+        // Sections are cards one under another (no tab bar): Профиль first, its title above
+        // its options; the column is centred.
+        let profile = text("Профиль");
         let graphics = text("Графика");
-        assert!(graphics.pos.y > title.pos.y && graphics.pos.y < 110.0);
-        assert!(text("Никнейм").pos.x < 100.0, "settings content must use the former sidebar space");
-        let pos = graphics.pos + graphics.galley.size() * 0.5;
-        render(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
-        render(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
-        assert_eq!(ctx.data(|d| d.get_temp::<usize>(egui::Id::new("settings-tab"))), Some(1));
+        assert!(profile.pos.y > title.pos.y && graphics.pos.y > profile.pos.y);
+        let nick = text("Никнейм");
+        assert!(nick.pos.y > profile.pos.y);
+        assert!(nick.pos.x > (960.0 - 620.0) / 2.0 - 1.0, "content sits in the centred column");
     }
 
     fn setup() -> (egui::Context, GuiIcons) {
