@@ -1380,13 +1380,12 @@ mod tests {
         let (ctx, icons) = setup();
         let worlds = vec![WorldEntry { cfg: WorldConfig::new("Side test world", 42), preview: None }];
         let mut st = WorldSelectState::default();
-        let mut action = MenuAction::None;
-        let mut render = |events| ctx.run(egui::RawInput {
+        let render = |st: &mut WorldSelectState, events| ctx.run(egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 540.0))),
             events, ..Default::default()
-        }, |ctx| { action = world_select(ctx, &icons, &mut st, &worlds, "0.2.1"); });
-        render(vec![]);
-        let out = render(vec![]);
+        }, |ctx| { let _ = world_select(ctx, &icons, st, &worlds, "0.2.1"); });
+        render(&mut st, vec![]);
+        let out = render(&mut st, vec![]);
         let text = |out: &egui::FullOutput, label: &str| out.shapes.iter().find_map(|s| match &s.shape {
             egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t.pos + t.galley.size() * 0.5), _ => None
         }).expect(label);
@@ -1396,11 +1395,11 @@ mod tests {
         assert!(single.x < 240.0 && network.x < 240.0 && create.x < 240.0, "controls in the left sidebar");
         assert!(single.y < network.y && network.y < create.y, "stacked vertically");
         assert!(text(&out, "Side test world").x > 240.0, "list right of the sidebar");
-        render(vec![egui::Event::PointerMoved(network), egui::Event::PointerButton { pos: network, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
-        render(vec![egui::Event::PointerButton { pos: network, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+        render(&mut st, vec![egui::Event::PointerMoved(network), egui::Event::PointerButton { pos: network, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+        render(&mut st, vec![egui::Event::PointerButton { pos: network, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
         assert_eq!(st.mode, 1);
-        render(vec![]);
-        let out = render(vec![]);
+        render(&mut st, vec![]);
+        let out = render(&mut st, vec![]);
         assert!(text(&out, "По коду").x > 720.0, "network sections in the right sidebar");
     }
 
