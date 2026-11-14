@@ -144,6 +144,10 @@ pub struct MobManager {
     pub boss_knock: DVec3,
     /// New creatures appear (off in Studio baseplate worlds).
     pub spawning: bool,
+    /// StrikeArena: enemies come all day long, no animals.
+    pub arena: bool,
+    /// Creatures killed (StrikeArena score).
+    pub kills: u32,
     spawn_timer: f32,
     /// Cubes flying off dead creatures.
     pub debris: Vec<Debris>,
@@ -166,7 +170,7 @@ fn tangent(v: DVec3, up: DVec3) -> DVec3 {
 
 impl MobManager {
     pub fn new(seed: u64) -> Self {
-        Self { mobs: Vec::new(), boss_deaths: Vec::new(), boss_effects: Vec::new(), boss_knock: DVec3::ZERO, spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
+        Self { mobs: Vec::new(), boss_deaths: Vec::new(), boss_effects: Vec::new(), boss_knock: DVec3::ZERO, spawning: true, arena: false, kills: 0, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
     }
 
     pub fn rand(&mut self) -> f64 {
@@ -349,7 +353,7 @@ impl MobManager {
         let dist = 22.0 + self.rand() * 22.0;
         let dir = world.grid().col_dir(player + (t1 * ang.cos() + t2 * ang.sin()) * dist);
         // Water under the spot: fish in rivers and lakes; squid, dolphins and sharks in the sea.
-        if let Some((pos, depth)) = Self::water_spot(world, dir, world.grid().radial(player)) {
+        if let Some((pos, depth)) = Self::water_spot(world, dir, world.grid().radial(player)).filter(|_| !self.arena) {
             if aquatic >= AQUATIC_CAP {
                 return;
             }
@@ -378,7 +382,7 @@ impl MobManager {
             }
             return;
         }
-        let want_hostile = !day;
+        let want_hostile = !day || self.arena;
         if want_hostile && hostile >= HOSTILE_CAP || !want_hostile && passive >= PASSIVE_CAP {
             return;
         }
@@ -745,6 +749,7 @@ impl MobManager {
         let away = tangent(m.body.pos - from, up).normalize_or_zero();
         m.body.vel += away * if m.boss.is_some(){1.0}else{7.0} + up * if m.boss.is_some(){0.5}else{4.0};
         m.body.on_ground = false;
+        if was_alive&&m.hp<=0. {self.kills+=1;}
         if was_alive&&m.hp<=0. {if let Some(boss)=&m.boss {self.boss_deaths.push(crate::bosses::BossDeath{kind:boss.kind,home:boss.home,at:m.body.pos});}}
         (was_alive&&m.hp <= 0.0).then_some(m.kind)
     }

@@ -1,8 +1,8 @@
-name: Android APK
+name: StrikeArena APK
 
 on:
   push:
-    branches: [mobile-explosives]
+    branches: [strike-arena]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 # One build at a time: two runs publishing "latest" together can clobber each other.
 concurrency:
-  group: android-apk-test
+  group: strike-arena-apk
   cancel-in-progress: false
 
 jobs:
@@ -54,22 +54,22 @@ jobs:
           cargo apk build -p wolfcraft-game --lib --release --target aarch64-linux-android
           ls -l target/release/apk/
           # Only the signed, aligned APK (never the "-unaligned" intermediate).
-          cp target/release/apk/WolfCraft.apk WolfCraft.apk
-          ls -lh WolfCraft.apk
+          cp target/release/apk/StrikeArena.apk StrikeArena.apk
+          ls -lh StrikeArena.apk
           # Refuse to publish a package Android would reject.
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs WolfCraft.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 WolfCraft.apk | tail -1
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs StrikeArena.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 StrikeArena.apk | tail -1
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WolfCraft-apk
-          path: WolfCraft.apk
+          name: StrikeArena-apk
+          path: StrikeArena.apk
 
       - name: Publish "latest" release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete test -y --cleanup-tag || true
-          gh release create test WolfCraft.apk --prerelease --target "$GITHUB_SHA" \
-            --title "WolfCraft ТЕСТ: взрывчатка (сборка #${{ github.run_number }})" \
-            --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай WolfCraft.apk ниже."
+          gh release delete strike-test -y --cleanup-tag || true
+          gh release create strike-test StrikeArena.apk --prerelease --target "$GITHUB_SHA" \
+            --title "StrikeArena (сборка #${{ github.run_number }})" \
+            --notes "Автосборка из ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Скачай StrikeArena.apk ниже."

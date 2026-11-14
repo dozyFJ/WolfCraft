@@ -186,6 +186,9 @@ pub struct WorldConfig {
     /// A Studio project (listed in the Studio, not among the game worlds).
     #[serde(default)]
     pub studio_project: bool,
+    /// StrikeArena: a shooter arena (cover, loadout, waves of enemies, kill count).
+    #[serde(default)]
+    pub arena: bool,
 }
 
 fn first_save_format() -> u32 {
@@ -213,6 +216,7 @@ impl WorldConfig {
             format_version: wolfcraft_common::version::SAVE_FORMAT,
             shape: PlanetShape::Sphere,
             studio_project: false,
+            arena: false,
         }
     }
 

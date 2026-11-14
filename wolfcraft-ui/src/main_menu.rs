@@ -46,6 +46,8 @@ pub enum MenuAction {
     NewStudioProject,
     /// World list opened straight on "Игра по сети → Рядом".
     OpenNetwork,
+    /// StrikeArena: straight into the arena (made the first time).
+    QuickMatch,
 }
 
 pub struct WorldEntry {

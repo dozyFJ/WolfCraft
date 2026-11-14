@@ -3033,6 +3033,22 @@ impl App {
                 }
             }
             MenuAction::CreateWorld(cfg) => self.start_load(*cfg, true),
+            MenuAction::QuickMatch => {
+                // The arena world: reuse it if it exists, else make a flat one.
+                if let Some(w) = self.worlds.iter().find(|w| w.cfg.arena) {
+                    let id = w.cfg.id.clone();
+                    self.handle_action(MenuAction::PlayWorld(id), gfx);
+                } else {
+                    let mut cfg = WorldConfig::new("Арена", splitmix(self.random_seed ^ platform::unix_now()) % 1_000_000_000);
+                    cfg.world_type = wolfcraft_engine::config::WorldType::Baseplate;
+                    cfg.mode = wolfcraft_engine::config::GameMode::Survival;
+                    cfg.difficulty = wolfcraft_engine::config::Difficulty::Normal;
+                    cfg.structures = false;
+                    cfg.size = wolfcraft_engine::config::PlanetSize::Small;
+                    cfg.arena = true;
+                    self.start_load(cfg, true);
+                }
+            }
             MenuAction::DeleteWorld(id) => {
                 let dir = self.worlds_dir.join(&id);
                 if let Err(e) = platform::move_to_recycle_bin(&dir) {
@@ -3053,6 +3069,9 @@ impl App {
                 if self.screen == Screen::Dead {
                     if let Some(s) = &mut self.session {
                         s.player.respawn();
+                        if s.cfg.arena {
+                            s.arena_loadout();
+                        }
                     }
                 }
                 self.screen = Screen::Playing;

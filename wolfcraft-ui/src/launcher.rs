@@ -50,7 +50,7 @@ fn tabs() -> &'static [(Tab, &'static str)] {
         &[(Tab::Studio, "Проекты"), (Tab::Settings, "Настройки")]
     } else {
         // One app: play, build and host — settings are under the gear on top and in Профиль.
-        &[(Tab::Home, "Главная"), (Tab::Studio, "Редактор"), (Tab::Server, "Сервер"), (Tab::Skins, "Профиль")]
+        &[(Tab::Home, "Главная"), (Tab::Server, "Сервер"), (Tab::Skins, "Профиль")]
     }
 }
 
@@ -64,10 +64,10 @@ struct Banner {
 }
 
 const BANNERS: [Banner; 4] = [
-    Banner { title: "Целая планета из блоков", text: "Дойдите до ребра куба и шагните на соседнюю грань", button: "Играть", top: Color32::from_rgb(10, 22, 48), bottom: Color32::from_rgb(18, 92, 120), planet: true },
-    Banner { title: "Лук и стрелы", text: "Зажмите, чтобы натянуть тетиву, отпустите — выстрел", button: "Играть", top: Color32::from_rgb(70, 36, 16), bottom: Color32::from_rgb(170, 96, 34), planet: false },
-    Banner { title: "Игра по сети", text: "Создайте сервер на телефоне и позовите друзей", button: "Открыть", top: Color32::from_rgb(28, 22, 70), bottom: Color32::from_rgb(96, 60, 170), planet: false },
-    Banner { title: "Свои текстуры", text: "Встроенные паки 16×–128× и загрузка своих", button: "Настройки", top: Color32::from_rgb(16, 52, 30), bottom: Color32::from_rgb(52, 140, 72), planet: false },
+    Banner { title: "Быстрый бой", text: "Арена, укрытия и волны врагов — сразу в бой", button: "В бой", top: Color32::from_rgb(60, 14, 14), bottom: Color32::from_rgb(170, 40, 30), planet: false },
+    Banner { title: "Арсенал", text: "Винтовка, пистолет, дробовик, снайперка, базука и гранаты", button: "В бой", top: Color32::from_rgb(30, 30, 34), bottom: Color32::from_rgb(90, 96, 104), planet: false },
+    Banner { title: "Бой по сети", text: "Создайте комнату на телефоне и позовите друзей по коду", button: "Открыть", top: Color32::from_rgb(28, 22, 70), bottom: Color32::from_rgb(96, 60, 170), planet: false },
+    Banner { title: "Всё разрушается", text: "Гранаты и ракеты ломают укрытия — стройте и взрывайте", button: "Настройки", top: Color32::from_rgb(70, 40, 10), bottom: Color32::from_rgb(200, 120, 30), planet: false },
 ];
 
 struct Release {
@@ -77,13 +77,8 @@ struct Release {
     points: &'static [&'static str],
 }
 
-const RELEASES: [Release; 6] = [
-    Release { version: "0.3.0", name: "Стройка и мебель", date: "ноябрь 2026", points: &["Дуговое стекло и купола", "Формы и материалы", "Двери и мебель", "Конструктор на верстаке"] },
-    Release { version: "0.2.1", name: "Лаунчер и графика", date: "ноябрь 2026", points: &["Запуск с главной", "Ник под выбором версии", "Прозрачная вода", "Обновления в настройках"] },
-    Release { version: "0.2.0", name: "Кубы и луки", date: "ноябрь 2026", points: &["Кубические планеты", "Лук, стрелы, доспехи", "Новые блоки и двери", "Лаунчер и новый чат"] },
-    Release { version: "0.1.9", name: "Новый HUD", date: "октябрь 2026", points: &["Островок паузы и чата", "Миникарта и карта мира", "Компас вокруг карты"] },
-    Release { version: "0.1.8", name: "Текстурпаки", date: "октябрь 2026", points: &["Паки 16×–128×", "Загрузка своих паков", "Быстрый полёт в космосе"] },
-    Release { version: "0.1.7", name: "Мультиплеер", date: "сентябрь 2026", points: &["Сервер на телефоне", "Приватные миры", "Игра по сети"] },
+const RELEASES: [Release; 1] = [
+    Release { version: "0.1.0", name: "Первый бой", date: "ноябрь 2026", points: &["Быстрый бой на арене", "Шесть видов оружия", "Волны врагов и счёт", "Бой по сети по коду"] },
 ];
 
 struct News {
@@ -94,11 +89,10 @@ struct News {
     icon: u16,
 }
 
-const NEWS: [News; 4] = [
-    News { title: "Инструменты как в Майне", date: "11 ноября", text: "Кирка, топор, лопата и меч держатся в руке по-новому, у каждого свой удар.", color: Color32::from_rgb(230, 150, 50), icon: icon::HAMMER },
-    News { title: "Ровный мир на кубе", date: "11 ноября", text: "Блоки на гранях кубической планеты теперь стоят строго вертикально.", color: Color32::from_rgb(40, 180, 200), icon: icon::CUBE },
-    News { title: "Новый чат", date: "11 ноября", text: "Полупрозрачная панель, ники цветом и кнопка отправки.", color: Color32::from_rgb(140, 100, 230), icon: icon::EDIT },
-    News { title: "Доспехи", date: "10 ноября", text: "Четыре слота доспехов в инвентаре: шлем, нагрудник, поножи и ботинки.", color: Color32::from_rgb(90, 190, 100), icon: icon::STAR },
+const NEWS: [News; 3] = [
+    News { title: "StrikeArena запущена", date: "14 ноября", text: "Шутер на движке WolfCraft: арены из блоков, оружие и разрушаемость.", color: Color32::from_rgb(200, 50, 40), icon: icon::CROSSHAIR },
+    News { title: "Арсенал", date: "14 ноября", text: "Винтовка, пистолет, дробовик, снайперка, базука и гранаты — всё сразу в руках.", color: Color32::from_rgb(120, 126, 136), icon: icon::HAMMER },
+    News { title: "Комнаты по коду", date: "14 ноября", text: "Вкладка «Сервер»: создайте комнату и позовите друзей по коду.", color: Color32::from_rgb(140, 100, 230), icon: icon::GLOBE },
 ];
 
 /// The launcher. `skin` is the selected skin preset.
@@ -119,7 +113,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::hover());
                 icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
+                ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "StrikeArena" }).font(bold_font(20.0)).color(p.text));
                 // Upright phone: room only for the name and the two buttons.
                 let wide = ui.ctx().screen_rect().width() > 480.0;
                 if wide {
@@ -178,14 +172,14 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 ui.horizontal(|ui| {
                     let width = (ui.available_width() - 118.0).max(100.0);
                     egui::ComboBox::from_id_salt("launcher-version")
-                        .width(width).selected_text(format!("WolfCraft {version}"))
+                        .width(width).selected_text(format!("StrikeArena {version}"))
                         .show_ui(ui, |ui| {
                             ui.label(format!("{version} — установлена"));
                             ui.separator();
                             ui.label("Другие версии доступны через обновление APK");
                         });
-                    if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 108.0, true).clicked() {
-                        action = MenuAction::LaunchVersion(version.to_string());
+                    if pill_button(ui, icons, Some(icon::PLAY), "В бой", ButtonKind::Primary, 108.0, true).clicked() {
+                        action = MenuAction::QuickMatch;
                     }
                 });
             });
@@ -385,7 +379,7 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
         *action = match cur {
             2 => MenuAction::OpenNetwork,
             3 => MenuAction::OpenSettings,
-            _ => MenuAction::LaunchVersion(wolfcraft_common::VERSION.to_string()),
+            _ => MenuAction::QuickMatch,
         };
     }
 }

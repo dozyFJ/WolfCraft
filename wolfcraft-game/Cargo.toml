@@ -40,8 +40,8 @@ jni = "0.21"
 oboe = { version = "0.6", features = ["shared-stdcxx"] }
 
 [package.metadata.android]
-package = "com.wolfcraft.mobile"
-apk_name = "WolfCraft"
+package = "com.strikearena.mobile"
+apk_name = "StrikeArena"
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android", "i686-linux-android"]
 
 [package.metadata.android.sdk]
@@ -64,7 +64,7 @@ name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
 name = "android.permission.RECORD_AUDIO"
 
 [package.metadata.android.application]
-label = "WolfCraft"
+label = "StrikeArena"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
 
 [package.metadata.android.application.activity]

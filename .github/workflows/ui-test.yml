@@ -2,7 +2,7 @@ name: UI tap test
 
 on:
   push:
-    branches: [mobile-explosives]
+    branches: [mobile-explosives, strike-arena]
   workflow_dispatch:
 
 jobs:

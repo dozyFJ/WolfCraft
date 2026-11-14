@@ -135,6 +135,9 @@ pub struct GameSession {
     prev_use_held: bool,
     /// The dragon the player rides (index into the creatures).
     pub riding: Option<usize>,
+    /// StrikeArena: cover is built (once per arena world), kills already announced.
+    arena_built: bool,
+    arena_shown: u32,
     /// A ritual of revival going on at an altar: (guardian, altar, seconds since it began).
     pub ritual: Option<(wolfcraft_engine::bosses::BossKind, wolfcraft_engine::cubesphere::Cell, f32)>,
     attack_cd: f32,
@@ -229,6 +232,8 @@ impl GameSession {
             tp_dist: 4.2,
             mobs: wolfcraft_engine::mobs::MobManager::new(seed),
             riding: None,
+            arena_built: false,
+            arena_shown: 0,
             ritual: None,
             attack_cd: 0.0,
             death_burst_done: false,
@@ -282,6 +287,13 @@ impl GameSession {
         };
         // Studio baseplates stay empty: no creatures appear.
         s.mobs.spawning = s.cfg.world_type != wolfcraft_engine::config::WorldType::Baseplate;
+        // StrikeArena: enemies all the time, the full arsenal in hand.
+        if s.cfg.arena {
+            s.mobs.spawning = true;
+            s.mobs.arena = true;
+            s.arena_built = s.dir.join("arena.done").exists();
+            s.arena_loadout();
+        }
         s.storage_bank=wolfcraft_engine::storage_bank::StorageBank::load(&s.dir.join("storage_bank.bin"));
         s.boss_book=wolfcraft_engine::bosses::BossBook::load(&s.dir.join("bosses.txt"));
         s.load_containers();
@@ -461,6 +473,7 @@ impl GameSession {
 
         // Riding a dragon: the stick steers it, «Прыжок» climbs, «Присесть» dives.
         self.tick_ride(input, dt);
+        self.tick_arena();
         // Resting: asleep (the night passes in a few seconds) or sitting until you move.
         let resting = self.tick_rest(input, dt);
         // Physics, split into steps of at most 1/30 s.
@@ -2031,6 +2044,122 @@ impl GameSession {
     fn next_arrow(&self) -> Option<wolfcraft_engine::items::ItemId> {
         use wolfcraft_engine::items::ids;
         self.player.inventory.slots.iter().flatten().map(|s| s.id).find(|id| *id == ids::ARROW || (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(id))
+    }
+
+    /// StrikeArena: every weapon with ammo in the hotbar (on start and after each respawn).
+    pub fn arena_loadout(&mut self) {
+        use wolfcraft_engine::items::{ItemStack, ids};
+        let kit = [
+            (ids::RIFLE, 1),
+            (ids::PISTOL, 1),
+            (ids::SHOTGUN, 1),
+            (ids::SNIPER, 1),
+            (ids::BAZOOKA, 1),
+            (ids::GRENADE, 8),
+            (ids::BULLETS, 64),
+            (ids::SHELLS, 32),
+            (ids::ROCKET, 8),
+            (ids::BULLETS, 64),
+            (ids::BULLETS, 64),
+        ];
+        for (i, (id, n)) in kit.iter().enumerate() {
+            if i < self.player.inventory.slots.len() {
+                self.player.inventory.slots[i] = Some(ItemStack::new(*id, *n));
+            }
+        }
+        self.player.inventory.selected = 0;
+    }
+
+    /// StrikeArena: builds the cover once the ground is there, announces kills.
+    fn tick_arena(&mut self) {
+        if !self.cfg.arena {
+            return;
+        }
+        if !self.arena_built && self.ground_ready() {
+            self.arena_built = true;
+            self.build_arena_cover();
+            let _ = std::fs::write(self.dir.join("arena.done"), "1");
+        }
+        if self.mobs.kills != self.arena_shown {
+            self.arena_shown = self.mobs.kills;
+            self.item_name = Some((format!("Убийств: {}", self.mobs.kills), 2.0));
+        }
+    }
+
+    /// A round arena around the spawn: a wall with gates, crates, pillars and low walls to hide
+    /// behind, a tower in the middle.
+    fn build_arena_cover(&mut self) {
+        use wolfcraft_engine::block::Block as B;
+        let g = self.chunks.grid();
+        let mid = g.world_to_cell(self.player.body.pos);
+        let mut cells = Vec::new();
+        let mut put = |di: i32, dj: i32, dk: i32, b: B| {
+            if let Some(c) = g.offset(mid, di, dj, dk) {
+                cells.push((c, b));
+            }
+        };
+        const R: i32 = 30;
+        for di in -R..=R {
+            for dj in -R..=R {
+                let d2 = di * di + dj * dj;
+                if d2 > R * R + R || d2 < (R - 1) * (R - 1) {
+                    continue;
+                }
+                let gate = di.abs() <= 2 || dj.abs() <= 2;
+                for dk in 0..5 {
+                    if !(gate && dk < 3) {
+                        put(di, dj, dk, if dk == 4 { B::SmoothStone } else { B::StoneBricks });
+                    }
+                }
+            }
+        }
+        // Scattered cover, the same for one world (seeded).
+        let mut h = self.cfg.seed ^ 0xA7E4A;
+        let mut rnd = |n: i32| {
+            h ^= h << 13;
+            h ^= h >> 7;
+            h ^= h << 17;
+            (h % n as u64) as i32
+        };
+        for _ in 0..36 {
+            let (di, dj) = (rnd(2 * R - 8) - (R - 4), rnd(2 * R - 8) - (R - 4));
+            if di.abs() < 5 && dj.abs() < 5 {
+                continue;
+            }
+            match rnd(3) {
+                // Crate 2×2×2.
+                0 => {
+                    for (a, b, k) in [(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0), (0, 0, 1), (1, 0, 1), (0, 1, 1), (1, 1, 1)] {
+                        put(di + a, dj + b, k, B::OakPlanks);
+                    }
+                }
+                // Pillar.
+                1 => {
+                    for k in 0..4 {
+                        put(di, dj, k, B::Cobblestone);
+                    }
+                }
+                // Low wall.
+                _ => {
+                    let along = rnd(2) == 0;
+                    for s in -2..=2 {
+                        let (a, b) = if along { (s, 0) } else { (0, s) };
+                        put(di + a, dj + b, 0, B::Bricks);
+                        put(di + a, dj + b, 1, B::Bricks);
+                    }
+                }
+            }
+        }
+        // Tower in the middle, a little off the spawn: a ladder of blocks up the side.
+        for k in 0..6 {
+            for (a, b) in [(6, 6), (7, 6), (6, 7), (7, 7)] {
+                put(a, b, k, B::StoneBricks);
+            }
+        }
+        for k in 0..6 {
+            put(5, 6 + (k % 2), k, if k % 2 == 0 { B::OakPlanks } else { B::Air });
+        }
+        let _ = crate::worldedit::apply(self, cells);
     }
 
     /// The ritual of revival at an altar, about six seconds:
