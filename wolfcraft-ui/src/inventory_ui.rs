@@ -196,8 +196,10 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         let by_width = (sw - 30.0) / 12.0;
         let cell = by_height.min(by_width).clamp(40.0, 84.0).floor();
         let sidebar = (cell * 0.92).floor() + 16.0;
-        let rows = (((h - 46.0 - cell - 10.0 + GAP) / (cell + GAP)).floor() as usize).clamp(2, 9);
-        let cols = (((sw - sidebar - 14.0 + GAP) / (cell + GAP)).floor() as usize).clamp(9, 24);
+        let rows = (((h - 46.0 + GAP) / (cell + GAP)).floor() as usize).clamp(2, 9);
+        // The hotbar and the bin are a two-column sidebar on the right.
+        let right = 2.0 * cell + GAP + 10.0;
+        let cols = (((sw - sidebar - right - 14.0 + GAP) / (cell + GAP)).floor() as usize).clamp(4, 24);
         let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;
         let esc = crate::ui_components::full_screen(ctx, "inventory", |ui| {
             creative_layout(ui, icons, &p, state, inv, cell, rows, cols, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
@@ -612,7 +614,7 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     let palette_all = items::creative_palette();
     // ---- Categories: a vertical sidebar on the left (scrolls if the screen is short) ----
     let tab = (cell * 0.92).floor();
-    let content_h = ui.available_height().max(30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + 10.0 + cell);
+    let content_h = ui.available_height().max(30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP);
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         // Top-down column (a plain child of the horizontal row would lay the tabs out in a row).
@@ -667,10 +669,41 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 }
             });
         });
-        ui.vertical(|ui| {
+        ui.allocate_ui_with_layout(Vec2::new(grid_w, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_width(grid_w);
             creative_main(ui, icons, p, state, inv, cell, rows, cols, grid_w, palette_all, slot_rects, trash_rect, result);
         });
+        // ---- Hotbar + bin: a sidebar on the right, two columns going down ----
+        let s = ((content_h - 4.0 * GAP) / 5.0).min(cell).floor();
+        ui.allocate_ui_with_layout(Vec2::new(2.0 * s + GAP, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+            hotbar_column(ui, icons, p, state, inv, s, slot_rects, trash_rect);
+        });
     });
+}
+
+/// The hotbar as a 2×5 column (slots 1–9 top-down, left then right) with the bin last.
+#[allow(clippy::too_many_arguments)]
+fn hotbar_column(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, s: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>) {
+    let origin = ui.cursor().min;
+    let (_, _) = ui.allocate_exact_size(Vec2::new(2.0 * s + GAP, 5.0 * s + 4.0 * GAP), Sense::hover());
+    let at = |i: usize| Rect::from_min_size(origin + Vec2::new((i / 5) as f32 * (s + GAP), (i % 5) as f32 * (s + GAP)), Vec2::splat(s));
+    for slot in 0..HOTBAR {
+        let rect = at(slot);
+        slot_rects.push((slot, rect));
+        draw_slot(ui, icons, p, state, inv, slot, rect);
+    }
+    let rect = at(9);
+    let resp = ui.interact(rect, Id::new("inv-bin"), Sense::click());
+    let hot = resp.hovered() || state.drag_slot.is_some();
+    ui.painter().rect_filled(rect, Rounding::same(10.0), p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
+    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, p.danger.gamma_multiply(0.7)));
+    icons.paint(ui.painter(), rect.shrink(s * 0.24), icon::TRASH, p.danger);
+    // Tap: delete the item in the selected hotbar slot. Or drag any slot here.
+    if resp.clicked() {
+        inv.slots[inv.selected] = None;
+    }
+    resp.on_hover_text("Удалить: нажмите — предмет в выбранном слоте, или перетащите сюда");
+    *trash_rect = Some(rect);
 }
 
 /// One cell of the creative grid.
@@ -732,11 +765,11 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
     // The grid takes all the height left above the hotbar (a cut-off last row shows there
     // is more to scroll), so no empty band stays under the hotbar.
     let _ = rows;
-    let grid_h = (ui.available_height() - 10.0 - cell - 6.0).max(cell);
+    let grid_h = (ui.available_height() - 4.0).max(cell);
     if state.tab == BACKPACK_TAB && !state.search_open {
         // The survival inventory inside the creative one: armor, second hand, 2x2 crafting,
         // backpack and hotbar (scrolls on small screens).
-        let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h + 10.0 + cell), Sense::hover());
+        let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
         egui::ScrollArea::vertical().id_salt("creative-survival-inv").auto_shrink([false, false]).show(&mut ui2, |ui| {
             if let Some(msg) = survival_layout(ui, icons, p, state, inv, false, grid_w - 16.0, slot_rects) {
@@ -825,30 +858,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             }
         });
     }
-    ui.add_space(10.0);
-    // ---- Hotbar + bin ----
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-        for slot in 0..HOTBAR {
-            let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
-            slot_rects.push((slot, rect));
-            draw_slot(ui, icons, p, state, inv, slot, rect);
-        }
-        // The bin sits at the right edge of the full-width grid.
-        let used = HOTBAR as f32 * (cell + GAP);
-        ui.add_space((grid_w - used - cell - 14.0).max(14.0 - GAP));
-        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
-        let hot = resp.hovered() || state.drag_slot.is_some();
-        ui.painter().rect_filled(rect, Rounding::same(10.0), p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
-        ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, p.danger.gamma_multiply(0.7)));
-        icons.paint(ui.painter(), rect.shrink(cell * 0.24), icon::TRASH, p.danger);
-        // Tap: delete the item in the selected hotbar slot. Or drag any slot here.
-        if resp.clicked() {
-            inv.slots[inv.selected] = None;
-        }
-        resp.on_hover_text("Удалить: нажмите — предмет в выбранном слоте, или перетащите сюда");
-        *trash_rect = Some(rect);
-    });
+    let _ = (trash_rect, slot_rects.len());
 }
 
 /// Survival crafting: grid → arrow → result. Click the result to craft, Shift+click for all.
