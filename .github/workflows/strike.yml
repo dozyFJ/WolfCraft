@@ -1,0 +1,73 @@
+name: Strike Arena APK
+
+on:
+  push:
+    branches: [shadow-fight]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: strike-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust + Android target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: strike
+
+      - name: Map, shooting, bots, shader
+        run: cargo test -p strikearena --lib -- --nocapture
+
+      - name: cargo-apk
+        run: cargo install cargo-apk --locked || cargo install cargo-apk
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018'
+
+      - name: Build APK (arm64)
+        env:
+          CARGO_APK_RELEASE_KEYSTORE: ${{ github.workspace }}/ci/wolfcraft-release.keystore
+          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: android
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/27.2.12479018"
+          unset ANDROID_SDK_ROOT
+          cargo apk build -p strikearena --lib --release --target aarch64-linux-android
+          cp target/release/apk/StrikeArena.apk StrikeArena.apk
+          ls -lh StrikeArena.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs StrikeArena.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StrikeArena-apk
+          path: StrikeArena.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete strike-arena-3d -y --cleanup-tag || true
+          gh release create strike-arena-3d StrikeArena.apk --prerelease --target "$GITHUB_SHA" \
+            --title "Strike Arena 3D (#${{ github.run_number }})" \
+            --notes "Тестовая сборка «Strike Arena 3D». ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."
