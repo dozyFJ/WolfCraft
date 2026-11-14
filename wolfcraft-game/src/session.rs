@@ -489,7 +489,15 @@ impl GameSession {
                 let reach = Interaction::reach(&self.player) - 1.5;
                 self.mobs.raycast(eye, d, reach).is_some_and(|(_, t)| self.hit.is_none_or(|h| t < h.dist + 0.5))
             });
-            events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held && !creature_first, dt, self.cfg.seed));
+            // Firearms and launchers never dig: the screen is for aiming.
+            let gun = self.player.inventory.held().and_then(|s| wolfcraft_engine::explosives::weapon(s.id).map(|_| s.id)).filter(|id| *id != wolfcraft_engine::items::ids::GRENADE);
+            events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held && !creature_first && gun.is_none(), dt, self.cfg.seed));
+            // Automatic weapons fire while the trigger (or the finger) is held.
+            if let Some(id) = gun.filter(|id| wolfcraft_engine::explosives::firearm(*id).is_some_and(|f| f.auto)) {
+                if (input.use_held || input.break_held) && !input.use_pressed && self.explosives.ready() {
+                    events.push(InteractionEvent::Fire { weapon: id });
+                }
+            }
             // A tap on a creature in the crosshair hits it (touch screens: a short tap is "use").
             if input.use_pressed && !self.try_attack(0.25) {
                 used_stack=self.player.inventory.held();
@@ -832,7 +840,17 @@ impl GameSession {
                     if !creative {
                         self.player.inventory.take(ammo, 1);
                     }
-                    self.explosives.fire(kind, eye, look, speed, cooldown);
+                    if let Some(gun) = wolfcraft_engine::explosives::firearm(id) {
+                        self.explosives.fire_gun(gun, eye, look);
+                        // Muzzle flash and a wisp of smoke in front of the eye.
+                        let up = wolfcraft_engine::physics::up_at(eye);
+                        let muzzle = eye + look * 0.9 - up * 0.15;
+                        self.mobs.fx_glow(muzzle, look * 2.0, [1.0, 0.80, 0.35], 0.08, 0.06, wolfcraft_engine::mobs::FxKind::Rise);
+                        self.mobs.fx(muzzle, look * 0.6 + up * 0.3, [0.70, 0.70, 0.68], 0.08, 0.5, wolfcraft_engine::mobs::FxKind::Rise);
+                    } else {
+                        let _ = kind;
+                        self.explosives.fire(kind, eye, look, speed, cooldown);
+                    }
                     keep.push(e);
                 }
                 other => keep.push(other),
@@ -842,6 +860,32 @@ impl GameSession {
 
         let targets: Vec<DVec3> = self.mobs.mobs.iter().map(|m| m.centre()).collect();
         let (blasts, broken) = self.explosives.update(&mut self.chunks, &targets, dt);
+        // Bullets: creatures take the damage, walls get a puff of dust and sparks.
+        for h in std::mem::take(&mut self.explosives.hits) {
+            match h.target {
+                Some(i) if i < self.mobs.mobs.len() && self.mobs.mobs[i].hp > 0.0 => {
+                    let from = h.pos - (self.mobs.mobs[i].centre() - h.pos).normalize_or_zero();
+                    events.push(InteractionEvent::BulletHit { at: h.pos, creature: true });
+                    if let Some(kind) = self.mobs.hurt(i, h.damage, from) {
+                        let at = self.mobs.mobs[i].body.pos;
+                        for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64 ^ i as u64) {
+                            self.drops.pop_from_block(drop, at);
+                        }
+                        self.player.survival.add_xp(if kind.hostile() { 5 } else { 1 });
+                    }
+                }
+                _ => {
+                    events.push(InteractionEvent::BulletHit { at: h.pos, creature: false });
+                    let up = wolfcraft_engine::physics::up_at(h.pos);
+                    for k in 0..4 {
+                        let a = k as f64 * 1.57 + self.clock as f64;
+                        let side = DVec3::new(a.cos(), (a * 1.3).sin(), a.sin());
+                        self.mobs.fx_glow(h.pos, side * 2.5 + up * 1.5, [1.0, 0.85, 0.45], 0.04, 0.18, wolfcraft_engine::mobs::FxKind::Rise);
+                    }
+                    self.mobs.fx(h.pos, up * 0.5, [0.55, 0.53, 0.50], 0.10, 0.6, wolfcraft_engine::mobs::FxKind::Rise);
+                }
+            }
+        }
         // Smoke behind rockets.
         let rockets: Vec<DVec3> = self.explosives.rockets().collect();
         for p in rockets {

@@ -187,7 +187,9 @@ fn main() {
     let port = arg_value(&args, "--port").and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
     // `--data`: where worlds live (the phone app passes its own files folder).
     let data = arg_value(&args, "--data").map(PathBuf::from).unwrap_or_else(data_dir);
-    let dir = data.join("worlds").join(slugify(&name));
+    // `--world <id>`: a place made in WolfStudio (its folder name); otherwise by the name.
+    let world_id = arg_value(&args, "--world").filter(|w| !w.trim().is_empty() && !w.contains(['/', '\\', '.']));
+    let dir = data.join("worlds").join(world_id.clone().unwrap_or_else(|| slugify(&name)));
 
     // Existing world: keep its settings. New world: create them.
     let cfg = match WorldConfig::load(&dir) {
@@ -195,7 +197,8 @@ fn main() {
         Err(_) => {
             let seed = arg_value(&args, "--seed").and_then(|s| s.parse::<i64>().ok()).map(|s| s as u64).unwrap_or_else(|| wolfcraft_common::platform::unix_now().wrapping_mul(6364136223846793005));
             let mut c = WorldConfig::new(&name, seed);
-            c.id = slugify(&name);
+            c.id = world_id.clone().unwrap_or_else(|| slugify(&name));
+            c.studio_project = true;
             // A new server world is a place, like in Roblox Studio: an empty flat baseplate
             // without structures. `--planet` makes an ordinary WolfCraft planet instead.
             if args.iter().any(|a| a == "--planet") {

@@ -440,7 +440,8 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     let _ = version;
     let form_id = Id::new("studio-new-form");
     let mut form: Option<(String, u8)> = ui.ctx().data(|d| d.get_temp(form_id)).unwrap_or(None);
-    let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project).collect();
+    // In the WolfStudio app every world is a server (its own folder, apart from game worlds).
+    let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project || is_studio_app()).collect();
 
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Мои серверы").font(bold_font(22.0)).color(p.text));

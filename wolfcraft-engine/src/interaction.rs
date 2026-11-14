@@ -44,6 +44,8 @@ pub enum InteractionEvent {
     Ignite { pos: Cell },
     /// Use with a grenade launcher, bazooka or grenade. Kept only if a shot was fired.
     Fire { weapon: items::ItemId },
+    /// A bullet struck a creature or a surface (for the hit sound and marker).
+    BulletHit { at: glam::DVec3, creature: bool },
     /// A blast at a world point (sound, particles); `power` is its radius in blocks.
     Exploded { at: glam::DVec3, power: f32 },
     /// A block destroyed by a blast (sync, chips), without the usual break sound.

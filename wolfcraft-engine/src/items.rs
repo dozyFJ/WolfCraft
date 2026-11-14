@@ -88,7 +88,14 @@ pub mod ids {
     pub const EGG_LAST: ItemId = 364;
     pub const PET_BASE: ItemId = 365;
     pub const PET_LAST: ItemId = 374;
-    pub const LAST: ItemId = 374;
+    // Firearms and their ammunition.
+    pub const PISTOL: ItemId = 375;
+    pub const RIFLE: ItemId = 376;
+    pub const SHOTGUN: ItemId = 377;
+    pub const SNIPER: ItemId = 378;
+    pub const BULLETS: ItemId = 379;
+    pub const SHELLS: ItemId = 380;
+    pub const LAST: ItemId = 380;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -208,6 +215,12 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::GRENADE_LAUNCHER => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Гранатомёт", sp::GRENADE_LAUNCHER) },
         ids::ROCKET => ItemInfo { max_stack: 16, ..plain("Ракета", sp::ROCKET) },
         ids::BAZOOKA => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Базука", sp::BAZOOKA) },
+        ids::PISTOL => ItemInfo { max_stack: 1, attack: 2.0, ..plain("Пистолет", sp::PISTOL) },
+        ids::RIFLE => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Автомат", sp::RIFLE) },
+        ids::SHOTGUN => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Дробовик", sp::SHOTGUN) },
+        ids::SNIPER => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Снайперская винтовка", sp::SNIPER) },
+        ids::BULLETS => ItemInfo { max_stack: 64, ..plain("Патроны", sp::BULLETS) },
+        ids::SHELLS => ItemInfo { max_stack: 32, ..plain("Дробь", sp::SHELLS) },
         ids::BOW => ItemInfo { max_stack: 1, durability: 384, ..plain("Лук", sp::BOW) },
         ids::ARROW => plain("Стрела", sp::ARROW),
         ids::STRING => plain("Нить", sp::STRING),
@@ -553,7 +566,7 @@ pub fn category(id: ItemId) -> &'static str {
         if (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id) {
             return "Вооружение";
         }
-        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD | ids::GUNPOWDER | ids::LIGHTER | ids::GRENADE | ids::GRENADE_LAUNCHER | ids::ROCKET | ids::BAZOOKA) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
+        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD | ids::GUNPOWDER | ids::LIGHTER | ids::GRENADE | ids::GRENADE_LAUNCHER | ids::ROCKET | ids::BAZOOKA | ids::PISTOL | ids::RIFLE | ids::SHOTGUN | ids::SNIPER | ids::BULLETS | ids::SHELLS) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
             return "Вооружение";
         }
         return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };

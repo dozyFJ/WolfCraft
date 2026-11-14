@@ -69,6 +69,10 @@ pub enum Sfx {
     /// Grenade launcher / bazooka shot.
     Launch,
     Explosion,
+    /// Gunshots: 0 pistol, 1 rifle, 2 shotgun, 3 sniper rifle.
+    Shot(u8),
+    /// A bullet hitting a creature: a short thwack.
+    BulletHit,
 }
 
 const RATE: u32 = 44100;
@@ -219,6 +223,21 @@ fn synth(s: Sfx) -> Vec<f32> {
         Sfx::Pop => sweep(0.07, 620.0, 1100.0, 6.0).into_iter().map(|v| v * 0.5).collect(),
         Sfx::Fuse => burst(0.7, 0.85, 1.5, 107).into_iter().map(|v| v * 0.45).collect(),
         Sfx::Launch => mix(&burst(0.30, 0.55, 5.0, 113), &sweep(0.25, 320.0, 110.0, 4.0), 0.6),
+        // Gunshot: a very sharp crack, a short body and a dry tail; heavier guns go lower and
+        // longer.
+        Sfx::Shot(k) => {
+            let (len, crack, body, tail) = match k {
+                0 => (0.16, 0.95, (520.0, 180.0), 0.10),
+                1 => (0.12, 0.90, (600.0, 220.0), 0.08),
+                2 => (0.32, 0.80, (260.0, 70.0), 0.30),
+                _ => (0.45, 1.0, (320.0, 60.0), 0.45),
+            };
+            let c = burst(0.035, crack, 22.0, 201 + k as u32);
+            let b = sweep(len, body.0, body.1, 7.0);
+            let t = burst(len + tail, 0.10, 3.0, 211 + k as u32);
+            mix(&mix(&c, &b, 0.9), &t, 0.6)
+        }
+        Sfx::BulletHit => mix(&ring(0.06, &[(170.0, 0.6)], 9.0), &burst(0.05, 0.5, 12.0, 223), 0.6),
         // A blast: a sharp crack, a deep falling boom, a long rumble and falling debris.
         Sfx::Explosion => {
             let crack = burst(0.12, 0.85, 14.0, 127);
@@ -282,6 +301,8 @@ fn room_for(s: Sfx) -> f32 {
         Sfx::Dig(_) | Sfx::Hit | Sfx::Pop | Sfx::Eat => 0.3,
         Sfx::Explosion => 1.0,
         Sfx::Launch | Sfx::Break(_) => 0.6,
+        Sfx::Shot(_) => 0.75,
+        Sfx::BulletHit => 0.2,
         _ => 0.45,
     }
 }
@@ -303,7 +324,7 @@ impl Audio {
                 (None, None)
             }
         };
-        let mut all = vec![Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit, Sfx::Pop, Sfx::Fuse, Sfx::Launch, Sfx::Explosion];
+        let mut all = vec![Sfx::Hurt, Sfx::Eat, Sfx::Splash, Sfx::Hit, Sfx::Pop, Sfx::Fuse, Sfx::Launch, Sfx::Explosion, Sfx::Shot(0), Sfx::Shot(1), Sfx::Shot(2), Sfx::Shot(3), Sfx::BulletHit];
         for m in Mat::ALL {
             all.extend([Sfx::Break(m), Sfx::Place(m), Sfx::Step(m), Sfx::Dig(m)]);
         }

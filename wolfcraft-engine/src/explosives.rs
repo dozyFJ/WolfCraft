@@ -28,6 +28,9 @@ const ROCKET_GRAVITY: f64 = 1.5;
 /// Projectiles explode by themselves after this many seconds.
 const GRENADE_LIFE: f32 = 4.0;
 const ROCKET_LIFE: f32 = 6.0;
+/// Bullets drop a little and vanish after a second and a half (about 200 blocks).
+const BULLET_GRAVITY: f64 = 3.0;
+const BULLET_LIFE: f32 = 1.5;
 /// Hard cap of live projectiles and lit charges (protects against huge chain reactions).
 const MAX_LIVE: usize = 256;
 
@@ -35,6 +38,8 @@ const MAX_LIVE: usize = 256;
 pub enum ShotKind {
     Grenade,
     Rocket,
+    /// A bullet or shotgun pellet: fast, nearly straight, hurts what it hits, no blast.
+    Bullet,
 }
 
 impl ShotKind {
@@ -42,6 +47,7 @@ impl ShotKind {
         match self {
             ShotKind::Grenade => GRENADE_POWER,
             ShotKind::Rocket => ROCKET_POWER,
+            ShotKind::Bullet => 0.0,
         }
     }
 }
@@ -53,6 +59,40 @@ pub struct Shot {
     pub pos: DVec3,
     pub vel: DVec3,
     pub age: f32,
+    /// Damage of a bullet that hits a creature (unused by grenades and rockets).
+    pub damage: f32,
+}
+
+/// A bullet hit: where, which target (index in `targets` of `update`) and how hard.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BulletHit {
+    pub pos: DVec3,
+    pub target: Option<usize>,
+    pub damage: f32,
+}
+
+/// Firearm stats: ammo, bullet damage, pellets per shot, spread (radians), muzzle speed,
+/// seconds between shots, automatic (fires while held).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Firearm {
+    pub ammo: ItemId,
+    pub damage: f32,
+    pub pellets: u32,
+    pub spread: f64,
+    pub speed: f64,
+    pub cooldown: f32,
+    pub auto: bool,
+}
+
+pub fn firearm(id: ItemId) -> Option<Firearm> {
+    let f = |ammo, damage, pellets, spread, speed, cooldown, auto| Some(Firearm { ammo, damage, pellets, spread, speed, cooldown, auto });
+    match id {
+        ids::PISTOL => f(ids::BULLETS, 6.0, 1, 0.012, 140.0, 0.28, false),
+        ids::RIFLE => f(ids::BULLETS, 4.5, 1, 0.022, 170.0, 0.11, true),
+        ids::SHOTGUN => f(ids::SHELLS, 3.0, 8, 0.075, 110.0, 0.85, false),
+        ids::SNIPER => f(ids::BULLETS, 22.0, 1, 0.0, 260.0, 1.3, false),
+        _ => None,
+    }
 }
 
 /// A lit dynamite charge (the block is already gone from the world).
@@ -75,13 +115,15 @@ pub fn weapon(id: ItemId) -> Option<(ItemId, ShotKind, f64, f32)> {
         ids::GRENADE_LAUNCHER => Some((ids::GRENADE, ShotKind::Grenade, 28.0, 0.8)),
         ids::BAZOOKA => Some((ids::ROCKET, ShotKind::Rocket, 45.0, 1.5)),
         ids::GRENADE => Some((ids::GRENADE, ShotKind::Grenade, 15.0, 0.6)),
-        _ => None,
+        _ => firearm(id).map(|f| (f.ammo, ShotKind::Bullet, f.speed, f.cooldown)),
     }
 }
 
 pub struct Explosives {
     pub lit: Vec<Lit>,
     pub shots: Vec<Shot>,
+    /// Bullet hits since the last `take_hits` (the session hurts creatures and shows sparks).
+    pub hits: Vec<BulletHit>,
     cooldown: f32,
     /// Cooldown of the last shot (for the reload animation).
     last_cooldown: f32,
@@ -90,7 +132,7 @@ pub struct Explosives {
 
 impl Explosives {
     pub fn new(seed: u64) -> Self {
-        Self { lit: Vec::new(), shots: Vec::new(), cooldown: 0.0, last_cooldown: 0.0, rng: splitmix(seed ^ 0xB00F) }
+        Self { lit: Vec::new(), shots: Vec::new(), hits: Vec::new(), cooldown: 0.0, last_cooldown: 0.0, rng: splitmix(seed ^ 0xB00F) }
     }
 
     fn rand(&mut self) -> f64 {
@@ -115,7 +157,23 @@ impl Explosives {
         if self.shots.len() >= MAX_LIVE {
             return;
         }
-        self.shots.push(Shot { kind, pos: from + dir * 0.6, vel: dir * speed, age: 0.0 });
+        self.shots.push(Shot { kind, pos: from + dir * 0.6, vel: dir * speed, age: 0.0, damage: 0.0 });
+    }
+
+    /// Fires a firearm from `from` along `dir`: one bullet, or a spread of pellets.
+    pub fn fire_gun(&mut self, gun: Firearm, from: DVec3, dir: DVec3) {
+        self.cooldown = gun.cooldown;
+        self.last_cooldown = gun.cooldown;
+        let side = dir.any_orthonormal_vector();
+        let up = dir.cross(side);
+        for _ in 0..gun.pellets {
+            if self.shots.len() >= MAX_LIVE {
+                break;
+            }
+            let (a, r) = (self.rand() * std::f64::consts::TAU, self.rand().sqrt() * gun.spread);
+            let d = (dir + (side * a.cos() + up * a.sin()) * r).normalize();
+            self.shots.push(Shot { kind: ShotKind::Bullet, pos: from + d * 0.4, vel: d * gun.speed, age: 0.0, damage: gun.damage });
+        }
     }
 
     /// Lights the dynamite block at `cell`: the block disappears and a charge starts counting.
@@ -153,22 +211,46 @@ impl Explosives {
             let mut s = self.shots[i];
             s.age += dt;
             let up = up_at(s.pos);
-            let g = if s.kind == ShotKind::Grenade { GRENADE_GRAVITY } else { ROCKET_GRAVITY };
+            let g = match s.kind {
+                ShotKind::Grenade => GRENADE_GRAVITY,
+                ShotKind::Rocket => ROCKET_GRAVITY,
+                ShotKind::Bullet => BULLET_GRAVITY,
+            };
             s.vel -= up * g * dtd;
             let d = s.vel * dtd;
             // Sub-steps so fast rockets do not pass through thin walls.
             let n = (d.length() / 0.4).ceil().max(1.0) as i32;
             let mut hit = None;
+            let mut target = None;
+            let reach = if s.kind == ShotKind::Bullet { 0.6 } else { 0.8 };
             for k in 1..=n {
                 let p = s.pos + d * (k as f64 / n as f64);
                 let b = world.block_at_world(p);
-                if b.is_solid() || b == Block::Lava || targets.iter().any(|t| (*t - p).length_squared() < 0.8 * 0.8) {
+                target = targets.iter().position(|t| (*t - p).length_squared() < reach * reach);
+                if b.is_solid() || b == Block::Lava || target.is_some() {
                     // Explode just in front of the surface, so the blast is not buried in it.
                     hit = Some(s.pos + d * ((k - 1) as f64 / n as f64));
                     break;
                 }
             }
-            let life = if s.kind == ShotKind::Grenade { GRENADE_LIFE } else { ROCKET_LIFE };
+            let life = match s.kind {
+                ShotKind::Grenade => GRENADE_LIFE,
+                ShotKind::Rocket => ROCKET_LIFE,
+                ShotKind::Bullet => BULLET_LIFE,
+            };
+            if s.kind == ShotKind::Bullet {
+                if let Some(p) = hit {
+                    self.hits.push(BulletHit { pos: p, target, damage: s.damage });
+                }
+                if hit.is_some() || s.age > life {
+                    self.shots.swap_remove(i);
+                    continue;
+                }
+                s.pos += d;
+                self.shots[i] = s;
+                i += 1;
+                continue;
+            }
             if let Some(p) = hit {
                 blasts.push(Blast { pos: p, power: s.kind.power() });
                 self.shots.swap_remove(i);
@@ -247,8 +329,10 @@ impl Explosives {
             let (color, size) = match s.kind {
                 ShotKind::Grenade => ([0.25, 0.38, 0.18], 0.26),
                 ShotKind::Rocket => ([0.60, 0.62, 0.66], 0.32),
+                // A bright tracer.
+                ShotKind::Bullet => ([1.0, 0.85, 0.45], 0.07),
             };
-            v.push(Debris { pos: s.pos, vel: s.vel, color, size, age: 0.0, spin: s.age * 4.0, kind: FxKind::Fall, glow: false });
+            v.push(Debris { pos: s.pos, vel: s.vel, color, size, age: 0.0, spin: s.age * 4.0, kind: FxKind::Fall, glow: s.kind == ShotKind::Bullet });
         }
         v
     }
@@ -315,6 +399,10 @@ mod tests {
         assert_eq!(weapon(ids::BAZOOKA).map(|w| w.0), Some(ids::ROCKET));
         assert_eq!(weapon(ids::GRENADE_LAUNCHER).map(|w| w.0), Some(ids::GRENADE));
         assert!(weapon(ids::STICK).is_none());
+        let pistol = firearm(ids::PISTOL).unwrap();
+        assert_eq!(weapon(ids::PISTOL).map(|w| (w.0, w.1)), Some((ids::BULLETS, ShotKind::Bullet)));
+        assert_eq!(firearm(ids::SHOTGUN).unwrap().ammo, ids::SHELLS);
+        assert!(firearm(ids::RIFLE).unwrap().auto && !pistol.auto);
     }
 
     #[test]
@@ -360,6 +448,29 @@ mod tests {
         }
         assert_eq!(blasts.len(), 1);
         assert!(e.shots.is_empty());
+    }
+
+    #[test]
+    fn bullets_hit_targets_and_leave_blocks_alone() {
+        let (mut w, _) = world();
+        let start = w.grid.cell_center(Cell::new(4, 15, 15, 60));
+        let down = -up_at(start);
+        // A creature between the muzzle and the slab takes the bullet.
+        let target = start + down * 4.0;
+        let mut e = Explosives::new(4);
+        e.fire_gun(firearm(ids::PISTOL).unwrap(), start, down);
+        let before = w.blocks.len();
+        for _ in 0..30 {
+            let (blasts, broken) = e.update(&mut w, &[target], 1.0 / 60.0);
+            assert!(blasts.is_empty() && broken.is_empty());
+        }
+        assert_eq!(e.hits.len(), 1);
+        assert_eq!(e.hits[0].target, Some(0));
+        assert_eq!(w.blocks.len(), before);
+        // A shotgun shell is a spread of pellets.
+        let mut e = Explosives::new(5);
+        e.fire_gun(firearm(ids::SHOTGUN).unwrap(), start, down);
+        assert_eq!(e.shots.len(), 8);
     }
 
     #[test]

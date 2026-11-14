@@ -171,6 +171,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        startPlaceFromStudio()
         polling = true
         Thread { pollLoop() }.start()
         handler.post(tick)
@@ -464,6 +465,25 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             Toast.makeText(this, "Студия не открылась: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    /** «Запустить» on a place in the studio leaves its folder name here: run it as the server. */
+    private fun startPlaceFromStudio() {
+        val f = java.io.File(filesDir, "start_server.txt")
+        val id = try { f.readText().trim() } catch (_: Exception) { return }
+        f.delete()
+        if (id.isEmpty()) return
+        val name = try {
+            java.io.File(filesDir, "wolfserver/worlds/$id/world.toml").readLines()
+                .firstOrNull { it.trim().startsWith("name") }?.substringAfter("=")?.trim()?.trim('"') ?: id
+        } catch (_: Exception) { id }
+        val go = { ServerService.start(this, name, true, id) }
+        if (ServerService.running()) {
+            ServerService.stop(this)
+            handler.postDelayed({ go() }, 1500)
+        } else go()
+        selectTab(1)
+        Toast.makeText(this, "Запуск сервера «$name»…", Toast.LENGTH_SHORT).show()
     }
 
     private fun startServer() {

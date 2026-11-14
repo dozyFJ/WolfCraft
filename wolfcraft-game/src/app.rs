@@ -99,6 +99,27 @@ const STUDIO_SCRIPT: &str = "studio.txt";
 const SCRIPT_FILE: &str = "script.lua";
 
 /// The world's Luau script (an old command list is translated on the way).
+/// Worlds of the bundled WolfServer (`--data <files>/wolfserver`): the WolfStudio places.
+fn servers_dir(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("wolfserver").join("worlds")
+}
+
+/// Studio projects made by older versions among the game worlds move to the servers folder.
+fn move_studio_projects(old: &std::path::Path, servers: &std::path::Path) {
+    let Ok(rd) = std::fs::read_dir(old) else { return };
+    for e in rd.flatten() {
+        let dir = e.path();
+        if WorldConfig::load(&dir).is_ok_and(|c| c.studio_project) {
+            let to = servers.join(e.file_name());
+            if !to.exists() {
+                if let Err(err) = std::fs::rename(&dir, &to) {
+                    log::warn!("move {} -> {}: {err}", dir.display(), to.display());
+                }
+            }
+        }
+    }
+}
+
 fn read_world_script(dir: &std::path::Path) -> String {
     if let Ok(s) = std::fs::read_to_string(dir.join(SCRIPT_FILE)) {
         return s;
@@ -256,6 +277,8 @@ pub struct App {
     hand_place: f32,
     /// Weapon kick after a shot: 1 → 0.
     gun_recoil: f32,
+    /// Hit marker after a bullet struck a creature (seconds left).
+    hit_marker: f32,
     /// Fraction of a crumble particle owed while mining (see the mining effects).
     mine_dust: f32,
     /// Ink of sign texts, drawn on the signs in the world.
@@ -291,8 +314,14 @@ impl App {
     pub fn new(args: LaunchArgs) -> Self {
         let data_dir = args.resolved_data_dir();
         let crash_report = std::fs::read_to_string(data_dir.join("logs").join("crash.txt")).ok();
-        let worlds_dir = data_dir.join("worlds");
+        // WolfStudio app: servers are places with their own worlds, apart from game worlds —
+        // the same folder the bundled WolfServer runs them from, so every server made on the
+        // «Сервер» tab is in the studio list and every place can be started as a server.
+        let worlds_dir = if wolfcraft_ui::launcher::is_studio_app() { servers_dir(&data_dir) } else { data_dir.join("worlds") };
         let _ = std::fs::create_dir_all(&worlds_dir);
+        if wolfcraft_ui::launcher::is_studio_app() {
+            move_studio_projects(&data_dir.join("worlds"), &worlds_dir);
+        }
         let mut settings = Settings::load(&data_dir);
         let saved_servers = settings.servers.clone();
         if cfg!(target_os = "android") {
@@ -379,6 +408,7 @@ impl App {
             hand_block: 0.0,
             hand_place: 0.0,
             gun_recoil: 0.0,
+            hit_marker: 0.0,
             mine_dust: 0.0,
             sign_texts: Default::default(),
             hand_switch: 0.0,
@@ -1524,9 +1554,27 @@ impl App {
                                 }
                                 self.audio.play(crate::audio::Sfx::Fuse, 1.0);
                             }
-                            InteractionEvent::Fire { .. } => {
-                                self.gun_recoil = 1.0;
-                                self.audio.play(crate::audio::Sfx::Launch, 1.0);
+                            InteractionEvent::Fire { weapon } => {
+                                use wolfcraft_engine::items::ids;
+                                // Light guns kick less (an automatic would shake the view away).
+                                let (kick, sfx) = match weapon {
+                                    ids::PISTOL => (0.75, Some(0)),
+                                    ids::RIFLE => (0.55, Some(1)),
+                                    ids::SHOTGUN => (1.0, Some(2)),
+                                    ids::SNIPER => (1.0, Some(3)),
+                                    _ => (1.0, None),
+                                };
+                                self.gun_recoil = self.gun_recoil.max(kick);
+                                match sfx {
+                                    Some(k) => self.audio.play(crate::audio::Sfx::Shot(k), 1.0),
+                                    None => self.audio.play(crate::audio::Sfx::Launch, 1.0),
+                                }
+                            }
+                            InteractionEvent::BulletHit { creature, .. } => {
+                                if creature {
+                                    self.audio.play(crate::audio::Sfx::BulletHit, 0.8);
+                                    self.hit_marker = 0.25;
+                                }
                             }
                             InteractionEvent::Exploded { at, power } => {
                                 let dist = (at - s.player.eye_pos()).length() as f32;
@@ -1761,6 +1809,7 @@ impl App {
                             mining: s.interaction.mining_fraction(),
                             bow_charge: s.bow_charge,
                             weapon_reload: s.explosives.reload(),
+                            hit_marker: self.hit_marker,
                             // Sign texts are drawn on the signs in the world now, not as a plate.
                             sign_text: None,
                             item_name: s.item_name.clone(),
@@ -2327,6 +2376,7 @@ impl App {
                 }
                 self.hand_place = (self.hand_place - dt * 6.5).max(0.0);
                 self.gun_recoil = (self.gun_recoil - dt * 3.2).max(0.0);
+                self.hit_marker = (self.hit_marker - dt).max(0.0);
                 if s.player.inventory.selected != self.last_hotbar {
                     self.last_hotbar = s.player.inventory.selected;
                     self.hand_switch = 1.0;
@@ -2366,6 +2416,10 @@ impl App {
                             let kind = match st.id {
                                 ids::GRENADE_LAUNCHER => 0,
                                 ids::BAZOOKA => 1,
+                                ids::PISTOL => 2,
+                                ids::RIFLE => 3,
+                                ids::SHOTGUN => 4,
+                                ids::SNIPER => 5,
                                 _ => return None,
                             };
                             let ammo = wolfcraft_engine::explosives::weapon(st.id).map(|w| w.0).unwrap_or(0);
@@ -2398,7 +2452,7 @@ impl App {
                     // The selected block, textured, in the right fist.
                     let held = s.player.inventory.held().and_then(|st| st.info().place).map(|b| {
                         let pose = HandsPose { holding: true, tool: None, icon: None, ..hand_pose };
-                        let mut vs = if (b as u16) >= 1024 { wolfcraft_engine::renderer::model::build_held_construction(&pose,b) } else { build_held_block(&pose, b.info().tiles, b.info().emissive, b.info().render == wolfcraft_engine::block::RenderKind::Cross) };
+                        let mut vs = if (b as u16) >= 1024 && wolfcraft_engine::construction::entry(b as u16).is_some() { wolfcraft_engine::renderer::model::build_held_construction(&pose,b) } else { build_held_block(&pose, b.info().tiles, b.info().emissive, b.info().render == wolfcraft_engine::block::RenderKind::Cross) };
                         for v in vs.iter_mut() {
                             v.pos = xf(v.pos);
                         }
@@ -2569,6 +2623,15 @@ impl App {
             MenuAction::JoinServer(addr) => {
                 self.host = None;
                 self.join_server(&addr);
+            }
+            MenuAction::HostServer(Some(id)) if wolfcraft_ui::launcher::is_studio_app() => {
+                // WolfStudio: «Запустить» starts this place on the bundled WolfServer (the
+                // «Сервер» tab), with its own world from the servers folder.
+                if let Some(s) = &mut self.session {
+                    s.save();
+                }
+                let _ = std::fs::write(self.data_dir.join("start_server.txt"), &id);
+                self.quit = true;
             }
             MenuAction::HostServer(world) => {
                 // Publishing from the studio ends the studio: the server world is played normally.

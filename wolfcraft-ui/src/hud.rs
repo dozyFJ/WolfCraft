@@ -70,6 +70,8 @@ pub struct HudState<'a> {
     pub bow_charge: f32,
     /// Grenade launcher / bazooka reload 0..1 (1 right after a shot, 0 ready).
     pub weapon_reload: f32,
+    /// Hit marker 0..1 after a bullet struck a creature (an X round the crosshair).
+    pub hit_marker: f32,
     /// Text of the sign under the crosshair.
     pub sign_text: Option<String>,
     pub item_name: Option<(String, f32)>,
@@ -218,7 +220,58 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
 
     // ---- Crosshair (hidden only when blocks are picked with the finger) ----
     let c = screen.center();
-    let gun_held = s.inventory.held().is_some_and(|h| matches!(h.id, wolfcraft_engine::items::ids::GRENADE_LAUNCHER | wolfcraft_engine::items::ids::BAZOOKA));
+    let firearm = s.inventory.held().map(|h| h.id).filter(|id| wolfcraft_engine::explosives::firearm(*id).is_some());
+    let gun_held = firearm.is_some() || s.inventory.held().is_some_and(|h| matches!(h.id, wolfcraft_engine::items::ids::GRENADE_LAUNCHER | wolfcraft_engine::items::ids::BAZOOKA));
+    // Firearms: a cross of four ticks that opens up after a shot (the spread), the sniper
+    // rifle a fine cross with a ring and range marks; the shotgun a wide circle.
+    if let Some(id) = firearm {
+        use wolfcraft_engine::items::ids;
+        let ready = s.weapon_reload <= 0.0;
+        let col = if ready { Color32::from_white_alpha(240) } else { Color32::from_white_alpha(150) };
+        let shadow = |w: f32| Stroke::new(w + 2.0, Color32::from_black_alpha(120));
+        let line = |a: Pos2, b: Pos2, w: f32| {
+            painter.line_segment([a, b], shadow(w));
+            painter.line_segment([a, b], Stroke::new(w, col));
+        };
+        let open = s.weapon_reload.clamp(0.0, 1.0);
+        match id {
+            ids::SNIPER => {
+                line(c + Vec2::new(-34.0, 0.0), c + Vec2::new(-4.0, 0.0), 1.5);
+                line(c + Vec2::new(4.0, 0.0), c + Vec2::new(34.0, 0.0), 1.5);
+                line(c + Vec2::new(0.0, -34.0), c + Vec2::new(0.0, -4.0), 1.5);
+                line(c + Vec2::new(0.0, 4.0), c + Vec2::new(0.0, 34.0), 1.5);
+                for y in [10.0f32, 18.0, 26.0] {
+                    line(c + Vec2::new(-4.0, y), c + Vec2::new(4.0, y), 1.5);
+                }
+                painter.circle_stroke(c, 40.0, shadow(1.5));
+                painter.circle_stroke(c, 40.0, Stroke::new(1.5_f32, col));
+                painter.circle_filled(c, 1.5, Color32::from_rgb(255, 80, 70));
+            }
+            ids::SHOTGUN => {
+                let r = 26.0 + 10.0 * open;
+                painter.circle_stroke(c, r, shadow(2.0));
+                painter.circle_stroke(c, r, Stroke::new(2.0_f32, col));
+                painter.circle_filled(c, 2.0, col);
+            }
+            _ => {
+                let gap = 5.0 + 12.0 * open + if id == ids::RIFLE { 3.0 } else { 0.0 };
+                for (dx, dy) in [(1.0f32, 0.0f32), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+                    let d = Vec2::new(dx, dy);
+                    line(c + d * gap, c + d * (gap + 9.0), 2.0);
+                }
+                painter.circle_filled(c, 1.5, col);
+            }
+        }
+    }
+    if s.hit_marker > 0.0 {
+        let a = (s.hit_marker / 0.25).clamp(0.0, 1.0);
+        let col = Color32::from_rgba_unmultiplied(255, 255, 255, (230.0 * a) as u8);
+        for (dx, dy) in [(1.0f32, 1.0f32), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+            let d = Vec2::new(dx, dy);
+            painter.line_segment([c + d * 7.0, c + d * 14.0], Stroke::new(4.0_f32, Color32::from_black_alpha((120.0 * a) as u8)));
+            painter.line_segment([c + d * 7.0, c + d * 14.0], Stroke::new(2.0_f32, col));
+        }
+    }
     for (a, b) in if !s.crosshair || gun_held { &[][..] } else { &[((-9.0, 0.0), (-3.0, 0.0)), ((3.0, 0.0), (9.0, 0.0)), ((0.0, -9.0), (0.0, -3.0)), ((0.0, 3.0), (0.0, 9.0))][..] } {
         let (a, b): ((f32, f32), (f32, f32)) = (*a, *b);
         let (a, b) = (c + Vec2::new(a.0, a.1), c + Vec2::new(b.0, b.1));
@@ -562,6 +615,7 @@ mod tests {
                     mining: 0.5,
                     bow_charge: 0.5,
                     weapon_reload: 0.3,
+                    hit_marker: 0.5,
                     sign_text: Some("Привет".into()),
                     item_name: Some(("Лампа".into(), 1.0)),
                     show_fps: true,

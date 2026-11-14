@@ -1419,6 +1419,9 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
 /// launcher is held at the chest. Recoil kicks it back and up with a muzzle flash; while
 /// reloading it dips and tips down, then comes back with a fresh round in the muzzle.
 fn build_gun_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
+    if g.kind >= 2 {
+        return build_firearm_view(pose, g);
+    }
     const OLIVE: [f32; 3] = [0.34, 0.40, 0.22];
     const OLIVE_D: [f32; 3] = [0.26, 0.31, 0.17];
     const DARK: [f32; 3] = [0.15, 0.16, 0.15];
@@ -1505,6 +1508,163 @@ fn build_gun_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
         let f = 0.10 + 0.10 * k;
         bx(&mut v, [-f, -f, z], [f, f, z + 0.10 + 0.20 * k], [1.0, 0.62, 0.18]);
         bx(&mut v, [-f * 0.55, -f * 0.55, z], [f * 0.55, f * 0.55, z + 0.18 + 0.30 * k], [1.0, 0.95, 0.60]);
+        for q in v[start..].iter_mut() {
+            q.tex = 3.0;
+        }
+    }
+    v
+}
+
+/// Firearms in first person, box-built like the bazooka: pistol (`kind` 2), assault rifle
+/// (3), pump shotgun (4), sniper rifle with a scope (5). Recoil kicks the gun back and up
+/// (the pistol's slide snaps back); after a shot the shotgun racks its pump and the sniper
+/// rifle works its bolt.
+fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
+    const DARK: [f32; 3] = [0.13, 0.14, 0.15];
+    const GUN: [f32; 3] = [0.24, 0.25, 0.27];
+    const STEEL: [f32; 3] = [0.42, 0.44, 0.47];
+    const WOOD: [f32; 3] = [0.50, 0.33, 0.18];
+    const WOOD_D: [f32; 3] = [0.38, 0.24, 0.13];
+    const OLIVE: [f32; 3] = [0.34, 0.37, 0.25];
+    const LENS: [f32; 3] = [0.45, 0.80, 1.0];
+    const BRASS: [f32; 3] = [0.85, 0.66, 0.28];
+    let frame = camera_frame(pose);
+    let (skin_c, _, _, sleeve_c, _) = skin_colors(pose.skin);
+    let sleeve_c = pose.sleeve.unwrap_or(sleeve_c);
+    let (off, btilt, _, _) = body_motion(pose);
+    let shot = g.recoil.clamp(0.0, 1.0);
+    let kick = shot * shot;
+    // Pump / bolt cycle after the shot: 0 → 1 → 0.
+    let cycle = (g.reload.clamp(0.0, 1.0) * std::f32::consts::PI).sin();
+    let anchor = match g.kind {
+        2 => Vec3::new(0.15, -0.16, 0.30),
+        5 => Vec3::new(0.17, -0.19, 0.12),
+        _ => Vec3::new(0.18, -0.20, 0.16),
+    };
+    let heavy = matches!(g.kind, 4 | 5);
+    let base = anchor + off + Vec3::new(0.0, 0.02 * kick, -(if heavy { 0.12 } else { 0.07 }) * kick);
+    let angle = -(if heavy { 0.28 } else { 0.18 }) * kick + btilt * 0.5;
+    let pivot = base;
+    let mut v: Vec<ModelVertex> = Vec::with_capacity(1500);
+    let bx = |v: &mut Vec<ModelVertex>, a: [f32; 3], b: [f32; 3], c: [f32; 3]| {
+        add_hand_box(v, &frame, base + Vec3::from(a), base + Vec3::from(b), pivot, angle, c);
+    };
+    let muzzle_z;
+    match g.kind {
+        2 => {
+            // Pistol: the slide runs back on recoil.
+            let s = -0.06 * kick;
+            bx(&mut v, [-0.030, 0.000, 0.00 + s], [0.030, 0.062, 0.30 + s], GUN);
+            bx(&mut v, [-0.031, 0.030, 0.03 + s], [0.031, 0.050, 0.10 + s], DARK);
+            bx(&mut v, [-0.006, 0.062, 0.27 + s], [0.006, 0.078, 0.29 + s], DARK);
+            bx(&mut v, [-0.024, 0.062, 0.01 + s], [-0.010, 0.076, 0.03 + s], DARK);
+            bx(&mut v, [0.010, 0.062, 0.01 + s], [0.024, 0.076, 0.03 + s], DARK);
+            bx(&mut v, [-0.028, -0.030, 0.02], [0.028, 0.002, 0.27], DARK);
+            bx(&mut v, [-0.012, -0.012, 0.29], [0.012, 0.012, 0.305], DARK);
+            bx(&mut v, [-0.027, -0.17, -0.01], [0.027, -0.028, 0.08], DARK);
+            bx(&mut v, [-0.029, -0.15, 0.0], [0.029, -0.05, 0.07], GUN);
+            bx(&mut v, [-0.007, -0.075, 0.08], [0.007, -0.028, 0.15], DARK);
+            muzzle_z = 0.31;
+            // Two-handed grip.
+            bx(&mut v, [-0.050, -0.15, -0.03], [0.050, -0.04, 0.09], skin_c);
+            bx(&mut v, [-0.060, -0.46, -0.22], [0.060, -0.14, 0.01], sleeve_c);
+            bx(&mut v, [-0.110, -0.15, -0.01], [-0.030, -0.05, 0.10], skin_c);
+            bx(&mut v, [-0.32, -0.46, -0.10], [-0.08, -0.13, 0.06], sleeve_c);
+        }
+        3 => {
+            // Assault rifle: receiver, handguard, barrel with a muzzle brake, curved magazine,
+            // stock, rail with sights.
+            bx(&mut v, [-0.040, -0.050, -0.06], [0.040, 0.050, 0.40], DARK);
+            bx(&mut v, [-0.041, -0.010, 0.10], [0.041, 0.030, 0.22], GUN);
+            bx(&mut v, [-0.036, -0.042, 0.40], [0.036, 0.042, 0.72], OLIVE);
+            for z in [0.46f32, 0.54, 0.62] {
+                bx(&mut v, [-0.038, -0.010, z], [0.038, 0.010, z + 0.04], DARK);
+            }
+            bx(&mut v, [-0.013, -0.013, 0.72], [0.013, 0.013, 0.90], STEEL);
+            bx(&mut v, [-0.021, -0.021, 0.88], [0.021, 0.021, 0.95], DARK);
+            bx(&mut v, [-0.030, -0.20, 0.17], [0.030, -0.05, 0.27], GUN);
+            bx(&mut v, [-0.030, -0.29, 0.21], [0.030, -0.19, 0.30], GUN);
+            bx(&mut v, [-0.025, -0.17, 0.01], [0.025, -0.05, 0.08], DARK);
+            bx(&mut v, [-0.008, -0.085, 0.08], [0.008, -0.05, 0.14], DARK);
+            bx(&mut v, [-0.034, -0.11, -0.42], [0.034, 0.030, -0.06], DARK);
+            bx(&mut v, [-0.038, -0.13, -0.46], [0.038, 0.040, -0.40], GUN);
+            bx(&mut v, [-0.018, 0.050, -0.02], [0.018, 0.068, 0.38], GUN);
+            bx(&mut v, [-0.020, 0.068, 0.02], [0.020, 0.105, 0.06], DARK);
+            bx(&mut v, [-0.006, 0.042, 0.66], [0.006, 0.105, 0.68], DARK);
+            muzzle_z = 0.95;
+            bx(&mut v, [-0.060, -0.17, -0.02], [0.060, -0.05, 0.10], skin_c);
+            bx(&mut v, [-0.070, -0.52, -0.16], [0.070, -0.16, 0.04], sleeve_c);
+            bx(&mut v, [-0.065, -0.10, 0.48], [0.065, 0.01, 0.62], skin_c);
+            bx(&mut v, [-0.30, -0.55, 0.38], [-0.04, -0.08, 0.56], sleeve_c);
+        }
+        4 => {
+            // Pump shotgun: the forend slides back and forth after the shot.
+            let pump = -0.13 * cycle;
+            bx(&mut v, [-0.028, 0.000, 0.06], [0.028, 0.054, 0.96], STEEL);
+            bx(&mut v, [-0.024, -0.050, 0.06], [0.024, 0.000, 0.86], DARK);
+            bx(&mut v, [-0.046, -0.072, 0.44 + pump], [0.046, 0.012, 0.66 + pump], WOOD);
+            for z in [0.48f32, 0.53, 0.58] {
+                bx(&mut v, [-0.048, -0.060, z + pump], [0.048, -0.040, z + 0.02 + pump], WOOD_D);
+            }
+            bx(&mut v, [-0.042, -0.065, -0.10], [0.042, 0.062, 0.10], DARK);
+            bx(&mut v, [-0.008, -0.11, -0.02], [0.008, -0.065, 0.05], DARK);
+            bx(&mut v, [-0.036, -0.15, -0.48], [0.036, 0.025, -0.10], WOOD);
+            bx(&mut v, [-0.040, -0.17, -0.52], [0.040, 0.030, -0.47], WOOD_D);
+            bx(&mut v, [-0.006, 0.054, 0.92], [0.006, 0.068, 0.94], BRASS);
+            if cycle > 0.4 {
+                // A spent red shell flies out of the port.
+                let t = (g.reload - 0.5).max(0.0) * 2.0;
+                let p = [0.06 + 0.25 * t, 0.07 + 0.12 * t, 0.02];
+                bx(&mut v, p, [p[0] + 0.03, p[1] + 0.03, p[2] + 0.07], [0.80, 0.16, 0.14]);
+            }
+            muzzle_z = 0.96;
+            bx(&mut v, [-0.060, -0.17, -0.10], [0.060, -0.06, 0.02], skin_c);
+            bx(&mut v, [-0.070, -0.52, -0.24], [0.070, -0.16, -0.04], sleeve_c);
+            bx(&mut v, [-0.065, -0.11, 0.48 + pump], [0.065, 0.0, 0.62 + pump], skin_c);
+            bx(&mut v, [-0.30, -0.55, 0.38 + pump], [-0.04, -0.09, 0.56 + pump], sleeve_c);
+        }
+        _ => {
+            // Sniper rifle: long barrel, big scope, bolt that is worked after every shot.
+            let bolt = -0.08 * cycle;
+            bx(&mut v, [-0.038, -0.060, -0.04], [0.038, 0.045, 0.34], DARK);
+            bx(&mut v, [-0.036, -0.075, 0.34], [0.036, 0.030, 0.74], OLIVE);
+            bx(&mut v, [-0.015, -0.015, 0.74], [0.015, 0.015, 1.12], STEEL);
+            bx(&mut v, [-0.026, -0.026, 1.08], [0.026, 0.026, 1.18], DARK);
+            // Scope with lenses, mounts and turrets.
+            bx(&mut v, [-0.036, 0.075, -0.02], [0.036, 0.145, 0.42], DARK);
+            bx(&mut v, [-0.046, 0.066, 0.36], [0.046, 0.155, 0.46], DARK);
+            bx(&mut v, [-0.030, 0.080, 0.461], [0.030, 0.140, 0.465], LENS);
+            bx(&mut v, [-0.026, 0.085, -0.025], [0.026, 0.135, -0.02], LENS);
+            bx(&mut v, [-0.016, 0.145, 0.16], [0.016, 0.175, 0.22], GUN);
+            bx(&mut v, [0.036, 0.095, 0.16], [0.062, 0.125, 0.22], GUN);
+            bx(&mut v, [-0.020, 0.045, 0.02], [0.020, 0.075, 0.06], GUN);
+            bx(&mut v, [-0.020, 0.045, 0.30], [0.020, 0.075, 0.34], GUN);
+            // Bolt handle on the right.
+            bx(&mut v, [0.038, 0.010, 0.04 + bolt], [0.085, 0.030, 0.07 + bolt], STEEL);
+            bx(&mut v, [0.080, -0.005, 0.035 + bolt], [0.105, 0.040, 0.075 + bolt], DARK);
+            bx(&mut v, [-0.028, -0.13, 0.12], [0.028, -0.06, 0.20], GUN);
+            bx(&mut v, [-0.026, -0.18, -0.02], [0.026, -0.06, 0.05], OLIVE);
+            bx(&mut v, [-0.008, -0.10, 0.05], [0.008, -0.06, 0.11], DARK);
+            bx(&mut v, [-0.036, -0.13, -0.50], [0.036, 0.040, -0.04], OLIVE);
+            bx(&mut v, [-0.040, -0.15, -0.54], [0.040, 0.045, -0.49], DARK);
+            bx(&mut v, [-0.030, 0.040, -0.36], [0.030, 0.070, -0.12], OLIVE);
+            muzzle_z = 1.18;
+            bx(&mut v, [-0.060, -0.19, -0.05], [0.060, -0.07, 0.07], skin_c);
+            bx(&mut v, [-0.070, -0.55, -0.20], [0.070, -0.18, 0.02], sleeve_c);
+            bx(&mut v, [-0.065, -0.13, 0.50], [0.065, -0.02, 0.64], skin_c);
+            bx(&mut v, [-0.30, -0.56, 0.40], [-0.04, -0.11, 0.58], sleeve_c);
+        }
+    }
+    if shot > 0.45 {
+        // Muzzle flash: a bright star for the first moments, unlit.
+        let start = v.len();
+        let k = (shot - 0.45) / 0.55;
+        let z = muzzle_z;
+        let f = if g.kind == 4 { 0.08 } else { 0.05 } * (0.6 + 0.6 * k);
+        bx(&mut v, [-f, -f, z], [f, f, z + 0.06 + 0.16 * k], [1.0, 0.70, 0.25]);
+        bx(&mut v, [-f * 1.8, -f * 0.3, z + 0.02], [f * 1.8, f * 0.3, z + 0.06], [1.0, 0.85, 0.45]);
+        bx(&mut v, [-f * 0.3, -f * 1.8, z + 0.02], [f * 0.3, f * 1.8, z + 0.06], [1.0, 0.85, 0.45]);
+        bx(&mut v, [-f * 0.5, -f * 0.5, z], [f * 0.5, f * 0.5, z + 0.10 + 0.22 * k], [1.0, 0.97, 0.75]);
         for q in v[start..].iter_mut() {
             q.tex = 3.0;
         }
