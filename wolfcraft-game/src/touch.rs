@@ -309,6 +309,13 @@ impl TouchState {
         }
     }
 
+    /// No HUD on screen (the studio's edit mode): no hotbar, inventory tile or minimap to tap.
+    pub fn clear_hud(&mut self) {
+        self.hotbar = None;
+        self.inv = None;
+        self.map = None;
+    }
+
     /// Reads the hotbar rectangle the HUD published (points -> physical pixels).
     pub fn sync_hotbar(&mut self, ppp: f32) {
         let read = |l: &std::sync::RwLock<[f32; 4]>| l.read().ok().and_then(|h| (h[2] > h[0]).then(|| (h[0] * ppp, h[1] * ppp, h[2] * ppp, h[3] * ppp)));
