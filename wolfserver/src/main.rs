@@ -11,9 +11,11 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use wolfcraft_engine::config::{GameMode, WorldConfig};
 mod worlds;
+mod profile;
+mod runtime;
 use wolfcraft_net::server::{ServerHandle, lan_addresses};
 use wolfcraft_net::{DEFAULT_PORT, S2C};
 
@@ -96,7 +98,7 @@ fn handle_panel(server: &ServerHandle, cfg: &WorldConfig, token: &str, mut strea
     match (method, path) {
         ("GET", "/api/status") => {
             let s = shared.lock().unwrap();
-            let players: Vec<serde_json::Value> = s.players.values().map(|p| serde_json::json!({ "id": p.state.id, "nick": p.state.nick, "hell": p.state.hell })).collect();
+            let players: Vec<serde_json::Value> = s.players.values().map(|p| serde_json::json!({ "id": p.state.id, "nick": p.state.nick, "hell": p.state.hell, "role": p.role.name() })).collect();
             let body = serde_json::json!({
                 "version": wolfcraft_common::VERSION,
                 "name": cfg.name,
@@ -202,13 +204,18 @@ fn main() {
             return;
         }
     };
-    let server = match wolfcraft_net::server::start(&cfg.name, world_toml, &dir, port, true) {
+    let token=match arg_value(&args,"--token"){Some(t) if t.len()>=8=>t,_=>match profile::secret(){Ok(t)=>t,Err(e)=>{eprintln!("Ключ: {e}");return;}}};
+    let profile=match profile::load(&data,&dir,&cfg){Ok(p)=>p,Err(e)=>{eprintln!("Конфигурация сервера: {e}");return;}};
+    let hooks=match runtime::Runtime::load(&profile,&cfg){Ok(h)=>std::sync::Arc::new(h),Err(e)=>{eprintln!("Расширения сервера: {e}");return;}};
+    let options=wolfcraft_net::server::ServerOptions{place:profile.place,max_players:profile.config.max_players,owner_keys:vec![profile.config.owner_key.clone(),token.clone()],editor_keys:profile.config.editor_keys.clone(),hooks:Some(hooks)};
+    let server = match wolfcraft_net::server::start_with_options(&cfg.name, world_toml, &dir, port, true,options) {
         Ok(s) => std::sync::Arc::new(s),
         Err(e) => {
             eprintln!("Сервер не запущен: {e}. Возможно, WolfCraft Сервер уже работает.");
             return;
         }
     };
+    let port=server.port;
     {
         let mut s = server.shared.lock().unwrap();
         let e = s.edits[0].len() + s.edits[1].len();
@@ -223,7 +230,7 @@ fn main() {
 
     // Control panel (this computer only).
     // `--token`: the WolfServer Pocket app passes its own, so its dashboard can use the API.
-    let token = arg_value(&args, "--token").filter(|t| t.len() >= 8).unwrap_or_else(|| format!("{:016x}", wolfcraft_common::platform::unix_now().wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((std::process::id() as u64) << 32) ^ Instant::now().elapsed().subsec_nanos() as u64));
+
     match TcpListener::bind(("127.0.0.1", PANEL_PORT)) {
         Ok(panel) => {
             let (server2, cfg2, token2) = (server.clone(), cfg.clone(), token.clone());

@@ -47,6 +47,8 @@ pub enum C2S {
         skin: u8,
         #[serde(default)]
         voice: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access_token: Option<String>,
     },
     State(PlayerState),
     Edit { cell: [i32; 4], block: u16, hell: bool },
@@ -119,6 +121,10 @@ pub struct Client {
 
 impl Client {
     pub fn connect(addr: &str, nick: &str, skin: u8) -> Result<Client, String> {
+        Self::connect_with_access(addr,nick,skin,None)
+    }
+
+    pub fn connect_with_access(addr: &str, nick: &str, skin: u8, access_token:Option<String>) -> Result<Client, String> {
         let full = with_port(addr);
         let sock = full.to_socket_addrs().map_err(|e| format!("адрес «{full}»: {e}"))?.next().ok_or_else(|| format!("адрес «{full}» не найден"))?;
         let stream = TcpStream::connect_timeout(&sock, Duration::from_secs(5)).map_err(|e| format!("не удалось подключиться к {full}: {e}"))?;
@@ -126,7 +132,7 @@ impl Client {
         let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
         let _ = stream.set_read_timeout(Some(Duration::from_secs(8)));
         let mut w = stream.try_clone().map_err(|e| e.to_string())?;
-        write_msg(&mut w, &C2S::Hello { protocol: PROTOCOL, nick: nick.to_string(), skin, voice: true }).map_err(|e| e.to_string())?;
+        write_msg(&mut w, &C2S::Hello { protocol: PROTOCOL, nick: nick.to_string(), skin, voice: true, access_token }).map_err(|e| e.to_string())?;
         let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
         let (id, world_toml, motd, voice) = match read_msg::<S2C>(&mut reader).map_err(|e| format!("сервер не ответил: {e}"))? {
             Some(S2C::Welcome { id, world_toml, motd, voice }) => (id, world_toml, motd, voice),
@@ -204,4 +210,5 @@ mod tests {
         assert_eq!(with_port(" 192.168.0.10:1234 "), "192.168.0.10:1234");
     }
 }
+
 

@@ -593,6 +593,10 @@ class MainActivity : Activity() {
         try {
             val f = java.io.File(filesDir, "open_server.txt")
             if (server != null) f.writeText(server) else f.delete()
+            val access = java.io.File(filesDir, "open_access.json")
+            if (server == "127.0.0.1:${ServerService.PORT}" && ServerService.running()) {
+                access.writeText(JSONObject().put("address", server).put("key", ServerService.token).toString())
+            } else access.delete()
             startActivity(Intent(this, android.app.NativeActivity::class.java))
         } catch (e: Exception) {
             Toast.makeText(this, "Студия не открылась: ${e.message}", Toast.LENGTH_LONG).show()

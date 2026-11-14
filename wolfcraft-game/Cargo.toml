@@ -30,6 +30,7 @@ rodio.workspace = true
 wolfcraft-net.workspace = true
 # Resource pack download (rustls: no OpenSSL needed on Android).
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
+serde_json.workspace = true
 mlua = { version = "0.12.2", features = ["luau", "send"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -72,3 +73,4 @@ config_changes = "orientation|keyboardHidden|screenSize|smallestScreenSize|scree
 [package.metadata.android.signing.release]
 path = "C:/Users/ADMIN/.android/debug.keystore"
 keystore_password = "android"
+

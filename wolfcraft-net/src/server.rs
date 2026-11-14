@@ -12,8 +12,38 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const MAX_PLAYERS: usize = 16;
 
+/// Roles are established by a private access key, never by a nickname or player state.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum Role { Owner, Editor, Player }
+impl Role {pub fn name(self)->&'static str {match self{Self::Owner=>"owner",Self::Editor=>"editor",Self::Player=>"player"}}}
+
+pub trait ServerHooks:Send+Sync {
+    fn event(&self,name:&str,data:serde_json::Value,state:&mut State)->bool;
+    fn block_at(&self,cell:[i32;4],hell:bool,state:&State)->Option<u16>{state.edits[hell as usize].get(&cell).copied()}
+}
+#[derive(Clone)]
+pub struct ServerOptions {
+    pub place:bool,
+    pub max_players:usize,
+    pub owner_keys:Vec<String>,
+    pub editor_keys:Vec<String>,
+    pub hooks:Option<Arc<dyn ServerHooks>>,
+}
+impl Default for ServerOptions {fn default()->Self{Self{place:false,max_players:MAX_PLAYERS,owner_keys:vec![],editor_keys:vec![],hooks:None}}}
+impl ServerOptions {
+    pub fn role(&self,key:Option<&str>)->Result<Role,&'static str>{
+        let Some(key)=key else{return Ok(Role::Player)};
+        if key.is_empty(){return Err("неверный ключ доступа");}
+        if self.owner_keys.iter().any(|k|!k.is_empty()&&k==key){return Ok(Role::Owner);}
+        if self.editor_keys.iter().any(|k|!k.is_empty()&&k==key){return Ok(Role::Editor);}
+        Err("неверный ключ доступа")
+    }
+    pub fn can_edit(&self,role:Role)->bool{!self.place||role!=Role::Player}
+}
+
 pub struct Player {
     pub state: PlayerState,
+    pub role:Role,
     out: TcpStream,
     /// Hears voice chat (said so in Hello).
     voice: bool,
@@ -21,6 +51,7 @@ pub struct Player {
 
 pub struct State {
     pub name: String,
+    pub options:ServerOptions,
     pub world_toml: String,
     pub dir: PathBuf,
     /// Latest block per cell: `[overworld, hell]`.
@@ -80,6 +111,7 @@ impl State {
         if let Some(p) = self.players.remove(&id) {
             let _ = p.out.shutdown(std::net::Shutdown::Both);
             self.log(format!("{} вышел ({why})", p.state.nick));
+            if let Some(hooks)=self.options.hooks.clone(){hooks.event("leave",serde_json::json!({"id":id,"nick":p.state.nick,"role":p.role.name()}),self);}
             let text = format!("{} вышел из игры", p.state.nick);
             self.broadcast(&S2C::Chat { from: String::new(), text }, None);
         }
@@ -93,7 +125,7 @@ impl State {
         self.drop_player(id, "выгнан");
     }
 
-    fn append_edit(&self, hell: bool, cell: [i32; 4], block: u16) {
+    pub fn append_edit(&self, hell: bool, cell: [i32; 4], block: u16) {
         let line = format!("{} {} {} {} {} {}\n", hell as u8, cell[0], cell[1], cell[2], cell[3], block);
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("edits.log")) {
             let _ = f.write_all(line.as_bytes());
@@ -125,8 +157,8 @@ fn handle_client(shared: Shared, stream: TcpStream) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
     let Ok(mut out) = stream.try_clone() else { return };
     let mut reader = BufReader::new(stream);
-    let (nick, skin, voice) = match read_msg::<C2S>(&mut reader) {
-        Ok(Some(C2S::Hello { protocol, nick, skin, voice })) if protocol == PROTOCOL => (clean_nick(&nick), skin, voice),
+    let (nick, skin, voice, access_token) = match read_msg::<C2S>(&mut reader) {
+        Ok(Some(C2S::Hello { protocol, nick, skin, voice, access_token })) if protocol == PROTOCOL => (clean_nick(&nick), skin, voice, access_token),
         Ok(Some(C2S::Hello { .. })) => {
             let _ = write_msg(&mut out, &S2C::Kick("другая версия игры".into()));
             return;
@@ -136,7 +168,8 @@ fn handle_client(shared: Shared, stream: TcpStream) {
     // Register and send the world, then every earlier edit.
     let id = {
         let mut s = shared.lock().unwrap();
-        if s.players.len() >= MAX_PLAYERS {
+        let role=match s.options.role(access_token.as_deref()) {Ok(role)=>role,Err(reason)=>{let _=write_msg(&mut out,&S2C::Kick(reason.into()));return;}};
+        if s.players.len() >= s.options.max_players {
             let _ = write_msg(&mut out, &S2C::Kick("сервер заполнен".into()));
             return;
         }
@@ -159,8 +192,9 @@ fn handle_client(shared: Shared, stream: TcpStream) {
         }
         let Ok(out2) = out.try_clone() else { return };
         let state = PlayerState { id, nick: nick.clone(), skin, pos: [0.0; 3], heading: [1.0, 0.0, 0.0], pitch: 0.0, phase: 0.0, amount: 0.0, sneak: false, swim: false, hell: false };
-        s.players.insert(id, Player { state, out: out2, voice });
-        s.log(format!("{nick} вошёл (id {id})"));
+        s.players.insert(id, Player { state, out: out2, voice, role });
+        s.log(format!("{nick} вошёл (id {id}, {})",role.name()));
+        if let Some(hooks)=s.options.hooks.clone(){hooks.event("join",serde_json::json!({"id":id,"nick":nick,"role":role.name()}),&mut s);}
         s.broadcast(&S2C::Chat { from: String::new(), text: format!("{nick} вошёл в игру") }, None);
         id
     };
@@ -180,6 +214,15 @@ fn handle_client(shared: Shared, stream: TcpStream) {
                 if !s.players.contains_key(&id) {
                     break;
                 }
+                let role=s.players[&id].role;
+                let mut allowed=s.options.can_edit(role)&&cell[0]>=0&&cell[0]<6&&cell[1]>=0&&cell[2]>=0&&cell[3]>=0;
+                if allowed {if let Some(hooks)=s.options.hooks.clone(){allowed=hooks.event("block_edit",serde_json::json!({"id":id,"nick":nick,"role":role.name(),"cell":cell,"block":block,"hell":hell}),&mut s);}}
+                allowed &= s.players.contains_key(&id);
+                if !allowed {
+                    let previous=s.options.hooks.as_ref().and_then(|h|h.block_at(cell,hell,&s)).or_else(||s.edits[hell as usize].get(&cell).copied()).unwrap_or(0);
+                    let _=write_msg(&mut out,&S2C::Edit{cell,block:previous,hell});
+                    continue;
+                }
                 s.edits[hell as usize].insert(cell, block);
                 s.append_edit(hell, cell, block);
                 s.broadcast(&S2C::Edit { cell, block, hell }, Some(id));
@@ -193,6 +236,7 @@ fn handle_client(shared: Shared, stream: TcpStream) {
                 if !s.players.contains_key(&id) {
                     break;
                 }
+                if let Some(hooks)=s.options.hooks.clone(){if !hooks.event("chat",serde_json::json!({"id":id,"nick":nick,"text":text}),&mut s){continue;}}
                 s.log(format!("<{nick}> {text}"));
                 s.broadcast(&S2C::Chat { from: nick.clone(), text }, None);
             }
@@ -244,6 +288,7 @@ impl ServerHandle {
     pub fn stop(&self) {
         if self.running.swap(false, Ordering::SeqCst) {
             let mut s = self.shared.lock().unwrap();
+            if let Some(hooks)=s.options.hooks.clone(){hooks.event("stop",serde_json::json!({}),&mut s);}
             s.log("Сервер остановлен");
             s.broadcast(&S2C::Kick("сервер остановлен".into()), None);
             // Close every connection so clients notice at once.
@@ -267,12 +312,18 @@ impl Drop for ServerHandle {
 /// Starts the server on `port`: accept thread + a 20 Hz broadcast of player states.
 /// `world_toml` is sent to every client; `dir` holds `edits.log`.
 pub fn start(name: &str, world_toml: String, dir: &Path, port: u16, echo: bool) -> Result<ServerHandle, String> {
+    start_with_options(name,world_toml,dir,port,echo,ServerOptions::default())
+}
+
+pub fn start_with_options(name: &str, world_toml: String, dir: &Path, port: u16, echo: bool,options:ServerOptions) -> Result<ServerHandle, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let listener = TcpListener::bind(("0.0.0.0", port)).map_err(|e| format!("порт {port} занят или недоступен: {e}"))?;
+    let port=listener.local_addr().map_err(|e|e.to_string())?.port();
     let _ = listener.set_nonblocking(true);
     let edits = load_edits(dir);
     let shared: Shared = Arc::new(Mutex::new(State {
         name: name.to_string(),
+        options,
         world_toml,
         dir: dir.to_path_buf(),
         edits,
@@ -283,6 +334,8 @@ pub fn start(name: &str, world_toml: String, dir: &Path, port: u16, echo: bool) 
         port,
         echo,
     }));
+    let hooks={shared.lock().unwrap().options.hooks.clone()};
+    if let Some(hooks)=hooks{hooks.event("start",serde_json::json!({}),&mut shared.lock().unwrap());}
     let running = Arc::new(AtomicBool::new(true));
     {
         let (shared, running) = (shared.clone(), running.clone());
@@ -292,6 +345,7 @@ pub fn start(name: &str, world_toml: String, dir: &Path, port: u16, echo: bool) 
                 while running.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(50));
                     let mut s = shared.lock().unwrap();
+                    if let Some(hooks)=s.options.hooks.clone(){hooks.event("tick",serde_json::json!({"dt":0.05}),&mut s);}
                     if s.players.len() > 1 {
                         let list: Vec<PlayerState> = s.players.values().map(|p| p.state.clone()).collect();
                         s.broadcast(&S2C::Players(list), None);
@@ -322,7 +376,7 @@ pub fn start(name: &str, world_toml: String, dir: &Path, port: u16, echo: bool) 
     // Tell the local networks (Wi-Fi, hotspot) that a game is open here.
     {
         let s2 = shared.clone();
-        crate::lan::start_beacon(name.to_string(), port, Arc::new(move || (s2.lock().map(|s| s.players.len()).unwrap_or(0), MAX_PLAYERS)), running.clone());
+        crate::lan::start_beacon(name.to_string(), port, Arc::new(move || (s2.lock().map(|s| s.players.len()).unwrap_or(0), s2.lock().map(|s|s.options.max_players).unwrap_or(MAX_PLAYERS))), running.clone());
     }
     Ok(ServerHandle { shared, running, port })
 }
@@ -409,4 +463,5 @@ mod tests {
         assert_eq!(load_edits(&dir)[0].get(&[2, 10, 11, 1030]), Some(&7));
     }
 }
+
 
