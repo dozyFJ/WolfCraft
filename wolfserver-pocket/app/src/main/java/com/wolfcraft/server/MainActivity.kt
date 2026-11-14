@@ -59,6 +59,8 @@ class MainActivity : Activity() {
     private var tab = 0
     /** Дашборд: 0 servers (ordinary worlds), 1 places. */
     private var listTab = 0
+    /** Сервер: 0 overview, 1 console, 2 settings, 3 plugins, 4 modules, 5 statistics, 6 logs. */
+    private var serverTab = 0
     private lateinit var content: LinearLayout
     private lateinit var scroll: ScrollView
     private val navButtons = mutableListOf<TextView>()
@@ -143,7 +145,8 @@ class MainActivity : Activity() {
             setBackgroundColor(cCard)
             setPadding(dp(8), dp(8), dp(8), dp(10))
         }
-        val items = listOf("▦" to "Дашборд", "▶" to "Сервер", "›_" to "Консоль", "⚙" to "Настройки")
+        // The console moved into «Сервер» (its own tabs: console, settings, plugins…).
+        val items = listOf("▦" to "Дашборд", "▶" to "Сервер", "⚙" to "Настройки")
         items.forEachIndexed { i, (icon, name) ->
             val b = TextView(this).apply {
                 this.text = "$icon\n$name"
@@ -185,7 +188,7 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
-    private fun renderKey() = "$tab|${ServerService.running()}|${ServerService.status}|${status?.toString()}|${ServerService.logText().length}"
+    private fun renderKey() = "$tab|$serverTab|${ServerService.running()}|${ServerService.status}|${status?.toString()}|${ServerService.logText().length}"
 
     private val tick = object : Runnable {
         override fun run() {
@@ -213,7 +216,6 @@ class MainActivity : Activity() {
         when (tab) {
             0 -> renderStudio()
             1 -> renderServerTab()
-            2 -> renderConsole()
             else -> renderSettings()
         }
     }
@@ -518,13 +520,259 @@ class MainActivity : Activity() {
     }
 
     /** Сервер: the dashboard and the server controls on one screen. */
+    private val serverTabs = listOf("Обзор", "Консоль", "Настройки", "Плагины", "Модули", "Статистика", "Логи")
+
+    /** Сервер: its own tabs along the top, scrolled sideways. */
     private fun renderServerTab() {
-        if (ServerService.running()) renderHome() else header("Сервер")
-        renderServerControls()
+        header("Сервер")
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4), 0, dp(8)) }
+        serverTabs.forEachIndexed { i, s ->
+            bar.addView(TextView(this).apply {
+                text = s
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(if (i == serverTab) Color.WHITE else cMuted)
+                background = if (i == serverTab) rounded(cAccent, 18) else rounded(cCard, 18, cLine)
+                setPadding(dp(16), dp(9), dp(16), dp(9))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) }
+                setOnClickListener { serverTab = i; render() }
+            })
+        }
+        content.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) })
+        when (serverTab) {
+            0 -> { if (ServerService.running()) renderHome(withHeader = false); renderServerControls() }
+            1 -> renderConsole(withHeader = false)
+            2 -> renderServerSettings()
+            3 -> renderPlugins()
+            4 -> renderModules()
+            5 -> renderStats()
+            else -> renderLogs()
+        }
     }
 
-    private fun renderHome() {
-        header("Сервер")
+    // ---- Server environment: the folder whose config, plugins and modules the server uses ---
+
+    private fun isPlaceDir(d: java.io.File) = try {
+        java.io.File(d, "world.toml").readLines().any { it.replace(" ", "") == "studio_project=true" }
+    } catch (_: Exception) { false }
+
+    /** A place runs from its own folder; ordinary worlds share the server's folder. */
+    private fun envRoot(): java.io.File {
+        val id = ServerService.worldId
+        if (id.isNotEmpty()) {
+            val d = java.io.File(placesDir(), id)
+            if (isPlaceDir(d)) return d
+        }
+        return java.io.File(filesDir, "wolfserver").apply { mkdirs() }
+    }
+
+    private fun envIsPlace() = envRoot().parentFile?.name == "worlds"
+
+    private fun envConfig() = java.io.File(envRoot(), if (envIsPlace()) "place.toml" else "server.toml")
+
+    private fun envTitle() = if (envIsPlace()) "Плейс «${ServerService.world}»" else "Обычные миры (общие настройки)"
+
+    private fun configLines(): List<String> = try { envConfig().readLines() } catch (_: Exception) { emptyList() }
+
+    private fun configValue(key: String): String? = configLines().firstOrNull { it.trim().startsWith("$key ") || it.trim().startsWith("$key=") }?.substringAfter("=")?.trim()
+
+    /** Sets `key = value` in the config (adds the line if missing). Takes effect on restart. */
+    private fun setConfig(key: String, value: String) {
+        val lines = configLines().toMutableList()
+        val i = lines.indexOfFirst { it.trim().startsWith("$key ") || it.trim().startsWith("$key=") }
+        if (i >= 0) lines[i] = "$key = $value" else lines += "$key = $value"
+        try { envConfig().writeText(lines.joinToString("\n") + "\n") } catch (e: Exception) {
+            Toast.makeText(this, "Не сохранилось: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun enabledPlugins(): List<String> = configValue("plugins")?.trim('[', ']')?.split(',')?.map { it.trim().trim('"', '\'') }?.filter { it.isNotEmpty() } ?: emptyList()
+
+    private fun restartHint() = label("Изменения применятся после перезапуска сервера.", 13f, cMuted).apply { setPadding(dp(4), dp(10), dp(4), 0) }
+
+    /** Opens a text file in a simple editor dialog (Lua, TOML). */
+    private fun editFile(title: String, f: java.io.File) {
+        val box = EditText(this).apply {
+            setText(try { f.readText() } catch (_: Exception) { "" })
+            typeface = Typeface.MONOSPACE
+            textSize = 13f
+            setTextColor(cText)
+            setBackgroundColor(Color.rgb(12, 14, 18))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            minLines = 12
+            gravity = Gravity.TOP
+            setHorizontallyScrolling(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(box)
+            .setPositiveButton("Сохранить") { _, _ ->
+                try { f.parentFile?.mkdirs(); f.writeText(box.text.toString()); Toast.makeText(this, "Сохранено — перезапусти сервер", Toast.LENGTH_SHORT).show() } catch (e: Exception) { Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show() }
+                render()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun safeId(s: String) = s.lowercase().map { if (it.isLetterOrDigit() && it.code < 128) it else '_' }.joinToString("").trim('_').take(32)
+
+    private fun renderServerSettings() {
+        content.addView(card {
+            addView(caption("Окружение"))
+            addView(label(envTitle(), 16f, cText, true))
+            addView(label(envConfig().absolutePath.substringAfter("files/"), 12.5f, cMuted).apply { typeface = Typeface.MONOSPACE })
+        })
+        content.addView(card {
+            addView(caption("Игроки"))
+            val max = input("Максимум игроков", configValue("max_players") ?: "16").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }
+            addView(max)
+            addView(button("Сохранить", 1) {
+                val n = max.text.toString().toIntOrNull()?.coerceIn(1, 64)
+                if (n == null) Toast.makeText(this@MainActivity, "Нужно число от 1 до 64", Toast.LENGTH_SHORT).show()
+                else { setConfig("max_players", n.toString()); max.clearFocus(); Toast.makeText(this@MainActivity, "Сохранено", Toast.LENGTH_SHORT).show() }
+            })
+        })
+        content.addView(card {
+            addView(caption("Ядро"))
+            addView(row("Скрипт ядра", configValue("core")?.trim('"') ?: "builtin"))
+            addView(button("Изменить ядро (core/main.lua)") { editFile("core/main.lua", java.io.File(envRoot(), "core/main.lua")) })
+        })
+        content.addView(card {
+            addView(caption("Ключи"))
+            addView(label("Ключ владельца хранится в файле настроек и не показывается здесь. Редакторов добавляйте ключами в editor_keys.", 13.5f, cMuted))
+        })
+        content.addView(restartHint())
+    }
+
+    private fun renderPlugins() {
+        val dir = java.io.File(envRoot(), "plugins").apply { mkdirs() }
+        val on = enabledPlugins()
+        content.addView(button("＋  Новый плагин", 1) {
+            val name = input("ID плагина (латиницей)", "welcome")
+            val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(name) }
+            AlertDialog.Builder(this).setTitle("Новый плагин").setView(box)
+                .setPositiveButton("Создать") { _, _ ->
+                    val id = safeId(name.text.toString())
+                    if (id.isNotEmpty()) {
+                        val d = java.io.File(dir, id).apply { mkdirs() }
+                        java.io.File(d, "plugin.toml").writeText("id = \"$id\"\nentry = \"main.lua\"\nmodules = []\n")
+                        java.io.File(d, "main.lua").writeText("-- Плагин $id: события start, stop, tick, join, leave, chat, block_edit\non(\"join\", function(player)\n    server.broadcast(\"Привет, \" .. player.nick .. \"!\")\nend)\n")
+                        setConfig("plugins", "[" + (on + id).distinct().joinToString(", ") { "\"$it\"" } + "]")
+                    }
+                    render()
+                }.setNegativeButton("Отмена", null).show()
+        }.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) })
+        val list = (dir.listFiles() ?: emptyArray()).filter { java.io.File(it, "plugin.toml").isFile }.sortedBy { it.name }
+        if (list.isEmpty()) content.addView(card {
+            addView(label("Плагинов нет", 16f, cText, true))
+            addView(label("Плагин — серверный скрипт на Luau: приветствия, правила, магазины, защита построек. Работает на сервере для всех игроков.", 14f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
+        })
+        for (d in list) {
+            val id = d.name
+            val enabled = id in on
+            content.addView(card {
+                val top = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                top.addView(label(id, 17f, cText, true).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
+                top.addView(label(if (enabled) "ВКЛЮЧЁН" else "ВЫКЛЮЧЕН", 11f, if (enabled) cGreen else cMuted, true).apply {
+                    setPadding(dp(10), dp(4), dp(10), dp(4)); background = rounded(Color.TRANSPARENT, 10, if (enabled) cGreen else cLine)
+                })
+                addView(top)
+                val row = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL }
+                row.addView(button(if (enabled) "Выключить" else "Включить", if (enabled) 0 else 1) {
+                    val next = if (enabled) on - id else (on + id).distinct()
+                    setConfig("plugins", "[" + next.joinToString(", ") { "\"$it\"" } + "]")
+                    render()
+                }.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
+                row.addView(button("Код") { editFile("$id/main.lua", java.io.File(d, "main.lua")) }.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) } })
+                row.addView(button("🗑", 2) {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Удалить плагин «$id»?").setPositiveButton("Удалить") { _, _ ->
+                        d.deleteRecursively(); setConfig("plugins", "[" + (on - id).joinToString(", ") { "\"$it\"" } + "]"); render()
+                    }.setNegativeButton("Отмена", null).show()
+                }.apply { layoutParams = LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) } })
+                addView(row)
+            })
+        }
+        content.addView(restartHint())
+    }
+
+    private fun renderModules() {
+        val dir = java.io.File(envRoot(), "modules").apply { mkdirs() }
+        content.addView(button("＋  Новый модуль", 1) {
+            val name = input("ID модуля (латиницей)", "utils")
+            val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(name) }
+            AlertDialog.Builder(this).setTitle("Новый модуль").setView(box)
+                .setPositiveButton("Создать") { _, _ ->
+                    val id = safeId(name.text.toString())
+                    if (id.isNotEmpty()) {
+                        val f = java.io.File(dir, "$id.lua")
+                        if (!f.exists()) f.writeText("-- Модуль $id: подключается в плагине через require(\"$id\")\nlocal M = {}\n\nfunction M.hello(nick)\n    return \"Привет, \" .. nick\nend\n\nreturn M\n")
+                    }
+                    render()
+                }.setNegativeButton("Отмена", null).show()
+        }.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) })
+        val list = (dir.listFiles() ?: emptyArray()).filter { it.isFile && it.name.endsWith(".lua") }.sortedBy { it.name }
+        if (list.isEmpty()) content.addView(card {
+            addView(label("Модулей нет", 16f, cText, true))
+            addView(label("Модуль — общий код для плагинов: require(\"имя\") в плагине.", 14f, cMuted).apply { setPadding(0, dp(6), 0, 0) })
+        })
+        for (f in list) {
+            content.addView(card {
+                isClickable = true
+                setOnClickListener { editFile(f.name, f) }
+                addView(label(f.name.removeSuffix(".lua"), 17f, cText, true))
+                addView(label("${f.length()} байт · нажми, чтобы править", 13f, cMuted))
+                addView(button("🗑", 2) {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Удалить модуль «${f.name}»?").setPositiveButton("Удалить") { _, _ -> f.delete(); render() }.setNegativeButton("Отмена", null).show()
+                })
+            })
+        }
+        content.addView(restartHint())
+    }
+
+    private fun folderSize(d: java.io.File): Long = d.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    private fun renderStats() {
+        val s = status
+        val on = ServerService.running()
+        val players = s?.optJSONArray("players")?.length() ?: 0
+        val root = envRoot()
+        val world = if (ServerService.worldId.isNotEmpty()) java.io.File(placesDir(), ServerService.worldId) else null
+        val rt = Runtime.getRuntime()
+        content.addView(card {
+            addView(caption("Сейчас"))
+            val rows = listOf(
+                "Состояние" to (if (on) "работает" else "остановлен"),
+                "Игроков" to (if (on) "$players из ${configValue("max_players") ?: "16"}" else "—"),
+                "Работает" to (s?.optLong("uptime")?.let { uptime(it) } ?: "—"),
+                "Изменено блоков" to (s?.optInt("edits")?.toString() ?: "—"),
+                "Плагинов" to "${enabledPlugins().size} вкл. из ${(java.io.File(root, "plugins").listFiles() ?: emptyArray()).count { it.isDirectory }}",
+                "Модулей" to "${(java.io.File(root, "modules").listFiles() ?: emptyArray()).count { it.name.endsWith(".lua") }}",
+                "Мир на диске" to (world?.let { "%.1f МБ".format(folderSize(it) / 1048576.0) } ?: "—"),
+                "Память приложения" to "%.0f МБ".format((rt.totalMemory() - rt.freeMemory()) / 1048576.0),
+            )
+            rows.forEachIndexed { i, (k, v) -> addView(row(k, v)); if (i < rows.size - 1) addView(divider()) }
+        })
+        if (on) playersCard()
+    }
+
+    private fun renderLogs() {
+        val serverLog = status?.optJSONArray("log")?.let { a -> (0 until a.length()).joinToString("\n") { a.getString(it) } }
+        content.addView(card {
+            addView(caption("Журнал сервера"))
+            addView(label(serverLog?.takeIf { it.isNotBlank() } ?: "Пусто. Запусти сервер.", 12f, Color.rgb(190, 198, 208)).apply { typeface = Typeface.MONOSPACE; setTextIsSelectable(true) })
+        })
+        content.addView(card {
+            addView(caption("Процесс"))
+            addView(label(ServerService.logText().takeIf { it.isNotBlank() } ?: "Пусто.", 12f, Color.rgb(160, 168, 178)).apply { typeface = Typeface.MONOSPACE; setTextIsSelectable(true) })
+        })
+        content.addView(button("Скопировать журнал") {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("WolfServer log", (serverLog ?: "") + "\n" + ServerService.logText()))
+            Toast.makeText(this, "Журнал скопирован", Toast.LENGTH_SHORT).show()
+        })
+    }
+
+    private fun renderHome(withHeader: Boolean = true) {
+        if (withHeader) header("Сервер")
         val s = status
         val on = ServerService.running()
         if (on) content.addView(card {
@@ -668,17 +916,40 @@ class MainActivity : Activity() {
         })
     }
 
-    private fun renderConsole() {
-        header("Консоль")
-        val serverLog = status?.optJSONArray("log")?.let { a -> (0 until a.length()).joinToString("\n") { a.getString(it) } }
-        val text = listOfNotNull(serverLog?.takeIf { it.isNotBlank() }, ServerService.logText().takeIf { it.isNotBlank() })
-            .joinToString("\n— процесс —\n")
-            .ifBlank { "Пусто. Запусти сервер." }
+    /** Console: the last lines and a command line (text → chat, /kick nick, /stop, /list). */
+    private fun renderConsole(withHeader: Boolean = true) {
+        if (withHeader) header("Консоль")
+        val lines = status?.optJSONArray("log")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+        val text = lines.takeLast(40).joinToString("\n").ifBlank { if (ServerService.running()) "…" else "Сервер остановлен. Запусти его на вкладке «Обзор»." }
         content.addView(card {
-            addView(caption("Журнал"))
             addView(label(text, 12f, Color.rgb(190, 198, 208)).apply { typeface = Typeface.MONOSPACE; setTextIsSelectable(true) })
         })
-        if (ServerService.running()) content.addView(sayCard("Написать в чат игры"))
+        if (ServerService.running()) content.addView(card {
+            addView(caption("Команда"))
+            val cmd = input("Текст в чат, /kick ник, /list, /stop")
+            addView(cmd)
+            addView(button("Выполнить", 1) {
+                val c = cmd.text.toString().trim()
+                cmd.setText("")
+                cmd.clearFocus()
+                when {
+                    c.isEmpty() -> {}
+                    c == "/stop" -> ServerService.stop(this@MainActivity)
+                    c == "/list" -> {
+                        val ps = status?.optJSONArray("players")
+                        val names = (0 until (ps?.length() ?: 0)).joinToString(", ") { ps!!.getJSONObject(it).optString("nick") }
+                        Toast.makeText(this@MainActivity, if (names.isEmpty()) "Никого нет" else names, Toast.LENGTH_LONG).show()
+                    }
+                    c.startsWith("/kick ") -> {
+                        val nick = c.removePrefix("/kick ").trim()
+                        val ps = status?.optJSONArray("players")
+                        val id = (0 until (ps?.length() ?: 0)).map { ps!!.getJSONObject(it) }.firstOrNull { it.optString("nick").equals(nick, true) }?.optInt("id")
+                        if (id != null) apiAsync("POST", "/api/kick", "&id=$id") else Toast.makeText(this@MainActivity, "Нет игрока «$nick»", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> apiAsync("POST", "/api/say", "&text=" + URLEncoder.encode(c, "UTF-8"))
+                }
+            })
+        })
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
