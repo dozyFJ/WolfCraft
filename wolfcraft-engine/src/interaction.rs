@@ -302,7 +302,7 @@ impl Interaction {
             return events;
         }
         // Grenade launcher, bazooka, grenade, the star remote: the session fires.
-        if crate::explosives::weapon(stack.id).is_some() || stack.id == items::ids::STAR_REMOTE {
+        if crate::explosives::weapon(stack.id).is_some() || matches!(stack.id, items::ids::STAR_REMOTE | items::ids::STAR_HAMMER) {
             events.push(InteractionEvent::Fire { weapon: stack.id });
             return events;
         }

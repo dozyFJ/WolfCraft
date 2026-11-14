@@ -104,7 +104,9 @@ pub mod ids {
     pub const STAR_REMOTE: ItemId = 385;
     /// «Звёздный бластер»: fires glowing plasma bolts that burst on impact (no ammo).
     pub const STAR_BLASTER: ItemId = 386;
-    pub const LAST: ItemId = 386;
+    /// «Звёздный молот»: slams the ground — creatures fly, a crater opens.
+    pub const STAR_HAMMER: ItemId = 387;
+    pub const LAST: ItemId = 387;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -234,6 +236,7 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::DRAGON_SOUL => ItemInfo { max_stack: 16, ..plain("Душа дракона", sp::DRAGON_SOUL) },
         ids::RAW_FISH => ItemInfo { food: Some((2.0, 1.0)), ..plain("Сырая рыба", sp::RAW_FISH) },
         ids::STAR_REMOTE => ItemInfo { max_stack: 1, ..plain("Звёздный пульт", sp::STAR_REMOTE) },
+        ids::STAR_HAMMER => ItemInfo { max_stack: 1, attack: 9.0, ..plain("Звёздный молот", sp::STAR_HAMMER) },
         ids::STAR_BLASTER => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Звёздный бластер", sp::STAR_BLASTER) },
         ids::COOKED_FISH => ItemInfo { food: Some((6.0, 9.0)), ..plain("Жареная рыба", sp::COOKED_FISH) },
         ids::BOW => ItemInfo { max_stack: 1, durability: 384, ..plain("Лук", sp::BOW) },
@@ -607,7 +610,7 @@ pub fn category(id: ItemId) -> &'static str {
         if (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id) {
             return "Вооружение";
         }
-        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD | ids::GUNPOWDER | ids::LIGHTER | ids::GRENADE | ids::GRENADE_LAUNCHER | ids::ROCKET | ids::BAZOOKA | ids::PISTOL | ids::RIFLE | ids::SHOTGUN | ids::SNIPER | ids::BULLETS | ids::SHELLS | ids::STAR_REMOTE | ids::STAR_BLASTER) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
+        if matches!(id, ids::BOW | ids::ARROW | ids::SHIELD | ids::GUNPOWDER | ids::LIGHTER | ids::GRENADE | ids::GRENADE_LAUNCHER | ids::ROCKET | ids::BAZOOKA | ids::PISTOL | ids::RIFLE | ids::SHOTGUN | ids::SNIPER | ids::BULLETS | ids::SHELLS | ids::STAR_REMOTE | ids::STAR_BLASTER | ids::STAR_HAMMER) || tool_shape(id).is_some_and(|(kind, _)| kind == 3) {
             return "Вооружение";
         }
         return if info(id).tool.is_some() { "Инструменты" } else { "Предметы" };
