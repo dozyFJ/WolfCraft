@@ -101,6 +101,107 @@ pub enum Held {
     Block([f32; 3]),
     /// Another item: its items-atlas sprite.
     Item(u16),
+    /// A weapon drawn as a box-built 3D model (same `kind` as `GunPose`): grenade launcher 0,
+    /// bazooka 1, pistol 2, rifle 3, shotgun 4, sniper 5, star blaster 6, star remote 7,
+    /// star hammer 8.
+    Gun(u8),
+}
+
+/// Aiming pose of the arms with a weapon: (right arm, left arm or `None` if it hangs free).
+fn gun_arms(kind: u8, pitch: f32) -> (f32, Option<f32>) {
+    let aim = -1.5 - pitch.clamp(-1.0, 1.0) * 0.8;
+    match kind {
+        // The remote is held out in one hand, the hammer rests on the shoulder.
+        7 => (-1.1, None),
+        8 => (-0.5, None),
+        _ => (aim, Some(aim + 0.25)),
+    }
+}
+
+/// A weapon in the hand, built from boxes (third person). In weapon space x is right, y the
+/// top of the weapon and z its barrel; with the arm raised forward the barrel points ahead.
+fn add_gun_3p(v: &mut Vec<ModelVertex>, frame: &Frame, hand: Vec3, pivot: Vec3, angle: f32, kind: u8) {
+    const DARK: [f32; 3] = [0.13, 0.14, 0.15];
+    const GUN: [f32; 3] = [0.24, 0.25, 0.27];
+    const STEEL: [f32; 3] = [0.45, 0.47, 0.50];
+    const WOOD: [f32; 3] = [0.50, 0.33, 0.18];
+    const OLIVE: [f32; 3] = [0.34, 0.40, 0.22];
+    const WHITE: [f32; 3] = [0.82, 0.85, 0.92];
+    const CYAN: [f32; 3] = [0.40, 0.95, 1.0];
+    // Weapon space → arm space: barrel (z) along the arm, away from the shoulder (−y);
+    // the weapon's top (y) to the arm's front (+z).
+    let mut b = |a: [f32; 3], c: [f32; 3], col: [f32; 3]| {
+        let lo = hand + Vec3::new(a[0], -c[2], a[1]);
+        let hi = hand + Vec3::new(c[0], -a[2], c[1]);
+        add_box(v, frame, lo, hi, pivot, angle, col);
+    };
+    match kind {
+        0 => {
+            b([-0.06, -0.05, -0.15], [0.06, 0.07, 0.35], OLIVE);
+            b([-0.07, -0.06, 0.05], [0.07, 0.08, 0.20], DARK);
+            b([-0.03, -0.20, -0.05], [0.03, -0.05, 0.03], DARK);
+            b([-0.03, -0.04, -0.40], [0.03, 0.04, -0.15], WOOD);
+        }
+        1 => {
+            b([-0.09, -0.09, -0.45], [0.09, 0.09, 0.55], OLIVE);
+            b([-0.10, -0.10, 0.50], [0.10, 0.10, 0.60], DARK);
+            b([-0.10, -0.10, -0.50], [0.10, 0.10, -0.42], DARK);
+            b([-0.03, 0.09, 0.00], [0.06, 0.17, 0.12], DARK);
+            b([-0.03, -0.22, 0.02], [0.03, -0.09, 0.08], DARK);
+            b([-0.05, -0.05, 0.60], [0.05, 0.05, 0.66], [0.80, 0.18, 0.14]);
+        }
+        2 => {
+            b([-0.035, 0.00, -0.02], [0.035, 0.07, 0.24], GUN);
+            b([-0.03, -0.16, -0.02], [0.03, 0.00, 0.06], DARK);
+            b([-0.012, 0.00, 0.24], [0.012, 0.03, 0.27], DARK);
+        }
+        3 => {
+            b([-0.045, -0.05, -0.08], [0.045, 0.06, 0.32], DARK);
+            b([-0.04, -0.04, 0.32], [0.04, 0.04, 0.58], OLIVE);
+            b([-0.015, -0.015, 0.58], [0.015, 0.015, 0.70], DARK);
+            b([-0.03, -0.20, 0.10], [0.03, -0.05, 0.18], GUN);
+            b([-0.035, -0.14, -0.04], [0.035, -0.05, 0.03], DARK);
+            b([-0.04, -0.07, -0.40], [0.04, 0.04, -0.08], GUN);
+            b([-0.012, 0.06, 0.05], [0.012, 0.10, 0.25], DARK);
+        }
+        4 => {
+            b([-0.045, -0.05, -0.05], [0.045, 0.06, 0.25], GUN);
+            b([-0.025, 0.00, 0.25], [0.025, 0.05, 0.70], STEEL);
+            b([-0.03, -0.06, 0.30], [0.03, 0.00, 0.55], WOOD);
+            b([-0.045, -0.09, -0.42], [0.045, 0.04, -0.05], WOOD);
+            b([-0.03, -0.15, -0.02], [0.03, -0.05, 0.05], DARK);
+        }
+        5 => {
+            b([-0.045, -0.05, -0.08], [0.045, 0.06, 0.30], OLIVE);
+            b([-0.015, -0.015, 0.30], [0.015, 0.015, 0.85], DARK);
+            b([-0.03, 0.06, 0.00], [0.03, 0.12, 0.26], DARK);
+            b([-0.025, 0.065, 0.26], [0.025, 0.115, 0.27], [0.45, 0.80, 1.0]);
+            b([-0.045, -0.10, -0.50], [0.045, 0.04, -0.08], OLIVE);
+            b([-0.03, -0.16, 0.00], [0.03, -0.05, 0.07], DARK);
+        }
+        6 => {
+            b([-0.05, -0.02, -0.04], [0.05, 0.08, 0.32], WHITE);
+            b([-0.05, 0.08, 0.00], [0.05, 0.10, 0.26], GUN);
+            b([0.05, 0.005, 0.06], [0.066, 0.06, 0.22], CYAN);
+            b([-0.035, -0.005, 0.32], [0.035, 0.065, 0.42], GUN);
+            b([-0.012, 0.018, 0.42], [0.012, 0.042, 0.43], CYAN);
+            b([-0.03, -0.17, -0.02], [0.03, -0.02, 0.07], GUN);
+        }
+        7 => {
+            b([-0.055, -0.03, -0.02], [0.055, 0.02, 0.18], [0.12, 0.13, 0.18]);
+            b([-0.022, 0.02, 0.04], [0.022, 0.034, 0.08], [0.95, 0.12, 0.10]);
+            b([-0.03, 0.02, 0.025], [0.03, 0.085, 0.032], [0.55, 0.60, 0.70]);
+            b([-0.045, 0.02, 0.11], [0.045, 0.025, 0.158], [0.45, 0.70, 1.0]);
+            b([-0.003, 0.025, 0.15], [0.003, 0.11, 0.156], [0.32, 0.34, 0.40]);
+            b([-0.014, 0.11, 0.14], [0.014, 0.13, 0.167], [1.0, 0.92, 0.45]);
+        }
+        _ => {
+            // Hammer: handle along the arm, the head at its end.
+            b([-0.02, -0.02, -0.10], [0.02, 0.02, 0.55], [0.42, 0.26, 0.14]);
+            b([-0.13, -0.08, 0.55], [0.13, 0.08, 0.72], [0.70, 0.73, 0.80]);
+            b([-0.15, -0.04, 0.60], [0.15, 0.04, 0.67], [0.55, 0.85, 1.0]);
+        }
+    }
 }
 
 /// Colour of armour of material `m` (leather, bronze, iron, diamond).
@@ -414,6 +515,23 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
         // Attack: the right arm's motion depends on the tool. Holding something keeps the arm a
         // little forward, as in Minecraft.
         let a = pose.attack.clamp(0.0, 1.0);
+        // A weapon: both arms come up to aim it (one-handed ones only the right).
+        if let (Held::Gun(k), false) = (pose.held, swim) {
+            let (r, l) = gun_arms(k, pose.pitch);
+            let kick = -0.25 * (a * std::f32::consts::PI).sin();
+            let ang = if side > 0.0 { r + kick } else { l.map(|l| l + kick).unwrap_or(ang) };
+            let x0 = if side < 0.0 { -0.48 } else { 0.25 };
+            let pivot = Vec3::new(x0 + 0.115, shoulder, 0.0);
+            // Two-handed: the left arm reaches in towards the weapon.
+            let x_in = if side < 0.0 && l.is_some() { 0.12 } else { 0.0 };
+            add_char_box(&mut v, &frame, Vec3::new(x0 + x_in, ty0 + 0.18, -0.115), Vec3::new(x0 + x_in + 0.23, shoulder + 0.02, 0.115), pivot, ang, sleeve_c);
+            add_char_box(&mut v, &frame, Vec3::new(x0 + x_in - 0.005, ty0 + 0.13, -0.12), Vec3::new(x0 + x_in + 0.235, ty0 + 0.2, 0.12), pivot, ang, dark(sleeve_c, 0.72));
+            add_char_box(&mut v, &frame, Vec3::new(x0 + x_in + 0.015, ty0 - 0.02, -0.1), Vec3::new(x0 + x_in + 0.215, ty0 + 0.14, 0.1), pivot, ang, skin_c);
+            if side > 0.0 {
+                add_held(&mut v, &frame, Vec3::new(x0 + 0.115, ty0 + 0.02, 0.0), pivot, ang, pose.held);
+            }
+            continue;
+        }
         let hold = if side > 0.0 && pose.held != Held::Nothing && !swim { -0.3 } else { 0.0 };
         let ang = if side > 0.0 && a > 0.0 && !swim {
             let k = (a * std::f32::consts::PI).sin();
@@ -543,6 +661,10 @@ fn add_held(v: &mut Vec<ModelVertex>, frame: &Frame, hand: Vec3, pivot: Vec3, an
         }
         Held::Tool(kind, mat) => wolfcraft_assets::items::TOOLS_BASE as usize + mat as usize * 4 + kind as usize,
         Held::Item(i) => i as usize,
+        Held::Gun(kind) => {
+            add_gun_3p(v, frame, hand + Vec3::new(0.0, -0.04, 0.0), pivot, angle, kind);
+            return;
+        }
     };
     let Some(px) = textures().and_then(|t| t.item_pixels.get(sprite).cloned()).filter(|p| p.len() == 256) else {
         if let Held::Tool(kind, mat) = held {
