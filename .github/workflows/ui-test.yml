@@ -26,4 +26,4 @@ jobs:
       - name: Luau block events
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q libasound2-dev pkg-config
-          cargo test -p wolfcraft-game --lib -- luau_scripts --nocapture
+          cargo test -p wolfcraft-game --lib -- luau_scripts voice --nocapture

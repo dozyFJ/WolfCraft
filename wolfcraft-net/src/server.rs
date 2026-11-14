@@ -15,6 +15,8 @@ pub const MAX_PLAYERS: usize = 16;
 pub struct Player {
     pub state: PlayerState,
     out: TcpStream,
+    /// Hears voice chat (said so in Hello).
+    voice: bool,
 }
 
 pub struct State {
@@ -49,6 +51,19 @@ impl State {
     }
 
     /// Sends to everyone (except `skip`); players whose socket is dead are dropped.
+    /// Sends a voice frame to every other player that hears voice chat.
+    pub fn voice_relay(&mut self, from: u32, m: &S2C) {
+        let mut dead = Vec::new();
+        for (id, p) in self.players.iter_mut() {
+            if *id != from && p.voice && write_msg(&mut p.out, m).is_err() {
+                dead.push(*id);
+            }
+        }
+        for id in dead {
+            self.drop_player(id, "связь потеряна");
+        }
+    }
+
     pub fn broadcast(&mut self, m: &S2C, skip: Option<u32>) {
         let mut dead = Vec::new();
         for (id, p) in self.players.iter_mut() {
@@ -110,8 +125,8 @@ fn handle_client(shared: Shared, stream: TcpStream) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
     let Ok(mut out) = stream.try_clone() else { return };
     let mut reader = BufReader::new(stream);
-    let (nick, skin) = match read_msg::<C2S>(&mut reader) {
-        Ok(Some(C2S::Hello { protocol, nick, skin })) if protocol == PROTOCOL => (clean_nick(&nick), skin),
+    let (nick, skin, voice) = match read_msg::<C2S>(&mut reader) {
+        Ok(Some(C2S::Hello { protocol, nick, skin, voice })) if protocol == PROTOCOL => (clean_nick(&nick), skin, voice),
         Ok(Some(C2S::Hello { .. })) => {
             let _ = write_msg(&mut out, &S2C::Kick("другая версия игры".into()));
             return;
@@ -127,7 +142,7 @@ fn handle_client(shared: Shared, stream: TcpStream) {
         }
         let id = s.next_id;
         s.next_id += 1;
-        let welcome = S2C::Welcome { id, world_toml: s.world_toml.clone(), motd: format!("Добро пожаловать в «{}»", s.name) };
+        let welcome = S2C::Welcome { id, world_toml: s.world_toml.clone(), motd: format!("Добро пожаловать в «{}»", s.name), voice: true };
         if write_msg(&mut out, &welcome).is_err() {
             return;
         }
@@ -144,7 +159,7 @@ fn handle_client(shared: Shared, stream: TcpStream) {
         }
         let Ok(out2) = out.try_clone() else { return };
         let state = PlayerState { id, nick: nick.clone(), skin, pos: [0.0; 3], heading: [1.0, 0.0, 0.0], pitch: 0.0, phase: 0.0, amount: 0.0, sneak: false, swim: false, hell: false };
-        s.players.insert(id, Player { state, out: out2 });
+        s.players.insert(id, Player { state, out: out2, voice });
         s.log(format!("{nick} вошёл (id {id})"));
         s.broadcast(&S2C::Chat { from: String::new(), text: format!("{nick} вошёл в игру") }, None);
         id
@@ -180,6 +195,17 @@ fn handle_client(shared: Shared, stream: TcpStream) {
                 }
                 s.log(format!("<{nick}> {text}"));
                 s.broadcast(&S2C::Chat { from: nick.clone(), text }, None);
+            }
+            Ok(Some(C2S::Voice(data))) => {
+                // Relay to everyone else who hears voice; a frame is small (40 ms of speech).
+                if data.len() > 8192 {
+                    continue;
+                }
+                let mut s = shared.lock().unwrap();
+                if !s.players.contains_key(&id) {
+                    break;
+                }
+                s.voice_relay(id, &S2C::Voice { id, data });
             }
             Ok(Some(C2S::Hello { .. })) => {}
             _ => break,

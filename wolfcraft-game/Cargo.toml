@@ -59,6 +59,9 @@ name = "android.permission.ACCESS_WIFI_STATE"
 [[package.metadata.android.uses_permission]]
 name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
 
+[[package.metadata.android.uses_permission]]
+name = "android.permission.RECORD_AUDIO"
+
 [package.metadata.android.application]
 label = "WolfCraft"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"

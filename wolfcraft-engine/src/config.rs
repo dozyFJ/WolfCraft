@@ -392,6 +392,13 @@ pub struct Settings {
     pub refresh_rate: u32,
     /// Saved multiplayer servers: (name, address).
     pub servers: Vec<(String, String)>,
+    /// Voice chat: microphone on, push-to-talk (else voice activation), activation level,
+    /// loudness of others, voices fade with distance.
+    pub voice_enabled: bool,
+    pub voice_push_to_talk: bool,
+    pub voice_threshold: f32,
+    pub voice_volume: f32,
+    pub voice_proximity: bool,
 }
 
 impl Settings {
@@ -457,6 +464,11 @@ impl Default for Settings {
             texture_pack: "builtin:toon16".into(),
             refresh_rate: 120,
             servers: Vec::new(),
+            voice_enabled: false,
+            voice_push_to_talk: false,
+            voice_threshold: 0.02,
+            voice_volume: 1.0,
+            voice_proximity: true,
         }
     }
 }
