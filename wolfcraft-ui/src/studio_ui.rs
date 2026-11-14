@@ -55,6 +55,22 @@ pub enum Node {
     Script,
     /// The block last tapped in the world.
     Target,
+    Models,
+    /// A group of blocks (a brush stroke makes one).
+    Model(usize),
+}
+
+/// What to do with a model (group of blocks).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ModelCmd {
+    /// Shift by (X, Z, вверх) blocks.
+    Move([i32; 3]),
+    Rotate,
+    Grow,
+    Shrink,
+    Delete,
+    Ungroup,
+    Select,
 }
 
 /// Names of the brush operations, in the order of the game's `BrushOp::ALL`.
@@ -166,6 +182,8 @@ pub struct StudioView {
     /// The block last tapped or aimed at: (block id, name, cell).
     pub target: Option<(u16, String, [i32; 3])>,
     pub script_running: bool,
+    /// Models of the place: (name, blocks).
+    pub models: Vec<(String, usize)>,
     /// Phone layout: columns end above the touch controls.
     pub compact: bool,
     pub now: f64,
@@ -201,6 +219,8 @@ pub enum StudioAction {
     Playtest(bool),
     /// The character appears here when «Играть» starts.
     SpawnHere,
+    /// Move, turn, resize… a model.
+    Model(usize, ModelCmd),
     /// From the texture editor: build it from blocks or save it.
     Paint(crate::texture_editor::PaintAction),
 }
@@ -932,6 +952,10 @@ fn explorer(ui: &mut Ui, p: &Palette, st: &mut StudioState, view: &StudioView) {
         row(ui, 1, Node::Drops, format!("Предметы на земле ({})", view.drops), Color32::from_rgb(230, 210, 110));
         let target = view.target.as_ref().map(|t| format!("Выбранный блок: {}", t.1)).unwrap_or_else(|| "Выбранный блок: —".into());
         row(ui, 1, Node::Target, target, Color32::from_rgb(150, 200, 255));
+        row(ui, 1, Node::Models, format!("Модели ({})", view.models.len()), Color32::from_rgb(255, 170, 210));
+        for (i, (n, count)) in view.models.iter().enumerate().take(200) {
+            row(ui, 2, Node::Model(i), format!("{n} · {count} бл."), Color32::from_rgb(255, 170, 210));
+        }
         row(ui, 0, Node::Lighting, "Освещение".into(), Color32::from_rgb(255, 220, 90));
         row(ui, 0, Node::Scripts, "Скрипты".into(), Color32::from_rgb(190, 140, 255));
         row(ui, 1, Node::Script, "script.lua".into(), Color32::from_rgb(190, 140, 255));
@@ -1027,6 +1051,45 @@ fn properties(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, 
                 }
             });
         }
+        Node::Models => {
+            prop(ui, "Моделей", view.models.len().to_string());
+            ui.label(egui::RichText::new("Каждый мазок Кисти «Добавить» становится моделью. Выберите её в Проводнике, чтобы двигать, поворачивать и менять размер.").size(12.0).color(p.text_muted));
+        }
+        Node::Model(i) => match view.models.get(i) {
+            Some((name, count)) => {
+                prop(ui, "Модель", name.clone());
+                prop(ui, "Блоков", count.to_string());
+                let mut b = |ui: &mut Ui, label: &str, cmd: ModelCmd, wd: f32| {
+                    if ui.add_sized(Vec2::new(wd, 30.0), egui::Button::new(label)).clicked() {
+                        actions.push(StudioAction::Model(i, cmd));
+                    }
+                };
+                let third = (w - 12.0) / 3.0;
+                ui.label(egui::RichText::new("Передвинуть").size(12.0).color(p.text_muted));
+                ui.horizontal(|ui| {
+                    b(ui, "X −", ModelCmd::Move([-1, 0, 0]), third);
+                    b(ui, "Вверх", ModelCmd::Move([0, 0, 1]), third);
+                    b(ui, "X +", ModelCmd::Move([1, 0, 0]), third);
+                });
+                ui.horizontal(|ui| {
+                    b(ui, "Z −", ModelCmd::Move([0, -1, 0]), third);
+                    b(ui, "Вниз", ModelCmd::Move([0, 0, -1]), third);
+                    b(ui, "Z +", ModelCmd::Move([0, 1, 0]), third);
+                });
+                ui.label(egui::RichText::new("Поворот и размер").size(12.0).color(p.text_muted));
+                ui.horizontal(|ui| {
+                    b(ui, "⟳ 90°", ModelCmd::Rotate, third);
+                    b(ui, "Больше ×2", ModelCmd::Grow, third);
+                    b(ui, "Меньше ÷2", ModelCmd::Shrink, third);
+                });
+                ui.horizontal(|ui| {
+                    b(ui, "Выделить", ModelCmd::Select, third);
+                    b(ui, "Разгруппир.", ModelCmd::Ungroup, third);
+                    b(ui, "🗑 Удалить", ModelCmd::Delete, third);
+                });
+            }
+            None => prop(ui, "Модель", "—".into()),
+        },
         Node::Target => match &view.target {
             Some((id, name, at)) => {
                 prop(ui, "Блок", name.clone());

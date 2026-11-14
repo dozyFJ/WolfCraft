@@ -33,6 +33,144 @@ pub struct WorldEdit {
     /// A brush stroke is going on: its dabs join one undo step.
     stroke: bool,
     stroke_started: bool,
+    /// Studio models: groups of blocks (each brush stroke that adds blocks makes one).
+    pub models: Vec<Model>,
+    models_loaded: bool,
+    /// Blocks added by the brush stroke going on (they become a model when it ends).
+    stroke_cells: Vec<Cell>,
+}
+
+/// A group of blocks in the studio («Модель», like in Roblox Studio).
+#[derive(Clone, Debug)]
+pub struct Model {
+    pub name: String,
+    pub cells: Vec<Cell>,
+}
+
+/// What can be done to a model.
+pub use wolfcraft_ui::studio_ui::ModelCmd;
+
+const MODELS_FILE: &str = "models.txt";
+
+/// Reads the place's models once (`models.txt` next to the world).
+pub fn load_models(s: &mut GameSession) {
+    if s.we.models_loaded {
+        return;
+    }
+    s.we.models_loaded = true;
+    let Ok(text) = std::fs::read_to_string(s.dir.join(MODELS_FILE)) else { return };
+    let mut cur: Option<Model> = None;
+    for line in text.lines() {
+        if let Some(name) = line.strip_prefix("# ") {
+            if let Some(m) = cur.take() {
+                s.we.models.push(m);
+            }
+            cur = Some(Model { name: name.to_string(), cells: Vec::new() });
+        } else if let Some(m) = &mut cur {
+            let v: Vec<i32> = line.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            if v.len() == 4 {
+                m.cells.push(Cell { f: v[0] as u8, i: v[1], j: v[2], k: v[3] });
+            }
+        }
+    }
+    if let Some(m) = cur {
+        s.we.models.push(m);
+    }
+}
+
+pub fn save_models(s: &GameSession) {
+    let mut out = String::new();
+    for m in &s.we.models {
+        out += &format!("# {}\n", m.name);
+        for c in &m.cells {
+            out += &format!("{} {} {} {}\n", c.f, c.i, c.j, c.k);
+        }
+    }
+    if let Err(e) = std::fs::write(s.dir.join(MODELS_FILE), out) {
+        log::warn!("models: {e}");
+    }
+}
+
+/// Moves, turns, resizes, deletes or ungroups a model. Returns a message for the output.
+pub fn model_cmd(s: &mut GameSession, idx: usize, cmd: ModelCmd) -> Result<String, String> {
+    let Some(m) = s.we.models.get(idx).cloned() else { return Err("Модели нет".into()) };
+    let g = s.chunks.grid();
+    let Some(f) = m.cells.first().map(|c| c.f) else {
+        s.we.models.remove(idx);
+        save_models(s);
+        return Err("Модель пустая — убрана".into());
+    };
+    // Blocks of the model (on its main face) relative to the corner of its box.
+    let cells: Vec<(Cell, Block)> = m.cells.iter().filter(|c| c.f == f).filter_map(|c| s.chunks.get_block(*c).filter(|b| *b != Block::Air).map(|b| (*c, b))).collect();
+    if cells.is_empty() && !matches!(cmd, ModelCmd::Ungroup | ModelCmd::Delete) {
+        return Err("Блоки модели ещё не загружены или уже убраны".into());
+    }
+    let lo = [cells.iter().map(|c| c.0.i).min().unwrap_or(0), cells.iter().map(|c| c.0.j).min().unwrap_or(0), cells.iter().map(|c| c.0.k).min().unwrap_or(0)];
+    let hi = [cells.iter().map(|c| c.0.i).max().unwrap_or(0), cells.iter().map(|c| c.0.j).max().unwrap_or(0), cells.iter().map(|c| c.0.k).max().unwrap_or(0)];
+    let rel: Vec<([i32; 3], Block)> = cells.iter().map(|(c, b)| ([c.i - lo[0], c.j - lo[1], c.k - lo[2]], *b)).collect();
+    let place = |r: [i32; 3], base: [i32; 3]| g.map_cell(f, base[0] + r[0], base[1] + r[1], base[2] + r[2]);
+    let new: Vec<([i32; 3], Block)> = match cmd {
+        ModelCmd::Ungroup => {
+            s.we.models.remove(idx);
+            save_models(s);
+            return Ok(format!("«{}» разгруппирована: блоки остались", m.name));
+        }
+        ModelCmd::Select => {
+            s.we.pos1 = Some(Cell { f, i: lo[0], j: lo[1], k: lo[2] });
+            s.we.pos2 = Some(Cell { f, i: hi[0], j: hi[1], k: hi[2] });
+            return Ok(format!("«{}» выделена: Копия, Заполнить и другие инструменты Модели работают с ней", m.name));
+        }
+        ModelCmd::Delete => Vec::new(),
+        ModelCmd::Move(d) => rel.iter().map(|(r, b)| ([r[0] + d[0], r[1] + d[1], r[2] + d[2]], *b)).collect(),
+        ModelCmd::Rotate => {
+            // A quarter turn about the vertical, inside the same box corner.
+            let h = hi[1] - lo[1];
+            rel.iter().map(|(r, b)| ([h - r[1], r[0], r[2]], *b)).collect()
+        }
+        ModelCmd::Grow => {
+            if rel.len() * 8 > 40_000 {
+                return Err("Слишком большая модель для увеличения".into());
+            }
+            let mut v = Vec::new();
+            for (r, b) in &rel {
+                for a in 0..8 {
+                    v.push(([r[0] * 2 + (a & 1), r[1] * 2 + ((a >> 1) & 1), r[2] * 2 + ((a >> 2) & 1)], *b));
+                }
+            }
+            v
+        }
+        ModelCmd::Shrink => {
+            let mut seen = std::collections::HashSet::new();
+            rel.iter().filter_map(|(r, b)| {
+                let q = [r[0].div_euclid(2), r[1].div_euclid(2), r[2].div_euclid(2)];
+                seen.insert(q).then_some((q, *b))
+            }).collect()
+        }
+    };
+    let mut ops: Vec<(Cell, Block)> = cells.iter().map(|(c, _)| (*c, Block::Air)).collect();
+    let mut out_cells = Vec::new();
+    for (r, b) in &new {
+        let Some(c) = place(*r, lo) else { return Err("Модель вышла бы за край грани планеты".into()) };
+        ops.push((c, *b));
+        out_cells.push(c);
+    }
+    let (n, missed) = apply(s, ops);
+    if missed > 0 && n == 0 {
+        return Err("Мир там ещё не загрузился".into());
+    }
+    if new.is_empty() {
+        s.we.models.remove(idx);
+    } else if let Some(m) = s.we.models.get_mut(idx) {
+        m.cells = out_cells;
+    }
+    save_models(s);
+    Ok(match cmd {
+        ModelCmd::Delete => format!("«{}» удалена", m.name),
+        ModelCmd::Rotate => format!("«{}» повёрнута на 90°", m.name),
+        ModelCmd::Grow => format!("«{}» увеличена ×2", m.name),
+        ModelCmd::Shrink => format!("«{}» уменьшена ×2", m.name),
+        _ => format!("«{}» сдвинута", m.name),
+    })
 }
 
 fn sys(t: impl Into<String>) -> Reply {
@@ -91,6 +229,16 @@ pub(crate) fn apply(s: &mut GameSession, cells: impl IntoIterator<Item = (Cell, 
             continue;
         }
         if s.chunks.set_block(c, b) {
+            // The brush adds blocks: they will be one model.
+            if s.we.stroke && old == Block::Air && b != Block::Air {
+                s.we.stroke_cells.push(c);
+            }
+            // A block that goes leaves its model.
+            if b == Block::Air && !s.we.models.is_empty() {
+                for m in &mut s.we.models {
+                    m.cells.retain(|x| *x != c);
+                }
+            }
             log.push((c, old));
             s.net_out.push((c, b));
         } else {
@@ -368,9 +516,21 @@ impl BrushOp {
 
 /// Starts or ends a brush stroke (all dabs while the finger is down are one undo step).
 pub fn stroke(s: &mut GameSession, on: bool) {
+    let was = s.we.stroke;
     s.we.stroke = on;
     if !on {
         s.we.stroke_started = false;
+        // The stroke is over: the blocks it added become a model.
+        if was && !s.we.stroke_cells.is_empty() {
+            load_models(s);
+            let mut cells = std::mem::take(&mut s.we.stroke_cells);
+            cells.sort_by_key(|c| (c.f, c.i, c.j, c.k));
+            cells.dedup();
+            let n = s.we.models.len() + 1;
+            s.we.models.push(Model { name: format!("Модель {n}"), cells });
+            save_models(s);
+        }
+        s.we.stroke_cells.clear();
     }
 }
 
