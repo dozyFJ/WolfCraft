@@ -95,6 +95,8 @@ pub struct StudioState {
     pub dock_frac: f32,
     /// Bottom of the world view (points), for the touch controls (portrait).
     pub view_bottom: Option<f32>,
+    /// Right edge of the world view (points) when the dock is at the side (landscape).
+    pub view_right: Option<f32>,
 }
 
 impl Default for StudioState {
@@ -124,7 +126,8 @@ impl Default for StudioState {
             assets_open: true,
             script_open: false,
             dock_tab: 0,
-            dock_open: true,
+            // Every window starts closed: the whole screen is the world, pills open them.
+            dock_open: false,
             dock_frac: 0.5,
             view_bottom: None,
         }
@@ -191,6 +194,9 @@ pub fn script_commands(script: &str) -> Vec<String> {
         .collect()
 }
 
+/// The ribbon-and-dock layout in landscape too (the older side-windows layout stays below).
+const DOCK_LAYOUT: bool = true;
+
 const CATS: [&str; 12] = ["Шаблоны", "Все", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы"];
 
 /// Draws the studio over the world. Returns the actions and the screen areas (points) that
@@ -221,7 +227,9 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &
         return (actions, covered);
     }
 
-    if screen.height() > screen.width() {
+    // One layout for phones in both orientations: ribbon, window pills, and a dock (under
+    // the world when upright, at the right side in landscape).
+    if DOCK_LAYOUT || screen.height() > screen.width() {
         return draw_portrait(ctx, icons, st, view, inv, &p, actions, covered);
     }
     st.view_bottom = None;
@@ -473,18 +481,33 @@ fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, vi
     }
     if !st.dock_open {
         st.view_bottom = None;
+        st.view_right = None;
         return (actions, covered);
     }
-    // World and dock.
-    let avail = screen.bottom() - top_bar.bottom();
-    st.dock_frac = st.dock_frac.clamp(0.25, 0.8);
-    let split_y = top_bar.bottom() + avail * st.dock_frac;
-    st.view_bottom = Some(split_y);
-    let dock = Rect::from_min_max(Pos2::new(screen.left(), split_y), screen.max);
+    // World and dock: under the world when upright, beside it on the right in landscape.
+    let landscape = screen.width() > screen.height();
+    let dock = if landscape {
+        let avail = screen.width();
+        st.dock_frac = st.dock_frac.clamp(0.35, 0.75);
+        let split_x = screen.left() + avail * st.dock_frac;
+        st.view_bottom = None;
+        st.view_right = Some(split_x);
+        if let Some(dx) = splitter(ctx, "studio-split-dock-x", Rect::from_min_max(Pos2::new(split_x - 7.0, top_bar.bottom()), Pos2::new(split_x + 7.0, screen.bottom())), true, p) {
+            st.dock_frac += dx / avail.max(1.0);
+        }
+        Rect::from_min_max(Pos2::new(split_x, top_bar.bottom()), screen.max)
+    } else {
+        let avail = screen.bottom() - top_bar.bottom();
+        st.dock_frac = st.dock_frac.clamp(0.25, 0.8);
+        let split_y = top_bar.bottom() + avail * st.dock_frac;
+        st.view_bottom = Some(split_y);
+        st.view_right = None;
+        if let Some(dy) = splitter(ctx, "studio-split-dock", Rect::from_min_max(Pos2::new(screen.left(), split_y - 7.0), Pos2::new(screen.right(), split_y + 7.0)), false, p) {
+            st.dock_frac += dy / avail.max(1.0);
+        }
+        Rect::from_min_max(Pos2::new(screen.left(), split_y), screen.max)
+    };
     covered.push(dock);
-    if let Some(dy) = splitter(ctx, "studio-split-dock", Rect::from_min_max(Pos2::new(screen.left(), split_y - 7.0), Pos2::new(screen.right(), split_y + 7.0)), false, p) {
-        st.dock_frac += dy / avail.max(1.0);
-    }
     egui::Area::new(Id::new("studio-dock")).order(egui::Order::Foreground).fixed_pos(dock.min).show(ctx, |ui| {
         Frame::none().fill(p.surface).stroke(Stroke::new(1.0_f32, p.outline)).show(ui, |ui| {
             ui.set_width(dock.width());
