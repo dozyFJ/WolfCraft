@@ -781,47 +781,6 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
                         if square_button(ui, icons, icon::GEAR, false).clicked() { action = MenuAction::OpenSettings; }
                     });
                 });
-                ui.horizontal(|ui| {
-                    let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-                    for (i, label) in [(0usize, "Одиночная"), (1, "По сети")] {
-                        if pill_button(ui, icons, None, label, if st.mode == i { ButtonKind::Primary } else { ButtonKind::Secondary }, half, true).clicked() { st.mode = i; }
-                    }
-                });
-                if st.mode == 0 {
-                    ui.horizontal(|ui| {
-                        let w = (ui.available_width() - 100.0).max(100.0);
-                        if pill_button(ui, icons, Some(icon::PLUS), "Создать мир", ButtonKind::Primary, w, true).clicked() { action = MenuAction::OpenCreate; }
-                        if square_button(ui, icons, icon::SEARCH, st.search_open).clicked() {
-                            st.search_open = !st.search_open;
-                            st.search_focus = st.search_open;
-                            if !st.search_open { st.search.clear(); }
-                        }
-                        if square_button(ui, icons, icon::SORT, st.sort_open).clicked() { st.sort_open = !st.sort_open; }
-                    });
-                    if st.search_open {
-                        let r = text_input(ui, icons, &mut st.search, "Название…", ui.available_width(), None);
-                        if st.search_focus { st.search_focus = false; r.request_focus(); }
-                    }
-                    if st.sort_open {
-                        egui::ScrollArea::horizontal().id_salt("world-sort-phone").show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                for (i, label) in SORT_NAMES.iter().enumerate() {
-                                    if pill_button(ui, icons, None, label, if st.sort == i { ButtonKind::Primary } else { ButtonKind::Secondary }, 0.0, true).clicked() {
-                                        st.sort = i; st.sort_open = false;
-                                    }
-                                }
-                            });
-                        });
-                    }
-                } else {
-                    egui::ScrollArea::horizontal().id_salt("network-phone-tabs").show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for (i, label) in [(0usize, "Рядом"), (1, "Создать сервер"), (2, "По коду"), (3, "Мои серверы")] {
-                                if pill_button(ui, icons, None, label, if st.net_tab == i { ButtonKind::Primary } else { ButtonKind::Secondary }, 0.0, true).clicked() { st.net_tab = i; }
-                            }
-                        });
-                    });
-                }
             });
     } else {
     // Left sidebar: every control, stacked vertically.
@@ -856,6 +815,107 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
             });
     }
     }
+    if compact {
+        // Phone: sections one under another in a centred column — «Одиночная» (create, search,
+        // sort and the worlds) and «По сети» (nearby, create a server, by code, my servers).
+        egui::CentralPanel::default().frame(Frame::none().fill(p.bg).inner_margin(Margin::symmetric(12.0, 12.0))).show(ctx, |ui| {
+            egui::ScrollArea::vertical().id_salt("worlds-phone-body").auto_shrink([false, false]).show(ui, |ui| {
+                let full = ui.available_width();
+                let col_w = full.min(620.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(((full - col_w) / 2.0).max(0.0));
+                    ui.vertical(|ui| {
+                        ui.set_width(col_w);
+                        let section = |ui: &mut Ui, ic: u16, title: &str, add: &mut dyn FnMut(&mut Ui)| {
+                            Frame::none().fill(p.surface).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(14.0)).show(ui, |ui| {
+                                ui.set_width(col_w - 28.0);
+                                ui.horizontal(|ui| {
+                                    let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+                                    icons.paint(ui.painter(), r, ic, p.accent);
+                                    ui.label(egui::RichText::new(title).font(bold_font(18.0)).color(p.text));
+                                });
+                                ui.add_space(4.0);
+                                let (line, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+                                ui.painter().rect_filled(line, 0.0, p.outline);
+                                ui.add_space(10.0);
+                                add(ui);
+                            });
+                            ui.add_space(12.0);
+                        };
+                        section(ui, icon::PLAY, "Одиночная", &mut |ui| {
+                            ui.horizontal(|ui| {
+                                let w = (ui.available_width() - 100.0).max(100.0);
+                                if pill_button(ui, icons, Some(icon::PLUS), "Создать мир", ButtonKind::Primary, w, true).clicked() { action = MenuAction::OpenCreate; }
+                                if square_button(ui, icons, icon::SEARCH, st.search_open).clicked() {
+                                    st.search_open = !st.search_open;
+                                    st.search_focus = st.search_open;
+                                    if !st.search_open { st.search.clear(); }
+                                }
+                                if square_button(ui, icons, icon::SORT, st.sort_open).clicked() { st.sort_open = !st.sort_open; }
+                            });
+                            if st.search_open {
+                                let r = text_input(ui, icons, &mut st.search, "Название…", ui.available_width(), None);
+                                if st.search_focus { st.search_focus = false; r.request_focus(); }
+                            }
+                            if st.sort_open {
+                                ui.horizontal_wrapped(|ui| {
+                                    for (i, label) in SORT_NAMES.iter().enumerate() {
+                                        if pill_button(ui, icons, None, label, if st.sort == i { ButtonKind::Primary } else { ButtonKind::Secondary }, 0.0, true).clicked() {
+                                            st.sort = i; st.sort_open = false;
+                                        }
+                                    }
+                                });
+                            }
+                            ui.add_space(8.0);
+                            let list = sorted_filtered(worlds, &st.search, st.sort);
+                            if list.is_empty() {
+                                let none = st.search.trim().is_empty() || !worlds.iter().any(|w| !w.cfg.studio_project);
+                                ui.label(egui::RichText::new(if none { "Миров пока нет — нажмите «Создать мир»" } else { "Ничего не найдено" }).color(p.text_muted));
+                            }
+                            let inner = ui.available_width();
+                            for w in &list {
+                                let selected = st.selected.as_deref() == Some(w.cfg.id.as_str());
+                                let resp = row_card(ui, selected, |ui| {
+                                    ui.set_width(inner - 26.0);
+                                    ui.horizontal(|ui| {
+                                        let (r, _) = ui.allocate_exact_size(Vec2::splat(48.0), Sense::hover());
+                                        if let Some(tex) = &w.preview {
+                                            ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                                        } else { ui.painter().rect_filled(r, Rounding::same(8.0), p.surface); }
+                                        ui.vertical(|ui| {
+                                            ui.add(egui::Label::new(egui::RichText::new(&w.cfg.name).font(bold_font(17.0)).color(p.text)).truncate());
+                                            ui.label(egui::RichText::new(format!("{} · {}", if w.cfg.mode == GameMode::Creative { "Творческий" } else { "Выживание" }, w.cfg.size.label())).size(12.0).color(p.text_muted));
+                                        });
+                                    });
+                                    ui.add_space(8.0);
+                                    ui.horizontal(|ui| {
+                                        let play_w = (ui.available_width() - 100.0).max(100.0);
+                                        if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, play_w, true).clicked() { action = MenuAction::PlayWorld(w.cfg.id.clone()); }
+                                        if icon_button(ui, icons, icon::EDIT, 40.0, ButtonKind::Ghost).clicked() { st.rename = Some((w.cfg.id.clone(), w.cfg.name.clone())); }
+                                        if icon_button(ui, icons, icon::TRASH, 40.0, ButtonKind::Danger).clicked() { st.confirm_delete = Some(w.cfg.id.clone()); }
+                                    });
+                                });
+                                if resp.clicked() { st.selected = Some(w.cfg.id.clone()); }
+                                ui.add_space(8.0);
+                            }
+                        });
+                        section(ui, icon::GLOBE, "По сети", &mut |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                for (i, label) in [(0usize, "Рядом"), (1, "Создать сервер"), (2, "По коду"), (3, "Мои серверы")] {
+                                    if pill_button(ui, icons, None, label, if st.net_tab == i { ButtonKind::Primary } else { ButtonKind::Secondary }, 0.0, true).clicked() { st.net_tab = i; }
+                                }
+                            });
+                            ui.add_space(8.0);
+                            if let Some(a) = online_tab(ui, icons, &p, st, worlds) {
+                                action = a;
+                            }
+                        });
+                    });
+                });
+            });
+        });
+    }
+    if !compact {
     egui::CentralPanel::default().frame(body_frame(&p)).show(ctx, |ui| {
         if st.mode == 1 {
             if let Some(a) = online_tab(ui, icons, &p, st, worlds) {
@@ -945,6 +1005,7 @@ pub fn world_select(ctx: &egui::Context, icons: &GuiIcons, st: &mut WorldSelectS
             }
         });
     });
+    }
 
     if let Some((id, name)) = &mut st.rename {
         let mut close = false;
@@ -1787,8 +1848,8 @@ mod tests {
         let create = text("Создать мир");
         let world = text("Телефон");
         let play = text("Играть");
-        assert!((single.y - network.y).abs() < 2.0);
-        assert!(create.y < world.y && world.y < play.y);
+        // Sections one under another: «Одиночная» (create, the worlds), then «По сети».
+        assert!(single.y < create.y && create.y < world.y && world.y < play.y && play.y < network.y);
         assert!(play.x > 0.0 && play.x < 390.0 && play.y < 844.0);
         render(&mut st, vec![egui::Event::PointerMoved(play), egui::Event::PointerButton { pos: play, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
         let (_, action) = render(&mut st, vec![egui::Event::PointerButton { pos: play, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
