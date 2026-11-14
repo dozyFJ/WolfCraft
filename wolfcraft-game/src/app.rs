@@ -1392,6 +1392,8 @@ impl App {
                     let frozen = self.screen != Screen::Playing;
                     let t = ScopeTimer::start();
                     s.fx_amount = self.settings.particles;
+                    // Mini-games only on a server (online) or in the studio.
+                    s.minigames = self.net.is_some() || self.studio.is_some();
                     let events = s.update(&input, dt, view, frozen);
                     self.profile.chunks_ms = t.ms();
                     if let Some((op, r, cube)) = brush {
