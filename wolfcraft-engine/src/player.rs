@@ -116,6 +116,8 @@ pub struct Player {
     /// Potion effects running now (not saved).
     pub effects: Vec<crate::magic::Active>,
     effect_tick: f32,
+    /// Free camera of the studio's edit mode: flies through blocks, no body, no damage.
+    pub noclip: bool,
 }
 
 pub fn tangent_fallback(up: DVec3) -> DVec3 {
@@ -148,6 +150,7 @@ impl Player {
             fall_peak: 0.0,
             effects: Vec::new(),
             effect_tick: 0.0,
+            noclip: false,
         }
     }
 
@@ -324,6 +327,31 @@ impl Player {
                 self.glide_wear-=1.0;
                 if let Some(w)=&mut self.inventory.armor[1] {w.damage=w.damage.saturating_add(1);if w.damage>=512 {self.inventory.armor[1]=None;}}
             }
+        }
+        if self.noclip {
+            // Studio camera: forward goes where you look (up and down too), «Вверх»/«Вниз»
+            // rise and sink, nothing collides; it glides to a stop.
+            let up = self.up();
+            let look = self.look_dir();
+            let mut dir = look * c.forward as f64 + right * c.strafe as f64;
+            if c.jump {
+                dir += up;
+            }
+            if c.sneak {
+                dir -= up;
+            }
+            if dir.length_squared() > 1.0 {
+                dir = dir.normalize();
+            }
+            let fly = if c.sprint { 30.0 } else { 12.0 } * space_boost(world.grid(), world.grid().radial(self.body.pos));
+            let target = dir * fly;
+            let k = (1.0 - (-10.0 * dt).exp()).min(1.0);
+            self.body.vel += (target - self.body.vel) * k;
+            self.body.pos += self.body.vel * dt;
+            self.body.flying = true;
+            self.body.on_ground = false;
+            self.anim_amount = 0.0;
+            return;
         }
         let input = MoveInput { wish, speed, jump: c.jump&&!self.gliding, up: c.jump, down: c.sneak };
         let altitude_before = crate::cubesphere::radial(self.body.pos);

@@ -193,6 +193,8 @@ pub enum StudioAction {
     RemoveTarget,
     /// Start or stop play-testing.
     Playtest(bool),
+    /// The character appears here when «Играть» starts.
+    SpawnHere,
 }
 
 /// Commands of a script: trimmed lines without comments, each starting with "/".
@@ -678,6 +680,10 @@ fn ribbon(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, view
             }
             if tool(ui, icons, p, icon::SUN, "День/ночь", false).clicked() {
                 actions.push(StudioAction::DayNight);
+            }
+            sep(ui, p);
+            if tool(ui, icons, p, icon::CROSSHAIR, "Спавн здесь", false).clicked() {
+                actions.push(StudioAction::SpawnHere);
             }
         }
         Tab::View => {
