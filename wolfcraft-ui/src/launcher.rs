@@ -162,7 +162,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     if matches!(page, Tab::Home | Tab::Skins | Tab::Settings) {
-                        let update = if wide {
+                        let update = if ui.ctx().screen_rect().width() > 480.0 {
                             pill_button(ui, icons, Some(icon::REFRESH), "Обновить", ButtonKind::Secondary, 0.0, true)
                         } else {
                             round_icon(ui, icons, &p, icon::REFRESH).on_hover_text("Обновить приложение")
