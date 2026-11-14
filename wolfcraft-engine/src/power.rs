@@ -266,6 +266,10 @@ fn eval_part(world: &mut impl WorldEdit, c: Cell) -> Vec<Cell> {
 /// Doors a signal holds swung (lower halves).
 static POWERED_DOORS: std::sync::LazyLock<std::sync::Mutex<HashSet<Cell>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
 
+/// Doors swung by a button: they stay as they are when the button pops back up, and the next
+/// press swings them back (press — open, press again — shut).
+static LATCHED_DOORS: std::sync::LazyLock<std::sync::Mutex<HashSet<Cell>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
+
 /// Plants a piston crushed (cell, block), for the game to drop as items.
 static CRUSHED: std::sync::Mutex<Vec<(Cell, Block)>> = std::sync::Mutex::new(Vec::new());
 
@@ -471,6 +475,23 @@ fn update_network(world: &mut impl WorldEdit, origin: Cell) -> (usize, HashSet<C
                     s.remove(&d);
                 }
             }
+            // A button is a press, not a hold: the door turns on the press and keeps its new
+            // position when the button pops back up.
+            let button = on && (probe.iter().any(|c| world.cell_block(*c) == Block::ButtonOn) || neighbors(world, d).into_iter().chain(top.map(|(t, _)| neighbors(world, t)).unwrap_or_default()).any(|n| world.cell_block(n) == Block::ButtonOn));
+            let swing = if on {
+                if button {
+                    if let Ok(mut l) = LATCHED_DOORS.lock() {
+                        l.insert(d);
+                    }
+                }
+                true
+            } else {
+                // Released: a door turned by a button stays where it is.
+                !LATCHED_DOORS.lock().map(|mut l| l.remove(&d)).unwrap_or(false)
+            };
+            if !swing {
+                continue;
+            }
             if let Some(nb) = b.door_toggle() {
                 world.set_block(d, nb);
                 changed += 1;
@@ -538,6 +559,27 @@ mod tests {
         w.set_block(at(6, 0), Block::Stone);
         update_iskrit(&mut w, at(6, 0));
         assert_eq!(w.cell_block(at(5, 0)), Block::DoorOpen, "manual door untouched");
+    }
+
+    #[test]
+    fn a_button_opens_a_door_and_the_next_press_shuts_it() {
+        let mut w = mock();
+        let up = |c: Cell| Cell::new(c.f, c.i, c.j, c.k + 1);
+        w.set_block(at(20, 0), Block::Door);
+        w.set_block(up(at(20, 0)), Block::DoorTop);
+        w.set_block(at(20, 1), Block::Button);
+        let press = |w: &mut Mock| {
+            w.set_block(at(20, 1), Block::ButtonOn);
+            update_iskrit(w, at(20, 1));
+            w.set_block(at(20, 1), Block::Button);
+            update_iskrit(w, at(20, 1));
+        };
+        press(&mut w);
+        assert_eq!(w.cell_block(at(20, 0)), Block::DoorOpen, "a press opens the door and it stays open");
+        assert_eq!(w.cell_block(up(at(20, 0))), Block::DoorTopOpen);
+        press(&mut w);
+        assert_eq!(w.cell_block(at(20, 0)), Block::Door, "the next press shuts it");
+        assert_eq!(w.cell_block(up(at(20, 0))), Block::DoorTop);
     }
 
     #[test]
