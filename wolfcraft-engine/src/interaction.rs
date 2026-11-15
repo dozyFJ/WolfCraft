@@ -290,7 +290,7 @@ impl Interaction {
             }
             // Chest and electric furnace open their own window (sneak to place blocks instead).
             let furniture_container = crate::construction::is_container(h.block);
-            if (furniture_container || matches!(h.block.base_kind(), Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::EnchantTable | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB)) && !player.sneaking {
+            if (furniture_container || (matches!(h.block.base_kind(), Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::EnchantTable | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) || crate::wolftech::kind(h.block).is_some())) && !player.sneaking {
                 events.push(InteractionEvent::OpenContainer { pos: h.cell, block: h.block.base_kind() });
                 return events;
             }
@@ -849,6 +849,11 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
         ids::RAW_TIN => ids::TIN_INGOT,
         ids::RAW_SILVER => ids::SILVER_INGOT,
         ids::RAW_URANIUM => ids::URANIUM_INGOT,
+        ids::IRON_DUST => ids::IRON_INGOT,
+        ids::GOLD_DUST => ids::GOLD_INGOT,
+        ids::COPPER_DUST => ids::COPPER_INGOT,
+        ids::TIN_DUST => ids::TIN_INGOT,
+        ids::SILVER_DUST => ids::SILVER_INGOT,
         ids::POTATO => ids::BAKED_POTATO,
         ids::RAW_MEAT => ids::COOKED_MEAT,
         ids::RAW_FISH => ids::COOKED_FISH,

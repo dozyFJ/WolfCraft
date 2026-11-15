@@ -191,6 +191,16 @@ pub mod tiles {
     pub const BUTTON_PAD: u16 = 190;
     pub const BUTTON_PAD_SIDE: u16 = 195;
     pub const FIRE: u16 = 196;
+    // WolfTech machines.
+    pub const TECH_SIDE: u16 = 197;
+    pub const TECH_TOP: u16 = 198;
+    pub const TECH_GEN_FRONT: u16 = 199;
+    pub const SOLAR_TOP: u16 = 200;
+    pub const CELL_SIDE: u16 = 201;
+    pub const CABLE: u16 = 202;
+    pub const CRUSHER_FRONT: u16 = 203;
+    pub const INDUCTION_FRONT: u16 = 204;
+    pub const ENRICHER_FRONT: u16 = 205;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2050,6 +2060,113 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    // WolfTech: steel casings with rivets, a coloured front per machine.
+    let casing = |q: &mut Painter, seed: u32| {
+        q.noisy(Rgb(0.46, 0.49, 0.53), 0.04, seed);
+        for i in 0..S {
+            q.put(i, 0, Rgb(0.30, 0.32, 0.36), 1.0);
+            q.put(i, S - 1, Rgb(0.30, 0.32, 0.36), 1.0);
+            q.put(0, i, Rgb(0.30, 0.32, 0.36), 1.0);
+            q.put(S - 1, i, Rgb(0.30, 0.32, 0.36), 1.0);
+        }
+        for (x, y) in [(2, 2), (13, 2), (2, 13), (13, 13)] {
+            q.put(x, y, Rgb(0.70, 0.72, 0.76), 1.0);
+        }
+    };
+    l.add(TECH_SIDE, "tech_side", p(|q| casing(q, 301)));
+    l.add(TECH_TOP, "tech_top", p(|q| {
+        casing(q, 302);
+        for i in 4..12 {
+            q.put(i, 7, Rgb(0.25, 0.27, 0.30), 1.0);
+            q.put(7, i, Rgb(0.25, 0.27, 0.30), 1.0);
+        }
+    }));
+    let front = |q: &mut Painter, seed: u32, c: Rgb, kind: u32| {
+        casing(q, seed);
+        for y in 3..13 {
+            for x in 3..13 {
+                q.put(x, y, Rgb(0.13, 0.14, 0.16), 1.0);
+            }
+        }
+        match kind {
+            // Generator: a glowing fire grate.
+            0 => {
+                for x in 4..12 {
+                    for y in (8..12).step_by(1) {
+                        if (x + y) % 2 == 0 {
+                            q.put(x, y, c, 1.0);
+                        }
+                    }
+                }
+            }
+            // Crusher: two toothed rollers.
+            1 => {
+                for x in 4..12 {
+                    q.put(x, 6, c, 1.0);
+                    q.put(x, 9, c, 1.0);
+                    if x % 2 == 0 {
+                        q.put(x, 7, c, 1.0);
+                        q.put(x, 8, c, 1.0);
+                    }
+                }
+            }
+            // Induction furnace: a glowing coil.
+            2 => {
+                for y in (4..12).step_by(2) {
+                    for x in 4..12 {
+                        q.put(x, y, c, 1.0);
+                    }
+                }
+            }
+            // Enricher: a vessel with a bubbling liquid.
+            _ => {
+                for y in 6..12 {
+                    for x in 5..11 {
+                        q.put(x, y, if (x * 3 + y) % 5 == 0 { Rgb(0.85, 1.0, 0.95) } else { c }, 1.0);
+                    }
+                }
+            }
+        }
+        // Status light.
+        q.put(12, 4, Rgb(0.30, 1.0, 0.40), 1.0);
+    };
+    l.add(TECH_GEN_FRONT, "tech_generator", p(|q| front(q, 303, Rgb(1.0, 0.55, 0.15), 0)));
+    l.add(SOLAR_TOP, "solar_top", p(|q| {
+        q.noisy(Rgb(0.10, 0.16, 0.35), 0.05, 304);
+        for i in 0..S {
+            q.put(i, 0, Rgb(0.70, 0.72, 0.76), 1.0);
+            q.put(i, S - 1, Rgb(0.70, 0.72, 0.76), 1.0);
+            q.put(0, i, Rgb(0.70, 0.72, 0.76), 1.0);
+            q.put(S - 1, i, Rgb(0.70, 0.72, 0.76), 1.0);
+            q.put(i, 8, Rgb(0.55, 0.60, 0.70), 1.0);
+            q.put(8, i, Rgb(0.55, 0.60, 0.70), 1.0);
+        }
+        for (x, y) in [(3, 3), (11, 3), (3, 11), (11, 11)] {
+            q.put(x, y, Rgb(0.45, 0.60, 0.95), 1.0);
+        }
+    }));
+    l.add(CELL_SIDE, "energy_cell", p(|q| {
+        casing(q, 305);
+        // Charge bars.
+        for k in 0..4u32 {
+            for x in 5..11 {
+                q.put(x, 4 + k * 2, if k < 3 { Rgb(0.30, 0.95, 0.45) } else { Rgb(0.20, 0.30, 0.22) }, 1.0);
+            }
+        }
+    }));
+    l.add(CABLE, "cable", p(|q| {
+        q.noisy(Rgb(0.78, 0.45, 0.22), 0.06, 306);
+        for i in 0..S {
+            if i % 4 == 0 {
+                for j in 0..S {
+                    q.put(i, j, Rgb(0.55, 0.30, 0.14), 1.0);
+                }
+            }
+        }
+    }));
+    l.add(CRUSHER_FRONT, "crusher", p(|q| front(q, 307, Rgb(0.75, 0.78, 0.82), 1)));
+    l.add(INDUCTION_FRONT, "induction_furnace", p(|q| front(q, 308, Rgb(1.0, 0.40, 0.10), 2)));
+    l.add(ENRICHER_FRONT, "enricher", p(|q| front(q, 309, Rgb(0.20, 0.80, 0.70), 3)));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

@@ -85,7 +85,13 @@ pub mod items {
     pub const STAR_REMOTE: u16 = 129;
     pub const STAR_BLASTER: u16 = 130;
     pub const STAR_HAMMER: u16 = 131;
-    pub const COUNT: u16 = 132;
+    pub const IRON_DUST: u16 = 132;
+    pub const GOLD_DUST: u16 = 133;
+    pub const COPPER_DUST: u16 = 134;
+    pub const TIN_DUST: u16 = 135;
+    pub const SILVER_DUST: u16 = 136;
+    pub const CIRCUIT: u16 = 137;
+    pub const COUNT: u16 = 138;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1117,6 +1123,42 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         'B' => Some(Rgb(0.40, 0.26, 0.14)),
         _ => None,
     })));
+    // WolfTech dusts: a small heap of grains in the metal's colour.
+    for (id, name, c) in [
+        (IRON_DUST, "iron_dust", Rgb(0.78, 0.74, 0.70)),
+        (GOLD_DUST, "gold_dust", Rgb(1.0, 0.82, 0.25)),
+        (COPPER_DUST, "copper_dust", Rgb(0.90, 0.52, 0.28)),
+        (TIN_DUST, "tin_dust", Rgb(0.80, 0.84, 0.88)),
+        (SILVER_DUST, "silver_dust", Rgb(0.88, 0.90, 0.95)),
+    ] {
+        l.add(id, name, p(move |q| {
+            for y in 7..14u32 {
+                let half = (y - 6) as i32;
+                for x in (8 - half).max(2)..(8 + half).min(14) {
+                    let x = x as u32;
+                    let shade = if (x * 7 + y * 3) % 5 == 0 { 0.75 } else if (x + y) % 3 == 0 { 1.12 } else { 1.0 };
+                    q.put(x, y, Rgb((c.0 * shade).min(1.0), (c.1 * shade).min(1.0), (c.2 * shade).min(1.0)), 1.0);
+                }
+            }
+        }));
+    }
+    l.add(CIRCUIT, "circuit", p(|q| {
+        for y in 3..13u32 {
+            for x in 2..14u32 {
+                q.put(x, y, Rgb(0.10, 0.45, 0.20), 1.0);
+            }
+        }
+        for x in 3..13u32 {
+            q.put(x, 6, Rgb(0.95, 0.78, 0.30), 1.0);
+            q.put(x, 10, Rgb(0.95, 0.78, 0.30), 1.0);
+        }
+        for (x, y) in [(5u32, 7u32), (9, 8), (11, 7)] {
+            q.put(x, y, Rgb(0.12, 0.12, 0.14), 1.0);
+            q.put(x + 1, y, Rgb(0.12, 0.12, 0.14), 1.0);
+            q.put(x, y + 1, Rgb(0.12, 0.12, 0.14), 1.0);
+            q.put(x + 1, y + 1, Rgb(0.12, 0.12, 0.14), 1.0);
+        }
+    }));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

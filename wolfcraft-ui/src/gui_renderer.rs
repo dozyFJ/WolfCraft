@@ -418,5 +418,6 @@ pub fn block_panel(block:Block)->u16 {
         Form::KitchenBase|Form::Counter|Form::Sink=>return g::PANEL_KITCHEN,
         _=>{}
     }if e.material<3{return g::PANEL_WOOD;}if e.material==6||e.material==7{return g::PANEL_METAL;}}
+    if wolfcraft_engine::wolftech::kind(block).is_some() {return g::PANEL_METAL;}
     match block.base_kind(){Block::ElectricFurnace|Block::MachineCasing|Block::Terminal|Block::CommandBlock=>g::PANEL_METAL,Block::EnchantTable=>g::PANEL_MAGIC,Block::Chest|Block::CraftingTable|Block::Battery=>g::PANEL_WOOD,_=>g::PANEL_STONE}
 }

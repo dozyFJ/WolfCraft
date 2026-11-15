@@ -2251,11 +2251,37 @@ impl App {
                                     let furnace = block.base_kind() == B::ElectricFurnace;
                                     let forge = block == B::MachineCasing;
                                     let magic = block == B::EnchantTable;
-                                    let (prog, working) = s.furnace_status(pos);
-                                    let status_text = if working { "Плавится…" } else { "Положите руду и топливо (уголь, дрова)" };
+                                    let tech = wolfcraft_engine::wolftech::kind(block);
+                                    let (prog, working) = match s.tech_status(pos, block) {
+                                        Some((p, w, _, _)) => (p, w),
+                                        None => s.furnace_status(pos),
+                                    };
+                                    let tech_text = match (tech, s.tech_status(pos, block)) {
+                                        (Some(k), Some((_, w, e, cap))) => {
+                                            let sp = wolfcraft_engine::wolftech::spec(k);
+                                            let what = if w {
+                                                match k {
+                                                    wolfcraft_engine::wolftech::Kind::Generator | wolfcraft_engine::wolftech::Kind::Solar => format!("даёт {:.0} ЭЕ/с", sp.rate),
+                                                    _ => format!("работает · {:.0} ЭЕ/с", sp.rate),
+                                                }
+                                            } else {
+                                                sp.hint.to_string()
+                                            };
+                                            format!("⚡ {:.0} / {:.0} ЭЕ · {}", e, cap, what)
+                                        }
+                                        _ => String::new(),
+                                    };
+                                    let status_text = if tech.is_some() { tech_text.as_str() } else if working { "Плавится…" } else { "Положите руду и топливо (уголь, дрова)" };
                                     let accepts = |slot: usize, st: &wolfcraft_engine::items::ItemStack| {
                                         if wolfcraft_engine::construction::is_portable(block)&&st.info().place.is_some_and(wolfcraft_engine::construction::is_portable){return false;}
-                                        if furnace {
+                                        if let Some(k) = tech {
+                                            use wolfcraft_engine::wolftech::Kind;
+                                            match k {
+                                                Kind::Generator => slot == 1 && wolfcraft_engine::wolftech::fuel(st.id) > 0.0,
+                                                Kind::Crusher | Kind::Induction | Kind::Enricher => slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some(),
+                                                _ => false,
+                                            }
+                                        } else if furnace {
                                             (slot == 0 && wolfcraft_engine::interaction::smelt_result(st.id).is_some()) || (slot == 1 && wolfcraft_engine::interaction::fuel_time(st.id) > 0.0)
                                         } else if forge {
                                             slot < 2
@@ -2267,12 +2293,12 @@ impl App {
                                     };
                                     let view = wolfcraft_ui::container_ui::ContainerView {
                                         skin:wolfcraft_ui::gui_renderer::block_panel(block),
-                                        title: if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else if wolfcraft_engine::construction::entry(block as u16).is_some() { block.info().name } else { "Сундук" },
-                                        columns: if furnace || forge { 3 } else if magic { 2 } else { 9 },
+                                        title: if let Some(k) = tech { wolfcraft_engine::wolftech::spec(k).name } else if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else if wolfcraft_engine::construction::entry(block as u16).is_some() { block.info().name } else { "Сундук" },
+                                        columns: if furnace || forge || tech.is_some() { 3 } else if magic { 2 } else { 9 },
                                         accepts: &accepts,
-                                        layout: if furnace { wolfcraft_ui::container_ui::Layout::Furnace } else if forge { wolfcraft_ui::container_ui::Layout::Forge } else if magic { wolfcraft_ui::container_ui::Layout::Enchant } else { wolfcraft_ui::container_ui::Layout::Grid },
-                                        working: furnace && working,
-                                        status: if furnace {
+                                        layout: if furnace || tech.is_some() { wolfcraft_ui::container_ui::Layout::Furnace } else if forge { wolfcraft_ui::container_ui::Layout::Forge } else if magic { wolfcraft_ui::container_ui::Layout::Enchant } else { wolfcraft_ui::container_ui::Layout::Grid },
+                                        working: (furnace || tech.is_some()) && working,
+                                        status: if furnace || tech.is_some() {
                                             Some((status_text, prog))
                                         } else if forge {
                                             Some(("Предмет + его материал — ремонт · два одинаковых — склеить · +3 материала уровнем выше — улучшить · + книга чар — зачаровать", 0.0))

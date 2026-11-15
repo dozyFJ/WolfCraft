@@ -1836,6 +1836,14 @@ blocks! {
     2453 ButtonRebirth => emissive(info("Кнопка перерождения", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD + 4, t::BUTTON_PAD_SIDE))),
     // Fire: burns on top of a block, spreads over wood and leaves, goes out in the rain.
     2454 Fire => emissive(not_solid(info("Огонь", Cross, 0.0, Hand, all(t::FIRE)))),
+    // WolfTech (the built-in tech mod): energy and machines. Tile slots: +j, -j, up, down, +i, -i.
+    2455 TechGenerator => needs_pick(info("Генератор", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::TECH_GEN_FRONT, t::TECH_SIDE])),
+    2456 SolarPanel => needs_pick(info("Солнечная панель", Shape, 3.0, Pickaxe, column(t::TECH_SIDE, t::SOLAR_TOP, t::TECH_SIDE))),
+    2457 EnergyCell => needs_pick(info("Энергоячейка", Opaque, 4.0, Pickaxe, column(t::CELL_SIDE, t::TECH_TOP, t::TECH_TOP))),
+    2458 Cable => info("Медный кабель", Shape, 0.5, Hand, all(t::CABLE)),
+    2459 Crusher => needs_pick(info("Дробитель", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::CRUSHER_FRONT, t::TECH_SIDE])),
+    2460 InductionFurnace => needs_pick(info("Индукционная печь", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::INDUCTION_FRONT, t::TECH_SIDE])),
+    2461 Enricher => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::ENRICHER_FRONT, t::TECH_SIDE])),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -1979,6 +1987,8 @@ impl Block {
         const DOOR: [f32; 6] = [0.0, 0.0, 0.0, 0.19, 1.0, 1.0];
         const DOOR_OPEN: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 0.19, 1.0];
         const WIRE: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.0625];
+        const CABLE: [f32; 6] = [0.34, 0.34, 0.34, 0.66, 0.66, 0.66];
+        const SOLAR: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.375];
         const BUTTON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.14];
         // A heap of bones: two long bones crossed, a skull and a small piece.
         const BONES: [[f32; 6]; 4] = [
@@ -2049,6 +2059,8 @@ impl Block {
             },
             Button => std::slice::from_ref(&BUTTON),
             Bones => &BONES,
+            Cable => &[CABLE],
+            SolarPanel => &[SOLAR],
             ButtonOn => std::slice::from_ref(&BUTTON_ON),
             SwitchOff => &LEVER_OFF,
             SwitchOn => &LEVER_ON,

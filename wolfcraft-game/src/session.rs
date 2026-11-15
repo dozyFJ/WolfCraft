@@ -106,6 +106,20 @@ pub struct Camera {
 /// Seconds to smelt one item in an electric furnace.
 const FURNACE_TIME: f32 = 3.0;
 
+/// State of one WolfTech machine.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TechState {
+    pub energy: f32,
+    pub progress: f32,
+    /// Generator: seconds of fuel left.
+    pub burn: f32,
+    /// ЭЕ/s made (generators) or wanted (machines) this frame.
+    pub flow: f32,
+    pub working: bool,
+    /// Solar panel: in the sun right now.
+    pub sunny: bool,
+}
+
 pub struct GameSession {
     pub cfg: WorldConfig,
     pub dir: PathBuf,
@@ -131,6 +145,10 @@ pub struct GameSession {
     /// Camera feel: dip after a hard landing, last vertical speed (to spot the landing),
     /// third-person shoulder offset (smoothed, shrinks near walls).
     land_dip: f64,
+    /// WolfTech machines: energy, progress, fuel left; the networks (rebuilt every second).
+    pub tech: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, TechState>,
+    tech_nets: Vec<Vec<wolfcraft_engine::cubesphere::Cell>>,
+    tech_t: f32,
     /// Seconds to the next entity-culling pass.
     cull_t: f32,
     /// Seconds to the next fire step (spreading, burning out).
@@ -296,6 +314,9 @@ impl GameSession {
             rest_camera: None,
             cam_lag: 0.0,
             land_dip: 0.0,
+            tech: std::collections::HashMap::new(),
+            tech_nets: Vec::new(),
+            tech_t: 0.0,
             cull_t: 0.0,
             fire_t: 0.0,
             weather: crate::weather::Weather::new(seed),
@@ -383,6 +404,7 @@ impl GameSession {
         s.storage_bank=wolfcraft_engine::storage_bank::StorageBank::load(&s.dir.join("storage_bank.bin"));
         s.boss_book=wolfcraft_engine::bosses::BossBook::load(&s.dir.join("bosses.txt"));
         s.load_containers();
+        s.load_tech();
         s.petsim = wolfcraft_engine::petsim::PetSim::from_text(&std::fs::read_to_string(s.dir.join("petsim.txt")).unwrap_or_default());
         // Old saves kept the pets in petsim.txt: they move into the inventory once.
         for k in std::mem::take(&mut s.petsim.owned) {
@@ -913,6 +935,7 @@ impl GameSession {
             }
         }
         self.tick_furnaces(dt);
+        self.tick_tech(dt);
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
             if let InteractionEvent::Broken { pos, block } = e {
@@ -922,6 +945,15 @@ impl GameSession {
                 self.fluids.changed(&self.chunks, *pos);
                 wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, *pos);
+            }
+            if let InteractionEvent::Placed { pos, block } = e {
+                if wolfcraft_engine::wolftech::kind(*block).is_some() {
+                    self.tech.entry(*pos).or_default();
+                    self.tech_t = 0.0;
+                }
+                if *block == wolfcraft_engine::block::Block::Cable {
+                    self.tech_t = 0.0;
+                }
             }
             if let InteractionEvent::Placed { pos, block: wolfcraft_engine::block::Block::ButtonOn } = e {
                 self.buttons.retain(|(p, _)| p != pos);
@@ -1770,7 +1802,7 @@ impl GameSession {
         use wolfcraft_engine::block::Block as B;
         if wolfcraft_engine::construction::is_shared(block) {return &mut self.storage_bank.shared;}
         let block=block.base_kind();
-        let n = if matches!(block, B::ElectricFurnace | B::MachineCasing) { 3 } else if block == B::EnchantTable { 2 } else { 27 };
+        let n = if matches!(block, B::ElectricFurnace | B::MachineCasing) || wolfcraft_engine::wolftech::kind(block).is_some() { 3 } else if block == B::EnchantTable { 2 } else { 27 };
         let v = self.containers.entry(pos).or_insert_with(|| {
             let mut slots=vec![None;n];
             // Player-placed chests use construction IDs; legacy chest IDs identify generated loot.
@@ -1788,6 +1820,185 @@ impl GameSession {
             v.push(out);
         }
         v
+    }
+
+    /// WolfTech: (progress 0..1, working, energy, capacity) of a machine.
+    pub fn tech_status(&self, pos: wolfcraft_engine::cubesphere::Cell, block: wolfcraft_engine::block::Block) -> Option<(f32, bool, f32, f32)> {
+        let k = wolfcraft_engine::wolftech::kind(block)?;
+        let sp = wolfcraft_engine::wolftech::spec(k);
+        let st = self.tech.get(&pos).copied().unwrap_or_default();
+        let prog = if sp.time > 0.0 { st.progress / sp.time } else if st.burn > 0.0 { 1.0 } else { 0.0 };
+        Some((prog.clamp(0.0, 1.0), st.working, st.energy, sp.capacity))
+    }
+
+    /// WolfTech: generators burn and shine, machines work, energy flows through the cables.
+    fn tick_tech(&mut self, dt: f32) {
+        use wolfcraft_engine::items::ItemStack;
+        use wolfcraft_engine::wolftech::{self as wt, Kind};
+        if self.tech.is_empty() {
+            return;
+        }
+        let g = self.chunks.grid();
+        self.tech_t -= dt;
+        if self.tech_t <= 0.0 {
+            self.tech_t = 1.0;
+            // Forget machines that were broken; find the networks (machines joined by cables
+            // or touching each other).
+            let cells: Vec<_> = self.tech.keys().copied().collect();
+            for c in &cells {
+                if let Some(b) = self.chunks.get_block(*c) {
+                    if wt::kind(b).is_none() {
+                        self.tech.remove(c);
+                    }
+                }
+            }
+            let mut seen = std::collections::HashSet::new();
+            self.tech_nets.clear();
+            for c in self.tech.keys().copied().collect::<Vec<_>>() {
+                if seen.contains(&c) {
+                    continue;
+                }
+                let mut net = Vec::new();
+                let mut queue = vec![c];
+                seen.insert(c);
+                while let Some(x) = queue.pop() {
+                    if self.tech.contains_key(&x) {
+                        net.push(x);
+                    }
+                    if seen.len() > 4096 {
+                        break;
+                    }
+                    for (a, b, k) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
+                        let Some(n) = g.offset(x, a, b, k) else { continue };
+                        if seen.contains(&n) {
+                            continue;
+                        }
+                        if self.chunks.get_block(n).is_some_and(wt::conducts) {
+                            seen.insert(n);
+                            queue.push(n);
+                        }
+                    }
+                }
+                self.tech_nets.push(net);
+            }
+            // Solar panels: daylight and open sky, checked once a second.
+            let day = self.daylight() > 0.45 && self.weather.rain < 0.5;
+            for (c, st) in self.tech.iter_mut() {
+                if self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::SolarPanel) {
+                    st.sunny = day && (1..40).all(|k| g.offset(*c, 0, 0, k).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
+                }
+            }
+        }
+        // Each machine on its own: fuel, recipes, progress.
+        let cells: Vec<_> = self.tech.keys().copied().collect();
+        for c in cells {
+            let Some(b) = self.chunks.get_block(c) else { continue };
+            let Some(k) = wt::kind(b) else { continue };
+            let sp = wt::spec(k);
+            let mut st = self.tech[&c];
+            st.working = false;
+            match k {
+                Kind::Generator => {
+                    if st.burn <= 0.0 && st.energy < sp.capacity * 0.95 {
+                        let v = self.container_slots(c, b);
+                        if let Some(f) = v.get(1).copied().flatten().filter(|f| wt::fuel(f.id) > 0.0) {
+                            st.burn = wt::fuel(f.id);
+                            v[1] = if f.count > 1 { Some(ItemStack { count: f.count - 1, ..f }) } else { None };
+                        }
+                    }
+                    if st.burn > 0.0 {
+                        st.burn -= dt;
+                        st.flow = sp.rate;
+                        st.working = true;
+                    } else {
+                        st.flow = 0.0;
+                    }
+                }
+                Kind::Solar => {
+                    st.flow = if st.sunny { sp.rate } else { 0.0 };
+                    st.working = st.sunny;
+                }
+                Kind::Cell => st.flow = 0.0,
+                _ => {
+                    let v = self.container_slots(c, b).clone();
+                    let out = v.first().copied().flatten().and_then(|i| wt::recipe(k, i.id));
+                    let room = out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
+                        None => true,
+                        Some(s) => s.id == o && s.count as u32 + n as u32 <= 64,
+                    });
+                    let need = sp.rate * dt;
+                    if room && st.energy >= need {
+                        st.energy -= need;
+                        st.progress += dt;
+                        st.flow = sp.rate;
+                        st.working = true;
+                        if st.progress >= sp.time {
+                            st.progress = 0.0;
+                            let (o, n) = out.unwrap();
+                            let v = self.container_slots(c, b);
+                            if let Some(i) = v[0].as_mut() {
+                                i.count -= 1;
+                                if i.count == 0 {
+                                    v[0] = None;
+                                }
+                            }
+                            match v[2].as_mut() {
+                                Some(s) => s.count += n,
+                                None => v[2] = Some(ItemStack::new(o, n)),
+                            }
+                        }
+                    } else {
+                        st.flow = if room { sp.rate } else { 0.0 };
+                        if !room {
+                            st.progress = 0.0;
+                        }
+                    }
+                }
+            }
+            self.tech.insert(c, st);
+        }
+        // Energy flows inside each network.
+        for net in &self.tech_nets {
+            let mut nodes = Vec::with_capacity(net.len());
+            let mut keep = Vec::with_capacity(net.len());
+            for c in net {
+                let (Some(b), Some(st)) = (self.chunks.get_block(*c), self.tech.get(c)) else { continue };
+                let Some(k) = wt::kind(b) else { continue };
+                nodes.push(wt::Node { kind: k, energy: st.energy, flow: st.flow });
+                keep.push(*c);
+            }
+            let e = wt::share(&nodes, dt);
+            for (c, v) in keep.iter().zip(e) {
+                if let Some(st) = self.tech.get_mut(c) {
+                    st.energy = v;
+                }
+            }
+        }
+    }
+
+    fn tech_path(&self) -> PathBuf {
+        self.dir.join(if self.hell { "tech_hell.txt" } else { "tech.txt" })
+    }
+
+    fn save_tech(&self) {
+        let mut out = String::new();
+        for (c, st) in &self.tech {
+            out += &format!("{} {} {} {} {} {} {}\n", c.f, c.i, c.j, c.k, st.energy, st.progress, st.burn);
+        }
+        if let Err(e) = wolfcraft_engine::storage::write_safe(&self.tech_path(), out.as_bytes()) {
+            log::error!("saving tech: {e}");
+        }
+    }
+
+    fn load_tech(&mut self) {
+        let Some(text) = wolfcraft_engine::storage::read_with_backup(&self.tech_path(), |b| String::from_utf8(b.to_vec()).ok()) else { return };
+        for line in text.lines() {
+            let n: Vec<f64> = line.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            if n.len() == 7 {
+                let c = wolfcraft_engine::cubesphere::Cell::new(n[0] as u8, n[1] as i32, n[2] as i32, n[3] as i32);
+                self.tech.insert(c, TechState { energy: n[4] as f32, progress: n[5] as f32, burn: n[6] as f32, ..Default::default() });
+            }
+        }
     }
 
     /// Smelting progress 0..1 and whether the furnace is working (burning or powered).
@@ -1892,7 +2103,10 @@ impl GameSession {
     /// Swaps planet + chunk streaming for the other dimension (the player is not moved).
     fn enter_dimension(&mut self, hell: bool) {
         self.save_containers();
+        self.save_tech();
         self.containers.clear();
+        self.tech.clear();
+        self.tech_nets.clear();
         let planet = Arc::new(if hell { Planet::new_hell(&self.cfg) } else { Planet::new(&self.cfg) });
         let dir = if hell { self.dir.join("hell") } else { self.dir.clone() };
         let Ok(storage) = wolfcraft_engine::storage::Storage::open(&dir) else {
@@ -1905,6 +2119,7 @@ impl GameSession {
         self.explosives = wolfcraft_engine::explosives::Explosives::new(self.cfg.seed);
         self.hell = hell;
         self.load_containers();
+        self.load_tech();
         self.dimension_changed = true;
     }
 

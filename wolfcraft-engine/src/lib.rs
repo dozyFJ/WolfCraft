@@ -22,6 +22,7 @@ pub mod mobs;
 pub mod physics;
 pub mod planet;
 pub mod power;
+pub mod wolftech;
 pub mod projectiles;
 pub mod renderer;
 pub mod player;
