@@ -2147,6 +2147,7 @@ impl App {
                             compact: cfg!(target_os = "android"),
                             crosshair: !(touch.seen && settings.tap_aim),
                             effects: p.effects.iter().map(|a| (format!("{} {}", a.effect.name(), wolfcraft_engine::magic::roman(a.level)), a.effect.color(), a.left)).collect(),
+                            look: if screen == Screen::Playing && settings.show_look { look_info(s) } else { None },
                             goal: s.goal().map(|a| (wolfcraft_engine::items::ItemStack::new(a.icon, 1), a.desc.to_string())),
                             tip: s.first_steps().then(|| {
                                 if touch.seen {
@@ -4299,3 +4300,89 @@ fn nearest_block(c: [u8; 4]) -> wolfcraft_engine::block::Block {
 }
 
 
+
+/// «Что это?» (like WAILA): what the crosshair is on — a creature or a block — with its name,
+/// where it comes from, whether the held tool can mine it, and machine energy / health bars.
+fn look_info(s: &crate::session::GameSession) -> Option<wolfcraft_ui::hud::LookInfo> {
+    use egui::Color32;
+    use wolfcraft_engine::block::ToolKind;
+    use wolfcraft_engine::items::{self, ItemStack, ids};
+    let green = Color32::from_rgb(120, 220, 120);
+    let red = Color32::from_rgb(240, 110, 100);
+    let grey = Color32::from_white_alpha(190);
+    let eye = s.player.eye_pos();
+    let look = s.player.look_dir();
+    // A creature in front of the block wins.
+    if let Some((i, t)) = s.mobs.raycast(eye, look, 8.0) {
+        if s.hit.is_none_or(|h| t < h.dist) {
+            let m = &s.mobs.mobs[i];
+            use wolfcraft_engine::mobs::{ALL_MOBS, MobKind};
+            let icon = match ALL_MOBS.iter().position(|k| *k == m.kind) {
+                Some(n) => ids::SOUL_BASE + n as u16,
+                None if m.kind == MobKind::Dragon => ids::DRAGON_SOUL,
+                None => ids::RAW_FISH,
+            };
+            let (name, source, max) = match &m.boss {
+                Some(b) => (b.kind.name().to_string(), "Страж · WolfCraft".to_string(), m.hp.max(1.0).max(b.kind.max_hp())),
+                None => (m.kind.name().to_string(), "Существо · WolfCraft".to_string(), m.kind.max_hp()),
+            };
+            let mut lines = vec![if m.kind.hostile() || m.boss.is_some() { ("Враждебный".to_string(), red) } else { ("Мирный".to_string(), green) }];
+            if m.saddled {
+                lines.push(("Под седлом — можно оседлать".into(), grey));
+            }
+            let f = m.hp / max.max(1.0);
+            return Some(wolfcraft_ui::hud::LookInfo { icon: ItemStack::new(icon, 1), name, source, lines, bar: Some((f, Color32::from_rgb(220, 60, 60), format!("♥ {:.0} / {:.0}", m.hp.max(0.0), max))) });
+        }
+    }
+    let h = s.hit?;
+    let block = h.block;
+    let base = block.base_item();
+    let id = base as items::ItemId;
+    let info = block.info();
+    let source = match items::category(id) {
+        "WolfTech" => "WolfTech".to_string(),
+        c => format!("WolfCraft · {c}"),
+    };
+    let mut lines = Vec::new();
+    let mut bar = None;
+    if info.hardness < 0.0 {
+        lines.push(("Неразрушимый".to_string(), grey));
+    } else {
+        let tool = match info.tool {
+            ToolKind::Pickaxe => Some("кирка"),
+            ToolKind::Axe => Some("топор"),
+            ToolKind::Shovel => Some("лопата"),
+            ToolKind::Hand => None,
+        };
+        let held = s.player.inventory.held().map(|st| st.info());
+        if info.needs_tool {
+            if items::can_harvest(held, block) {
+                lines.push(("✓ Добывается тем, что в руке".to_string(), green));
+            } else {
+                let tier = ["деревянная", "каменная", "железная", "алмазная"][(info.min_tier as usize).min(3)];
+                lines.push((format!("✗ Нужна {} ({tier} или лучше)", tool.unwrap_or("кирка")), red));
+            }
+        } else if let Some(t) = tool {
+            lines.push((format!("Быстрее: {t}"), grey));
+        }
+    }
+    // WolfTech machines: energy, what they do now; the reactor's heat.
+    if let Some((prog, working, e, cap)) = s.tech_status(h.cell, block) {
+        let k = wolfcraft_engine::wolftech::kind(block).unwrap();
+        if k == wolfcraft_engine::wolftech::Kind::Reactor {
+            let (heat, max) = s.reactor_heat(h.cell);
+            lines.push((format!("🌡 Нагрев {:.0} / {:.0}", heat, max), if heat > max * 0.7 { red } else { grey }));
+        }
+        if wolfcraft_engine::wolftech::is_machine(k) {
+            lines.push((if working { format!("Работает · {:.0} %", prog * 100.0) } else { "Ждёт сырьё или энергию".to_string() }, if working { green } else { grey }));
+        } else if wolfcraft_engine::wolftech::is_source(k) {
+            let flow = s.tech.get(&h.cell).map(|t| t.flow).unwrap_or(0.0);
+            lines.push((format!("Даёт {:.0} ЭЕ/с", flow), if flow > 0.0 { green } else { grey }));
+        }
+        bar = Some((e / cap.max(1.0), Color32::from_rgb(60, 190, 230), format!("⚡ {:.0} / {:.0} ЭЕ", e, cap)));
+    } else if let Some(v) = s.containers.get(&h.cell) {
+        let n: u32 = v.iter().flatten().map(|x| x.count as u32).sum();
+        lines.push((if n == 0 { "Пусто".to_string() } else { format!("Внутри: {n} предм.") }, grey));
+    }
+    Some(wolfcraft_ui::hud::LookInfo { icon: ItemStack::new(id, 1), name: base.info().name.to_string(), source, lines, bar })
+}

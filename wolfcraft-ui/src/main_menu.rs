@@ -1802,6 +1802,10 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                     setting_row(ui, "Показывать FPS", None, |ui| {
                         res.changed |= toggle_switch(ui, &mut s.show_fps).changed();
                     });
+                    ui.add_space(8.0);
+                    setting_row(ui, "«Что это?»", Some("Как мод WAILA: плашка под миникартой — что за блок или существо перед вами, чем добыть, энергия машин, здоровье"), |ui| {
+                        res.changed |= toggle_switch(ui, &mut s.show_look).changed();
+                    });
                 }
                 2 => {
                     packs_tab(ui, icons, &p, s, packs, &mut res);
