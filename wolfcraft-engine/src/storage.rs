@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const MAGIC: &[u8; 4] = b"WCR2";
+const MAGIC: &[u8; 4] = b"WCR3";
 /// (face, region i, region j, region k)
 type RegionKey = (u8, i32, i32, i32);
 
@@ -62,6 +62,79 @@ pub fn rle_decode(data: &[u8], expected: usize) -> Option<Vec<u16>> {
     (out.len() == expected && i == data.len()).then_some(out)
 }
 
+/// CRC-32 (IEEE), to notice files damaged on the disk or cut by a power loss.
+pub fn crc32(data: &[u8]) -> u32 {
+    let mut c = !0u32;
+    for &b in data {
+        c ^= b as u32;
+        for _ in 0..8 {
+            c = if c & 1 != 0 { (c >> 1) ^ 0xEDB8_8320 } else { c >> 1 };
+        }
+    }
+    !c
+}
+
+fn parse_region(bytes: &[u8]) -> Result<Region, String> {
+    let mut region = Region::default();
+    if bytes.len() < 8 {
+        return Err("too short".into());
+    }
+    let magic = &bytes[0..4];
+    let body = if magic == MAGIC {
+        // WCR3: a checksum over everything before it.
+        if bytes.len() < 12 {
+            return Err("too short".into());
+        }
+        let (body, tail) = bytes.split_at(bytes.len() - 4);
+        if crc32(body) != u32::from_le_bytes(tail.try_into().unwrap()) {
+            return Err("checksum mismatch".into());
+        }
+        body
+    } else if magic == b"WCR2" || magic == b"WCR1" {
+        bytes
+    } else {
+        return Err("bad header".into());
+    };
+    let legacy = magic == b"WCR1";
+    let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+    let mut off = 8;
+    for _ in 0..count {
+        if off + 6 > body.len() {
+            return Err("truncated".into());
+        }
+        let idx = u16::from_le_bytes([body[off], body[off + 1]]);
+        let len = u32::from_le_bytes(body[off + 2..off + 6].try_into().unwrap()) as usize;
+        off += 6;
+        if off + len > body.len() {
+            return Err("truncated chunk".into());
+        }
+        let comp = &body[off..off + len];
+        let data = if legacy && !comp.is_empty() {
+            let mut raw = Vec::with_capacity(CHUNK_VOL);
+            let mut i = 0;
+            while i + 3 <= comp.len() {
+                let n = u16::from_le_bytes([comp[i], comp[i + 1]]) as usize;
+                if n == 0 || n > CHUNK_VOL.saturating_sub(raw.len()) {
+                    break;
+                }
+                raw.extend(std::iter::repeat_n(comp[i + 2] as u16, n));
+                i += 3;
+            }
+            if raw.len() != CHUNK_VOL || i != comp.len() {
+                log::warn!("invalid legacy chunk {idx}");
+                off += len;
+                continue;
+            }
+            rle_encode(&raw)
+        } else {
+            comp.to_vec()
+        };
+        region.chunks.insert(idx, data);
+        off += len;
+    }
+    Ok(region)
+}
+
 impl Storage {
     /// Opens (and creates) the world folder structure.
     pub fn open(world_dir: &Path) -> Result<Self, String> {
@@ -79,44 +152,36 @@ impl Storage {
         self.dir.join("regions").join(format!("r.{}.{}.{}.{}.wcr", r.0, r.1, r.2, r.3))
     }
 
+    /// Reads a region file. A damaged file (bad header, cut short, wrong checksum) is not
+    /// trusted: it is copied aside to `regions/corrupt/` and the previous good copy (`.bak`,
+    /// kept by every save) is used instead — like Java's handling of broken chunk files.
     fn read_region(&self, r: RegionKey) -> Region {
-        let Ok(bytes) = std::fs::read(self.region_path(r)) else { return Region::default() };
-        let mut region = Region::default();
-        if bytes.len() < 8 || (&bytes[0..4] != MAGIC && &bytes[0..4] != b"WCR1") {
-            log::warn!("region {r:?}: bad header, ignoring file");
-            return region;
-        }
-        let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-        let mut off = 8;
-        for _ in 0..count {
-            if off + 6 > bytes.len() {
-                log::warn!("region {r:?}: truncated");
-                break;
-            }
-            let idx = u16::from_le_bytes([bytes[off], bytes[off + 1]]);
-            let len = u32::from_le_bytes(bytes[off + 2..off + 6].try_into().unwrap()) as usize;
-            off += 6;
-            if off + len > bytes.len() {
-                log::warn!("region {r:?}: truncated chunk");
-                break;
-            }
-            let comp = &bytes[off..off + len];
-            let data = if &bytes[0..4] == b"WCR1" && !comp.is_empty() {
-                let mut raw = Vec::with_capacity(CHUNK_VOL);
-                let mut i = 0;
-                while i + 3 <= comp.len() {
-                    let n = u16::from_le_bytes([comp[i], comp[i + 1]]) as usize;
-                    if n == 0 || n > CHUNK_VOL.saturating_sub(raw.len()) { break; }
-                    raw.extend(std::iter::repeat_n(comp[i + 2] as u16, n));
-                    i += 3;
+        let path = self.region_path(r);
+        let Ok(bytes) = std::fs::read(&path) else { return Region::default() };
+        match parse_region(&bytes) {
+            Ok(region) => region,
+            Err(why) => {
+                log::warn!("region {r:?}: {why}; trying the backup");
+                let bad = self.dir.join("regions").join("corrupt");
+                let _ = std::fs::create_dir_all(&bad);
+                let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                if let Some(name) = path.file_name() {
+                    let _ = std::fs::copy(&path, bad.join(format!("{}.{stamp}", name.to_string_lossy())));
                 }
-                if raw.len() != CHUNK_VOL || i != comp.len() { log::warn!("invalid legacy chunk {idx}"); off += len; continue; }
-                rle_encode(&raw)
-            } else { comp.to_vec() };
-            region.chunks.insert(idx, data);
-            off += len;
+                match std::fs::read(path.with_extension("bak")).map_err(|e| e.to_string()).and_then(|b| parse_region(&b)) {
+                    Ok(mut region) => {
+                        log::warn!("region {r:?}: restored from the backup");
+                        // Write the good copy back at the next save.
+                        region.dirty = true;
+                        region
+                    }
+                    Err(e) => {
+                        log::warn!("region {r:?}: no usable backup ({e}); the area regenerates");
+                        Region::default()
+                    }
+                }
+            }
         }
-        region
     }
 
     /// Returns the saved version of a chunk, if the player changed it earlier.
@@ -168,9 +233,21 @@ impl Storage {
                 buf.extend_from_slice(&(d.len() as u32).to_le_bytes());
                 buf.extend_from_slice(d);
             }
+            let crc = crc32(&buf);
+            buf.extend_from_slice(&crc.to_le_bytes());
             let path = self.region_path(*r);
             let tmp = path.with_extension("tmp");
-            std::fs::write(&tmp, &buf).map_err(|e| format!("{}: {e}", tmp.display()))?;
+            {
+                use std::io::Write;
+                let mut f = std::fs::File::create(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+                f.write_all(&buf).map_err(|e| format!("{}: {e}", tmp.display()))?;
+                // On the disk for real before the swap: a power cut cannot leave half a file.
+                let _ = f.sync_all();
+            }
+            // The previous good version stays as .bak for recovery.
+            if path.exists() {
+                let _ = std::fs::rename(&path, path.with_extension("bak"));
+            }
             std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))?;
             region.dirty = false;
             written += 1;
@@ -189,6 +266,39 @@ mod tests {
     use crate::block::Block;
 
     #[test]
+    fn a_damaged_region_comes_back_from_the_backup() {
+        let dir = std::env::temp_dir().join(format!("wc_backup_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = ChunkKey::new(0, 0, 0, 0);
+        let storage = Storage::open(&dir).unwrap();
+        let mut c = Chunk::empty();
+        c.set(1, 2, 3, Block::Stone);
+        storage.store_chunk(key, &c);
+        storage.flush().unwrap();
+        // Second save keeps the first as .bak.
+        c.set(4, 4, 4, Block::Dirt);
+        storage.store_chunk(key, &c);
+        storage.flush().unwrap();
+        let path = storage.region_path((0, 0, 0, 0));
+        assert!(path.with_extension("bak").exists());
+        // A bit flips on the disk.
+        let mut bytes = std::fs::read(&path).unwrap();
+        let mid = bytes.len() / 2;
+        bytes[mid] ^= 0x40;
+        std::fs::write(&path, bytes).unwrap();
+        let fresh = Storage::open(&dir).unwrap();
+        let got = fresh.load_chunk(key).expect("restored from the backup");
+        assert_eq!(got.get(1, 2, 3), Block::Stone);
+        assert!(std::fs::read_dir(dir.join("regions").join("corrupt")).unwrap().count() >= 1, "the broken file is kept aside");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn crc32_matches_the_standard() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+    }
+
+    #[test]
     fn old_region_migrates_and_keeps_wide_furniture_ids() {
         use crate::construction::{self, Form};
         let dir=std::env::temp_dir().join(format!("wc_wide_migration_{}",std::process::id()));
@@ -205,7 +315,7 @@ mod tests {
         let chunk=storage.load_chunk(key).unwrap();
         assert_eq!(chunk.get(1,2,3),chair);
         assert_eq!(chunk.get(0,0,0),Block::Stone);
-        assert_eq!(&std::fs::read(storage.region_path((0,0,0,0))).unwrap()[..4],b"WCR2");
+        assert_eq!(&std::fs::read(storage.region_path((0,0,0,0))).unwrap()[..4],b"WCR3");
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
