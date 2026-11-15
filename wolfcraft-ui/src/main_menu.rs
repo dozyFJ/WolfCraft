@@ -442,29 +442,26 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
         // version badge at the end. Above it the logo: icon on the left, WOLFCRAFT in capitals,
         // a line under it. Lying phone: logo on the left half, buttons on the right.
         let wide = rect.width() > rect.height() * 1.2;
+        // Upright phone: the title and one column of buttons, all of it in the middle of the
+        // screen.
+        let list_h = 8.0 * 56.0 + 30.0;
         let (logo_area, list_area) = if wide {
             (Rect::from_min_max(rect.min, Pos2::new(rect.center().x, rect.bottom())), Rect::from_min_max(Pos2::new(rect.center().x, rect.top()), rect.max))
         } else {
-            (Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.top() + rect.height() * 0.30)), Rect::from_min_max(Pos2::new(rect.left(), rect.top() + rect.height() * 0.30), rect.max))
+            let top = (rect.center().y - (100.0 + list_h) / 2.0).max(rect.top() + 8.0);
+            (Rect::from_min_max(Pos2::new(rect.left(), top), Pos2::new(rect.right(), top + 100.0)), Rect::from_min_max(Pos2::new(rect.left(), top + 100.0), rect.max))
         };
-        // Logo.
+        // Title: just the name in capitals and a line under it, centred (no icon).
         {
             let painter = ui.painter();
-            let title = "WOLFCRAFT";
             let size = (logo_area.width() * 0.105).clamp(26.0, 40.0);
-            let g = painter.layout_no_wrap(title.to_string(), bold_font(size), Color32::WHITE);
-            let ic = size * 1.25;
-            let total = ic + 12.0 + g.size().x;
-            let left = logo_area.center().x - total / 2.0;
-            let cy = logo_area.center().y + if wide { -10.0 } else { 6.0 };
-            icons.paint(painter, Rect::from_min_size(Pos2::new(left, cy - ic / 2.0), Vec2::splat(ic)), icon::LOGO, Color32::WHITE);
-            let tx = left + ic + 12.0;
-            painter.galley(Pos2::new(tx, cy - g.size().y / 2.0 - 6.0), g.clone(), Color32::WHITE);
-            painter.text(Pos2::new(tx + 1.0, cy + g.size().y / 2.0 - 2.0), Align2::LEFT_TOP, "Целая планета из блоков", FontId::proportional((size * 0.38).max(12.0)), Color32::from_white_alpha(170));
+            let cy = logo_area.center().y + if wide { -10.0 } else { 0.0 };
+            painter.text(Pos2::new(logo_area.center().x, cy - 6.0), Align2::CENTER_BOTTOM, "WOLFCRAFT", bold_font(size), Color32::WHITE);
+            painter.text(Pos2::new(logo_area.center().x, cy + 2.0), Align2::CENTER_TOP, "Целая планета из блоков", FontId::proportional((size * 0.38).max(12.0)), Color32::from_white_alpha(170));
         }
         let width = (list_area.width() - 32.0).clamp(200.0, 380.0);
         let height = (list_area.height() - 16.0).max(150.0);
-        let col = Rect::from_center_size(list_area.center(), Vec2::new(width, height));
+        let col = if wide { Rect::from_center_size(list_area.center(), Vec2::new(width, height)) } else { Rect::from_min_size(Pos2::new(list_area.center().x - width / 2.0, list_area.top()), Vec2::new(width, height)) };
         let sheet_id = egui::Id::new("game-menu-sheet");
         let open: Option<Sheet> = ui.ctx().data(|d| d.get_temp(sheet_id)).flatten();
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(col), |ui| {
@@ -486,12 +483,15 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
                         [(icon::BACKPACK, "Магазин", 2), (icon::STAR, "Новости", 3)],
                         [(icon::PROPS, "Ещё", 4), (icon::GEAR, "Настройки", 5)],
                     ];
+                    // Lying phone: pairs side by side; upright: one button under another.
+                    let rows: Vec<Vec<(u16, &str, u8)>> = if wide { rows.iter().map(|r| r.to_vec()).collect() } else { rows.iter().flatten().map(|b| vec![*b]).collect() };
                     for row in rows {
+                        let bw = if row.len() == 1 { w } else { half };
                         ui.horizontal(|ui| {
                             ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
                             for (ic, label, k) in row {
                                 let on = (k == 3 && open == Some(Sheet::News)) || (k == 4 && open == Some(Sheet::More));
-                                if pill_button(ui, icons, Some(ic), label, if on { ButtonKind::Primary } else { ButtonKind::Secondary }, half, true).clicked() {
+                                if pill_button(ui, icons, Some(ic), label, if on { ButtonKind::Primary } else { ButtonKind::Secondary }, bw, true).clicked() {
                                     match k {
                                         0 => action = MenuAction::OpenNetwork,
                                         1 => action = open_settings_at(ui.ctx(), 0),
