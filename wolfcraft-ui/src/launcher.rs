@@ -396,15 +396,15 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
             }
         });
     });
-    // then the play stack: the version and «Играть»,
-    ui.add_space(10.0);
-    play_banner(ui, icons, p, version, nickname, action);
-    // and the news at the end.
+    // then the news,
     section(ui, p, "Новости", "");
     for n in &NEWS {
         news_card(ui, icons, p, n);
         ui.add_space(2.0);
     }
+    // and the play stack at the end: the version and «Играть».
+    ui.add_space(10.0);
+    play_banner(ui, icons, p, version, nickname, action);
     ui.add_space(8.0);
 }
 
