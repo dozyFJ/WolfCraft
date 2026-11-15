@@ -2120,6 +2120,30 @@ impl App {
                             compact: cfg!(target_os = "android"),
                             crosshair: !(touch.seen && settings.tap_aim),
                             effects: p.effects.iter().map(|a| (format!("{} {}", a.effect.name(), wolfcraft_engine::magic::roman(a.level)), a.effect.color(), a.left)).collect(),
+                            pickups: s.pickups.iter().map(|(id, n, age)| (wolfcraft_engine::items::ItemStack::new(*id, (*n).min(255) as u8), *age)).collect(),
+                            popups: {
+                                // Damage numbers: from the world onto the screen.
+                                let cam = s.camera();
+                                let fwd = cam.forward.normalize();
+                                let right = fwd.cross(cam.up).normalize();
+                                let up = right.cross(fwd);
+                                let scr = ctx.screen_rect();
+                                let tan = (settings.fov.to_radians() * 0.5).tan() as f64;
+                                let aspect = (scr.width() / scr.height().max(1.0)) as f64;
+                                s.popups
+                                    .iter()
+                                    .filter_map(|pp| {
+                                        let d = pp.at - cam.eye;
+                                        let z = d.dot(fwd);
+                                        if z < 0.3 {
+                                            return None;
+                                        }
+                                        let x = d.dot(right) / z / (tan * aspect);
+                                        let y = d.dot(up) / z / tan;
+                                        Some((egui::Pos2::new(scr.center().x + x as f32 * scr.width() * 0.5, scr.center().y - y as f32 * scr.height() * 0.5), pp.text.clone(), pp.color, pp.age, pp.big))
+                                    })
+                                    .collect()
+                            },
                         };
                         // Studio edit mode: no game GUI (hotbar, bars, minimap) — like Roblox
                         // Studio, the place's own GUI comes from its scripts; only the phone
