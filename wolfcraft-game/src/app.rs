@@ -1702,7 +1702,8 @@ impl App {
                             InteractionEvent::FrameUse{..}|InteractionEvent::ActivateBoss{..}=>{},
                             InteractionEvent::Slept { .. } | InteractionEvent::Sat { .. } => {}
                             InteractionEvent::OpenBuilder => {
-                                self.inv_ui = InventoryUiState { builder: true, ..InventoryUiState::default() };
+                                self.inv_ui = InventoryUiState::default();
+                                self.inv_ui.builder = true;
                                 self.screen = Screen::Inventory;
                                 self.near_table = false;
                             }
