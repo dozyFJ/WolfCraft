@@ -1322,8 +1322,11 @@ pub struct GunPose {
     pub recoil: f32,
     /// Reload progress 0..1 (0 = ready): the weapon dips and comes back.
     pub reload: f32,
-    /// A round sits in the muzzle (rocket tip / grenade visible).
+    /// A round sits in the muzzle (rocket tip / grenade visible). Electric tools: charged.
     pub loaded: bool,
+    /// Electric tools: how hard the motor runs, 0 idle → 1 full (spins up while digging,
+    /// winds down after).
+    pub work: f32,
 }
 
 impl HandsPose {
@@ -1901,14 +1904,26 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
     let heavy = matches!(g.kind, 4 | 5);
     let base = anchor + off + Vec3::new(0.0, 0.02 * kick, -(if heavy { 0.12 } else { 0.07 }) * kick);
     // Electric tools buzz while they work.
-    let buzz = if matches!(g.kind, 11 | 12) && pose.punch_cycle > 0.0 { Vec3::new((pose.time * 97.0).sin(), (pose.time * 113.0).cos(), 0.0) * 0.004 } else { Vec3::ZERO };
-    let base = base + buzz;
+    let work = if g.loaded { g.work.clamp(0.0, 1.0) } else { 0.0 };
+    let electric = matches!(g.kind, 11 | 12);
+    // Idle hum when charged, a hard buzz while it works.
+    let buzz = if electric && g.loaded { Vec3::new((pose.time * 97.0).sin(), (pose.time * 113.0).cos(), 0.0) * (0.0008 + 0.0045 * work) } else { Vec3::ZERO };
+    // Drill: pushed into the block and pecking; chainsaw: sawing back and forth.
+    let push = match g.kind {
+        11 => Vec3::new(0.0, 0.0, work * (0.05 + 0.015 * (pose.time * 14.0).sin())),
+        12 => Vec3::new(0.0, -0.02 * work, work * (0.03 + 0.03 * (pose.time * 9.0).sin())),
+        _ => Vec3::ZERO,
+    };
+    let base = base + buzz + push;
     let angle = if g.kind == 13 {
         // The energy sword swings down and across like any blade.
         1.3 * (pose.punch_cycle.clamp(0.0, 1.0) * std::f32::consts::PI).sin() + btilt * 0.5
     } else if g.kind == 8 {
         // The hammer comes down: the head swings forward over the grip.
         1.4 * (shot * std::f32::consts::PI).sin() + btilt * 0.5
+    } else if g.kind == 12 {
+        // The chainsaw bar dips into the cut.
+        0.28 * work + btilt * 0.5
     } else {
         -(if heavy { 0.28 } else { 0.18 }) * kick + btilt * 0.5
     };
@@ -2104,7 +2119,7 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             bx(&mut v, [-0.035, -0.17, -0.02], [0.035, -0.04, 0.06], DARK);
             bx(&mut v, [-0.042, -0.21, -0.06], [0.042, -0.16, 0.10], GRAPH);
             bx(&mut v, [-0.030, -0.025, 0.24], [0.030, 0.045, 0.31], STEEL);
-            let spin = if pose.punch_cycle > 0.0 { pose.time * 40.0 } else { 0.0 };
+            let spin = pose.time * 45.0 * work;
             for k in 0..6 {
                 let z = 0.31 + k as f32 * 0.045;
                 let a = spin + k as f32 * 1.1;
@@ -2113,7 +2128,19 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
                 bx(&mut v, [-r + sx, -r + 0.01 + sy, z], [r + sx, r + 0.01 + sy, z + 0.04], if k % 2 == 0 { STEEL } else { [0.62, 0.64, 0.68] });
             }
             let glow_from = v.len();
-            bx(&mut v, [0.045, 0.0, 0.04], [0.050, 0.04, 0.18], CYAN);
+            // Charge strip: dim when empty, pulsing while it works.
+            let pulse = if g.loaded { 0.55 + 0.45 * work * (0.5 + 0.5 * (pose.time * 12.0).sin()) } else { 0.15 };
+            bx(&mut v, [0.045, 0.0, 0.04], [0.050, 0.04, 0.18], [CYAN[0] * pulse, CYAN[1] * pulse, CYAN[2] * pulse]);
+            // Sparks flying off the bit tip.
+            if work > 0.4 {
+                for k in 0..5u32 {
+                    let t = (pose.time * 7.0 + k as f32 * 0.37).fract();
+                    let a = k as f32 * 2.4 + (pose.time * 3.0).floor() * 1.7;
+                    let (px, py, pz) = (a.cos() * 0.10 * t, a.sin() * 0.08 * t + 0.03 * t, 0.58 - 0.12 * t);
+                    let f = 0.006 * (1.0 - t);
+                    bx(&mut v, [px - f, py - f, pz - f], [px + f, py + f, pz + f], [1.0, 0.85 - 0.4 * t, 0.35]);
+                }
+            }
             for q in v[glow_from..].iter_mut() {
                 q.tex = 3.0;
             }
@@ -2129,13 +2156,33 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             bx(&mut v, [-0.055, -0.060, -0.10], [0.055, 0.070, 0.20], ORANGE);
             bx(&mut v, [-0.020, 0.070, -0.06], [0.020, 0.12, 0.14], DARK);
             bx(&mut v, [-0.012, -0.020, 0.20], [0.012, 0.050, 0.62], STEEL);
-            let run = if pose.punch_cycle > 0.0 { (pose.time * 30.0).fract() * 0.04 } else { 0.0 };
+            let run = (pose.time * (2.0 + 30.0 * work)).fract() * 0.04 * (work > 0.05) as u8 as f32;
             for k in 0..10 {
                 let z = 0.21 + ((k as f32 * 0.04 + run) % 0.40);
                 bx(&mut v, [-0.014, 0.050, z], [0.014, 0.062, z + 0.02], DARK);
                 bx(&mut v, [-0.014, -0.032, z], [0.014, -0.020, z + 0.02], DARK);
             }
             bx(&mut v, [-0.040, -0.17, -0.10], [0.040, -0.06, 0.0], GRAPH);
+            if work > 0.3 {
+                // Sawdust thrown back from the tip of the bar.
+                for k in 0..6u32 {
+                    let t = (pose.time * 5.0 + k as f32 * 0.29).fract();
+                    let sx = ((k as f32 * 1.9).sin()) * 0.07 * t;
+                    let (py, pz) = (-0.03 - 0.10 * t + 0.06 * t * t, 0.60 - 0.22 * t);
+                    let f = 0.008 * (1.0 - 0.5 * t);
+                    bx(&mut v, [sx - f, py - f, pz - f], [sx + f, py + f, pz + f], [0.80, 0.62, 0.38]);
+                }
+            }
+            if g.loaded {
+                // Motor exhaust: grey puffs drifting up from the back, thicker under load.
+                for k in 0..(1 + (work * 3.0) as u32) {
+                    let t = (pose.time * 1.6 + k as f32 * 0.33).fract();
+                    let f = 0.012 + 0.025 * t;
+                    let (px, py, pz) = (0.06 + 0.02 * t, 0.04 + 0.16 * t, -0.10 - 0.05 * t);
+                    let c = 0.55 + 0.25 * t;
+                    bx(&mut v, [px - f, py - f, pz - f], [px + f, py + f, pz + f], [c, c, c]);
+                }
+            }
             muzzle_z = 0.6;
             bx(&mut v, [-0.055, -0.17, -0.10], [0.055, -0.06, 0.02], skin_c);
             bx(&mut v, [-0.065, -0.52, -0.28], [0.065, -0.16, -0.04], sleeve_c);

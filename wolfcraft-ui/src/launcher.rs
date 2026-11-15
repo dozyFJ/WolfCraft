@@ -134,12 +134,17 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
         let bg = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(full);
         // The living world from the loading splash, dimmed so cards stay readable.
         crate::main_menu::world_backdrop(&bg, full, ctx.input(|i| i.time) as f32);
-        bg.rect_filled(full, 0.0, p.bg.gamma_multiply(if p.dark { 0.55 } else { 0.45 }));
-        let bar = p.surface.gamma_multiply(0.82);
-        bg.rect_filled(Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + TOOLBAR_H)), 0.0, bar);
-        bg.rect_filled(Rect::from_min_max(Pos2::new(full.left(), screen.bottom() - NAV_H), full.max), 0.0, bar);
-        bg.line_segment([Pos2::new(full.left(), screen.top() + TOOLBAR_H), Pos2::new(full.right(), screen.top() + TOOLBAR_H)], Stroke::new(1.0_f32, p.outline));
-        bg.line_segment([Pos2::new(full.left(), screen.bottom() - NAV_H), Pos2::new(full.right(), screen.bottom() - NAV_H)], Stroke::new(1.0_f32, p.outline));
+        bg.rect_filled(full, 0.0, p.bg.gamma_multiply(if p.dark { 0.38 } else { 0.30 }));
+        // Aero glass bars: a tinted pane with a glossy upper half and a bright rim.
+        let top = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + TOOLBAR_H));
+        let nav = Rect::from_min_max(Pos2::new(full.left(), screen.bottom() - NAV_H), full.max);
+        for (r, gloss_top) in [(top, screen.top()), (nav, nav.top())] {
+            bg.rect_filled(r, 0.0, glass_tint(&p));
+            let g = Rect::from_min_max(Pos2::new(r.left(), gloss_top), Pos2::new(r.right(), gloss_top + if r == top { TOOLBAR_H * 0.48 } else { NAV_H * 0.42 }));
+            bg.rect_filled(g, 0.0, glass_gloss(&p));
+        }
+        bg.line_segment([Pos2::new(full.left(), screen.top() + TOOLBAR_H), Pos2::new(full.right(), screen.top() + TOOLBAR_H)], Stroke::new(1.0_f32, glass_rim(&p)));
+        bg.line_segment([Pos2::new(full.left(), screen.bottom() - NAV_H), Pos2::new(full.right(), screen.bottom() - NAV_H)], Stroke::new(1.0_f32, glass_rim(&p)));
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
@@ -147,7 +152,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     let page = tabs[tab].0;
     egui::TopBottomPanel::top("launcher-toolbar")
         .exact_height(TOOLBAR_H)
-        .frame(Frame::none().fill(p.surface.gamma_multiply(0.82)).inner_margin(Margin::symmetric(16.0, 8.0)))
+        .frame(Frame::none().inner_margin(Margin::symmetric(16.0, 8.0)))
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 if page == Tab::Home {
@@ -227,7 +232,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     if page == Tab::Server {
         egui::TopBottomPanel::top("launcher-server-tabs")
             .exact_height(46.0)
-            .frame(Frame::none().fill(p.surface.gamma_multiply(0.82)).inner_margin(Margin::symmetric(10.0, 4.0)).stroke(Stroke::new(1.0_f32, p.outline)))
+            .frame(Frame::none().fill(glass_tint(&p)).inner_margin(Margin::symmetric(10.0, 4.0)).stroke(Stroke::new(1.0_f32, glass_rim(&p))))
             .show(ctx, |ui| {
                 server_tab = crate::server_page::tab_bar(ui, &p);
             });
@@ -236,7 +241,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     // ---- Bottom navigation ----
     egui::TopBottomPanel::bottom("launcher-nav")
         .exact_height(NAV_H)
-        .frame(Frame::none().fill(p.surface.gamma_multiply(0.82)).stroke(Stroke::new(1.0_f32, p.outline)))
+        .frame(Frame::none())
         .show(ctx, |ui| {
             let rect = ui.max_rect();
             let w = rect.width() / tabs.len() as f32;
@@ -264,7 +269,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     if tabs[tab].0 == Tab::Home {
         egui::TopBottomPanel::bottom("launcher-launch")
             .exact_height(100.0)
-            .frame(Frame::none().fill(p.surface).inner_margin(Margin::symmetric(16.0, 10.0)))
+            .frame(Frame::none().fill(glass_tint(&p)).inner_margin(Margin::symmetric(16.0, 10.0)).stroke(Stroke::new(1.0_f32, glass_rim(&p))))
             .show(ctx, |ui| {
                 ui.label(egui::RichText::new(format!("Ник: {nickname}")).color(p.text));
                 ui.horizontal(|ui| {
@@ -535,7 +540,7 @@ fn release_card(ui: &mut Ui, p: &Palette, r: &Release, latest: bool) {
 }
 
 fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
-    Frame::none().fill(p.surface).rounding(Rounding::same(12.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(12.0)).show(ui, |ui| {
+    glass_card(ui, p, 12.0, Margin::same(12.0), Stroke::new(1.0_f32, p.outline), |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal_top(|ui| {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(52.0), Sense::hover());
@@ -567,7 +572,7 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
     let addr_id = Id::new(("launcher-server-addr", place_mode));
     let mut addr: String = ui.ctx().data(|d| d.get_temp(addr_id)).unwrap_or_default();
     let card = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
-        Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+        glass_card(ui, p, 18.0, Margin::same(16.0), Stroke::new(1.0_f32, p.outline), |ui| {
             ui.set_width(ui.available_width());
             add(ui);
         });
@@ -643,7 +648,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     // Creating a server: name and template, right here in the menu (not in the editor).
     if let Some((name, template)) = &mut form {
         let mut close = false;
-        Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.5_f32, p.accent)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+        glass_card(ui, p, 18.0, Margin::same(16.0), Stroke::new(1.5_f32, p.accent), |ui| {
             ui.set_width(ui.available_width());
             ui.label(egui::RichText::new("НОВЫЙ СЕРВЕР").size(11.5).color(p.text_muted));
             ui.add(egui::TextEdit::singleline(name).char_limit(32).hint_text("Название").desired_width(ui.available_width()));
@@ -666,7 +671,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     ui.ctx().data_mut(|d| d.insert_temp(form_id, form.clone()));
 
     if projects.is_empty() && form.is_none() {
-        Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(18.0)).show(ui, |ui| {
+        glass_card(ui, p, 18.0, Margin::same(18.0), Stroke::new(1.0_f32, p.outline), |ui| {
             ui.set_width(ui.available_width());
             ui.label(egui::RichText::new("Пока нет серверов").font(bold_font(16.0)).color(p.text));
             ui.label(egui::RichText::new("Сервер — это ваша игра, как плейс в Roblox Studio. Создайте его, откройте в редакторе, стройте и пишите скрипт на Luau, потом «Запустить» — и друзья заходят.").size(13.0).color(p.text_muted));
@@ -675,7 +680,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     // Server cards: tap the card to open the editor scene.
     for w in projects {
         let name = w.cfg.name.strip_prefix("Проект").map(|rest| format!("Сервер{rest}")).unwrap_or_else(|| w.cfg.name.clone());
-        let out = Frame::none().fill(p.surface).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(12.0)).show(ui, |ui| {
+        let out = glass_card(ui, p, 16.0, Margin::same(12.0), Stroke::new(1.0_f32, p.outline), |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
@@ -720,7 +725,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
         ui.label(egui::RichText::new("Пока нет. Запустите сервер на вкладке «Сервер» в WolfStudio или WolfServer.exe на ПК.").size(13.0).color(p.text_muted));
     }
     for (name, addr, players, max) in &nearby {
-        Frame::none().fill(p.surface).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(12.0)).show(ui, |ui| {
+        glass_card(ui, p, 16.0, Margin::same(12.0), Stroke::new(1.0_f32, p.outline), |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
@@ -745,7 +750,7 @@ fn profile(ui: &mut Ui, icons: &GuiIcons, p: &Palette, skin: u8, nickname: &str,
     use wolfcraft_engine::renderer::model::{SKIN_NAMES, skin_colors};
     let w = ui.available_width();
     // Player card: the figure on the left, name, skin and nickname field on the right.
-    Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+    glass_card(ui, p, 18.0, Margin::same(16.0), Stroke::new(1.0_f32, p.outline), |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(Vec2::new(96.0, 190.0), Sense::hover());
@@ -778,7 +783,7 @@ fn profile(ui: &mut Ui, icons: &GuiIcons, p: &Palette, skin: u8, nickname: &str,
         ui.spacing_mut().item_spacing.x = 10.0;
         let cw = (ui.available_width() - 20.0) / 3.0;
         for (num, label) in [(worlds_n.to_string(), "миров"), (projects.to_string(), "проектов"), (SKIN_NAMES.len().to_string(), "скинов")] {
-            Frame::none().fill(p.surface).rounding(Rounding::same(14.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::symmetric(8.0, 10.0)).show(ui, |ui| {
+            glass_card(ui, p, 14.0, Margin::symmetric(8.0, 10.0), Stroke::new(1.0_f32, p.outline), |ui| {
                 ui.set_width(cw - 16.0);
                 ui.vertical_centered(|ui| {
                     ui.label(egui::RichText::new(num).font(bold_font(22.0)).color(p.accent));
@@ -811,7 +816,7 @@ fn profile(ui: &mut Ui, icons: &GuiIcons, p: &Palette, skin: u8, nickname: &str,
 /// Настройки лаунчера: look, game settings, version and about — right in the launcher.
 fn launcher_settings(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, dark: bool, action: &mut MenuAction) {
     let card = |ui: &mut Ui, title: &str, body: &mut dyn FnMut(&mut Ui)| {
-        Frame::none().fill(p.surface).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(16.0)).show(ui, |ui| {
+        glass_card(ui, p, 18.0, Margin::same(16.0), Stroke::new(1.0_f32, p.outline), |ui| {
             ui.set_width(ui.available_width());
             ui.label(egui::RichText::new(title.to_uppercase()).size(11.5).color(p.text_muted));
             ui.add_space(6.0);
@@ -911,3 +916,39 @@ mod tests {
 }
 
 
+
+/// Aero glass: a see-through tinted pane (sky-blue in light, deep blue in dark).
+fn glass_tint(p: &Palette) -> Color32 {
+    if p.dark { Color32::from_rgba_unmultiplied(22, 36, 60, 165) } else { Color32::from_rgba_unmultiplied(225, 238, 252, 150) }
+}
+
+/// The glossy reflection on the upper half of a glass pane.
+fn glass_gloss(p: &Palette) -> Color32 {
+    Color32::from_rgba_unmultiplied(255, 255, 255, if p.dark { 18 } else { 70 })
+}
+
+/// The bright rim round a glass pane.
+fn glass_rim(p: &Palette) -> Color32 {
+    Color32::from_rgba_unmultiplied(255, 255, 255, if p.dark { 55 } else { 150 })
+}
+
+/// A card in the Aero glass style: soft shadow, a tinted see-through body, a gloss over the
+/// upper half, a white inner rim and the given outer edge. Content is drawn on top.
+fn glass_card<R>(ui: &mut Ui, p: &Palette, r: f32, margin: Margin, edge: Stroke, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+    let back = ui.painter().add(egui::Shape::Noop);
+    let out = Frame::none().rounding(Rounding::same(r)).inner_margin(margin).show(ui, add);
+    let rect = out.response.rect;
+    let hover = out.response.hovered() as u8 as f32;
+    let mut shapes = vec![
+        egui::Shape::rect_filled(rect.translate(Vec2::new(0.0, 4.0)).expand(1.5), Rounding::same(r + 1.5), Color32::from_black_alpha(45)),
+        egui::Shape::rect_filled(rect, Rounding::same(r), glass_tint(p)),
+    ];
+    let gloss = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.top() + (rect.height() * 0.46).min(60.0)));
+    shapes.push(egui::Shape::rect_filled(gloss, Rounding { nw: r, ne: r, sw: 0.0, se: 0.0 }, glass_gloss(p).gamma_multiply(1.0 + 0.4 * hover)));
+    // A thin bright line where the gloss ends, like the edge of a reflection.
+    shapes.push(egui::Shape::line_segment([Pos2::new(rect.left() + r, gloss.bottom()), Pos2::new(rect.right() - r, gloss.bottom())], Stroke::new(1.0, glass_gloss(p).gamma_multiply(0.6))));
+    shapes.push(egui::Shape::rect_stroke(rect.shrink(1.0), Rounding::same((r - 1.0).max(0.0)), Stroke::new(1.0, glass_rim(p))));
+    shapes.push(egui::Shape::rect_stroke(rect, Rounding::same(r), Stroke::new(edge.width, if edge.color == p.outline { glass_rim(p).gamma_multiply(0.6) } else { edge.color })));
+    ui.painter().set(back, egui::Shape::Vec(shapes));
+    out
+}

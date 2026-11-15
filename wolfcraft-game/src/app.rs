@@ -281,6 +281,8 @@ pub struct App {
     hand_place: f32,
     /// Weapon kick after a shot: 1 → 0.
     gun_recoil: f32,
+    /// Drill / chainsaw motor: 0 idle → 1 full, follows digging smoothly.
+    tool_work: f32,
     /// Chat commands to send soon (the server's «Команды при запуске»).
     queued_chat: Vec<String>,
     /// Hit marker after a bullet struck a creature (seconds left).
@@ -434,6 +436,7 @@ impl App {
             hand_block: 0.0,
             hand_place: 0.0,
             gun_recoil: 0.0,
+            tool_work: 0.0,
             queued_chat: Vec::new(),
             hit_marker: 0.0,
             thud_cd: 0.0,
@@ -2905,6 +2908,8 @@ impl App {
                 }
                 self.hand_place = (self.hand_place - dt * 6.5).max(0.0);
                 self.gun_recoil = (self.gun_recoil - dt * 3.2).max(0.0);
+                let want = if self.hand_cycle > 0.0 { 1.0 } else { 0.0 };
+                self.tool_work += (want - self.tool_work) * (dt * if want > self.tool_work { 7.0 } else { 2.5 }).min(1.0);
                 self.hit_marker = (self.hit_marker - dt).max(0.0);
                 self.thud_cd = (self.thud_cd - dt).max(0.0);
                 if s.player.inventory.selected != self.last_hotbar {
@@ -2968,8 +2973,13 @@ impl App {
                             };
                             let ammo = wolfcraft_engine::explosives::weapon(st.id).map(|w| w.0).unwrap_or(0);
                             let reload = s.explosives.reload();
-                            let loaded = reload <= 0.0 && (s.player.is_creative() || s.player.inventory.count(ammo) > 0);
-                            Some(wolfcraft_engine::renderer::model::GunPose { kind, recoil: self.gun_recoil, reload, loaded })
+                            let loaded = if matches!(kind, 11 | 12) {
+                                // Electric tools: charged unless worn down to zero.
+                                s.player.is_creative() || st.damage < st.info().durability.max(1)
+                            } else {
+                                reload <= 0.0 && (s.player.is_creative() || s.player.inventory.count(ammo) > 0)
+                            };
+                            Some(wolfcraft_engine::renderer::model::GunPose { kind, recoil: self.gun_recoil, reload, loaded, work: self.tool_work })
                         }),
                     };
                     let hands = build_first_person_hands(&hand_pose);
