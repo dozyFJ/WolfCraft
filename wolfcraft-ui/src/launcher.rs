@@ -385,16 +385,8 @@ fn gradient(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
 // Главная
 
 fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandle>, version: &str, nickname: &str, dark: bool, action: &mut MenuAction) {
-    ui.add_space(4.0);
     let _ = (planet, dark);
-    // Play right under the slider: the nickname, the version, «Играть».
-    play_banner(ui, icons, p, version, nickname, action);
-    // Новости and Релизы: each its own section.
-    section(ui, p, "Новости", "");
-    for n in &NEWS {
-        news_card(ui, icons, p, n);
-        ui.add_space(2.0);
-    }
+    // Under the page menu: the releases first,
     section(ui, p, "Релизы", "все версии");
     egui::ScrollArea::horizontal().id_salt("launcher-releases").auto_shrink([false, true]).drag_to_scroll(true).show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -404,7 +396,15 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
             }
         });
     });
-    ui.add_space(6.0);
+    // then the play stack: the version and «Играть»,
+    ui.add_space(10.0);
+    play_banner(ui, icons, p, version, nickname, action);
+    // and the news at the end.
+    section(ui, p, "Новости", "");
+    for n in &NEWS {
+        news_card(ui, icons, p, n);
+        ui.add_space(2.0);
+    }
     ui.add_space(8.0);
 }
 
