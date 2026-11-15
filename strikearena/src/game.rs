@@ -21,6 +21,8 @@ pub enum Screen {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Btn {
     Fire,
+    /// The second trigger on the left, over the joystick (like Standoff).
+    FireLeft,
     Aim,
     Reload,
     Swap,
@@ -30,11 +32,16 @@ enum Btn {
 #[derive(Clone, Copy)]
 enum Role {
     Joy { cur: Pos2 },
-    Look { last: Pos2 },
+    /// Dragging turns the view. A touch that stays put fires (tap — one shot, hold — burst),
+    /// until it has moved enough to count as a drag.
+    Look { last: Pos2, moved: f32 },
     Btn { b: Btn, last: Pos2 },
 }
 
 pub const MOUSE: u64 = 1 << 40;
+
+/// How far (points) a finger may slide on the screen and still be a shot rather than a turn.
+const TAP_SLOP: f32 = 14.0;
 
 const SKILLS: [(&str, f32); 3] = [("Лёгкие", 0.25), ("Обычные", 0.55), ("Сложные", 0.85)];
 
@@ -160,6 +167,7 @@ impl Game {
         let (w, h, u) = (self.view.x, self.view.y, self.unit());
         vec![
             (Btn::Fire, Pos2::new(w - 1.6 * u, h - 1.9 * u), 1.0 * u, "Огонь"),
+            (Btn::FireLeft, Pos2::new(1.3 * u, h - 4.9 * u), 0.62 * u, "Огонь"),
             (Btn::Aim, Pos2::new(w - 3.7 * u, h - 1.2 * u), 0.62 * u, "Прицел"),
             (Btn::Reload, Pos2::new(w - 1.1 * u, h - 4.0 * u), 0.55 * u, "Перезар."),
             (Btn::Swap, Pos2::new(w - 3.3 * u, h - 3.3 * u), 0.55 * u, "Оружие"),
@@ -186,13 +194,13 @@ impl Game {
                         Btn::Reload | Btn::Swap => {
                             self.taps.insert(b);
                         }
-                        Btn::Fire => {}
+                        Btn::Fire | Btn::FireLeft => {}
                     }
                     self.touches.insert(id, Role::Btn { b, last: p });
                 } else if p.distance(self.joy_home()) < self.unit() * 2.4 && !self.touches.values().any(|r| matches!(r, Role::Joy { .. })) {
                     self.touches.insert(id, Role::Joy { cur: p });
                 } else if p.x > self.view.x * 0.35 {
-                    self.touches.insert(id, Role::Look { last: p });
+                    self.touches.insert(id, Role::Look { last: p, moved: 0.0 });
                 }
             }
             TouchPhase::Moved => {
@@ -200,7 +208,12 @@ impl Game {
                 match self.touches.get_mut(&id) {
                     Some(Role::Joy { cur }) => *cur = p,
                     // Firing and looking with the same thumb.
-                    Some(Role::Look { last }) | Some(Role::Btn { b: Btn::Fire, last }) => {
+                    Some(Role::Look { last, moved }) => {
+                        d = Some(p - *last);
+                        *moved += (p - *last).length();
+                        *last = p;
+                    }
+                    Some(Role::Btn { b: Btn::Fire | Btn::FireLeft, last }) => {
                         d = Some(p - *last);
                         *last = p;
                     }
@@ -230,7 +243,11 @@ impl Game {
         mv += Vec2::new((k(KeyCode::KeyD) as i32 - k(KeyCode::KeyA) as i32) as f32, (k(KeyCode::KeyW) as i32 - k(KeyCode::KeyS) as i32) as f32);
         let mut look = std::mem::take(&mut self.look);
         look += Vec2::new((k(KeyCode::ArrowRight) as i32 - k(KeyCode::ArrowLeft) as i32) as f32, (k(KeyCode::ArrowDown) as i32 - k(KeyCode::ArrowUp) as i32) as f32) * 6.0;
-        let fire = self.touches.values().any(|r| matches!(r, Role::Btn { b: Btn::Fire, .. })) || k(KeyCode::Space);
+        let fire = self.touches.values().any(|r| match r {
+            Role::Btn { b: Btn::Fire | Btn::FireLeft, .. } => true,
+            Role::Look { moved, .. } => *moved < TAP_SLOP,
+            _ => false,
+        }) || k(KeyCode::Space);
         let taps = std::mem::take(&mut self.taps);
         let me = self.m.as_ref().map(|m| &m.men[0]);
         let zoom = me.map(|s| if s.aiming { s.spec().zoom } else { 1.0 }).unwrap_or(1.0);
@@ -337,12 +354,30 @@ impl Game {
         if playing {
             let me = &m.men[0];
             s.hurt = me.hurt * 0.8;
-            let cam = render::camera(me, self.shake, self.time);
-            s.eye = cam.eye;
-            s.target = cam.eye + cam.fwd;
-            s.fov_y = fov;
-            render::everyone(s, m, 0, self.time);
-            render::viewmodel(s, me, &cam, self.time);
+            let spect = (!me.alive() && me.dead_t > 1.2).then_some(me.last_by).filter(|&k| k != 0 && m.men[k].alive());
+            if let Some(k) = spect {
+                // Watching the killer from behind his shoulder until the respawn.
+                let o = &m.men[k];
+                let f = o.forward();
+                let flat = Vec3::new(f.x, 0.0, f.z).normalize_or_zero();
+                let right = flat.cross(Vec3::Y);
+                let want = o.eye() - flat * 2.6 + Vec3::Y * 0.7 + right * 0.6;
+                // Do not look through walls: pull in to the first hit.
+                let d = want - o.eye();
+                let len = d.length();
+                let t = m.map.ray(o.eye(), d / len.max(1e-3), len).map(|t| (t - 0.3).max(0.3)).unwrap_or(len);
+                s.eye = o.eye() + d / len.max(1e-3) * t;
+                s.target = o.eye() + f * 6.0;
+                s.fov_y = 72f32.to_radians();
+                render::everyone(s, m, 0, self.time);
+            } else {
+                let cam = render::camera(me, self.shake, self.time);
+                s.eye = cam.eye;
+                s.target = cam.eye + cam.fwd;
+                s.fov_y = fov;
+                render::everyone(s, m, 0, self.time);
+                render::viewmodel(s, me, &cam, self.time);
+            }
         } else {
             s.hurt = 0.0;
             let a = self.time * 0.06;
@@ -553,12 +588,44 @@ impl Game {
             p.text(pos, Align2::RIGHT_TOP, text, FontId::proportional(13.0), Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), a));
         }
         if !me.alive() {
-            let killer = if me.last_by != 0 { m.men[me.last_by].name.clone() } else { String::new() };
-            shadow_text(&p, Pos2::new(w / 2.0, h * 0.35), "ТЫ УБИТ", 40.0, Color32::from_rgb(235, 70, 60));
-            if !killer.is_empty() {
-                shadow_text(&p, Pos2::new(w / 2.0, h * 0.35 + 36.0), &format!("Убил: {killer}"), 18.0, Color32::WHITE);
+            // A compact panel at the bottom: who killed you, whom you watch, the respawn bar.
+            let killer = (me.last_by != 0).then(|| &m.men[me.last_by]);
+            let panel = Rect::from_center_size(Pos2::new(w / 2.0, h - 70.0), EV::new(340.0, 92.0));
+            p.rect_filled(panel, 14.0, Color32::from_black_alpha(170));
+            p.rect_stroke(panel, 14.0, Stroke::new(1.5_f32, Color32::from_rgb(235, 70, 60)));
+            p.text(panel.center_top() + EV::new(0.0, 18.0), Align2::CENTER_CENTER, "ТЫ УБИТ", FontId::proportional(24.0), Color32::from_rgb(240, 80, 70));
+            if let Some(k) = killer {
+                let watching = me.dead_t > 1.2 && k.alive();
+                let line = format!("{}{} · {}", if watching { "Наблюдение: " } else { "Убил: " }, k.name, gun(GUNS[k.gun]).name);
+                p.text(panel.center_top() + EV::new(0.0, 44.0), Align2::CENTER_CENTER, line, FontId::proportional(15.0), Color32::WHITE);
             }
-            shadow_text(&p, Pos2::new(w / 2.0, h * 0.35 + 64.0), &format!("Возрождение через {:.0}", me.respawn.max(0.0).ceil()), 16.0, Color32::from_white_alpha(200));
+            let bar = Rect::from_min_size(Pos2::new(panel.left() + 20.0, panel.bottom() - 22.0), EV::new(panel.width() - 40.0, 8.0));
+            let k = (1.0 - me.respawn / 3.0).clamp(0.0, 1.0);
+            p.rect_filled(bar, 4.0, Color32::from_white_alpha(40));
+            p.rect_filled(Rect::from_min_size(bar.min, EV::new(bar.width() * k, bar.height())), 4.0, Color32::from_rgb(240, 200, 80));
+            p.text(bar.right_top() - EV::new(0.0, 4.0), Align2::RIGHT_BOTTOM, format!("Возрождение через {:.0}", me.respawn.max(0.0).ceil()), FontId::proportional(12.0), Color32::from_white_alpha(210));
+            return;
+        }
+        // Before the start: the teams line up, a big countdown.
+        if m.warmup > 0.0 {
+            let n = m.warmup.ceil() as u32;
+            let pop = 1.0 + (1.0 - m.warmup.fract()).powi(3) * 0.25;
+            p.rect_filled(Rect::from_center_size(Pos2::new(w / 2.0, h * 0.34), EV::new(w.min(520.0), 92.0)), 16.0, Color32::from_black_alpha(150));
+            p.text(Pos2::new(w / 2.0, h * 0.34 - 22.0), Align2::CENTER_CENTER, "МАТЧ НАЧНЁТСЯ ЧЕРЕЗ", FontId::proportional(18.0), Color32::from_white_alpha(220));
+            p.text(Pos2::new(w / 2.0, h * 0.34 + 16.0), Align2::CENTER_CENTER, n.to_string(), FontId::proportional(44.0 * pop), Color32::from_rgb(255, 205, 80));
+            for team in 0..2u8 {
+                let x = if team == 0 { 16.0 } else { w - 16.0 };
+                let al = if team == 0 { Align2::LEFT_TOP } else { Align2::RIGHT_TOP };
+                let col = if team == 0 { Color32::from_rgb(120, 170, 255) } else { Color32::from_rgb(255, 120, 110) };
+                let top = h * 0.2;
+                let card = if team == 0 { Rect::from_min_size(Pos2::new(8.0, top - 8.0), EV::new(170.0, 140.0)) } else { Rect::from_min_size(Pos2::new(w - 178.0, top - 8.0), EV::new(170.0, 140.0)) };
+                p.rect_filled(card, 12.0, Color32::from_black_alpha(130));
+                p.text(Pos2::new(x, top), al, if team == 0 { "СИНИЕ" } else { "КРАСНЫЕ" }, FontId::proportional(16.0), col);
+                for (i, o) in m.men.iter().filter(|o| o.team == team).enumerate() {
+                    let c = if o.bot.is_none() { Color32::from_rgb(255, 215, 90) } else { Color32::WHITE };
+                    p.text(Pos2::new(x, top + 22.0 + i as f32 * 20.0), al, format!("{} · {}", o.name, gun(GUNS[o.gun]).name), FontId::proportional(13.0), c);
+                }
+            }
         }
         if self.screen != Screen::Playing {
             return;
@@ -577,8 +644,8 @@ impl Game {
         for (b, pos, r, label) in self.buttons() {
             let on = held.contains(&b) || (b == Btn::Aim && self.aim_toggle);
             let fill = match (b, on) {
-                (Btn::Fire, true) => Color32::from_rgba_unmultiplied(230, 80, 50, 210),
-                (Btn::Fire, false) => Color32::from_rgba_unmultiplied(160, 40, 30, 150),
+                (Btn::Fire | Btn::FireLeft, true) => Color32::from_rgba_unmultiplied(230, 80, 50, 210),
+                (Btn::Fire | Btn::FireLeft, false) => Color32::from_rgba_unmultiplied(160, 40, 30, 150),
                 (_, true) => Color32::from_white_alpha(120),
                 _ => Color32::from_black_alpha(110),
             };
@@ -616,6 +683,6 @@ fn big(ui: &mut egui::Ui, text: &str) -> bool {
 }
 
 fn shadow_text(p: &egui::Painter, at: Pos2, text: &str, size: f32, color: Color32) {
-    p.text(at + EV::new(2.0, 3.0), Align2::CENTER_CENTER, text, FontId::proportional(size), Color32::from_black_alpha(170));
+    p.text(at + EV::new(1.0, 1.5), Align2::CENTER_CENTER, text, FontId::proportional(size), Color32::from_black_alpha(120));
     p.text(at, Align2::CENTER_CENTER, text, FontId::proportional(size), color);
 }

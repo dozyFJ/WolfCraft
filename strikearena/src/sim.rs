@@ -129,7 +129,11 @@ pub struct Match {
     pub events: Vec<Event>,
     rng: u32,
     pub skill: f32,
+    /// Countdown before the match starts: everyone stands at the spawn and can only look.
+    pub warmup: f32,
 }
+
+pub const WARMUP: f32 = 5.0;
 
 const NAMES: [&str; 10] = ["Ты", "Ястреб", "Гром", "Сокол", "Буря", "Кобра", "Шторм", "Призрак", "Клык", "Вихрь"];
 
@@ -175,7 +179,7 @@ impl Match {
             refill(&mut s);
             men.push(s);
         }
-        Self { map, men, score: [0, 0], time: MATCH_TIME, over: None, events: Vec::new(), rng: seed | 1, skill }
+        Self { map, men, score: [0, 0], time: MATCH_TIME, over: None, events: Vec::new(), rng: seed | 1, skill, warmup: WARMUP }
     }
 
     fn rand(&mut self) -> f32 {
@@ -190,6 +194,13 @@ impl Match {
     pub fn update(&mut self, dt: f32, player: Input) {
         self.events.clear();
         if self.over.is_some() {
+            return;
+        }
+        if self.warmup > 0.0 {
+            self.warmup -= dt;
+            let me = &mut self.men[0];
+            me.yaw -= player.look.x;
+            me.pitch = (me.pitch + player.look.y).clamp(-1.3, 1.3);
             return;
         }
         self.time -= dt;
@@ -496,6 +507,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nobody_moves_or_shoots_before_the_start() {
+        let mut m = Match::new(4, 0.9);
+        let start: Vec<Vec2> = m.men.iter().map(|s| s.pos).collect();
+        let mut t = 0.0;
+        while t < WARMUP - 0.1 {
+            m.update(1.0 / 60.0, Input { mv: Vec2::new(0.0, 1.0), fire: true, ..Default::default() });
+            t += 1.0 / 60.0;
+        }
+        assert!(m.men.iter().zip(&start).all(|(s, p)| s.pos == *p));
+        assert_eq!(m.men[0].mag[0], 30);
+        assert!(m.warmup > 0.0);
+    }
+
+    #[test]
     fn a_shot_hits_a_soldier_in_the_open_and_not_through_a_wall() {
         let d = Vec3::new(0.0, 0.0, 1.0);
         let hit = ray_soldier(Vec3::new(0.0, 1.2, 0.0), d, Vec2::new(0.0, 5.0)).unwrap();
@@ -508,6 +533,7 @@ mod tests {
     #[test]
     fn the_player_kills_a_bot_standing_in_front() {
         let mut m = Match::new(5, 0.5);
+        m.warmup = 0.0;
         // Put an enemy 6 m ahead of the player in the open, frozen.
         m.men[5].pos = m.men[0].pos + Vec2::new(0.0, 6.0);
         m.men[5].protect = 0.0;
@@ -535,7 +561,7 @@ mod tests {
         for skill in [0.3f32, 0.8] {
             let mut m = Match::new(9, skill);
             let mut t = 0.0;
-            while m.over.is_none() && t < MATCH_TIME + 1.0 {
+            while m.over.is_none() && t < MATCH_TIME + WARMUP + 1.0 {
                 m.update(1.0 / 30.0, Input::default());
                 t += 1.0 / 30.0;
             }
@@ -548,6 +574,7 @@ mod tests {
     #[test]
     fn reloading_refills_the_magazine() {
         let mut m = Match::new(3, 0.5);
+        m.warmup = 0.0;
         m.men[0].mag[0] = 0;
         let mut t = 0.0;
         while t < 2.5 {
