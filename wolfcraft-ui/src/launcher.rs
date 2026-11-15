@@ -365,7 +365,7 @@ fn gradient(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
 
 fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandle>, version: &str, nickname: &str, dark: bool, action: &mut MenuAction) {
     ui.add_space(4.0);
-    banner_slider(ui, p, planet, action);
+    let _ = planet;
     // Play right under the slider: the nickname, the version, «Играть».
     play_banner(ui, icons, p, version, nickname, action);
     // Theme: dark or light.
@@ -542,6 +542,7 @@ fn play_banner(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, nickna
     }
 }
 
+#[allow(dead_code)]
 fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, action: &mut MenuAction) {
     let ctx = ui.ctx().clone();
     let w = ui.available_width();
