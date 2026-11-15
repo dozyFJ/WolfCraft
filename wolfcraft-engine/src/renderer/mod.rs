@@ -406,9 +406,31 @@ pub struct WorldRenderer {
     uploads: u32,
 }
 
+/// Chunk vertex as the GPU sees it (like Sodium's compact format): 20 bytes instead of 32.
+/// Position in 1/1024 block (±32 blocks around the chunk corner), texture coordinates in 1/512,
+/// ambient occlusion and skylight in bytes.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuVertex {
+    pos: [i16; 4],
+    uv: [i16; 2],
+    flags: u32,
+    light: [u8; 4],
+}
+
+pub fn pack_vertex(v: &Vertex) -> GpuVertex {
+    let q = |x: f32, k: f32| (x * k).round().clamp(-32768.0, 32767.0) as i16;
+    let l = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    GpuVertex { pos: [q(v.pos[0], 1024.0), q(v.pos[1], 1024.0), q(v.pos[2], 1024.0), 0], uv: [q(v.uv[0], 512.0), q(v.uv[1], 512.0)], flags: v.flags, light: [l(v.light[0]), l(v.light[1]), 0, 0] }
+}
+
+fn pack_all(v: &[Vertex]) -> Vec<GpuVertex> {
+    v.iter().map(pack_vertex).collect()
+}
+
 fn vertex_layouts() -> ([wgpu::VertexAttribute; 4], [wgpu::VertexAttribute; 1]) {
     (
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Uint32, 3 => Float32x2],
+        wgpu::vertex_attr_array![0 => Sint16x4, 1 => Sint16x2, 2 => Uint32, 3 => Unorm8x4],
         wgpu::vertex_attr_array![4 => Float32x4],
     )
 }
@@ -492,7 +514,7 @@ impl WorldRenderer {
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("world-pl"), bind_group_layouts: &[&layout], push_constant_ranges: &[] });
         let (va, ia) = vertex_layouts();
         let vbuffers = [
-            wgpu::VertexBufferLayout { array_stride: std::mem::size_of::<Vertex>() as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &va },
+            wgpu::VertexBufferLayout { array_stride: std::mem::size_of::<GpuVertex>() as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &va },
             wgpu::VertexBufferLayout { array_stride: 16, step_mode: wgpu::VertexStepMode::Instance, attributes: &ia },
         ];
         let make = |label: &str, fs: &str, cull: Option<wgpu::Face>, blend: Option<wgpu::BlendState>, depth_write: bool| {
@@ -618,7 +640,7 @@ impl WorldRenderer {
         let model_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("model-vb"), size: (model_cap * std::mem::size_of::<ModelVertex>()) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
 
         let hands_cap = 256;
-        let held_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("held-vb"), size: (8192 * std::mem::size_of::<Vertex>()) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let held_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("held-vb"), size: (8192 * std::mem::size_of::<GpuVertex>()) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let zero_inst = device.create_buffer(&wgpu::BufferDescriptor { label: Some("zero-inst"), size: 16, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         queue.write_buffer(&zero_inst, 0, bytemuck::cast_slice(&[0.0f32; 4]));
         let hands_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("hands-vb"), size: (hands_cap * std::mem::size_of::<ModelVertex>()) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
@@ -821,7 +843,8 @@ impl WorldRenderer {
         if idx.is_empty() {
             return None;
         }
-        let vbytes: &[u8] = bytemuck::cast_slice(verts);
+        let packed = pack_all(verts);
+        let vbytes: &[u8] = bytemuck::cast_slice(&packed);
         let ibytes: &[u8] = bytemuck::cast_slice(idx);
         self.uploads += 1;
         // Reuse existing buffers when the new mesh fits and is not wastefully smaller.
@@ -905,7 +928,7 @@ impl WorldRenderer {
     pub fn set_held(&mut self, queue: &wgpu::Queue, verts: &[Vertex]) {
         let n = verts.len().min(8192);
         if n > 0 {
-            queue.write_buffer(&self.held_buf, 0, bytemuck::cast_slice(&verts[..n]));
+            queue.write_buffer(&self.held_buf, 0, bytemuck::cast_slice(&pack_all(&verts[..n])));
         }
         self.held_count = n as u32;
     }
@@ -1328,6 +1351,18 @@ mod tests {
     fn globals_layout_matches_wgsl() {
         assert_eq!(std::mem::size_of::<Globals>(), 64 + 16 * 6 + 16 * MAX_TILES);
         assert_eq!(std::mem::size_of::<Vertex>(), 32);
+        assert_eq!(std::mem::size_of::<GpuVertex>(), 20);
+    }
+
+    #[test]
+    fn packed_vertices_keep_position_to_a_millimetre() {
+        let v = Vertex { pos: [15.999, -27.5, 3.25], uv: [-16.0, 0.5], flags: 7, light: [0.45, 1.0] };
+        let p = pack_vertex(&v);
+        for k in 0..3 {
+            assert!((p.pos[k] as f32 / 1024.0 - v.pos[k]).abs() < 0.001);
+        }
+        assert_eq!((p.uv[0] as f32 / 512.0, p.uv[1] as f32 / 512.0), (-16.0, 0.5));
+        assert_eq!(p.light[1], 255);
     }
 
     #[test]
