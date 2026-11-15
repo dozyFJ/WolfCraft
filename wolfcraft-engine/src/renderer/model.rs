@@ -2390,7 +2390,8 @@ mod tests {
         let rest = build_first_person_hands(&p);
         p.punch_cycle = strike_moment(true);
         let struck = build_first_person_hands(&p);
-        assert!(rest.len() > 2 * ARM, "sword and shield add boxes");
+        // In Minecraft style the arm holding an item is hidden: only the sword and the shield.
+        assert!(rest.len() > 2 * 3 * 36, "sword and shield add boxes");
         assert_eq!(rest.len(), struck.len());
         assert!(rest.iter().zip(&struck).any(|(a, b)| a.pos != b.pos), "the sword arm swings");
         // Shield boxes are the last 3 boxes: their centre moves towards the view axis when blocking.

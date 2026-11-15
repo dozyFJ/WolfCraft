@@ -131,8 +131,11 @@ pub fn share(nodes: &[Node], dt: f32) -> Vec<f32> {
     // 3. Machines take what they need for this frame (filling their buffer up to a second's worth).
     for (i, n) in nodes.iter().enumerate() {
         if is_machine(n.kind) {
-            let cap = spec(n.kind).capacity;
-            let want = (cap - e[i]).max(0.0).min(spec(n.kind).rate * dt * 4.0 + if n.flow > 0.0 { cap * 0.1 } else { 0.0 });
+            // A machine keeps only a few seconds of work in its buffer: the rest of the
+            // energy stays in the cells for the others.
+            let sp = spec(n.kind);
+            let target = sp.capacity.min(sp.rate * 3.0);
+            let want = (target - e[i]).max(0.0);
             let got = want.min(pool);
             e[i] += got;
             pool -= got;
