@@ -2464,6 +2464,14 @@ impl App {
                         sky[i] += (toon[i] - sky[i]) * k;
                     }
                 }
+                // Rain and storms: a grey, darker sky.
+                let rain = s.rain_amount();
+                if rain > 0.0 {
+                    let grey = (sky[0] * 0.3 + sky[1] * 0.5 + sky[2] * 0.2) * 0.75;
+                    for c in &mut sky {
+                        *c += (grey - *c) * rain * 0.8;
+                    }
+                }
                 if underwater {
                     sky = [0.04, 0.18, 0.36];
                 } else if s.hell {
@@ -2481,15 +2489,15 @@ impl App {
                     fx_flags: self.settings.fx_flags(),
                     season,
                     snow,
-                    humidity,
-                    fog_density: s.biome_fog().2,
+                    humidity: humidity.max(s.rain_amount()),
+                    fog_density: s.biome_fog().2 * (1.0 + s.rain_amount() * 1.2),
                     eye: cam.eye,
                     forward: cam.forward.as_vec3(),
                     up: cam.up.as_vec3(),
                     fov_y: (self.settings.fov + self.fov_fx).to_radians(),
                     aspect: w as f32 / h.max(1) as f32,
                     sun_dir: sun.as_vec3(),
-                    day,
+                    day: day * (1.0 - s.rain_amount() * 0.3),
                     underwater,
                     view_distance_blocks: (self.settings.render_distance * 16) as f32,
                     time: self.time.elapsed(),

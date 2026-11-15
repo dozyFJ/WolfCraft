@@ -123,11 +123,13 @@ pub struct Mob {
     pub saddled: bool,
     /// Someone sits on it: the rider steers, the creature's own mind rests.
     pub ridden: bool,
+    /// Seconds it keeps burning (ghouls in the sun, lava, fire).
+    pub burning: f32,
 }
 
 impl Mob {
     pub fn new(kind: MobKind, pos: DVec3, heading: DVec3) -> Self {
-        Self { kind, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0, saddled: false, ridden: false }
+        Self { kind, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0, saddled: false, ridden: false, burning: 0.0 }
     }
     /// Centre of the body, for aiming.
     pub fn centre(&self) -> DVec3 {
@@ -148,11 +150,13 @@ pub struct MobManager {
     /// Cubes flying off dead creatures.
     pub debris: Vec<Debris>,
     rng: u64,
+    /// The sun burns undead creatures (off under rain, set by the game every frame).
+    pub sun_burns: bool,
 }
 
 const HOSTILE_CAP: usize = 8;
 /// Upper bound of live particles (death cubes + block chips).
-pub const MAX_DEBRIS: usize = 900;
+pub const MAX_DEBRIS: usize = 1400;
 const PASSIVE_CAP: usize = 6;
 /// Fish, squid, dolphins and sharks at once.
 const AQUATIC_CAP: usize = 8;
@@ -166,7 +170,7 @@ fn tangent(v: DVec3, up: DVec3) -> DVec3 {
 
 impl MobManager {
     pub fn new(seed: u64) -> Self {
-        Self { mobs: Vec::new(), boss_deaths: Vec::new(), boss_effects: Vec::new(), boss_knock: DVec3::ZERO, spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5) }
+        Self { mobs: Vec::new(), boss_deaths: Vec::new(), boss_effects: Vec::new(), boss_knock: DVec3::ZERO, spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5), sun_burns: true }
     }
 
     pub fn rand(&mut self) -> f64 {
@@ -300,6 +304,21 @@ impl MobManager {
                     d.pos += d.vel * dt;
                     continue;
                 }
+                FxKind::Rain | FxKind::Snow => {
+                    let next = d.pos + d.vel * dt;
+                    let b = world.block_at_world(next);
+                    if b.is_solid() || b.is_fluid() {
+                        d.age = 3.0;
+                    } else {
+                        d.pos = next;
+                        if d.kind == FxKind::Snow {
+                            let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+                            let side = tangent(helper, up).normalize();
+                            d.vel = -up * 1.6 + side * ((d.age * 1.7 + d.spin).sin() as f64 * 0.5);
+                        }
+                    }
+                    continue;
+                }
                 FxKind::Leaf => {
                     // Leaves flutter down slowly, swaying from side to side.
                     let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
@@ -424,6 +443,9 @@ impl MobManager {
         let mut effects: Vec<(crate::magic::Effect,f32)> = Vec::new();
         let mut knock = DVec3::ZERO;
         let mut spawns: Vec<DVec3> = Vec::new();
+        let self_sun_burns = self.sun_burns;
+        let mut vanished = 0u32;
+        let mut fire: Vec<DVec3> = Vec::new();
         let mut rolls: Vec<f64> = (0..self.mobs.len() * 2).map(|_| self.rand()).collect();
         for (i, m) in self.mobs.iter_mut().enumerate() {
             if m.hp<=0. {continue;}
@@ -438,6 +460,9 @@ impl MobManager {
             let dist = to_player.length();
             if let Some(boss)=&mut m.boss {
                 use crate::bosses::{Attack,BossKind};
+                // A guardian fights whoever called it, in creative too (the game ignores its
+                // damage there): it used to stand still in front of a creative player.
+                let targetable = true;
                 let phase=boss.kind.phase(m.hp);
                 if (m.body.pos-boss.anchor).length()>25. {m.body.pos=boss.anchor;m.body.vel=DVec3::ZERO;}
                 boss.cooldown=(boss.cooldown-dt as f32).max(0.0);
@@ -538,6 +563,31 @@ impl MobManager {
             }
             m.slow = (m.slow - dt as f32).max(0.0);
             m.attack_cd = (m.attack_cd - dt as f32).max(0.0);
+            // Daylight, like Minecraft: ghouls under the open sky catch fire; crawlers that are
+            // far from the player and out of sight slip away.
+            if day && self_sun_burns && !m.kind.aquatic() {
+                let open_sky = || Self::line_clear(world, m.body.pos + up * 1.9, m.body.pos + up * 40.0);
+                if m.kind == MobKind::Ghoul && rolls[i * 2] < 0.25 && !world.block_at_world(m.body.pos + up * 0.5).is_fluid() && open_sky() {
+                    m.burning = m.burning.max(3.0);
+                }
+                if m.kind == MobKind::Crawler && dist > 24.0 && m.alert <= 0.0 && rolls[i * 2 + 1] < 0.02 * dt * 60.0 {
+                    m.hp = 0.0;
+                    vanished += 1;
+                    continue;
+                }
+            }
+            if m.burning > 0.0 {
+                m.burning -= dt as f32;
+                if world.block_at_world(m.body.pos + up * 0.5).is_fluid() {
+                    m.burning = 0.0;
+                }
+                m.hp -= 1.6 * dt as f32;
+                m.hurt = m.hurt.max(0.15);
+                fire.push(m.body.pos + up * 0.9);
+                if m.hp <= 0.0 {
+                    continue;
+                }
+            }
             let mut wish = DVec3::ZERO;
             m.alert = (m.alert - dt as f32).max(0.0);
             if dist > SLEEP_DIST && m.alert <= 0.0 && m.body.on_ground {
@@ -714,6 +764,16 @@ impl MobManager {
             self.burst(pos, &kind.palette(), kind.size());
         }
         self.step_debris(world, dt);
+        // Flames on burning creatures.
+        for at in fire {
+            let up = up_at(at);
+            for _ in 0..2 {
+                let j = DVec3::new(self.rand() - 0.5, self.rand() - 0.5, self.rand() - 0.5) * 0.6;
+                let g = 0.35 + self.rand() as f32 * 0.4;
+                self.fx_glow(at + j, up * (1.2 + self.rand() * 0.8), [1.0, g, 0.08], 0.11, 0.5, FxKind::Rise);
+            }
+        }
+        let _ = vanished;
         self.mobs.retain(|m| (m.body.pos - player).length() < DESPAWN_DIST && m.hp > 0.0);
         dealt
     }
@@ -753,6 +813,23 @@ impl MobManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ghouls_burn_in_the_sun_but_not_at_night() {
+        let w = crate::physics::tests::Ball::new(60.0);
+        for (day, burns) in [(true, true), (false, false)] {
+            let mut m = MobManager::new(3);
+            m.spawning = false;
+            let pos = DVec3::Y * 61.0;
+            m.mobs.push(Mob::new(MobKind::Ghoul, pos, DVec3::X));
+            let far = DVec3::Y * 61.0 + DVec3::X * 30.0;
+            for _ in 0..240 {
+                m.update(&w, far, day, false, true, 1.0 / 30.0);
+            }
+            let hurt = m.mobs.first().map(|g| g.hp < MobKind::Ghoul.max_hp()).unwrap_or(true);
+            assert_eq!(hurt, burns, "day {day}");
+        }
+    }
 
     #[test]
     fn kinds_have_sane_stats() {
@@ -805,6 +882,10 @@ pub enum FxKind {
     Rise,
     /// Flutters down slowly (falling leaves).
     Leaf,
+    /// A rain drop: falls fast and straight, gone when it hits something.
+    Rain,
+    /// A snowflake: drifts down slowly, gone on the ground.
+    Snow,
 }
 
 impl MobKind {
