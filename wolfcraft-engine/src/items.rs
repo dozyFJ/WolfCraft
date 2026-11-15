@@ -655,7 +655,7 @@ pub fn category(id: ItemId) -> &'static str {
             Block::MachineCasing | Block::Battery | Block::ElectricFurnace => "Строительство",
             Block::ElectricLamp | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
             Block::IskritOre | Block::UraniumOre | Block::UraniumBlock => "Руды",
-            Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable => "Строительство",
+            Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable | Block::BuilderTable => "Строительство",
             _ => "Природа",
         },
     }

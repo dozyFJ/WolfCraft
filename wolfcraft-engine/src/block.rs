@@ -1844,6 +1844,7 @@ blocks! {
     2459 Crusher => needs_pick(info("Дробитель", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::CRUSHER_FRONT, t::TECH_SIDE])),
     2460 InductionFurnace => needs_pick(info("Индукционная печь", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::INDUCTION_FRONT, t::TECH_SIDE])),
     2461 Enricher => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::ENRICHER_FRONT, t::TECH_SIDE])),
+    2462 BuilderTable => info("Конструктор", Opaque, 3.75, Axe, column(t::BUILDER_SIDE, t::BUILDER_TOP, t::PLANKS)),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a

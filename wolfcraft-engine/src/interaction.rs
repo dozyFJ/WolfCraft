@@ -28,6 +28,8 @@ pub enum InteractionEvent {
     Placed { pos: Cell, block: Block },
     Ate { hunger: f32 },
     OpenCrafting,
+    /// The «Конструктор» block: building pieces (forms × materials).
+    OpenBuilder,
     FrameUse {pos:Cell},
     /// A bed was used: the spawn point is set; `night` = slept through to the morning.
     Slept { night: bool, pos: Cell },
@@ -238,6 +240,10 @@ impl Interaction {
             if !player.sneaking {
                 if crate::construction::entry(h.block as u16).is_some_and(|(e,_)|e.form==crate::construction::Form::ItemFrame) {events.push(InteractionEvent::FrameUse{pos:h.cell});return events;}
                 if let Some(kind)=crate::construction::altar(h.block){events.push(InteractionEvent::ActivateBoss{pos:h.cell,kind});return events;}
+            }
+            if h.block == Block::BuilderTable && !player.sneaking {
+                events.push(InteractionEvent::OpenBuilder);
+                return events;
             }
             if h.block.base_kind() == Block::CraftingTable && !player.sneaking {
                 events.push(InteractionEvent::OpenCrafting);

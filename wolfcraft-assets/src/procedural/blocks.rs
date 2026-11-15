@@ -201,6 +201,8 @@ pub mod tiles {
     pub const CRUSHER_FRONT: u16 = 203;
     pub const INDUCTION_FRONT: u16 = 204;
     pub const ENRICHER_FRONT: u16 = 205;
+    pub const BUILDER_TOP: u16 = 206;
+    pub const BUILDER_SIDE: u16 = 207;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2167,6 +2169,48 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(CRUSHER_FRONT, "crusher", p(|q| front(q, 307, Rgb(0.75, 0.78, 0.82), 1)));
     l.add(INDUCTION_FRONT, "induction_furnace", p(|q| front(q, 308, Rgb(1.0, 0.40, 0.10), 2)));
     l.add(ENRICHER_FRONT, "enricher", p(|q| front(q, 309, Rgb(0.20, 0.80, 0.70), 3)));
+    // Конструктор: a drafting table — a blue blueprint with white lines on top, a hammer and
+    // a saw hanging on the side.
+    l.add(BUILDER_TOP, "builder_table_top", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let n = (rnd(x, y, 310) - 0.5) * 0.05;
+                let edge = x < 2 || y < 2 || x > 13 || y > 13;
+                let c = if edge {
+                    Rgb(0.45, 0.32, 0.18).add(n)
+                } else if (x == 4 && (4..12).contains(&y)) || (y == 11 && (4..12).contains(&x)) || (x + y == 15 && (5..11).contains(&x)) || ((x == 9 || x == 10) && (4..7).contains(&y)) {
+                    Rgb(0.88, 0.94, 1.0)
+                } else if x % 3 == 0 || y % 3 == 0 {
+                    Rgb(0.22, 0.42, 0.72).add(n)
+                } else {
+                    Rgb(0.18, 0.36, 0.66).add(n)
+                };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(BUILDER_SIDE, "builder_table_side", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let n = (rnd(x, y, 311) - 0.5) * 0.06;
+                let c = if y < 3 {
+                    Rgb(0.45, 0.32, 0.18).add(n)
+                } else if x == 4 && (5..14).contains(&y) {
+                    Rgb(0.40, 0.26, 0.14)
+                } else if (2..7).contains(&x) && (4..6).contains(&y) {
+                    Rgb(0.60, 0.62, 0.66)
+                } else if (9..14).contains(&x) && (5..12).contains(&y) && x + y <= 20 {
+                    // Saw blade: a triangle with a toothed edge.
+                    if x + y == 20 && x % 2 == 0 { Rgb(0.45, 0.46, 0.50) } else { Rgb(0.70, 0.72, 0.76) }
+                } else if x == 13 && (5..9).contains(&y) {
+                    Rgb(0.55, 0.20, 0.12)
+                } else {
+                    Rgb(0.62, 0.47, 0.28).add(n)
+                };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

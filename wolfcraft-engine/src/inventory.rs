@@ -369,6 +369,8 @@ pub fn recipes() -> &'static [Recipe] {
         }
         v.push(r(&[(b(Block::OakPlanks), 2)], (ids::STICK, 4), false, "Дерево"));
         v.push(r(&[(b(Block::OakPlanks), 4)], (b(Block::CraftingTable), 1), false, "Строительство"));
+        // Конструктор: a separate block where the building pieces (slabs, arcs, furniture…) are made.
+        v.push(r(&[(b(Block::CraftingTable), 1), (ids::IRON_INGOT, 2), (b(Block::OakPlanks), 2)], (b(Block::BuilderTable), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 8)], (b(Block::Chest), 1), true, "Строительство"));
         // Furnace, forge and barrel.
         v.push(r(&[(b(Block::Cobblestone), 8)], (b(Block::ElectricFurnace), 1), true, "Строительство"));
