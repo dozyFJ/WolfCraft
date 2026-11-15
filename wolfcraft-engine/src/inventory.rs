@@ -392,6 +392,8 @@ pub fn recipes() -> &'static [Recipe] {
             v.push(r(&[(ids::IRON_INGOT, *n), (ids::DIAMOND, 1), (ids::CIRCUIT, 1)], (ids::NANO_BASE + k as u16, 1), true, "WolfTech"));
         }
         v.push(r(&[(ids::IRON_INGOT, 24), (ids::CIRCUIT, 6), (b(Block::EnergyCell), 2), (ids::DIAMOND, 4)], (ids::MECH, 1), true, "WolfTech"));
+        v.push(r(&[(ids::COPPER_INGOT, 2), (ids::CIRCUIT, 1), (ids::GOLD_INGOT, 1)], (ids::OVERCLOCKER, 1), true, "WolfTech"));
+        v.push(r(&[(ids::COPPER_INGOT, 3), (ids::CIRCUIT, 1), (b(Block::IskritBlock), 1)], (ids::STORAGE_UPGRADE, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (ids::SHIELD, 1), true, "Вооружение"));

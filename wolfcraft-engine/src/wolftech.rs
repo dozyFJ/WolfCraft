@@ -50,9 +50,9 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Generator => Spec { name: "Генератор", capacity: 2_000.0, rate: 20.0, time: 0.0, hint: "Положите уголь или дрова" },
         Kind::Solar => Spec { name: "Солнечная панель", capacity: 500.0, rate: 8.0, time: 0.0, hint: "Работает днём под открытым небом" },
         Kind::Cell => Spec { name: "Энергоячейка", capacity: 40_000.0, rate: 0.0, time: 0.0, hint: "Хранит энергию, заряжает снаряжение (положите его слева)" },
-        Kind::Crusher => Spec { name: "Дробитель", capacity: 1_000.0, rate: 10.0, time: 4.0, hint: "Руда → 2 пыли, камень → булыжник → гравий → песок" },
-        Kind::Induction => Spec { name: "Индукционная печь", capacity: 1_000.0, rate: 8.0, time: 2.0, hint: "Плавит быстро, на энергии" },
-        Kind::Enricher => Spec { name: "Обогатитель", capacity: 2_000.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
+        Kind::Crusher => Spec { name: "Дробитель", capacity: 200.0, rate: 10.0, time: 4.0, hint: "Руда → 2 пыли, камень → булыжник → гравий → песок" },
+        Kind::Induction => Spec { name: "Индукционная печь", capacity: 160.0, rate: 8.0, time: 2.0, hint: "Плавит быстро, на энергии" },
+        Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
     }
 }
 
@@ -107,6 +107,8 @@ pub fn recipe(k: Kind, input: ItemId) -> Option<(ItemId, u8)> {
 #[derive(Clone, Copy, Debug)]
 pub struct Node {
     pub kind: Kind,
+    /// Energy store of this node (the spec's, plus «Накопитель» upgrades).
+    pub cap: f32,
     pub energy: f32,
     /// Generators: ЭЕ/s it makes now. Machines: ЭЕ/s it wants now (0 when idle).
     pub flow: f32,
@@ -120,7 +122,7 @@ pub fn share(nodes: &[Node], dt: f32) -> Vec<f32> {
     // 1. Generators produce into themselves (up to capacity).
     for (i, n) in nodes.iter().enumerate() {
         if matches!(n.kind, Kind::Generator | Kind::Solar) {
-            e[i] = (e[i] + n.flow * dt).min(spec(n.kind).capacity);
+            e[i] = (e[i] + n.flow * dt).min(n.cap);
         }
     }
     // 2. Pool everything that can be given: generators and cells.
@@ -134,22 +136,50 @@ pub fn share(nodes: &[Node], dt: f32) -> Vec<f32> {
         if is_machine(n.kind) {
             // A machine keeps only a few seconds of work in its buffer: the rest of the
             // energy stays in the cells for the others.
-            let sp = spec(n.kind);
-            let target = sp.capacity.min(sp.rate * 3.0);
-            let want = (target - e[i]).max(0.0);
+            let want = (n.cap.min(n.flow.max(spec(n.kind).rate) * 3.0) - e[i]).max(0.0);
             let got = want.min(pool);
             e[i] += got;
             pool -= got;
         }
     }
-    // 4. The rest goes back: first to cells (storage), then to the generators' buffers.
+    // 4. Machines fill their own small stores, the rest goes to the cells (storage) and
+    //    then back into the generators' buffers.
+    for (i, n) in nodes.iter().enumerate() {
+        if is_machine(n.kind) && pool > 0.0 {
+            let put = (n.cap - e[i]).max(0.0).min(pool);
+            e[i] += put;
+            pool -= put;
+        }
+    }
     for &i in givers.iter().filter(|&&i| nodes[i].kind == Kind::Cell).chain(givers.iter().filter(|&&i| nodes[i].kind != Kind::Cell)) {
-        let room = spec(nodes[i].kind).capacity - e[i];
+        let room = nodes[i].cap - e[i];
         let put = room.min(pool);
         e[i] += put;
         pool -= put;
     }
     e
+}
+
+/// IC2-style upgrades in a machine's right-hand slots: (time ×, energy use ×, extra store).
+/// Each «Ускоритель» works 30 % faster and uses 60 % more power; each «Накопитель» adds
+/// 2 000 ЭЕ of store.
+pub fn upgrades(slots: &[Option<crate::items::ItemStack>]) -> (f32, f32, f32) {
+    let mut oc = 0u32;
+    let mut st = 0u32;
+    for s in slots.iter().flatten() {
+        match s.id {
+            ids::OVERCLOCKER => oc += s.count as u32,
+            ids::STORAGE_UPGRADE => st += s.count as u32,
+            _ => {}
+        }
+    }
+    let oc = oc.min(16) as i32;
+    (0.7f32.powi(oc), 1.6f32.powi(oc), st.min(64) as f32 * 2_000.0)
+}
+
+/// An upgrade item for the machine slots.
+pub fn is_upgrade(id: ItemId) -> bool {
+    matches!(id, ids::OVERCLOCKER | ids::STORAGE_UPGRADE)
 }
 
 /// Fuel value in seconds of burning (same as the furnace).
@@ -164,9 +194,9 @@ mod tests {
     #[test]
     fn energy_flows_from_a_generator_through_to_a_machine_and_a_cell() {
         let mut nodes = vec![
-            Node { kind: Kind::Generator, energy: 0.0, flow: 20.0 },
-            Node { kind: Kind::Crusher, energy: 0.0, flow: 10.0 },
-            Node { kind: Kind::Cell, energy: 0.0, flow: 0.0 },
+            Node { kind: Kind::Generator, cap: spec(Kind::Generator).capacity, energy: 0.0, flow: 20.0 },
+            Node { kind: Kind::Crusher, cap: spec(Kind::Crusher).capacity, energy: 0.0, flow: 10.0 },
+            Node { kind: Kind::Cell, cap: spec(Kind::Cell).capacity, energy: 0.0, flow: 0.0 },
         ];
         let mut total_made = 0.0;
         for _ in 0..600 {
@@ -179,9 +209,17 @@ mod tests {
             nodes[1].energy = (nodes[1].energy - 10.0 * 0.05).max(0.0);
         }
         assert!(nodes[1].energy > 5.0, "the machine is fed: {}", nodes[1].energy);
-        assert!(nodes[2].energy > 100.0, "the surplus is stored: {}", nodes[2].energy);
+        assert!(nodes[2].energy > 50.0, "the surplus is stored: {}", nodes[2].energy);
         let held: f32 = nodes.iter().map(|n| n.energy).sum();
         assert!(held <= total_made + 1.0, "no energy from nowhere");
+    }
+
+    #[test]
+    fn overclockers_speed_up_and_cost_more() {
+        use crate::items::ItemStack;
+        assert_eq!(upgrades(&[]), (1.0, 1.0, 0.0));
+        let (t, e, s) = upgrades(&[Some(ItemStack::new(ids::OVERCLOCKER, 2)), Some(ItemStack::new(ids::STORAGE_UPGRADE, 1))]);
+        assert!((t - 0.49).abs() < 1e-4 && (e - 2.56).abs() < 1e-4 && s == 2_000.0);
     }
 
     #[test]

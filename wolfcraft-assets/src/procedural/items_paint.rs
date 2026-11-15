@@ -97,7 +97,9 @@ pub mod items {
     pub const JETPACK: u16 = 141;
     pub const NANO_BASE: u16 = 142;
     pub const MECH: u16 = 146;
-    pub const COUNT: u16 = 147;
+    pub const OVERCLOCKER: u16 = 147;
+    pub const STORAGE_UPGRADE: u16 = 148;
+    pub const COUNT: u16 = 149;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1201,6 +1203,9 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(NANO_BASE + 2, "nano_leggings", art(&["", "", "...NNNNNNNNNN", "...NccccccccN", "...NNNN..NNNN", "...NNcN..NcNN", "...NNNN..NNNN", "...NNNN..NNNN", "...NNcN..NcNN", "...NNNN..NNNN", "...NNNN..NNNN", "...NNNN..NNNN"]));
     l.add(NANO_BASE + 3, "nano_boots", art(&["", "", "", "", "", "", "...NNN....NNN", "...NcN....NcN", "...NNN....NNN", "..NNNN...NNNN", ".NNNcN..NNNcN", ".NNNNN..NNNNN"]));
     l.add(MECH, "mech", art(&["", ".....GGGGGG", ".....GccccG", ".....GGGGGG", "..DDGGGGGGGGDD", "..DDGGGYYGGGDD", "..DD.GGGGGG.DD", "..cc.GGGGGG.cc", ".....DD..DD", ".....DD..DD", ".....DD..DD", "....DDD..DDD"]));
+    // Upgrades: a green board with a cyan arrow (speed) / a blue battery (store).
+    l.add(OVERCLOCKER, "overclocker", art(&["", "", "..GGGGGGGGGGGG", "..GDDDDDDDDDDG", "..GDDDDccDDDDG", "..GDDDcccDDDDG", "..GDDccccccDDG", "..GDDDcccDDDDG", "..GDDDDccDDDDG", "..GDDDDDDDDDDG", "..GYDYDYDYDYDG", "..GGGGGGGGGGGG"]));
+    l.add(STORAGE_UPGRADE, "storage_upgrade", art(&["", "", "..GGGGGGGGGGGG", "..GDDDDDDDDDDG", "..GDbbbbbbbbDG", "..GDbccccccbbG", "..GDbccccccbbG", "..GDbbbbbbbbDG", "..GDDDDDDDDDDG", "..GDDDDDDDDDDG", "..GYDYDYDYDYDG", "..GGGGGGGGGGGG"]));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

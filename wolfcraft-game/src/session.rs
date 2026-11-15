@@ -1820,7 +1820,8 @@ impl GameSession {
         use wolfcraft_engine::block::Block as B;
         if wolfcraft_engine::construction::is_shared(block) {return &mut self.storage_bank.shared;}
         let block=block.base_kind();
-        let n = if matches!(block, B::ElectricFurnace | B::MachineCasing) || wolfcraft_engine::wolftech::kind(block).is_some() { 3 } else if block == B::EnchantTable { 2 } else { 27 };
+        let tech_machine = wolfcraft_engine::wolftech::kind(block).is_some_and(wolfcraft_engine::wolftech::is_machine);
+        let n = if tech_machine { 7 } else if matches!(block, B::ElectricFurnace | B::MachineCasing) || wolfcraft_engine::wolftech::kind(block).is_some() { 3 } else if block == B::EnchantTable { 2 } else { 27 };
         let v = self.containers.entry(pos).or_insert_with(|| {
             let mut slots=vec![None;n];
             // Player-placed chests use construction IDs; legacy chest IDs identify generated loot.
@@ -1831,6 +1832,10 @@ impl GameSession {
                 slots[2]=Some(ItemStack::of_block(B::Torch,8));
             } slots
         });
+        // WolfTech machines from before the upgrade slots: four more on the right.
+        if tech_machine && v.len() < 7 {
+            v.resize(7, None);
+        }
         // Furnaces from before the fuel slot: [input, output] → [input, fuel, output].
         if block == B::ElectricFurnace && v.len() == 2 {
             let out = v.pop().flatten();
@@ -1845,8 +1850,18 @@ impl GameSession {
         let k = wolfcraft_engine::wolftech::kind(block)?;
         let sp = wolfcraft_engine::wolftech::spec(k);
         let st = self.tech.get(&pos).copied().unwrap_or_default();
-        let prog = if sp.time > 0.0 { st.progress / sp.time } else if st.burn > 0.0 { 1.0 } else { 0.0 };
-        Some((prog.clamp(0.0, 1.0), st.working, st.energy, sp.capacity))
+        let (tm, _, extra) = self.tech_mods(pos, block);
+        let time = sp.time * tm;
+        let prog = if time > 0.0 { st.progress / time } else if st.burn > 0.0 { 1.0 } else { 0.0 };
+        Some((prog.clamp(0.0, 1.0), st.working, st.energy, sp.capacity + extra))
+    }
+
+    /// WolfTech upgrades in the machine at `pos`: (time ×, energy use ×, extra store).
+    pub fn tech_mods(&self, pos: wolfcraft_engine::cubesphere::Cell, block: wolfcraft_engine::block::Block) -> (f32, f32, f32) {
+        if !wolfcraft_engine::wolftech::kind(block).is_some_and(wolfcraft_engine::wolftech::is_machine) {
+            return (1.0, 1.0, 0.0);
+        }
+        self.containers.get(&pos).map(|v| wolfcraft_engine::wolftech::upgrades(v.get(3..).unwrap_or(&[]))).unwrap_or((1.0, 1.0, 0.0))
     }
 
     /// WolfTech: what the network of the machine at `pos` makes (ЭЕ/s), holds and how many
@@ -1978,6 +1993,9 @@ impl GameSession {
                 }
                 _ => {
                     let v = self.container_slots(c, b).clone();
+                    // Upgrades: faster and hungrier with «Ускорители».
+                    let (tm, em, _) = wt::upgrades(v.get(3..).unwrap_or(&[]));
+                    let sp = wt::Spec { time: sp.time * tm, rate: sp.rate * em, ..sp };
                     let out = v.first().copied().flatten().and_then(|i| wt::recipe(k, i.id));
                     let room = out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
                         None => true,
@@ -2021,7 +2039,8 @@ impl GameSession {
             for c in net {
                 let (Some(b), Some(st)) = (self.chunks.get_block(*c), self.tech.get(c)) else { continue };
                 let Some(k) = wt::kind(b) else { continue };
-                nodes.push(wt::Node { kind: k, energy: st.energy, flow: st.flow });
+                let cap = wt::spec(k).capacity + self.tech_mods(*c, b).2;
+                nodes.push(wt::Node { kind: k, cap, energy: st.energy, flow: st.flow });
                 keep.push(*c);
             }
             let e = wt::share(&nodes, dt);

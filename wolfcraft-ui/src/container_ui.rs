@@ -61,6 +61,11 @@ fn slot_places(layout: Layout, n: usize, cols: usize) -> (Vec<(f32, f32, &'stati
         Layout::Forge if n == 3 => (vec![(1.0, 0.0, "Предмет"), (3.0, 0.0, "Материал / книга"), (7.0, 0.0, "Результат")], 1.4),
         // Hidden slots sit at x < 0 (they exist but are not shown).
         Layout::Machine if n == 3 => (vec![(2.5, 0.3, "Сырьё"), (-9.0, 0.0, ""), (6.5, 0.3, "Результат")], 1.8),
+        // With the IC2-style upgrade slots: a 2×2 block on the right.
+        Layout::Machine if n == 7 => (
+            vec![(1.6, 0.55, "Сырьё"), (-9.0, 0.0, ""), (4.6, 0.55, "Результат"), (6.85, 0.0, ""), (7.9, 0.0, ""), (6.85, 1.05, ""), (7.9, 1.05, "")],
+            2.35,
+        ),
         Layout::Generator if n == 3 => (vec![(-9.0, 0.0, ""), (4.0, 0.3, "Топливо"), (-9.0, 0.0, "")], 1.8),
         Layout::Charger if n == 3 => (vec![(4.0, 0.3, "Заряжается"), (-9.0, 0.0, ""), (-9.0, 0.0, "")], 1.8),
         Layout::Panel => ((0..n).map(|_| (-9.0, 0.0, "")).collect(), 1.8),
@@ -230,6 +235,23 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
                 let (a, b, out) = (at(places[0].0, places[0].1), at(places[1].0, places[1].1), at(places[2].0, places[2].1));
                 ui.painter().text(egui::pos2((a.right() + b.left()) / 2.0, a.center().y), Align2::CENTER_CENTER, "+", FontId::proportional(26.0), p.text);
                 arrow(ui, egui::pos2(b.right() + 14.0, b.center().y), egui::pos2(out.left() - 10.0, b.center().y), if slots[2].is_some() { 1.0 } else { 0.0 }, &p);
+            }
+            Layout::Machine if slots.len() == 7 => {
+                let (inp, out) = (at(places[0].0, places[0].1), at(places[2].0, places[2].1));
+                let f = view.status.map(|s| s.1).unwrap_or(0.0);
+                arrow(ui, egui::pos2(inp.right() + 14.0, out.center().y), egui::pos2(out.left() - 10.0, out.center().y), f, &p);
+                // The upgrade bay: a darker recess with its caption above.
+                let bay = Rect::from_min_max(at(places[3].0, places[3].1).min, at(places[6].0, places[6].1).max).expand(5.0);
+                ui.painter().rect_filled(bay, Rounding::same(6.0), Color32::from_black_alpha(70));
+                ui.painter().rect_stroke(bay, Rounding::same(6.0), Stroke::new(1.5_f32, p.accent.gamma_multiply(0.6)));
+                ui.painter().text(egui::pos2(bay.center().x, bay.bottom() + 2.0), Align2::CENTER_TOP, "Улучшения", FontId::proportional(11.0), p.accent);
+                // While it works: a glow pulsing along the arrow's track.
+                if view.working {
+                    let t = ui.input(|i| i.time) as f32;
+                    let x = inp.right() + 14.0 + (out.left() - inp.right() - 24.0) * ((t * 1.5).fract());
+                    ui.painter().circle_filled(egui::pos2(x, out.center().y), 4.0, Color32::from_rgb(120, 230, 255));
+                    ui.ctx().request_repaint();
+                }
             }
             Layout::Machine if slots.len() == 3 => {
                 let (inp, out) = (at(places[0].0, places[0].1), at(places[2].0, places[2].1));
