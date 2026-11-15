@@ -180,11 +180,26 @@ pub fn viewmodel(s: &mut Scene, m: &Soldier, c: &Cam, t: f32) {
         return; // the scope covers the screen
     }
     let rot = Quat::from_mat3(&Mat3::from_cols(c.up.cross(c.fwd), c.up, c.fwd));
-    let reload = if m.reload > 0.0 { (m.reload * 3.0).min(1.0) } else { 0.0 };
+    // Reload, in stages: tilt the gun, the old magazine drops, the left hand brings a new one
+    // from below, pushes it in, and the gun is racked back into place.
+    let rk = if m.reload > 0.0 { (1.0 - m.reload / m.spec().reload).clamp(0.0, 1.0) } else { 1.0 };
+    let reloading = m.reload > 0.0;
+    let tilt_k = if reloading { (rk * std::f32::consts::PI).sin().powf(0.6) } else { 0.0 };
+    let mag_drop = if !reloading {
+        0.0
+    } else if rk < 0.3 {
+        (rk / 0.3).powi(2) * 0.45
+    } else if rk < 0.55 {
+        (1.0 - (rk - 0.3) / 0.25) * 0.45
+    } else {
+        0.0
+    };
+    let rack = if reloading && rk > 0.78 { ((rk - 0.78) / 0.22 * std::f32::consts::PI).sin() * 0.045 } else { 0.0 };
+    let reload = tilt_k * 0.35;
     let kick = m.fired * 1.6 + m.recoil * 0.6;
     let sway = Vec2::new((m.walk).sin() * 0.012 * m.moving, (m.walk * 2.0).sin().abs() * 0.01 * m.moving + (t * 1.8).sin() * 0.004);
     let base = if aim { Vec3::new(0.0, -0.105, 0.32) } else { Vec3::new(0.17, -0.19, 0.38) };
-    let o = base + Vec3::new(sway.x, -sway.y - reload * 0.18, -kick * 0.25);
+    let o = base + Vec3::new(sway.x - tilt_k * 0.04, -sway.y - reload * 0.18, -kick * 0.25 - rack);
     let at = |x: f32, y: f32, z: f32| c.eye + c.right * x + c.up * y + c.fwd * z;
     let body = Vec3::new(0.13, 0.13, 0.12);
     let metal = Vec3::new(0.2, 0.21, 0.22);
@@ -195,7 +210,7 @@ pub fn viewmodel(s: &mut Scene, m: &Soldier, c: &Cam, t: f32) {
         Gun::Sniper => (0.55, Vec3::new(0.22, 0.26, 0.18), 0.32),
         Gun::Pistol => (0.16, metal, 0.06),
     };
-    let tilt = Quat::from_axis_angle(c.right, -kick * 0.6 - reload * 0.5);
+    let tilt = Quat::from_axis_angle(c.right, -kick * 0.6 - reload * 0.5) * Quat::from_axis_angle(c.fwd, tilt_k * 0.55);
     let r2 = tilt * rot;
     let center = at(o.x, o.y, o.z + len * 0.3);
     s.add(Shape::Cube, Mat4::from_scale_rotation_translation(Vec3::new(0.06, 0.09, len), r2, center), col, Vec3::ZERO, 0.0, 0.0);
@@ -203,7 +218,9 @@ pub fn viewmodel(s: &mut Scene, m: &Soldier, c: &Cam, t: f32) {
     let front = center + fwd2 * (len * 0.5);
     s.rod(front, front + fwd2 * barrel, 0.018, metal, 0.0);
     // Magazine and grip.
-    s.add(Shape::Cube, Mat4::from_scale_rotation_translation(Vec3::new(0.045, 0.12, 0.06), r2, center - tilt * c.up * 0.09 + fwd2 * 0.05), metal, Vec3::ZERO, 0.0, 0.0);
+    let mag_home = center - tilt * c.up * 0.09 + fwd2 * 0.05;
+    let mag_at = mag_home - c.up * mag_drop;
+    s.add(Shape::Cube, Mat4::from_scale_rotation_translation(Vec3::new(0.045, 0.12, 0.06), r2, mag_at), metal, Vec3::ZERO, 0.0, 0.0);
     if g == Gun::Sniper {
         let top = center + tilt * c.up * 0.075;
         s.rod(top - fwd2 * 0.12, top + fwd2 * 0.16, 0.028, Vec3::splat(0.08), 0.0);
@@ -216,7 +233,8 @@ pub fn viewmodel(s: &mut Scene, m: &Soldier, c: &Cam, t: f32) {
     let sleeve = crate::render::team_color(m.team) * 0.7;
     let skin = Vec3::new(0.78, 0.58, 0.45);
     let grip = center - tilt * c.up * 0.06 - fwd2 * (len * 0.25);
-    let fore = center + fwd2 * (len * 0.3) - tilt * c.up * 0.05;
+    // While reloading the left hand holds the magazine.
+    let fore = if reloading && rk < 0.75 { mag_at - c.up * 0.06 } else { center + fwd2 * (len * 0.3) - tilt * c.up * 0.05 };
     for (hand, sh) in [(grip, at(0.3, -0.5, 0.0)), (fore, at(-0.25, -0.5, 0.1))] {
         s.limb(sh, hand, 0.045, sleeve, Vec3::ZERO, 0.0);
         s.sphere(hand, Vec3::splat(0.04), skin, Vec3::ZERO, 0.0, 0.0);

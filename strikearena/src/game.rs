@@ -199,11 +199,9 @@ impl Game {
     fn buttons(&self) -> Vec<(Btn, Pos2, f32, &'static str)> {
         let (w, h, u) = (self.view.x, self.view.y, self.unit());
         vec![
-            (Btn::Fire, Pos2::new(w - 1.6 * u, h - 1.9 * u), 1.0 * u, "Огонь"),
-            (Btn::FireLeft, Pos2::new(1.3 * u, h - 4.9 * u), 0.62 * u, "Огонь"),
-            (Btn::Aim, Pos2::new(w - 3.7 * u, h - 1.2 * u), 0.62 * u, "Прицел"),
-            (Btn::Reload, Pos2::new(w - 1.1 * u, h - 4.0 * u), 0.55 * u, "Перезар."),
-            (Btn::Shop, Pos2::new(w - 3.3 * u, h - 3.3 * u), 0.55 * u, "Магазин"),
+            // No fire or reload buttons: tap the screen to shoot, tap the gun's card to reload.
+            (Btn::Aim, Pos2::new(w - 1.5 * u, h - 1.6 * u), 0.7 * u, "Прицел"),
+            (Btn::Shop, Pos2::new(w - 1.2 * u, h - 3.6 * u), 0.55 * u, "Магазин"),
             (Btn::Pause, Pos2::new(26.0, 26.0), 0.36 * u, "II"),
         ]
     }
@@ -217,7 +215,12 @@ impl Game {
         match phase {
             TouchPhase::Started => {
                 if let Some((k, _)) = self.hotbar().into_iter().find(|(_, r)| r.expand(3.0).contains(p)) {
-                    self.pending_switch = Some(k);
+                    // Tap the gun in hand again — reload it; another card — take that gun.
+                    if self.m.as_ref().is_some_and(|m| m.men[0].gun == k) {
+                        self.taps.insert(Btn::Reload);
+                    } else {
+                        self.pending_switch = Some(k);
+                    }
                     return;
                 }
                 let hit = self.buttons().into_iter().filter(|b| b.1.distance(p) < b.2 * 1.15).min_by(|a, b| a.1.distance(p).total_cmp(&b.1.distance(p))).map(|b| b.0);
@@ -324,7 +327,11 @@ impl Game {
         }
         let input = if self.screen == Screen::Playing { self.input() } else { Input::default() };
         let Some(m) = self.m.as_mut() else { return };
+        let was_warm = m.warmup > 0.0;
         m.update(dt, input);
+        if was_warm && m.warmup <= 0.0 {
+            self.feed.push(("Матч начался! До 30 убийств.".to_string(), Color32::from_rgb(255, 215, 90), 6.0));
+        }
         let me = &m.men[0];
         let cam = render::camera(me, 0.0, self.time);
         for e in m.events.clone() {
@@ -353,8 +360,8 @@ impl Game {
                     let kn = &m.men[killer];
                     let vn = &m.men[victim];
                     let col = if killer == 0 { Color32::from_rgb(255, 215, 90) } else if kn.team == 0 { Color32::from_rgb(120, 170, 255) } else { Color32::from_rgb(255, 120, 110) };
-                    self.feed.push((format!("{} [{}{}] {}", kn.name, gun(g).name, if head { " · в голову" } else { "" }, vn.name), col, 5.0));
-                    if self.feed.len() > 5 {
+                    self.feed.push((format!("{} [{}{}] {}", kn.name, gun(g).name, if head { " · в голову" } else { "" }, vn.name), col, 8.0));
+                    if self.feed.len() > 6 {
                         self.feed.remove(0);
                     }
                     if killer == 0 {
@@ -508,7 +515,14 @@ impl Game {
         if let Some(item) = buy {
             if let Some(m) = self.m.as_mut() {
                 match m.buy(0, item) {
-                    Ok(()) => self.shop_msg = (String::new(), 0.0),
+                    Ok(()) => {
+                        self.shop_msg = (String::new(), 0.0);
+                        let name = SHOP.iter().find(|s| s.0 == item).map(|s| s.1).unwrap_or("");
+                        self.feed.push((format!("Куплено: {name}"), Color32::from_rgb(120, 220, 110), 6.0));
+                        if self.feed.len() > 6 {
+                            self.feed.remove(0);
+                        }
+                    }
                     Err(e) => self.shop_msg = (e.to_string(), 2.0),
                 }
             }
@@ -711,25 +725,40 @@ impl Game {
                 }
             }
         }
-        // Money, health, armour (top left, next to pause).
-        p.text(Pos2::new(54.0, 12.0), Align2::LEFT_TOP, format!("$ {}", me.money), FontId::proportional(18.0), Color32::from_rgb(120, 220, 110));
+        // Game chat in the top-left corner: kills and match messages.
+        if !self.feed.is_empty() {
+            let lines = self.feed.len() as f32;
+            let chat = Rect::from_min_size(Pos2::new(54.0, 10.0), EV::new((w * 0.3).clamp(220.0, 320.0), 8.0 + lines * 18.0));
+            let fade = self.feed.iter().map(|f| f.2).fold(0.0f32, f32::max).min(1.0);
+            p.rect_filled(chat, 8.0, Color32::from_black_alpha((110.0 * fade) as u8));
+            for (i, (text, col, life)) in self.feed.iter().enumerate() {
+                let a = (life.min(1.0) * 255.0) as u8;
+                let pos = Pos2::new(chat.left() + 8.0, chat.top() + 4.0 + i as f32 * 18.0);
+                p.text(pos, Align2::LEFT_TOP, text, FontId::proportional(13.0), Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), a));
+            }
+        }
+        // Health and armour where the left fire button was (above the joystick); money and ammo
+        // right of the hotbar.
+        let bar = self.hotbar();
+        let (left, right) = (bar[0].1, bar[3].1);
         let hk = (me.hp / 100.0).clamp(0.0, 1.0);
         let hc = if hk > 0.5 { Color32::WHITE } else if hk > 0.25 { Color32::from_rgb(240, 190, 60) } else { Color32::from_rgb(235, 70, 60) };
-        let hp_at = Pos2::new(54.0, 40.0);
+        let u = self.unit();
+        let _ = left;
+        let hp_at = Pos2::new(16.0, self.view.y - 4.9 * u - 10.0);
+        p.rect_filled(Rect::from_min_size(hp_at - EV::new(8.0, 14.0), EV::new(104.0, 50.0)), 8.0, Color32::from_black_alpha(110));
         p.rect_filled(Rect::from_center_size(hp_at + EV::new(6.0, 0.0), EV::new(12.0, 4.0)), 1.0, hc);
         p.rect_filled(Rect::from_center_size(hp_at + EV::new(6.0, 0.0), EV::new(4.0, 12.0)), 1.0, hc);
-        p.text(hp_at + EV::new(16.0, 0.0), Align2::LEFT_CENTER, format!("{:.0}", me.hp.max(0.0)), FontId::proportional(18.0), hc);
-        let ar_at = hp_at + EV::new(66.0, 0.0);
-        let shield = vec![ar_at + EV::new(0.0, -6.0), ar_at + EV::new(10.0, -6.0), ar_at + EV::new(10.0, 1.0), ar_at + EV::new(5.0, 7.0), ar_at + EV::new(0.0, 1.0)];
+        p.text(hp_at + EV::new(18.0, 0.0), Align2::LEFT_CENTER, format!("{:.0}", me.hp.max(0.0)), FontId::proportional(18.0), hc);
+        let ar_at = hp_at + EV::new(0.0, 22.0);
+        let shield = vec![ar_at + EV::new(1.0, -6.0), ar_at + EV::new(11.0, -6.0), ar_at + EV::new(11.0, 1.0), ar_at + EV::new(6.0, 7.0), ar_at + EV::new(1.0, 1.0)];
         p.add(egui::Shape::convex_polygon(shield, if me.armor > 0.0 { Color32::from_rgb(150, 190, 230) } else { Color32::from_white_alpha(50) }, Stroke::NONE));
-        p.text(ar_at + EV::new(15.0, 0.0), Align2::LEFT_CENTER, format!("{:.0}", me.armor), FontId::proportional(18.0), Color32::from_rgb(150, 190, 230));
-        // Kill feed, under the top bar on the right.
-        for (i, (text, col, life)) in self.feed.iter().enumerate() {
-            let a = (life.min(1.0) * 255.0) as u8;
-            let pos = Pos2::new(w - 14.0, 60.0 + i as f32 * 20.0);
-            p.text(pos + EV::new(1.0, 1.0), Align2::RIGHT_TOP, text, FontId::proportional(13.0), Color32::from_black_alpha(a / 2 + 40));
-            p.text(pos, Align2::RIGHT_TOP, text, FontId::proportional(13.0), Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), a));
-        }
+        p.text(ar_at + EV::new(18.0, 0.0), Align2::LEFT_CENTER, format!("{:.0}", me.armor), FontId::proportional(16.0), Color32::from_rgb(150, 190, 230));
+        let money_at = Pos2::new(right.right() + 10.0, right.center().y - 10.0);
+        p.rect_filled(Rect::from_min_size(money_at - EV::new(4.0, 14.0), EV::new(104.0, 50.0)), 8.0, Color32::from_black_alpha(110));
+        let ammo = if me.reload > 0.0 { "…".to_string() } else { format!("{} / {}", me.mag[me.gun], me.reserve[me.gun]) };
+        p.text(money_at + EV::new(4.0, 0.0), Align2::LEFT_CENTER, ammo, FontId::proportional(18.0), if me.mag[me.gun] == 0 { Color32::from_rgb(255, 90, 70) } else { Color32::WHITE });
+        p.text(money_at + EV::new(4.0, 22.0), Align2::LEFT_CENTER, format!("$ {}", me.money), FontId::proportional(16.0), Color32::from_rgb(120, 220, 110));
         // Weapon hotbar (WolfCraft style).
         if me.alive() {
             for (k, r) in self.hotbar() {
@@ -741,6 +770,13 @@ impl Game {
                 item_icon(&p, r.shrink2(EV::new(7.0, 14.0)), Item::Gun(k), if has { Color32::from_white_alpha(235) } else { Color32::from_white_alpha(45) });
                 if has {
                     p.text(r.right_bottom() + EV::new(-5.0, -3.0), Align2::RIGHT_BOTTOM, me.mag[k].to_string(), FontId::proportional(12.0), Color32::WHITE);
+                }
+                if sel && me.reload > 0.0 {
+                    // Reload progress fills the card from the bottom.
+                    let k = 1.0 - me.reload / spec.reload;
+                    let fill = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - r.height() * k), r.max);
+                    p.rect_filled(fill, 10.0, Color32::from_rgba_unmultiplied(90, 150, 255, 70));
+                    p.text(r.center_top() + EV::new(0.0, 4.0), Align2::CENTER_TOP, "↻", FontId::proportional(13.0), Color32::WHITE);
                 }
             }
         }
@@ -809,10 +845,6 @@ impl Game {
             p.circle(pos, r, fill, Stroke::new(2.0_f32, Color32::from_white_alpha(150)));
             p.text(pos, Align2::CENTER_CENTER, label, FontId::proportional((r * 0.34).clamp(11.0, 18.0)), Color32::WHITE);
         }
-        // Ammo by the fire button.
-        let (_, fire_at, fr, _) = self.buttons()[0];
-        let ammo = if me.reload > 0.0 { "перезарядка…".to_string() } else { format!("{} / {}", me.mag[me.gun], me.reserve[me.gun]) };
-        shadow_text(&p, fire_at - EV::new(0.0, fr + 16.0), &ammo, 18.0, if me.mag[me.gun] == 0 { Color32::from_rgb(255, 90, 70) } else { Color32::WHITE });
     }
 }
 
