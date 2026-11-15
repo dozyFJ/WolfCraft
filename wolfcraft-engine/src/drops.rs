@@ -41,6 +41,8 @@ pub struct Drops {
     next_seed: u32,
     /// Extra pull radius (blocks), from «Магнит» on the held tool.
     pub magnet_bonus: f64,
+    /// Seconds to the next merge pass (merging is all-pairs: not every frame).
+    merge_t: f32,
 }
 
 impl Drops {
@@ -111,6 +113,11 @@ impl Drops {
             if here.is_lava() || here == Block::Magma {
                 return false; // burnt
             }
+            // Like Lithium: an item lying still on firm ground, away from the player, does no
+            // physics at all until something changes under it.
+            if d.resting && d.delay <= 0.0 && (player_centre - d.pos).length() >= magnet && !here.is_water() && solid(d.pos - up * 0.14) && !solid(d.pos) {
+                return true;
+            }
             if here.is_water() {
                 // Floats up slowly, drifts.
                 d.vel += up * (14.0 * dt);
@@ -177,7 +184,11 @@ impl Drops {
             }
             true
         });
-        self.merge();
+        self.merge_t -= dt as f32;
+        if self.merge_t <= 0.0 {
+            self.merge_t = 0.25;
+            self.merge();
+        }
         picked
     }
 
