@@ -1511,7 +1511,7 @@ mod tests {
 
     #[test]
     fn globals_layout_matches_wgsl() {
-        assert_eq!(std::mem::size_of::<Globals>(), 64 + 16 * 6 + 16 * MAX_TILES);
+        assert_eq!(std::mem::size_of::<Globals>(), 64 + 16 * 6 + 64 + 16 * MAX_TILES);
         assert_eq!(std::mem::size_of::<Vertex>(), 32);
         assert_eq!(std::mem::size_of::<GpuVertex>(), 20);
     }
