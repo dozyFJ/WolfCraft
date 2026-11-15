@@ -80,15 +80,26 @@ pub fn tab_bar(ui: &mut Ui, p: &Palette) -> usize {
     let id = Id::new("server-page-tab");
     let mut cur: usize = ui.ctx().data(|d| d.get_temp(id)).unwrap_or(0);
     cur = cur.min(TABS.len() - 1);
-    egui::ScrollArea::horizontal().id_salt("server-tabs").drag_to_scroll(true).show(ui, |ui| {
+    egui::ScrollArea::horizontal().id_salt("server-tabs").drag_to_scroll(true).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             for (i, t) in TABS.iter().enumerate() {
                 let on = i == cur;
-                let g = ui.painter().layout_no_wrap(t.to_string(), FontId::proportional(13.5), if on { Color32::WHITE } else { p.text });
-                let (r, resp) = ui.allocate_exact_size(g.size() + Vec2::new(24.0, 14.0), egui::Sense::click());
-                ui.painter().rect_filled(r, Rounding::same(r.height() / 2.0), if on { p.accent } else if resp.hovered() { p.surface_hover } else { p.bg });
-                ui.painter().galley(r.min + Vec2::new(12.0, 7.0), g, p.text);
+                let g = ui.painter().layout_no_wrap(t.to_string(), FontId::proportional(14.0), if on { Color32::WHITE } else { p.text });
+                let (r, resp) = ui.allocate_exact_size(Vec2::new(g.size().x + 30.0, 40.0), egui::Sense::click());
+                let round = Rounding::same(r.height() / 2.0);
+                if on {
+                    // Glossy Aero pill.
+                    ui.painter().rect_filled(r.translate(Vec2::new(0.0, 2.0)), round, Color32::from_black_alpha(45));
+                    ui.painter().rect_filled(r, round, p.accent);
+                    let shine = egui::Rect::from_min_max(r.min + Vec2::new(r.height() * 0.4, 2.5), egui::pos2(r.right() - r.height() * 0.4, r.center().y));
+                    ui.painter().rect_filled(shine, Rounding::same(shine.height() / 2.0), Color32::from_white_alpha(45));
+                    ui.painter().rect_stroke(r, round, egui::Stroke::new(1.0, Color32::from_white_alpha(110)));
+                } else {
+                    ui.painter().rect_filled(r, round, if resp.hovered() { p.surface_hover } else { Color32::from_black_alpha(if p.dark { 70 } else { 20 }) });
+                    ui.painter().rect_stroke(r, round, egui::Stroke::new(1.0, Color32::from_white_alpha(if p.dark { 40 } else { 120 })));
+                }
+                ui.painter().galley(egui::pos2(r.left() + 15.0, r.center().y - g.size().y / 2.0), g, p.text);
                 if resp.clicked() {
                     cur = i;
                 }

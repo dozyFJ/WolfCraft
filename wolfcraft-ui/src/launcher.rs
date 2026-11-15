@@ -287,9 +287,10 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     // «Сервер»: its own tabs right under the toolbar.
     let mut server_tab = 0;
     if page == Tab::Server {
-        egui::TopBottomPanel::top("launcher-server-tabs")
-            .exact_height(46.0)
-            .frame(Frame::none().fill(glass_tint(&p)).inner_margin(Margin::symmetric(10.0, 4.0)).stroke(Stroke::new(1.0_f32, glass_rim(&p))))
+        // Дашборд, Плагины, Моды…: a pill menu along the bottom.
+        egui::TopBottomPanel::bottom("launcher-server-tabs")
+            .exact_height(60.0)
+            .frame(Frame::none().fill(glass_tint(&p)).inner_margin(Margin::symmetric(10.0, 8.0)).stroke(Stroke::new(1.0_f32, glass_rim(&p))))
             .show(ctx, |ui| {
                 server_tab = crate::server_page::tab_bar(ui, &p);
             });
