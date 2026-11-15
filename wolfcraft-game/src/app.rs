@@ -2050,7 +2050,7 @@ impl App {
             let p = s.player.body.pos;
             let f = wolfcraft_engine::player::day_fraction(s.player.world_time);
             let mins = (f * 24.0 * 60.0) as u32;
-            wolfcraft_ui::webgui::Host { health: s.player.health, max_health: 20.0, hunger: s.player.hunger, pos: [p.x, p.y, p.z], time: format!("{:02}:{:02}", mins / 60 % 24, mins % 60), nick: s.nickname.clone(), creative: s.player.is_creative() }
+            wolfcraft_ui::webgui::Host { health: s.player.survival.health, max_health: 20.0, hunger: s.player.survival.hunger, pos: [p.x, p.y, p.z], time: format!("{:02}:{:02}", mins / 60 % 24, mins % 60), nick: s.nickname.clone(), creative: s.player.is_creative() }
         }).unwrap_or_default();
         let mut web_fx: Vec<wolfcraft_ui::webgui::Effect> = Vec::new();
         let mut web_log: Vec<String> = Vec::new();
