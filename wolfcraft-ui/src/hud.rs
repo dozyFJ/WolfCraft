@@ -114,8 +114,8 @@ pub struct HudState<'a> {
     pub look: Option<LookInfo>,
 }
 
-/// The WAILA-style plate at `top_right` (its top-right corner). Returns its bottom.
-fn draw_look(painter: &Painter, icons: &GuiIcons, p: &Palette, top_right: Pos2, l: &LookInfo) -> f32 {
+/// The WAILA-style plate hanging from `top_centre`. Returns its bottom.
+fn draw_look(painter: &Painter, icons: &GuiIcons, p: &Palette, top_centre: Pos2, l: &LookInfo) -> f32 {
     let name = painter.layout_no_wrap(l.name.clone(), bold_font(15.0), Color32::WHITE);
     let src = painter.layout_no_wrap(l.source.clone(), FontId::proportional(11.5), Color32::from_rgb(110, 170, 255));
     let mut w = name.size().x.max(src.size().x);
@@ -128,7 +128,7 @@ fn draw_look(painter: &Painter, icons: &GuiIcons, p: &Palette, top_right: Pos2, 
     let icon = 34.0;
     let w = (w + icon + 30.0).clamp(150.0, 320.0);
     let h = 44.0 + l.lines.len() as f32 * 17.0 + if l.bar.is_some() { 20.0 } else { 0.0 };
-    let r = Rect::from_min_size(Pos2::new(top_right.x - w, top_right.y), Vec2::new(w, h));
+    let r = Rect::from_min_size(Pos2::new(top_centre.x - w / 2.0, top_centre.y), Vec2::new(w, h));
     painter.rect_filled(r, Rounding::same(14.0), Color32::from_rgba_unmultiplied(14, 16, 22, 220));
     painter.rect_stroke(r, Rounding::same(14.0), Stroke::new(2.0_f32, p.accent.gamma_multiply(0.75)));
     let ic = Rect::from_min_size(r.min + Vec2::new(10.0, 8.0), Vec2::splat(icon));
@@ -154,6 +154,10 @@ fn draw_look(painter: &Painter, icons: &GuiIcons, p: &Palette, top_right: Pos2, 
 /// The next goal at the top of the screen, and the controls under it at the very start.
 fn draw_goal(painter: &Painter, icons: &GuiIcons, p: &Palette, screen: Rect, s: &HudState) {
     let mut y = screen.top() + 14.0;
+    // «Что это?» at the top in the middle, the goal under it.
+    if let Some(l) = &s.look {
+        y = draw_look(painter, icons, p, Pos2::new(screen.center().x, y - 4.0), l) + 6.0;
+    }
     if let Some((st, text)) = &s.goal {
         let g = painter.layout_no_wrap(format!("Цель: {text}"), FontId::proportional(14.0), Color32::WHITE);
         let w = g.size().x + 44.0;
@@ -595,12 +599,7 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         let y = if s.compass.is_some() && !s.compact { compass_bottom - 32.0 } else { stack_top - 14.0 };
         painter.text(Pos2::new(hotbar.center().x, y), Align2::CENTER_BOTTOM, name, FontId::proportional(16.0), p.text.gamma_multiply(a));
     }
-    // «Что это?»: under the minimap on phones, in the top-right corner on PC.
-    let mut look_bottom = if s.compact { screen.top() + 160.0 } else { screen.top() + 20.0 };
-    if let Some(l) = &s.look {
-        let at = Pos2::new(screen.right() - 9.0, look_bottom - 8.0);
-        look_bottom = draw_look(&painter, icons, &p, at, l) + 10.0;
-    }
+    let look_bottom = if s.compact { screen.top() + 160.0 } else { screen.top() + 20.0 };
     // Potion effects: a column of chips on the right, under the minimap on phones.
     if !s.effects.is_empty() {
         let x = screen.right() - 14.0;
