@@ -106,7 +106,14 @@ pub mod ids {
     pub const STAR_BLASTER: ItemId = 386;
     /// «Звёздный молот»: slams the ground — creatures fly, a crater opens.
     pub const STAR_HAMMER: ItemId = 387;
-    pub const LAST: ItemId = 387;
+    /// WolfTech: dusts from the crusher and the enricher (smelt into ingots), and the circuit.
+    pub const IRON_DUST: ItemId = 388;
+    pub const GOLD_DUST: ItemId = 389;
+    pub const COPPER_DUST: ItemId = 390;
+    pub const TIN_DUST: ItemId = 391;
+    pub const SILVER_DUST: ItemId = 392;
+    pub const CIRCUIT: ItemId = 393;
+    pub const LAST: ItemId = 393;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -200,6 +207,12 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::RAW_TIN => plain("Сырое олово", sp::RAW_TIN),
         ids::RAW_SILVER => plain("Сырое серебро", sp::RAW_SILVER),
         ids::COPPER_INGOT => plain("Медный слиток", sp::COPPER_INGOT),
+        ids::IRON_DUST => plain("Железная пыль", sp::IRON_DUST),
+        ids::GOLD_DUST => plain("Золотая пыль", sp::GOLD_DUST),
+        ids::COPPER_DUST => plain("Медная пыль", sp::COPPER_DUST),
+        ids::TIN_DUST => plain("Оловянная пыль", sp::TIN_DUST),
+        ids::SILVER_DUST => plain("Серебряная пыль", sp::SILVER_DUST),
+        ids::CIRCUIT => plain("Микросхема", sp::CIRCUIT),
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
         ids::BRONZE_INGOT => plain("Бронзовый слиток", sp::BRONZE_INGOT),
         ids::SILVER_INGOT => plain("Серебряный слиток", sp::SILVER_INGOT),
@@ -591,6 +604,9 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
+    if (ids::IRON_DUST..=ids::CIRCUIT).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
+        return "WolfTech";
+    }
     if (ITEM_BASE..1024).contains(&id) {
         if armor_slot(id).is_some() {
             return "Доспехи";

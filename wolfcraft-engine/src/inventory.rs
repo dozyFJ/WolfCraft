@@ -372,6 +372,15 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::OakPlanks), 8)], (b(Block::Chest), 1), true, "Строительство"));
         // Furnace, forge and barrel.
         v.push(r(&[(b(Block::Cobblestone), 8)], (b(Block::ElectricFurnace), 1), true, "Строительство"));
+        // WolfTech: circuits, cables, generators, storage, machines.
+        v.push(r(&[(b(Block::IskritWire), 2), (ids::COPPER_INGOT, 2), (ids::IRON_INGOT, 1)], (ids::CIRCUIT, 1), true, "WolfTech"));
+        v.push(r(&[(ids::COPPER_INGOT, 3)], (b(Block::Cable), 8), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 4), (b(Block::ElectricFurnace), 1), (ids::CIRCUIT, 1)], (b(Block::TechGenerator), 1), true, "WolfTech"));
+        v.push(r(&[(b(Block::Glass), 3), (ids::IRON_INGOT, 2), (ids::CIRCUIT, 1)], (b(Block::SolarPanel), 1), true, "WolfTech"));
+        v.push(r(&[(ids::COPPER_INGOT, 4), (b(Block::IskritBlock), 1), (ids::IRON_INGOT, 3)], (b(Block::EnergyCell), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 4), (b(Block::Cobblestone), 4), (ids::CIRCUIT, 1)], (b(Block::Crusher), 1), true, "WolfTech"));
+        v.push(r(&[(b(Block::ElectricFurnace), 1), (ids::COPPER_INGOT, 4), (ids::CIRCUIT, 1)], (b(Block::InductionFurnace), 1), true, "WolfTech"));
+        v.push(r(&[(b(Block::Crusher), 1), (ids::GOLD_INGOT, 2), (ids::CIRCUIT, 2)], (b(Block::Enricher), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (ids::SHIELD, 1), true, "Вооружение"));
