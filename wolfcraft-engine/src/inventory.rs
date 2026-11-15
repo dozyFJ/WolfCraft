@@ -412,6 +412,11 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_INGOT, 6), (ids::CIRCUIT, 1), (b(Block::Obsidian), 1)], (b(Block::Compressor), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::OakPlanks), 4)], (b(Block::Sawmill), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Glass), 2)], (b(Block::Extractor), 1), true, "WolfTech"));
+        // Thermal-style devices.
+        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Cobblestone), 4)], (b(Block::Extruder), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 3), (ids::CIRCUIT, 1), (b(Block::Glass), 4), (b(Block::Dirt), 2)], (b(Block::Insolator), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Ice), 2)], (b(Block::Glacier), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 6), (ids::CIRCUIT, 1), (b(Block::Obsidian), 2)], (b(Block::MagmaGenerator), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (ids::DIAMOND, 1), (ids::CIRCUIT, 1), (b(Block::EnergyCell), 1)], (ids::DRILL, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 6), (ids::CIRCUIT, 1), (b(Block::EnergyCell), 1)], (ids::CHAINSAW, 1), true, "WolfTech"));
         // «Механика» (like Create): shafts, cogs, a water wheel, a crank, the press, the millstone.

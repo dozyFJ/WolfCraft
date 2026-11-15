@@ -2377,7 +2377,7 @@ impl App {
                                         if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
-                                                Kind::Generator => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k, st.id) > 0.0,
+                                                Kind::Generator | Kind::Magma => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k, st.id) > 0.0,
                                                 Kind::Reactor => wolfcraft_engine::wolftech::is_reactor_part(st.id),
                                                 k if wolfcraft_engine::wolftech::is_machine(k) => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
                                                 Kind::Cell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
@@ -2403,7 +2403,7 @@ impl App {
                                         } else if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
-                                                Kind::Generator => wolfcraft_ui::container_ui::Layout::Generator,
+                                                Kind::Generator | Kind::Magma => wolfcraft_ui::container_ui::Layout::Generator,
                                                 Kind::Reactor => wolfcraft_ui::container_ui::Layout::Reactor,
                                                 Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water => wolfcraft_ui::container_ui::Layout::Panel,
                                                 Kind::Cell => wolfcraft_ui::container_ui::Layout::Charger,

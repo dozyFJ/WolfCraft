@@ -2061,6 +2061,8 @@ impl GameSession {
                     }
                     Kind::Geo => around(|b| b.is_lava()),
                     Kind::Water => around(|b| b.is_water()),
+                    Kind::Extruder => (around(|b| b.is_lava()) > 0.0 && around(|b| b.is_water()) > 0.0) as u8 as f32,
+                    Kind::Glacier => around(|b| b.is_water()),
                     _ => st.env,
                 };
             }
@@ -2096,7 +2098,7 @@ impl GameSession {
                     st.flow = st.env;
                     st.working = st.flow > 0.0;
                 }
-                Kind::Generator => {
+                Kind::Generator | Kind::Magma => {
                     if st.burn <= 0.0 && st.energy < sp.capacity * 0.95 {
                         let v = self.container_slots(c, b);
                         if let Some(f) = v.get(1).copied().flatten().filter(|f| wt::fuel_for(k, f.id) > 0.0) {
@@ -2137,9 +2139,14 @@ impl GameSession {
                     // Upgrades: faster and hungrier with «Ускорители».
                     let (tm, em, _) = wt::upgrades(v.get(3..).unwrap_or(&[]));
                     let sp = wt::Spec { time: sp.time * tm, rate: sp.rate * em, ..sp };
-                    let out = v.first().copied().flatten().filter(|i| i.count >= wt::need(k, i.id)).and_then(|i| wt::recipe(k, i.id));
-                    let take = v.first().copied().flatten().map(|i| wt::need(k, i.id)).unwrap_or(1);
-                    let room = out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
+                    let inp = v.first().copied().flatten();
+                    let out = match inp {
+                        Some(i) => Some(i).filter(|i| i.count >= wt::need(k, i.id)).and_then(|i| wt::recipe(k, i.id)),
+                        None => wt::idle_recipe(k),
+                    };
+                    let take = if wt::keeps(k) { 0 } else { inp.map(|i| wt::need(k, i.id)).unwrap_or(1) };
+                    let sp = wt::Spec { time: sp.time * inp.map(|i| wt::slow(k, i.id)).unwrap_or(1.0), ..sp };
+                    let room = wt::env_ok(k, st.env) && out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
                         None => true,
                         Some(s) => s.id == o && s.count as u32 + n as u32 <= 64,
                     });
