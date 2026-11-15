@@ -16,6 +16,18 @@ pub enum Part {
     Crank,
     Press,
     Millstone,
+    /// Windmill sails: turn under the open sky, faster in a storm.
+    Sail,
+    /// Electric motor: WolfTech energy → rotation.
+    Motor,
+    /// Kinetic dynamo: rotation → WolfTech energy.
+    Dynamo,
+    /// Mechanical saw: logs → planks.
+    Saw,
+    /// Crushing wheels: ore → dust, stone → gravel → sand.
+    Crusher,
+    /// Gearbox: passes the turning on to every side (turns corners).
+    Gearbox,
 }
 
 pub fn part(b: Block) -> Option<Part> {
@@ -32,6 +44,12 @@ pub fn part(b: Block) -> Option<Part> {
         HandCrank => Part::Crank,
         MechPress => Part::Press,
         Millstone => Part::Millstone,
+        WindSail => Part::Sail,
+        ElectricMotor => Part::Motor,
+        KineticDynamo => Part::Dynamo,
+        MechSaw => Part::Saw,
+        CrushingWheel => Part::Crusher,
+        Gearbox => Part::Gearbox,
         _ => return None,
     })
 }
@@ -57,17 +75,24 @@ pub fn axis(p: Part) -> Option<u8> {
     match p {
         Part::Shaft(a) | Part::Cog(a) | Part::Wheel(a) => Some(a),
         Part::Crank => Some(2),
-        Part::Press | Part::Millstone => None,
+        _ => None,
     }
 }
 
+/// Machines with an input and an output slot.
 pub fn is_machine(p: Part) -> bool {
-    matches!(p, Part::Press | Part::Millstone)
+    matches!(p, Part::Press | Part::Millstone | Part::Saw | Part::Crusher)
+}
+
+/// Whole blocks that take or give turning on any side (machines, motor, dynamo, sails,
+/// gearbox).
+pub fn is_hub(p: Part) -> bool {
+    is_machine(p) || matches!(p, Part::Sail | Part::Motor | Part::Dynamo | Part::Gearbox)
 }
 
 /// Drawn as a spinning model (not as a block mesh).
 pub fn spins(b: Block) -> bool {
-    part(b).is_some_and(|p| !is_machine(p))
+    part(b).is_some_and(|p| !is_hub(p))
 }
 
 /// Stress a machine takes while it turns (SU).
@@ -75,6 +100,9 @@ pub fn load(p: Part) -> f32 {
     match p {
         Part::Press => 128.0,
         Part::Millstone => 64.0,
+        Part::Saw => 64.0,
+        Part::Crusher => 160.0,
+        Part::Dynamo => 96.0,
         _ => 0.0,
     }
 }
@@ -90,8 +118,9 @@ pub fn link(a: Part, b: Part, dir: (u8, i8)) -> Option<bool> {
     let (ax, sign) = dir;
     let a_axis = if a == Part::Crank { if ax == 2 && sign < 0 { Some(2) } else { None } } else { along(a) };
     let b_axis = if b == Part::Crank { if ax == 2 && sign > 0 { Some(2) } else { None } } else { along(b) };
-    match (is_machine(a), is_machine(b)) {
-        (true, true) => None,
+    match (is_hub(a), is_hub(b)) {
+        // Hubs touch each other only through a gearbox.
+        (true, true) => (a == Part::Gearbox || b == Part::Gearbox).then_some(false),
         (true, false) => (b_axis == Some(ax)).then_some(false),
         (false, true) => (a_axis == Some(ax)).then_some(false),
         (false, false) => {
@@ -125,6 +154,12 @@ pub fn recipe(p: Part, input: ItemId) -> Option<(ItemId, u8)> {
             ids::WHEAT => (ids::WHEAT_SEEDS, 2),
             _ => return None,
         }),
+        Part::Saw => Some(match input {
+            x if [Block::OakLog, Block::BirchLog, Block::SpruceLog, Block::AcaciaLog].iter().any(|l| b(*l) == x) => (crate::wolftech::recipe(crate::wolftech::Kind::Sawmill, x)?.0, 6),
+            x if [Block::OakPlanks, Block::BirchPlanks, Block::SprucePlanks, Block::AcaciaPlanks].iter().any(|l| b(*l) == x) => (ids::STICK, 4),
+            _ => return None,
+        }),
+        Part::Crusher => crate::wolftech::recipe(crate::wolftech::Kind::Crusher, input),
         _ => None,
     }
 }
@@ -137,6 +172,12 @@ pub fn name(p: Part) -> &'static str {
         Part::Crank => "Ручной кривошип",
         Part::Press => "Механический пресс",
         Part::Millstone => "Жернова",
+        Part::Sail => "Ветряная мельница",
+        Part::Motor => "Электромотор",
+        Part::Dynamo => "Кинетическое динамо",
+        Part::Saw => "Механическая пила",
+        Part::Crusher => "Дробильные колёса",
+        Part::Gearbox => "Редуктор",
     }
 }
 
@@ -153,5 +194,11 @@ mod tests {
         assert_eq!(link(Part::Crank, Part::Shaft(2), (2, -1)), Some(false), "a crank drives the shaft under it");
         assert_eq!(link(Part::Crank, Part::Shaft(2), (2, 1)), None);
         assert_eq!(recipe(Part::Press, ids::IRON_INGOT), Some((ids::IRON_PLATE, 1)));
+        assert_eq!(link(Part::Gearbox, Part::Shaft(1), (1, 1)), Some(false), "a gearbox drives every side");
+        assert_eq!(link(Part::Gearbox, Part::Saw, (0, 1)), Some(false));
+        assert_eq!(link(Part::Saw, Part::Press, (0, 1)), None, "machines side by side need a gearbox");
+        assert_eq!(recipe(Part::Saw, Block::OakLog as ItemId), Some((Block::OakPlanks as ItemId, 6)));
+        assert_eq!(recipe(Part::Crusher, ids::RAW_IRON), Some((ids::IRON_DUST, 2)));
+        assert!(!spins(Block::Gearbox) && spins(Block::Shaft));
     }
 }

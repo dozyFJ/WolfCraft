@@ -42,6 +42,10 @@ pub enum Kind {
     Glacier,
     /// Thermal-style dynamo: burns magma and netherrack.
     Magma,
+    /// «Механика» link: turns rotation into energy.
+    Dynamo,
+    /// «Механика» link: spends energy to turn shafts.
+    Motor,
 }
 
 pub struct Spec {
@@ -75,6 +79,8 @@ pub fn kind(b: Block) -> Option<Kind> {
         Block::Insolator => Kind::Insolator,
         Block::Glacier => Kind::Glacier,
         Block::MagmaGenerator => Kind::Magma,
+        Block::KineticDynamo => Kind::Dynamo,
+        Block::ElectricMotor => Kind::Motor,
         _ => return None,
     })
 }
@@ -97,13 +103,15 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Insolator => Spec { name: "Теплица", capacity: 400.0, rate: 10.0, time: 8.0, hint: "Семена, морковь, картофель или цветок в слоте — растит ещё (сам образец не тратится)" },
         Kind::Glacier => Spec { name: "Ледогенератор", capacity: 200.0, rate: 8.0, time: 2.0, hint: "Нужна вода сбоку → снег. Лёд в слоте — делает лёд" },
         Kind::Magma => Spec { name: "Магматический генератор", capacity: 4_000.0, rate: 40.0, time: 0.0, hint: "Положите магму или адский камень" },
+        Kind::Dynamo => Spec { name: "Кинетическое динамо", capacity: 1_000.0, rate: 0.0, time: 0.0, hint: "Подведите вал «Механики»: вращение → энергия (быстрее крутится — больше ЭЕ)" },
+        Kind::Motor => Spec { name: "Электромотор", capacity: 400.0, rate: 16.0, time: 0.0, hint: "Подключите кабель: на энергии крутит валы «Механики» (64 об/мин)" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
     }
 }
 
 /// Makes energy (generators of every kind).
 pub fn is_source(k: Kind) -> bool {
-    matches!(k, Kind::Generator | Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Reactor | Kind::Magma)
+    matches!(k, Kind::Generator | Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Reactor | Kind::Magma | Kind::Dynamo)
 }
 
 /// Burns fuel from its slot (the coal generator and the reactor).
@@ -361,6 +369,7 @@ pub fn share(nodes: &[Node], dt: f32) -> Vec<f32> {
         e[i] = 0.0;
     }
     // 3. Machines take what they need for this frame (filling their buffer up to a second's worth).
+    let is_machine = |k: Kind| is_machine(k) || k == Kind::Motor;
     for (i, n) in nodes.iter().enumerate() {
         if is_machine(n.kind) {
             // A machine keeps only a few seconds of work in its buffer: the rest of the

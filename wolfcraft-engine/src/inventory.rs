@@ -429,6 +429,13 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(b(Block::Shaft), 1), (b(Block::OakPlanks), 3)], (b(Block::HandCrank), 1), true, "Механика"));
         v.push(r(&[(b(Block::Shaft), 1), (ids::IRON_INGOT, 4), (b(Block::Cobblestone), 2)], (b(Block::MechPress), 1), true, "Механика"));
         v.push(r(&[(b(Block::Cogwheel), 1), (b(Block::Stone), 4)], (b(Block::Millstone), 1), true, "Механика"));
+        // Stage 2: wind, a gearbox, the saw and crushing wheels; the link with WolfTech.
+        v.push(r(&[(b(Block::Shaft), 1), (b(Block::OakPlanks), 4), (b(Block::Wool), 4)], (b(Block::WindSail), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Cogwheel), 4), (b(Block::OakPlanks), 2)], (b(Block::Gearbox), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Shaft), 1), (ids::IRON_PLATE, 2), (ids::IRON_INGOT, 1)], (b(Block::MechSaw), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Cogwheel), 2), (b(Block::Stone), 6), (ids::IRON_PLATE, 1)], (b(Block::CrushingWheel), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Shaft), 1), (ids::COPPER_PLATE, 4), (ids::CIRCUIT, 1)], (b(Block::ElectricMotor), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Shaft), 1), (ids::COPPER_PLATE, 4), (b(Block::Cable), 2)], (b(Block::KineticDynamo), 1), true, "Механика"));
         v.push(r(&[(ids::COPPER_INGOT, 3), (ids::CIRCUIT, 1), (b(Block::IskritBlock), 1)], (ids::STORAGE_UPGRADE, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));

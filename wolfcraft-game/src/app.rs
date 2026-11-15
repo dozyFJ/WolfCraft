@@ -2467,7 +2467,7 @@ impl App {
                                             match k {
                                                 Kind::Generator | Kind::Magma => wolfcraft_ui::container_ui::Layout::Generator,
                                                 Kind::Reactor => wolfcraft_ui::container_ui::Layout::Reactor,
-                                                Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water => wolfcraft_ui::container_ui::Layout::Panel,
+                                                Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Dynamo | Kind::Motor => wolfcraft_ui::container_ui::Layout::Panel,
                                                 Kind::Cell => wolfcraft_ui::container_ui::Layout::Charger,
                                                 _ => wolfcraft_ui::container_ui::Layout::Machine,
                                             }
