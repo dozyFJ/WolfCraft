@@ -229,10 +229,20 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     // Clear air nearby, the fog closes in only towards the edge of the view distance (it
     // just hides where the world ends); the cartoon look adds a faint haze far away.
     var f = fog_amount(d);
+    var fog_rgb = g.fog.rgb;
     if (fx_on(8u)) {
         f = max(f, clamp((d * g.fog.a - 0.45) * 0.25, 0.0, 0.10));
+        // Like PC shader packs and Hytale: the air glows golden towards the sun and stays
+        // cool blue away from it; far land loses a little colour (aerial perspective).
+        let v = normalize(in.rel);
+        let to_sun = max(dot(v, sun), 0.0);
+        let glow = pow(to_sun, 6.0) * day + pow(to_sun, 3.0) * twilight * 0.8;
+        fog_rgb = mix(fog_rgb * vec3<f32>(0.94, 0.98, 1.06), vec3<f32>(1.0, 0.86, 0.62), clamp(glow, 0.0, 1.0) * 0.55);
+        let far = smoothstep(0.25, 0.9, d * g.fog.a);
+        let lum = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+        rgb = mix(rgb, mix(vec3<f32>(lum), rgb, 0.75) * vec3<f32>(0.95, 0.98, 1.06), far * 0.6);
     }
-    rgb = mix(rgb, g.fog.rgb, f);
+    rgb = mix(rgb, fog_rgb, f);
     if (g.misc.y > 0.5) {
         let w = clamp(d / 36.0, 0.0, 0.92);
         rgb = mix(rgb * vec3<f32>(0.55, 0.75, 1.0), vec3<f32>(0.05, 0.22, 0.42), w);
@@ -389,7 +399,12 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
             0.0,
             cos(dot(w, vec3<f32>(0.6, -0.8, 1.1)) * 1.9 + t * 1.6) + 0.5 * cos(dot(w, vec3<f32>(1.7, 0.3, -0.5)) * 3.3 + t * 2.2),
         );
-        let nw = normalize(n + wave * 0.06);
+        var nw = normalize(n + wave * 0.06);
+        if (fx_on(8u)) {
+            // Cartoon water: the ripples are drawn as clean light bands on a turquoise body.
+            let crest = step(1.05, wave.x + wave.z);
+            rgb = mix(rgb * vec3<f32>(0.85, 1.02, 1.08), rgb + vec3<f32>(0.18, 0.24, 0.26), crest * 0.55);
+        }
         let v = normalize(-in.rel);
         let sun = normalize(g.sun.xyz);
         let up = normalize(in.world);

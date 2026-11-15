@@ -249,9 +249,27 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
         }
     }
     let _ = seed;
+    // Hytale-style painted shading: what is darker than the block's colour leans cool
+    // (blue-violet), what is lighter leans warm (sunny yellow) — colour instead of grey.
+    let mean_l = lum(&juicy(mean));
+    for c in flat.iter_mut() {
+        let d = (lum(c) - mean_l).clamp(-0.3, 0.3);
+        let tint = if d < 0.0 { [0.94, 0.96, 1.10] } else { [1.06, 1.03, 0.90] };
+        let k = (d.abs() / 0.3).min(1.0) * 0.6;
+        for i in 0..3 {
+            c[i] *= 1.0 + (tint[i] - 1.0) * k;
+        }
+    }
     for y in 0..n {
         for x in 0..n {
             let mut c = flat[((y * h / n) * w + x * w / n) as usize];
+            // Built blocks catch the sky: a soft light gradient from the top edge down.
+            if bevel >= 0.5 {
+                let g = 0.05 * (0.5 - (y as f32 + 0.5) / n as f32);
+                for v in c.iter_mut().take(3) {
+                    *v = (*v * (1.0 + g)).min(1.0);
+                }
+            }
             // Natural ground and foliage stay seamless: facets or a bevel repeat on every
             // block and make a visible grid over a meadow.
             if bevel >= 0.3 {
@@ -264,9 +282,11 @@ pub fn toon_seeded(src: &Image, size: u32, bevel: f32, seed: u32) -> Image {
                 let edge = l_.min(t_).min(r_).min(b_);
                 let ink = if bevel >= 1.0 { texel } else { 0.0 };
                 if edge < ink {
-                    for v in c.iter_mut().take(3) {
-                        *v *= 0.58;
-                    }
+                    // A soft coloured outline (the block's own colour, darker and cooler),
+                    // not black ink.
+                    c[0] *= 0.66;
+                    c[1] *= 0.68;
+                    c[2] *= 0.76;
                 } else if edge < ink + texel {
                     let lit = if l_.min(t_) <= r_.min(b_) { 0.16 * bevel } else { -0.16 * bevel };
                     for i in 0..3 {
