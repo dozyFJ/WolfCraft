@@ -14,6 +14,10 @@ name = "wolfcraft_game"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 
+[[bin]]
+name = "WolfCraft"
+path = "src/main.rs"
+
 [dependencies]
 wolfcraft-common.workspace = true
 wolfcraft-assets.workspace = true
