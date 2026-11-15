@@ -131,6 +131,8 @@ pub struct GameSession {
     /// Camera feel: dip after a hard landing, last vertical speed (to spot the landing),
     /// third-person shoulder offset (smoothed, shrinks near walls).
     land_dip: f64,
+    /// Seconds to the next entity-culling pass.
+    cull_t: f32,
     /// Seconds to the next fire step (spreading, burning out).
     fire_t: f32,
     /// Rain, thunderstorms and snow.
@@ -294,6 +296,7 @@ impl GameSession {
             rest_camera: None,
             cam_lag: 0.0,
             land_dip: 0.0,
+            cull_t: 0.0,
             fire_t: 0.0,
             weather: crate::weather::Weather::new(seed),
             stuck_check: 0.0,
@@ -927,6 +930,13 @@ impl GameSession {
         }
         self.special_effects(dt);
         self.weather_tick(dt);
+        // Entity culling 5 times a second: creatures behind walls are not drawn.
+        self.cull_t -= dt;
+        if self.cull_t <= 0.0 {
+            self.cull_t = 0.2;
+            let eye = self.camera().eye;
+            self.mobs.cull_hidden(&self.chunks, eye);
+        }
         self.fire_tick(dt);
         // Radiation: uranium carried or within two blocks hurts slowly. A full set of armour
         // keeps it out.

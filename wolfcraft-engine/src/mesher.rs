@@ -37,6 +37,10 @@ pub struct MeshData {
     /// Opaque indices before this one are blocks and shapes; the rest are small details
     /// (grass, flowers) that far chunks skip.
     pub detail_start: u32,
+    /// Opaque indices grouped by face direction (like Sodium): faces of direction `f` are
+    /// `dirs[f]..dirs[f + 1]`; from `dirs[6]` on come shapes, fluids and details. The renderer
+    /// skips the groups that face away from the camera.
+    pub dirs: [u32; 7],
     /// Which sides of the chunk see each other through non-opaque blocks: bit `a * 6 + b` for
     /// sides `a`, `b` (see [`SIDE_DIRS`]). Lets the renderer skip chunks hidden behind walls.
     pub vis: u64,
@@ -45,7 +49,7 @@ pub struct MeshData {
 impl Default for MeshData {
     fn default() -> Self {
         // No mesh means air: every side sees every other.
-        Self { opaque: Vec::new(), opaque_idx: Vec::new(), water: Vec::new(), water_idx: Vec::new(), detail_start: 0, vis: VIS_ALL }
+        Self { opaque: Vec::new(), opaque_idx: Vec::new(), water: Vec::new(), water_idx: Vec::new(), detail_start: 0, dirs: [0; 7], vis: VIS_ALL }
     }
 }
 
@@ -178,10 +182,16 @@ fn face_visible(b: Block, n: Block) -> bool {
     }
     match b.info().render {
         RenderKind::Opaque => !n.is_opaque(),
-        RenderKind::Cutout => !(n.is_opaque() || n == b),
+        // Leaves next to any leaves: no inner face (like the MoreCulling mod) — tree crowns
+        // drew every leaf block's six sides.
+        RenderKind::Cutout => !(n.is_opaque() || n == b || (is_leaves(b) && is_leaves(n))),
         RenderKind::Translucent => !(n.is_opaque() || n == b),
         _ => false,
     }
+}
+
+fn is_leaves(b: Block) -> bool {
+    matches!(b, Block::OakLeaves | Block::SpruceLeaves | Block::BirchLeaves | Block::AcaciaLeaves)
 }
 
 const NORMALS: [[i32; 3]; 6] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
@@ -305,8 +315,10 @@ pub fn mesh_chunk(inp: &MeshInput) -> MeshData {
     let light = block_light(inp);
     let bl = |p: [i32; 3]| light[MeshInput::idx(p[0], p[1], p[2])] as u32;
     for f in 0..6 {
+        out.dirs[f] = out.opaque_idx.len() as u32;
         mesh_direction(inp, f, &mut out, &bl);
     }
+    out.dirs[6] = out.opaque_idx.len() as u32;
     mesh_shapes(inp, &mut out, &bl);
     mesh_fluids(inp, &mut out, &bl);
     out.detail_start = out.opaque_idx.len() as u32;
@@ -766,6 +778,27 @@ mod tests {
             eprintln!("construction pieces whose outline differs from the model ({}):\n{}", report.len(), report.join("\n"));
         }
         assert!(bad.is_empty(), "{} blocks look wrong:\n{}", bad.len(), bad.join("\n"));
+    }
+
+    #[test]
+    fn faces_are_grouped_by_direction() {
+        let inp = input_with(&[(8, 8, 8, Block::Stone)]);
+        let m = mesh_chunk(&inp);
+        for f in 0..6 {
+            let (a, b) = (m.dirs[f] as usize, m.dirs[f + 1] as usize);
+            assert_eq!(b - a, 6, "one quad facing {f}");
+            for &k in &m.opaque_idx[a..b] {
+                assert_eq!((m.opaque[k as usize].flags >> 17) & 7, f as u32, "a face in the wrong group");
+            }
+        }
+    }
+
+    #[test]
+    fn leaves_hide_faces_between_each_other() {
+        let one = mesh_chunk(&input_with(&[(8, 8, 8, Block::OakLeaves)])).quad_count();
+        let two = mesh_chunk(&input_with(&[(8, 8, 8, Block::OakLeaves), (9, 8, 8, Block::BirchLeaves)])).quad_count();
+        assert_eq!(one, 6);
+        assert_eq!(two, 10, "the two touching faces are gone");
     }
 
     #[test]

@@ -125,11 +125,13 @@ pub struct Mob {
     pub ridden: bool,
     /// Seconds it keeps burning (ghouls in the sun, lava, fire).
     pub burning: f32,
+    /// Behind walls from the camera: not drawn (set by the game, like the Entity Culling mod).
+    pub hidden: bool,
 }
 
 impl Mob {
     pub fn new(kind: MobKind, pos: DVec3, heading: DVec3) -> Self {
-        Self { kind, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0, saddled: false, ridden: false, burning: 0.0 }
+        Self { kind, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0, saddled: false, ridden: false, burning: 0.0, hidden: false }
     }
     /// Centre of the body, for aiming.
     pub fn centre(&self) -> DVec3 {
@@ -779,6 +781,25 @@ impl MobManager {
         dealt
     }
 
+    /// Entity culling: marks creatures that solid blocks hide from `eye` (rays to the head and
+    /// the middle of the body both blocked). Near ones and guardians are always drawn.
+    pub fn cull_hidden(&mut self, world: &impl Voxels, eye: DVec3) {
+        for m in &mut self.mobs {
+            let d = (m.body.pos - eye).length();
+            if d < 10.0 || m.boss.is_some() || m.ridden {
+                m.hidden = false;
+                continue;
+            }
+            let up = up_at(m.body.pos);
+            let blocked = |to: DVec3| {
+                let v = to - eye;
+                let n = (v.length() / 0.6).ceil().max(1.0) as i32;
+                (1..n).any(|i| world.block_at_world(eye + v * (i as f64 / n as f64)).is_opaque())
+            };
+            m.hidden = blocked(m.body.pos + up * 0.6) && blocked(m.body.pos + up * 1.5);
+        }
+    }
+
     /// Nearest mob hit by a ray (origin, unit dir) within `reach`: (index, distance along the ray).
     pub fn raycast(&self, origin: DVec3, dir: DVec3, reach: f64) -> Option<(usize, f64)> {
         let mut best: Option<(usize, f64)> = None;
@@ -814,6 +835,20 @@ impl MobManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creatures_behind_rock_are_not_drawn() {
+        let w = crate::physics::tests::Ball::new(60.0);
+        let mut m = MobManager::new(1);
+        // One on the far side of the planet, one standing next to the camera.
+        m.mobs.push(Mob::new(MobKind::Cow, -DVec3::Y * 61.0, DVec3::X));
+        m.mobs.push(Mob::new(MobKind::Cow, DVec3::Y * 61.0 + DVec3::X * 3.0, DVec3::Z));
+        m.mobs.push(Mob::new(MobKind::Cow, DVec3::Y * 61.0 + DVec3::X * 20.0, DVec3::Z));
+        m.cull_hidden(&w, DVec3::Y * 62.6);
+        assert!(m.mobs[0].hidden, "the rock of the planet hides it");
+        assert!(!m.mobs[1].hidden);
+        assert!(!m.mobs[2].hidden, "in the open, far but visible");
+    }
 
     #[test]
     fn ghouls_burn_in_the_sun_but_not_at_night() {
