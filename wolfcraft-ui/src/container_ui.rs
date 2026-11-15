@@ -26,6 +26,8 @@ pub struct ContainerView<'a> {
     pub layout: Layout,
     /// The furnace is burning (its flame is lit).
     pub working: bool,
+    /// WolfTech: how full the machine's energy store is (0..1), drawn as a bar on the left.
+    pub energy: Option<f32>,
 }
 
 /// Layout of a block's slots.
@@ -41,6 +43,14 @@ pub enum Layout {
     Forge,
     /// Slots 0 item or book, 1 iskrit; the offers follow below.
     Enchant,
+    /// WolfTech machine: slot 0 input → slot 2 result (no fuel: it runs on energy).
+    Machine,
+    /// WolfTech generator: only slot 1, the fuel.
+    Generator,
+    /// WolfTech energy cell: only slot 0, the gear to charge.
+    Charger,
+    /// WolfTech solar panel: no slots, just the energy bar.
+    Panel,
 }
 
 /// Where each of the block's slots sits, in cells from the top-left of the slot area
@@ -49,6 +59,11 @@ fn slot_places(layout: Layout, n: usize, cols: usize) -> (Vec<(f32, f32, &'stati
     match layout {
         Layout::Furnace if n == 3 => (vec![(2.0, 0.0, "Сырьё"), (2.0, 1.7, "Топливо"), (6.0, 0.85, "Результат")], 3.1),
         Layout::Forge if n == 3 => (vec![(1.0, 0.0, "Предмет"), (3.0, 0.0, "Материал / книга"), (7.0, 0.0, "Результат")], 1.4),
+        // Hidden slots sit at x < 0 (they exist but are not shown).
+        Layout::Machine if n == 3 => (vec![(2.5, 0.3, "Сырьё"), (-9.0, 0.0, ""), (6.5, 0.3, "Результат")], 1.8),
+        Layout::Generator if n == 3 => (vec![(-9.0, 0.0, ""), (4.0, 0.3, "Топливо"), (-9.0, 0.0, "")], 1.8),
+        Layout::Charger if n == 3 => (vec![(4.0, 0.3, "Заряжается"), (-9.0, 0.0, ""), (-9.0, 0.0, "")], 1.8),
+        Layout::Panel => ((0..n).map(|_| (-9.0, 0.0, "")).collect(), 1.8),
         Layout::Enchant if n == 2 => (vec![(3.0, 0.0, "Предмет / книга"), (5.0, 0.0, "Искрит")], 1.4),
         _ => {
             let rows = n.div_ceil(cols);
@@ -216,15 +231,40 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
                 ui.painter().text(egui::pos2((a.right() + b.left()) / 2.0, a.center().y), Align2::CENTER_CENTER, "+", FontId::proportional(26.0), p.text);
                 arrow(ui, egui::pos2(b.right() + 14.0, b.center().y), egui::pos2(out.left() - 10.0, b.center().y), if slots[2].is_some() { 1.0 } else { 0.0 }, &p);
             }
+            Layout::Machine if slots.len() == 3 => {
+                let (inp, out) = (at(places[0].0, places[0].1), at(places[2].0, places[2].1));
+                let f = view.status.map(|s| s.1).unwrap_or(0.0);
+                arrow(ui, egui::pos2(inp.right() + 14.0, out.center().y), egui::pos2(out.left() - 10.0, out.center().y), f, &p);
+            }
             Layout::Enchant if slots.len() == 2 => {
                 let (a, b) = (at(places[0].0, places[0].1), at(places[1].0, places[1].1));
                 ui.painter().text(egui::pos2((a.right() + b.left()) / 2.0, a.center().y), Align2::CENTER_CENTER, "+", FontId::proportional(26.0), Color32::from_rgb(255, 110, 100));
             }
             _ => {}
         }
+        // WolfTech: the energy bar down the left side, filling from the bottom.
+        if let Some(e) = view.energy {
+            let e = e.clamp(0.0, 1.0);
+            let bar = Rect::from_min_size(area.left_top() + Vec2::new(8.0, 2.0), Vec2::new(26.0, area.height() - 4.0));
+            ui.painter().rect_filled(bar, Rounding::same(4.0), Color32::from_rgb(18, 20, 26));
+            let fill = Rect::from_min_max(egui::pos2(bar.left() + 3.0, bar.bottom() - 3.0 - (bar.height() - 6.0) * e), bar.max - Vec2::splat(3.0));
+            let col = Color32::from_rgb((230.0 - 170.0 * e) as u8, (70.0 + 150.0 * e) as u8, (60.0 + 150.0 * e) as u8);
+            if e > 0.0 {
+                ui.painter().rect_filled(fill, Rounding::same(2.0), col);
+            }
+            ui.painter().rect_stroke(bar, Rounding::same(4.0), Stroke::new(2.0_f32, p.outline));
+            // A lightning bolt over the bar.
+            let c = bar.center();
+            ui.painter().add(egui::Shape::convex_polygon(vec![c + Vec2::new(2.0, -11.0), c + Vec2::new(-6.0, 2.0), c + Vec2::new(0.0, 2.0)], Color32::WHITE, Stroke::NONE));
+            ui.painter().add(egui::Shape::convex_polygon(vec![c + Vec2::new(0.0, -2.0), c + Vec2::new(6.0, -2.0), c + Vec2::new(-2.0, 11.0)], Color32::WHITE, Stroke::NONE));
+            ui.painter().text(egui::pos2(bar.right() + 8.0, bar.bottom()), Align2::LEFT_BOTTOM, format!("{:.0} %", e * 100.0), FontId::proportional(12.0), p.text);
+        }
         let mut to_player: Option<usize> = None;
         for i in 0..slots.len() {
             let (px, py, caption) = places[i];
+            if px < 0.0 {
+                continue;
+            }
             let rect = at(px, py);
             if !caption.is_empty() {
                 ui.painter().text(egui::pos2(rect.center().x, rect.bottom() + 3.0), Align2::CENTER_TOP, caption, FontId::proportional(11.0), p.text_muted);
@@ -339,11 +379,11 @@ mod tests {
         let atlases = wolfcraft_assets::AtlasManager::new(None).unwrap();
         let icons = GuiIcons::new(&ctx, &atlases);
         let any = |_: usize, _: &ItemStack| true;
-        let view = ContainerView { title: "Сундук", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 9, accepts: &any, status: Some(("Статус", 0.3)), layout: Layout::Grid, working: false };
+        let view = ContainerView { title: "Сундук", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 9, accepts: &any, status: Some(("Статус", 0.3)), layout: Layout::Grid, working: false, energy: None };
         let mut inv = Inventory::default();
         for (w, h, scaled) in [(802.0f32, 360.0f32, true), (420.0, 800.0, true), (1400.0, 900.0, false)] {
             // A small window first: the big one after it must still be measured in full.
-            let small = ContainerView { title: "Кузница", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 3, accepts: &any, status: None, layout: Layout::Forge, working: false };
+            let small = ContainerView { title: "Кузница", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 3, accepts: &any, status: None, layout: Layout::Forge, working: false, energy: None };
             let mut three = vec![None; 3];
             for _ in 0..3 {
                 let mut raw = egui::RawInput::default();
@@ -409,7 +449,7 @@ mod tests {
         let mut inv = Inventory::default();
         let mut out = String::new();
         for (k, (layout, n)) in [(Layout::Forge, 3), (Layout::Furnace, 3), (Layout::Enchant, 2)].into_iter().enumerate() {
-            let view = ContainerView { title: "Блок", skin: wolfcraft_assets::gui::PANEL_STONE, columns: n, accepts: &any, status: Some(("Подсказка", 0.6)), layout, working: true };
+            let view = ContainerView { title: "Блок", skin: wolfcraft_assets::gui::PANEL_STONE, columns: n, accepts: &any, status: Some(("Подсказка", 0.6)), layout, working: true, energy: None };
             let mut slots = vec![None; n];
             let mut shapes = Vec::new();
             for _ in 0..8 {
