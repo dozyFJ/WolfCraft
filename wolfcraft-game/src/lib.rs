@@ -11,6 +11,7 @@ mod session;
 mod signs;
 mod touch;
 mod voice;
+mod weather;
 mod worldedit;
 
 use winit::event_loop::EventLoop;

@@ -2525,7 +2525,12 @@ pub fn build_debris(debris: &[crate::mobs::Debris], camera: DVec3) -> Vec<ModelV
         let k = ((3.0 - d.age) / 0.5).clamp(0.0, 1.0);
         let h = h * k.max(0.05);
         let start = v.len();
-        add_box(&mut v, &f, Vec3::new(-h, -h, -h), Vec3::new(h, h, h), Vec3::ZERO, d.spin + d.age * 6.0, d.color);
+        match d.kind {
+            // A thin streak along "up" for rain, a flat flake for snow.
+            crate::mobs::FxKind::Rain => add_box(&mut v, &f, Vec3::new(-0.012, -0.24, -0.012), Vec3::new(0.012, 0.24, 0.012), Vec3::ZERO, 0.0, d.color),
+            crate::mobs::FxKind::Snow => add_box(&mut v, &f, Vec3::new(-0.035, -0.01, -0.035), Vec3::new(0.035, 0.01, 0.035), Vec3::ZERO, d.spin + d.age, d.color),
+            _ => add_box(&mut v, &f, Vec3::new(-h, -h, -h), Vec3::new(h, h, h), Vec3::ZERO, d.spin + d.age * 6.0, d.color),
+        }
         if d.glow {
             for vx in &mut v[start..] {
                 vx.tex = 3.0; // unlit

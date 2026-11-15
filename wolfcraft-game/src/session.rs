@@ -131,6 +131,8 @@ pub struct GameSession {
     /// Camera feel: dip after a hard landing, last vertical speed (to spot the landing),
     /// third-person shoulder offset (smoothed, shrinks near walls).
     land_dip: f64,
+    /// Rain, thunderstorms and snow.
+    pub weather: crate::weather::Weather,
     /// Seconds to the next "am I stuck in blocks?" check.
     stuck_check: f32,
     /// View bobbing: step phase, smoothed strength, time off the ground.
@@ -290,6 +292,7 @@ impl GameSession {
             rest_camera: None,
             cam_lag: 0.0,
             land_dip: 0.0,
+            weather: crate::weather::Weather::new(seed),
             stuck_check: 0.0,
             bob_phase: 0.0,
             bob_amp: 0.0,
@@ -920,6 +923,7 @@ impl GameSession {
             }
         }
         self.special_effects(dt);
+        self.weather_tick(dt);
         // Radiation: uranium carried or within two blocks hurts slowly. A full set of armour
         // keeps it out.
         if !self.player.survival.dead && !self.player.is_creative() {
@@ -2089,6 +2093,90 @@ impl GameSession {
         let sign = if self.camera_mode == CameraMode::ThirdFront { 1.0 } else { -1.0 };
         let eye = self.player.eye_pos() + self.player.up() * self.cam_lag;
         self.room_along(eye, look * sign)
+    }
+
+    /// Weather: the spell changes now and then; drops or flakes fall around the player (not
+    /// under a roof, not in deserts); thunderstorms strike lightning nearby. Rain puts out
+    /// burning creatures and keeps the sun from setting ghouls on fire.
+    fn weather_tick(&mut self, dt: f32) {
+        use wolfcraft_engine::biome::Biome as B;
+        use wolfcraft_engine::mobs::FxKind;
+        let flat = self.cfg.world_type == wolfcraft_engine::config::WorldType::Baseplate;
+        if self.hell || flat {
+            self.mobs.sun_burns = true;
+            return;
+        }
+        if self.weather.step(dt) {
+            self.item_name = Some((
+                match self.weather.sky {
+                    crate::weather::Sky::Clear => "Распогодилось",
+                    crate::weather::Sky::Rain => "Начинается дождь",
+                    crate::weather::Sky::Thunder => "Надвигается гроза",
+                }
+                .into(),
+                2.5,
+            ));
+        }
+        let (biome, _, _) = self.env_col.unwrap_or((B::Plains, 0.5, 0.5));
+        let dry = matches!(biome, B::Desert | B::Badlands | B::Volcano | B::Savanna);
+        let rain = if dry { 0.0 } else { self.weather.rain };
+        self.mobs.sun_burns = rain < 0.3;
+        if rain <= 0.01 {
+            return;
+        }
+        let snowy = self.environment().1 > 0.5;
+        let pos = self.player.body.pos;
+        let up = self.player.up();
+        let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let t1 = (helper - up * helper.dot(up)).normalize();
+        let t2 = up.cross(t1);
+        let k = self.fx_amount.clamp(0.2, 2.0) as f64;
+        let n = (rain as f64 * k * if snowy { 90.0 } else { 260.0 } * dt as f64) + self.mobs.rand();
+        for _ in 0..n as usize {
+            let a = self.mobs.rand() * std::f64::consts::TAU;
+            let d = 1.0 + self.mobs.rand().sqrt() * 13.0;
+            let h = 6.0 + self.mobs.rand() * 10.0;
+            let at = pos + (t1 * a.cos() + t2 * a.sin()) * d + up * h;
+            if snowy {
+                self.mobs.fx(at, -up * 1.6, [0.95, 0.97, 1.0], 0.07, 3.0, FxKind::Snow);
+            } else {
+                // Slanted a little by the wind.
+                let wind = t1 * 1.2;
+                self.mobs.fx(at, -up * 16.0 + wind, [0.62, 0.72, 0.9], 0.03, 1.4, FxKind::Rain);
+            }
+        }
+        // Rain puts out burning creatures.
+        if !snowy && rain > 0.5 {
+            for m in &mut self.mobs.mobs {
+                m.burning = 0.0;
+            }
+        }
+        if self.weather.bolt(dt) {
+            // Lightning somewhere 15–45 blocks away: a white flash, a bright column of sparks.
+            let a = self.mobs.rand() * std::f64::consts::TAU;
+            let d = 15.0 + self.mobs.rand() * 30.0;
+            let dir = (pos + (t1 * a.cos() + t2 * a.sin()) * d).normalize();
+            if let Some(ground) = self.planet.stand_position(dir) {
+                let gup = wolfcraft_engine::physics::up_at(ground);
+                for i in 0..40 {
+                    let y = i as f64 * 1.2;
+                    let wob = (t1 * (self.mobs.rand() - 0.5) + t2 * (self.mobs.rand() - 0.5)) * 0.8;
+                    self.mobs.fx_glow(ground + gup * y + wob, DVec3::ZERO, [0.85, 0.9, 1.0], 0.3, 0.35, FxKind::Rise);
+                }
+                self.flash = Some(([0.9, 0.92, 1.0], 0.25));
+                self.shake = self.shake.max(0.25);
+            }
+        }
+    }
+
+    /// How rainy it is where the player stands (0..1): the sky and fog go grey.
+    pub fn rain_amount(&self) -> f32 {
+        use wolfcraft_engine::biome::Biome as B;
+        if self.hell {
+            return 0.0;
+        }
+        let (biome, _, _) = self.env_col.unwrap_or((B::Plains, 0.5, 0.5));
+        if matches!(biome, B::Desert | B::Badlands | B::Volcano | B::Savanna) { 0.0 } else { self.weather.rain }
     }
 
     /// Particles that bring the world to life: embers and smoke over torches, bubbles and

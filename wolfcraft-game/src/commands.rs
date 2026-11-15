@@ -145,6 +145,22 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
             s.cfg.difficulty = d;
             vec![sys(format!("Сложность: {}", d.label()))]
         }
+        "weather" | "погода" => {
+            use crate::weather::Sky;
+            let secs = args.get(1).and_then(|v| v.parse::<f32>().ok()).unwrap_or(600.0);
+            let sky = match args.first().copied() {
+                Some("clear" | "ясно" | "солнце") => Sky::Clear,
+                Some("rain" | "дождь" | "снег" | "snow") => Sky::Rain,
+                Some("thunder" | "гроза") => Sky::Thunder,
+                _ => return vec![err("Использование: /weather <ясно|дождь|гроза> [секунды]")],
+            };
+            s.weather.set(sky, secs);
+            vec![sys(match sky {
+                Sky::Clear => "Погода: ясно",
+                Sky::Rain => "Погода: дождь (в холодных краях — снег)",
+                Sky::Thunder => "Погода: гроза",
+            })]
+        }
         "time" => match args.as_slice() {
             [] | ["query"] => vec![sys(format!("Время мира: {}", s.clock()))],
             ["set", v] => match parse_time(v) {
