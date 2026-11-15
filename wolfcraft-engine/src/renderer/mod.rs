@@ -313,6 +313,8 @@ pub struct FrameParams {
     pub season: f32,
     pub snow: f32,
     pub humidity: f32,
+    /// Rain now (0..1): blocks under the sky get wet and shiny.
+    pub rain: f32,
     /// Fog thickness of the biome (1 = normal, more = mistier).
     pub fog_density: f32,
     /// Texture relief: 0 off, 1 lit relief (normal from the height maps), 2 parallax depth.
@@ -385,6 +387,10 @@ pub struct WorldRenderer {
     render_scale: f32,
     offscreen: Option<(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup)>,
     blit_pipeline: wgpu::RenderPipeline,
+    /// Post effects (bloom, light shafts): their uniform, and whether they are on (then the
+    /// world is drawn off screen even at full resolution).
+    post_buf: wgpu::Buffer,
+    post_on: bool,
     blit_layout: wgpu::BindGroupLayout,
     blit_sampler: wgpu::Sampler,
     color_format: wgpu::TextureFormat,
@@ -655,8 +661,10 @@ impl WorldRenderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
                 wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
+        let post_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("post"), size: 16, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let blit_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("blit-pl"), bind_group_layouts: &[&blit_layout], push_constant_ranges: &[] });
         let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("blit"),
@@ -708,6 +716,8 @@ impl WorldRenderer {
             render_scale: 1.0,
             offscreen: None,
             blit_pipeline,
+            post_buf,
+            post_on: false,
             blit_layout,
             blit_sampler,
             color_format,
@@ -756,6 +766,14 @@ impl WorldRenderer {
         (t, v)
     }
 
+    /// Bloom / light shafts on or off (they need the world drawn off screen first).
+    pub fn set_post(&mut self, on: bool) {
+        if on != self.post_on {
+            self.post_on = on;
+            self.depth_size = (0, 0);
+        }
+    }
+
     /// Renders the world at a fraction of the screen resolution (phones) and stretches it.
     pub fn set_render_scale(&mut self, scale: f32) {
         let scale = scale.clamp(0.4, 1.0);
@@ -774,7 +792,7 @@ impl WorldRenderer {
             self.depth_size = (tw, th);
             self.offscreen = None;
         }
-        if self.render_scale < 0.99 && self.offscreen.is_none() {
+        if (self.render_scale < 0.99 || self.post_on) && self.offscreen.is_none() {
             let tex = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("world-offscreen"),
                 size: wgpu::Extent3d { width: tw, height: th, depth_or_array_layers: 1 },
@@ -789,10 +807,14 @@ impl WorldRenderer {
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("blit-bg"),
                 layout: &self.blit_layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.blit_sampler) }],
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.blit_sampler) },
+                    wgpu::BindGroupEntry { binding: 2, resource: self.post_buf.as_entire_binding() },
+                ],
             });
             self.offscreen = Some((tex, view, bg));
-        } else if self.render_scale >= 0.99 {
+        } else if self.render_scale >= 0.99 && !self.post_on {
             self.offscreen = None;
         }
     }
@@ -977,7 +999,7 @@ impl WorldRenderer {
             // Fog is mixed in linear space inside the shader; the caller passes display colours.
             fog: [fog_color[0].powf(2.2), fog_color[1].powf(2.2), fog_color[2].powf(2.2), p.fog_density.max(0.5) / (p.view_distance_blocks * 1.15).max(16.0)],
             misc: [p.time, p.underwater as u32 as f32, p.crack, p.shaders as f32],
-            env: [p.season, p.snow, p.humidity, 0.0],
+            env: [p.season, p.snow, p.humidity, p.rain],
             fx: [p.relief_mode as f32, p.relief_strength, p.fx_flags as f32, 0.0],
             tiles: self.tile_rects,
         };
@@ -985,6 +1007,20 @@ impl WorldRenderer {
             g.fog[3] = 1.0 / 60.0;
         }
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
+        // Post effects: where the sun is on the screen.
+        {
+            let s = vp * Vec4::new(p.sun_dir.x * 1000.0, p.sun_dir.y * 1000.0, p.sun_dir.z * 1000.0, 1.0);
+            let (mut sx, mut sy, mut vis) = (0.5, 0.5, 0.0);
+            if s.w > 0.0 {
+                sx = s.x / s.w * 0.5 + 0.5;
+                sy = 0.5 - s.y / s.w * 0.5;
+                // Fades out as the sun leaves the screen, and at night.
+                let off = (sx - 0.5).abs().max((sy - 0.5).abs());
+                vis = (1.0 - ((off - 0.5) / 0.4).clamp(0.0, 1.0)) * p.day.clamp(0.0, 1.0);
+            }
+            let flags = ((p.fx_flags >> 4) & 3) as f32;
+            queue.write_buffer(&self.post_buf, 0, bytemuck::cast_slice(&[sx, sy, vis, if p.underwater { 0.0 } else { flags }]));
+        }
         // View model: same camera orientation, its own projection (FOV) and a short far plane.
         let vm_fov = if p.viewmodel_fov_y > 0.1 { p.viewmodel_fov_y } else { p.fov_y };
         let mut gh = g;
@@ -1375,6 +1411,13 @@ mod tests {
         for want in ["vs_main", "fs_opaque", "fs_water", "vs_line", "fs_line", "vs_crack", "fs_crack", "vs_model", "fs_model"] {
             assert!(names.contains(&want), "missing entry point {want}");
         }
+    }
+
+    #[test]
+    fn post_shader_is_valid_wgsl() {
+        let module = naga::front::wgsl::parse_str(include_str!("blit.wgsl")).expect("WGSL parse error");
+        let mut v = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all());
+        v.validate(&module).expect("WGSL validation error");
     }
 
     #[test]

@@ -364,6 +364,14 @@ pub struct Settings {
     /// Leaves drawn solid (no see-through holes): much faster on weak phones.
     #[serde(default)]
     pub fast_leaves: bool,
+    /// Post effects like on PC: glow around bright things, sun rays through leaves (they cost
+    /// some speed), wet shiny blocks in the rain.
+    #[serde(default)]
+    pub fx_bloom: bool,
+    #[serde(default)]
+    pub fx_rays: bool,
+    #[serde(default = "yes")]
+    pub fx_wet: bool,
     /// Look the settings were last moved to (1: the cartoon style became the default).
     /// Missing in old files, so they read 0 and get moved once.
     #[serde(default)]
@@ -416,6 +424,10 @@ impl Settings {
             _ => return,
         };
         self.fx_toon = preset == 4;
+        // Ultra adds the PC-style glow and sun rays.
+        self.fx_bloom = preset == 2;
+        self.fx_rays = preset == 2;
+        self.fx_wet = preset != 0;
         self.relief_mode = relief;
         self.relief_strength = strength;
         self.fx_wind = on;
@@ -425,8 +437,12 @@ impl Settings {
 
     /// Effect flags for the renderer (1 wind, 2 water, 4 grading).
     pub fn fx_flags(&self) -> u8 {
-        self.fx_wind as u8 | (self.fx_water as u8) << 1 | (self.fx_grading as u8) << 2 | (self.fx_toon as u8) << 3
+        self.fx_wind as u8 | (self.fx_water as u8) << 1 | (self.fx_grading as u8) << 2 | (self.fx_toon as u8) << 3 | (self.fx_bloom as u8) << 4 | (self.fx_rays as u8) << 5 | (self.fx_wet as u8) << 6
     }
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -447,6 +463,9 @@ impl Default for Settings {
             fx_grading: true,
             fx_toon: true,
             fast_leaves: false,
+            fx_bloom: false,
+            fx_rays: false,
+            fx_wet: true,
             // Phones are fill-rate bound: three quarters of the screen looks the same and is
             // close to twice as fast.
             render_scale: if cfg!(target_os = "android") { 0.75 } else { 1.0 },

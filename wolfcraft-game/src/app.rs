@@ -2488,6 +2488,7 @@ impl App {
         let mut encoder = gfx.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
         let (w, h) = gfx.gpu.size();
         gfx.world.set_render_scale(self.settings.render_scale);
+        gfx.world.set_post(self.settings.fx_bloom || self.settings.fx_rays);
         gfx.world.resize(&gfx.gpu.device, w, h);
         // While loading, the world is not drawn: the loading screen covers everything (a
         // half-built world showed through the strips beside a notch).
@@ -2545,6 +2546,7 @@ impl App {
                     season,
                     snow,
                     humidity: humidity.max(s.rain_amount()),
+                    rain: if s.hell { 0.0 } else { s.rain_amount() },
                     fog_density: s.biome_fog().2 * (1.0 + s.rain_amount() * 1.2),
                     eye: cam.eye,
                     forward: cam.forward.as_vec3(),
