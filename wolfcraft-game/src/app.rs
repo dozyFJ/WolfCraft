@@ -2274,6 +2274,12 @@ impl App {
                                                 sp.hint.to_string()
                                             };
                                             let (make, held, n) = s.tech_net(pos);
+                                            let (tm, em, _) = s.tech_mods(pos, block);
+                                            let what = if wolfcraft_engine::wolftech::is_machine(k) && tm < 0.999 {
+                                                format!("{what} · скорость ×{:.1}, расход ×{:.1}", 1.0 / tm, em)
+                                            } else {
+                                                what
+                                            };
                                             format!("⚡ {:.0} / {:.0} ЭЕ · {} · сеть: {} шт., +{:.0} ЭЕ/с, всего {:.0}", e, cap, what, n, make, held)
                                         }
                                         _ => String::new(),
@@ -2285,7 +2291,7 @@ impl App {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
                                                 Kind::Generator => slot == 1 && wolfcraft_engine::wolftech::fuel(st.id) > 0.0,
-                                                Kind::Crusher | Kind::Induction | Kind::Enricher => slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some(),
+                                                Kind::Crusher | Kind::Induction | Kind::Enricher => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
                                                 Kind::Cell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
                                                 _ => false,
                                             }

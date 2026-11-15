@@ -123,7 +123,10 @@ pub mod ids {
     pub const NANO_BASE: ItemId = 398;
     pub const NANO_LAST: ItemId = 401;
     pub const MECH: ItemId = 402;
-    pub const LAST: ItemId = 402;
+    /// IC2-style machine upgrades.
+    pub const OVERCLOCKER: ItemId = 403;
+    pub const STORAGE_UPGRADE: ItemId = 404;
+    pub const LAST: ItemId = 404;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -258,6 +261,8 @@ pub fn info(id: ItemId) -> ItemInfo {
             ItemInfo { max_stack: 1, durability: 2000, ..plain(NAMES[i], sp::NANO_BASE + i as u16) }
         }
         ids::MECH => ItemInfo { max_stack: 1, ..plain("Мех «Волк»", sp::MECH) },
+        ids::OVERCLOCKER => ItemInfo { max_stack: 16, ..plain("Ускоритель", sp::OVERCLOCKER) },
+        ids::STORAGE_UPGRADE => ItemInfo { max_stack: 16, ..plain("Накопитель", sp::STORAGE_UPGRADE) },
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
         ids::BRONZE_INGOT => plain("Бронзовый слиток", sp::BRONZE_INGOT),
         ids::SILVER_INGOT => plain("Серебряный слиток", sp::SILVER_INGOT),
@@ -649,7 +654,7 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
-    if (ids::IRON_DUST..=ids::MECH).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
+    if (ids::IRON_DUST..=ids::STORAGE_UPGRADE).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
         return "WolfTech";
     }
     if (ITEM_BASE..1024).contains(&id) {
