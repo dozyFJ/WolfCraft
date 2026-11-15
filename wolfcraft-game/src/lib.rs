@@ -1,5 +1,6 @@
 //! WolfCraft game library: desktop `main` and the Android entry point share this code.
 
+mod achievements;
 mod app;
 mod updates;
 mod audio;

@@ -91,6 +91,42 @@ pub struct HudState<'a> {
     pub pickups: Vec<(ItemStack, f32)>,
     /// Damage numbers on the screen: where, text, colour, age in seconds, heavy blow.
     pub popups: Vec<(Pos2, String, [u8; 3], f32, bool)>,
+    /// Achievement toast: icon, name, what it was for, seconds shown.
+    pub achievement: Option<(ItemStack, String, String, f32)>,
+}
+
+/// "Достижение получено!": a golden plate slides in on the left (like the pickup feed, but
+/// bigger), a shine sweeps across it, and it slides away after four seconds.
+fn draw_achievement(painter: &Painter, icons: &GuiIcons, screen: Rect, s: &HudState) {
+    let Some((st, name, desc, age)) = &s.achievement else { return };
+    let a = *age;
+    let t_in = (a / 0.35).min(1.0);
+    let ease_in = 1.0 - (1.0 - t_in).powi(3) * (1.0 + 2.4 * t_in);
+    let t_out = ((a - 3.8) / 0.4).clamp(0.0, 1.0);
+    let slide = ease_in * (1.0 - t_out * t_out);
+    let gold = Color32::from_rgb(255, 205, 70);
+    let title = painter.layout_no_wrap(name.clone(), FontId::proportional(16.0), Color32::WHITE);
+    let sub = painter.layout_no_wrap(desc.clone(), FontId::proportional(12.0), Color32::WHITE);
+    let w = title.size().x.max(sub.size().x).max(150.0) + 70.0;
+    let h = 58.0;
+    let x = screen.left() + 18.0 - (1.0 - slide) * (w + 40.0);
+    let r = Rect::from_min_size(Pos2::new(x, screen.center().y - 150.0), Vec2::new(w, h));
+    painter.rect_filled(r, Rounding::same(h * 0.5), Color32::from_rgba_unmultiplied(20, 16, 8, 225));
+    painter.rect_stroke(r, Rounding::same(h * 0.5), Stroke::new(2.5_f32, gold));
+    // A shine sweeping across once it has arrived.
+    let sweep = ((a - 0.35) / 0.8).clamp(0.0, 1.0);
+    if sweep > 0.0 && sweep < 1.0 {
+        let sx = r.left() + r.width() * sweep;
+        let shine = Rect::from_min_max(Pos2::new((sx - 18.0).max(r.left() + 10.0), r.top() + 3.0), Pos2::new((sx + 18.0).min(r.right() - 10.0), r.bottom() - 3.0));
+        painter.rect_filled(shine, Rounding::same(6.0), Color32::from_white_alpha(28));
+    }
+    let ic = Rect::from_center_size(Pos2::new(r.left() + h * 0.5, r.center().y), Vec2::splat(h - 14.0));
+    painter.circle_filled(ic.center(), h * 0.42, Color32::from_rgba_unmultiplied(255, 205, 70, 40));
+    icons.paint_stack(painter, ic.shrink(4.0), &ItemStack { count: 1, ..*st });
+    let tx = r.left() + h + 4.0;
+    painter.text(Pos2::new(tx, r.top() + 7.0), Align2::LEFT_TOP, "Достижение получено!", FontId::proportional(11.0), gold);
+    painter.galley(Pos2::new(tx, r.top() + 20.0), title, Color32::WHITE);
+    painter.galley(Pos2::new(tx, r.top() + 39.0), sub, Color32::from_white_alpha(170));
 }
 
 /// Pop-ups: damage numbers that burst out and float up, and the pickup feed sliding in.
@@ -477,6 +513,7 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         draw_compass(&painter, &p, Rect::from_center_size(Pos2::new(hotbar.center().x, compass_bottom - 12.0), Vec2::new(hb_w.min(420.0), 24.0)), b);
     }
     draw_popups(&painter, icons, &p, screen, s);
+    draw_achievement(&painter, icons, screen, s);
     // Selected item name.
     if let Some((name, t)) = &s.item_name {
         let a = (t * 2.0).clamp(0.0, 1.0);
@@ -676,6 +713,7 @@ mod tests {
                     effects: Vec::new(),
                     pickups: Vec::new(),
                     popups: Vec::new(),
+                    achievement: None,
                 };
                 draw(ctx, &icons, &s);
             });
