@@ -365,6 +365,22 @@ fn gradient(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
 fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandle>, version: &str, nickname: &str, dark: bool, action: &mut MenuAction) {
     ui.add_space(4.0);
     banner_slider(ui, p, planet, action);
+    // Play right under the slider: the nickname, the version, «Играть».
+    play_banner(ui, icons, p, version, nickname, action);
+    // Theme: dark or light.
+    glass_card(ui, p, 18.0, Margin::same(14.0), Stroke::new(1.0_f32, p.outline), |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(egui::RichText::new("Тема").font(bold_font(16.0)).color(p.text));
+        ui.add_space(4.0);
+        ui.columns(2, |c| {
+            if aero_button(&mut c[0], p, icons, Some(icon::MOON), "Тёмная", dark).clicked() && !dark {
+                *action = MenuAction::ToggleTheme;
+            }
+            if aero_button(&mut c[1], p, icons, Some(icon::SUN), "Светлая", !dark).clicked() && dark {
+                *action = MenuAction::ToggleTheme;
+            }
+        });
+    });
     // Новости and Релизы in one glass block with a tab bar.
     let tab_id = Id::new("launcher-home-feed");
     let mut feed: usize = ui.ctx().data(|d| d.get_temp(tab_id)).unwrap_or(0);
@@ -391,20 +407,6 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(tab_id, feed));
-    // Theme: dark or light.
-    glass_card(ui, p, 18.0, Margin::same(14.0), Stroke::new(1.0_f32, p.outline), |ui| {
-        ui.set_width(ui.available_width());
-        ui.label(egui::RichText::new("Тема").font(bold_font(16.0)).color(p.text));
-        ui.add_space(4.0);
-        ui.columns(2, |c| {
-            if aero_button(&mut c[0], p, icons, Some(icon::MOON), "Тёмная", dark).clicked() && !dark {
-                *action = MenuAction::ToggleTheme;
-            }
-            if aero_button(&mut c[1], p, icons, Some(icon::SUN), "Светлая", !dark).clicked() && dark {
-                *action = MenuAction::ToggleTheme;
-            }
-        });
-    });
     // Updates.
     glass_card(ui, p, 18.0, Margin::same(14.0), Stroke::new(1.0_f32, p.outline), |ui| {
         ui.set_width(ui.available_width());
@@ -421,8 +423,6 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
             });
         });
     });
-    // Play: a banner at the end with the nickname and the version.
-    play_banner(ui, icons, p, version, nickname, action);
     ui.add_space(8.0);
 }
 
@@ -441,10 +441,13 @@ fn aero_tabs(ui: &mut Ui, p: &Palette, names: &[&str], cur: usize) -> Option<usi
         if i == cur {
             gloss_capsule(ui, r, p.accent);
         } else if resp.hovered() {
-            ui.painter().rect_filled(r, Rounding::same(16.0), glass_gloss(p));
+            ui.painter().rect_filled(r, Rounding::same(r.height() / 2.0), glass_gloss(p));
         }
-        let col = if i == cur { Color32::WHITE } else { p.text };
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, *n, bold_font(14.0), col);
+        if i == cur {
+            shadow_text(ui.painter(), r.center(), Align2::CENTER_CENTER, n, bold_font(14.0), Color32::WHITE);
+        } else {
+            ui.painter().text(r.center(), Align2::CENTER_CENTER, *n, bold_font(14.0), p.text);
+        }
         if resp.clicked() {
             out = Some(i);
         }
@@ -455,32 +458,16 @@ fn aero_tabs(ui: &mut Ui, p: &Palette, names: &[&str], cur: usize) -> Option<usi
 /// A glossy Aero capsule in colour `c`: lighter at the top, a white shine over the upper half,
 /// a bright rim.
 fn gloss_capsule(ui: &Ui, r: Rect, c: Color32) {
-    let round = Rounding::same(r.height() / 2.0);
+    let rad = r.height() / 2.0;
     let pt = ui.painter();
-    pt.rect_filled(r.translate(Vec2::new(0.0, 2.0)), round, Color32::from_black_alpha(50));
-    let top = Color32::from_rgb(c.r().saturating_add(40), c.g().saturating_add(40), c.b().saturating_add(40));
-    let bottom = c.gamma_multiply(0.8);
-    let mut m = egui::Mesh::default();
-    m.colored_vertex(r.left_top(), top);
-    m.colored_vertex(r.right_top(), top);
-    m.colored_vertex(r.right_bottom(), bottom);
-    m.colored_vertex(r.left_bottom(), bottom);
-    m.add_triangle(0, 1, 2);
-    m.add_triangle(0, 2, 3);
-    // Round ends: paint the gradient clipped by a capsule made of the fill and two circles.
-    pt.rect_filled(r, round, c);
-    let inner = r.shrink2(Vec2::new(r.height() / 2.0, 0.0));
-    let mut mi = egui::Mesh::default();
-    for v in [inner.left_top(), inner.right_top(), inner.right_bottom(), inner.left_bottom()] {
-        mi.colored_vertex(v, if v.y == inner.top() { top } else { bottom });
-    }
-    mi.add_triangle(0, 1, 2);
-    mi.add_triangle(0, 2, 3);
-    pt.add(egui::Shape::mesh(mi));
-    let _ = m;
-    let shine = Rect::from_min_max(r.min + Vec2::new(r.height() * 0.3, 1.5), Pos2::new(r.right() - r.height() * 0.3, r.center().y));
-    pt.rect_filled(shine, Rounding { nw: shine.height(), ne: shine.height(), sw: 2.0, se: 2.0 }, Color32::from_white_alpha(70));
-    pt.rect_stroke(r, round, Stroke::new(1.0, Color32::from_white_alpha(120)));
+    pt.rect_filled(r.translate(Vec2::new(0.0, 2.0)), Rounding::same(rad), Color32::from_black_alpha(45));
+    // Body: lighter at the top, deeper at the bottom.
+    grad_rect(pt, r, rad, rad, mix(c, Color32::WHITE, 0.18), mix(c, Color32::BLACK, 0.22));
+    // Shine: a soft reflection over the upper half that fades out before the middle.
+    let shine = Rect::from_min_max(r.min + Vec2::new(rad * 0.5, 2.0), Pos2::new(r.right() - rad * 0.5, r.center().y + 1.0));
+    grad_rect(pt, shine, shine.height(), 2.0, Color32::from_white_alpha(80), Color32::from_white_alpha(8));
+    pt.rect_stroke(r, Rounding::same(rad), Stroke::new(1.0, mix(c, Color32::BLACK, 0.4)));
+    pt.rect_stroke(r.shrink(1.0), Rounding::same(rad - 1.0), Stroke::new(1.0, Color32::from_white_alpha(70)));
 }
 
 /// A glossy Aero button: accent when `on`, clear glass otherwise.
@@ -489,13 +476,13 @@ fn aero_button(ui: &mut Ui, p: &Palette, icons: &GuiIcons, ic: Option<u16>, labe
     let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 42.0), Sense::click());
     let press = resp.is_pointer_button_down_on();
     if on {
-        gloss_capsule(ui, r, if press { p.accent.gamma_multiply(0.85) } else { p.accent });
+        gloss_capsule(ui, r, if press { mix(p.accent, Color32::BLACK, 0.15) } else { p.accent });
     } else {
-        let round = Rounding::same(21.0);
-        ui.painter().rect_filled(r, round, glass_tint(p));
-        let shine = Rect::from_min_max(r.min + Vec2::new(12.0, 1.5), Pos2::new(r.right() - 12.0, r.center().y));
-        ui.painter().rect_filled(shine, Rounding { nw: 20.0, ne: 20.0, sw: 2.0, se: 2.0 }, glass_gloss(p).gamma_multiply(if resp.hovered() { 1.6 } else { 1.0 }));
-        ui.painter().rect_stroke(r, round, Stroke::new(1.0, glass_rim(p)));
+        let pt = ui.painter();
+        pt.rect_filled(r, Rounding::same(21.0), Color32::from_black_alpha(if p.dark { 60 } else { 18 }));
+        let shine = Rect::from_min_max(r.min + Vec2::new(10.0, 2.0), Pos2::new(r.right() - 10.0, r.center().y + 1.0));
+        grad_rect(pt, shine, shine.height(), 2.0, glass_gloss(p).gamma_multiply(if resp.hovered() { 1.8 } else { 1.2 }), Color32::TRANSPARENT);
+        pt.rect_stroke(r, Rounding::same(21.0), Stroke::new(1.0, glass_rim(p).gamma_multiply(0.8)));
     }
     let col = if on { Color32::WHITE } else { p.text };
     let galley = ui.painter().layout_no_wrap(label.to_string(), bold_font(15.0), col);
@@ -504,39 +491,44 @@ fn aero_button(ui: &mut Ui, p: &Palette, icons: &GuiIcons, ic: Option<u16>, labe
     if let Some(ic) = ic {
         icons.paint(ui.painter(), Rect::from_min_size(Pos2::new(x, r.center().y - 9.0), Vec2::splat(18.0)), ic, col);
     }
-    ui.painter().galley(Pos2::new(x + total - galley.size().x, r.center().y - galley.size().y / 2.0), galley, col);
+    let pos = Pos2::new(x + total - galley.size().x, r.center().y);
+    if on {
+        shadow_text(ui.painter(), pos, Align2::LEFT_CENTER, label, bold_font(15.0), col);
+    } else {
+        ui.painter().text(pos, Align2::LEFT_CENTER, label, bold_font(15.0), col);
+    }
     resp
 }
 
-/// The last block of Главная: who plays, which version, and a big glossy «Играть».
+/// The block under the slider: who plays, which version, and a big glossy «Играть».
 fn play_banner(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, nickname: &str, action: &mut MenuAction) {
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 170.0), Sense::hover());
     let pt = ui.painter();
-    pt.rect_filled(rect.translate(Vec2::new(0.0, 4.0)).expand(1.5), Rounding::same(20.0), Color32::from_black_alpha(50));
-    // Deep blue-green Aero gradient with a sheen.
-    let (a, b) = (Color32::from_rgb(40, 120, 200), Color32::from_rgb(20, 60, 110));
-    let inner = rect.shrink2(Vec2::new(0.0, 20.0));
-    let mut m = egui::Mesh::default();
-    m.colored_vertex(inner.left_top(), a);
-    m.colored_vertex(inner.right_top(), a);
-    m.colored_vertex(inner.right_bottom(), b);
-    m.colored_vertex(inner.left_bottom(), b);
-    m.add_triangle(0, 1, 2);
-    m.add_triangle(0, 2, 3);
-    pt.rect_filled(Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.top() + 40.0)), Rounding { nw: 20.0, ne: 20.0, sw: 0.0, se: 0.0 }, a);
-    pt.rect_filled(Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 40.0), rect.max), Rounding { nw: 0.0, ne: 0.0, sw: 20.0, se: 20.0 }, b);
-    pt.add(egui::Shape::mesh(m));
-    let shine = Rect::from_min_max(rect.min + Vec2::new(1.0, 1.0), Pos2::new(rect.right() - 1.0, rect.top() + rect.height() * 0.42));
-    pt.rect_filled(shine, Rounding { nw: 19.0, ne: 19.0, sw: 0.0, se: 0.0 }, Color32::from_white_alpha(34));
-    pt.rect_stroke(rect, Rounding::same(20.0), Stroke::new(1.0, Color32::from_white_alpha(140)));
+    pt.rect_filled(rect.translate(Vec2::new(0.0, 4.0)).expand(1.5), Rounding::same(20.0), Color32::from_black_alpha(55));
+    // Deep blue Aero glass with a soft sheen fading out at the top.
+    grad_rect(pt, rect, 20.0, 20.0, Color32::from_rgba_unmultiplied(48, 110, 190, 235), Color32::from_rgba_unmultiplied(16, 40, 86, 240));
+    let shine = Rect::from_min_max(rect.min + Vec2::new(2.0, 2.0), Pos2::new(rect.right() - 2.0, rect.top() + 58.0));
+    grad_rect(pt, shine, 18.0, 0.0, Color32::from_white_alpha(46), Color32::TRANSPARENT);
+    pt.rect_stroke(rect.shrink(1.0), Rounding::same(19.0), Stroke::new(1.0, Color32::from_white_alpha(80)));
+    pt.rect_stroke(rect, Rounding::same(20.0), Stroke::new(1.0, Color32::from_black_alpha(70)));
     let x = rect.left() + 18.0;
-    pt.text(Pos2::new(x, rect.top() + 16.0), Align2::LEFT_TOP, "ГОТОВЫ?", FontId::proportional(11.0), Color32::from_white_alpha(190));
-    pt.text(Pos2::new(x, rect.top() + 32.0), Align2::LEFT_TOP, format!("Играть как {nickname}"), bold_font(20.0), Color32::WHITE);
+    pt.text(Pos2::new(x, rect.top() + 16.0), Align2::LEFT_TOP, "ГОТОВЫ?", FontId::proportional(11.0), Color32::from_rgb(170, 215, 255));
+    shadow_text(pt, Pos2::new(x, rect.top() + 32.0), Align2::LEFT_TOP, &format!("Играть как {nickname}"), bold_font(20.0), Color32::WHITE);
     // Version picker and the button, inside the banner.
     let row = Rect::from_min_max(Pos2::new(x, rect.bottom() - 92.0), Pos2::new(rect.right() - 18.0, rect.bottom() - 14.0));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(row).layout(egui::Layout::top_down(egui::Align::Min)));
     child.spacing_mut().item_spacing.y = 8.0;
+    // The version box as dark glass inside the banner.
+    {
+        let v = &mut child.visuals_mut().widgets;
+        for w in [&mut v.inactive, &mut v.hovered, &mut v.active, &mut v.open] {
+            w.weak_bg_fill = Color32::from_black_alpha(80);
+            w.bg_fill = Color32::from_black_alpha(80);
+            w.bg_stroke = Stroke::new(1.0, Color32::from_white_alpha(60));
+            w.rounding = Rounding::same(10.0);
+        }
+    }
     egui::ComboBox::from_id_salt("launcher-version")
         .width(row.width())
         .selected_text(egui::RichText::new(format!("WolfCraft {version}")).color(Color32::WHITE))
@@ -546,12 +538,13 @@ fn play_banner(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, nickna
             ui.label("Новые версии — кнопкой «Проверить» в блоке «Обновления»");
         });
     let (br, resp) = child.allocate_exact_size(Vec2::new(row.width(), 44.0), Sense::click());
-    gloss_capsule(&child, br, if resp.is_pointer_button_down_on() { Color32::from_rgb(70, 170, 60) } else { Color32::from_rgb(90, 200, 70) });
+    gloss_capsule(&child, br, if resp.is_pointer_button_down_on() { Color32::from_rgb(52, 150, 48) } else { Color32::from_rgb(62, 172, 56) });
     let galley = child.painter().layout_no_wrap("Играть".to_string(), bold_font(18.0), Color32::WHITE);
     let tw = galley.size().x + 28.0;
     let gx = br.center().x - tw / 2.0;
-    icons.paint(child.painter(), Rect::from_min_size(Pos2::new(gx, br.center().y - 10.0), Vec2::splat(20.0)), icon::PLAY, Color32::WHITE);
-    child.painter().galley(Pos2::new(gx + 28.0, br.center().y - galley.size().y / 2.0), galley, Color32::WHITE);
+    icons.paint(child.painter(), Rect::from_min_size(Pos2::new(gx, br.center().y - 9.0), Vec2::splat(18.0)).translate(Vec2::new(0.0, 1.2)), icon::PLAY, Color32::from_black_alpha(110));
+    icons.paint(child.painter(), Rect::from_min_size(Pos2::new(gx, br.center().y - 9.0), Vec2::splat(18.0)), icon::PLAY, Color32::WHITE);
+    shadow_text(child.painter(), Pos2::new(gx + 28.0, br.center().y), Align2::LEFT_CENTER, "Играть", bold_font(18.0), Color32::WHITE);
     if resp.clicked() {
         *action = MenuAction::LaunchVersion(version.to_string());
     }
@@ -658,7 +651,7 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
     // Aero: a sheen over the upper half and a bright rim; the square corners are rounded off
     // with the page backdrop's tint.
     let shine = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.top() + rect.height() * 0.42));
-    ui.painter().rect_filled(shine, Rounding { nw: 14.0, ne: 14.0, sw: 0.0, se: 0.0 }, Color32::from_white_alpha(26));
+    grad_rect(ui.painter(), shine, 14.0, 0.0, Color32::from_white_alpha(34), Color32::TRANSPARENT);
     ui.painter().rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0_f32, glass_rim(p)));
     // Dots.
     let dots_w = n as f32 * 14.0;
@@ -691,7 +684,7 @@ fn release_card(ui: &mut Ui, p: &Palette, r: &Release, latest: bool) {
     let (a, b) = if latest { (p.accent, p.accent.gamma_multiply(0.45)) } else { (Color32::from_rgb(60, 66, 80), Color32::from_rgb(36, 40, 50)) };
     let shape = egui::epaint::RectShape::filled(head, Rounding { nw: 12.0, ne: 12.0, sw: 0.0, se: 0.0 }, a);
     pt.add(shape);
-    pt.rect_filled(Rect::from_min_max(head.min, Pos2::new(head.right(), head.center().y)), Rounding { nw: 12.0, ne: 12.0, sw: 0.0, se: 0.0 }, Color32::from_white_alpha(40));
+    grad_rect(pt, Rect::from_min_max(head.min, Pos2::new(head.right(), head.bottom() - 6.0)), 12.0, 0.0, Color32::from_white_alpha(50), Color32::TRANSPARENT);
     let _ = b;
     pt.text(Pos2::new(rect.left() + 14.0, head.top() + 10.0), Align2::LEFT_TOP, format!("v{}", r.version), bold_font(18.0), Color32::WHITE);
     pt.text(Pos2::new(rect.left() + 14.0, head.top() + 33.0), Align2::LEFT_TOP, r.date, FontId::proportional(11.5), Color32::from_white_alpha(200));
@@ -720,7 +713,7 @@ fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
                 ui.spacing_mut().item_spacing.y = 4.0;
                 // Title, then the date on its own line: nothing squeezes on a narrow screen.
                 ui.label(egui::RichText::new(n.title).font(bold_font(15.0)).color(p.text));
-                ui.label(egui::RichText::new(n.date).size(11.5).color(p.accent));
+                ui.label(egui::RichText::new(n.date).size(11.5).color(if p.dark { Color32::from_rgb(140, 195, 255) } else { mix(p.accent, Color32::BLACK, 0.2) }));
                 ui.label(egui::RichText::new(n.text).size(13.0).color(p.text_muted));
             });
         });
@@ -1086,6 +1079,55 @@ mod tests {
 
 
 
+/// Linear mix of two colours (unmultiplied), `t` 0..1.
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    let (a, b) = (a.to_srgba_unmultiplied(), b.to_srgba_unmultiplied());
+    let l = |i: usize| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t.clamp(0.0, 1.0)).round() as u8;
+    Color32::from_rgba_unmultiplied(l(0), l(1), l(2), l(3))
+}
+
+/// A rounded rectangle filled with a vertical gradient (`r_top` rounds the upper corners,
+/// `r_bottom` the lower ones). Used for every Aero shine: no hard edges anywhere.
+fn grad_rect(pt: &egui::Painter, r: Rect, r_top: f32, r_bottom: f32, top: Color32, bottom: Color32) {
+    pt.add(grad_shape(r, r_top, r_bottom, top, bottom));
+}
+
+fn grad_shape(r: Rect, r_top: f32, r_bottom: f32, top: Color32, bottom: Color32) -> egui::Shape {
+    let (rt, rb) = (r_top.min(r.width() / 2.0).min(r.height()), r_bottom.min(r.width() / 2.0).min(r.height()));
+    let mut pts: Vec<Pos2> = Vec::new();
+    let arc = |pts: &mut Vec<Pos2>, c: Pos2, rad: f32, from: f32| {
+        if rad <= 0.5 {
+            pts.push(c);
+            return;
+        }
+        for k in 0..=6 {
+            let a = (from + k as f32 * 15.0).to_radians();
+            pts.push(Pos2::new(c.x + rad * a.cos(), c.y + rad * a.sin()));
+        }
+    };
+    arc(&mut pts, Pos2::new(r.left() + rt, r.top() + rt), rt, 180.0);
+    arc(&mut pts, Pos2::new(r.right() - rt, r.top() + rt), rt, 270.0);
+    arc(&mut pts, Pos2::new(r.right() - rb, r.bottom() - rb), rb, 0.0);
+    arc(&mut pts, Pos2::new(r.left() + rb, r.bottom() - rb), rb, 90.0);
+    let col = |p: Pos2| mix(top, bottom, (p.y - r.top()) / r.height().max(1.0));
+    let mut m = egui::Mesh::default();
+    m.colored_vertex(r.center(), col(r.center()));
+    for p in &pts {
+        m.colored_vertex(*p, col(*p));
+    }
+    let n = pts.len() as u32;
+    for i in 0..n {
+        m.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    egui::Shape::mesh(m)
+}
+
+/// Text with a soft dark shadow under it, so it reads on glossy and light surfaces.
+fn shadow_text(pt: &egui::Painter, pos: Pos2, align: Align2, text: &str, font: FontId, col: Color32) {
+    pt.text(pos + Vec2::new(0.0, 1.2), align, text, font.clone(), Color32::from_black_alpha(110));
+    pt.text(pos, align, text, font, col);
+}
+
 /// Aero glass: a see-through tinted pane (sky-blue in light, deep blue in dark).
 fn glass_tint(p: &Palette) -> Color32 {
     if p.dark { Color32::from_rgba_unmultiplied(22, 36, 60, 165) } else { Color32::from_rgba_unmultiplied(225, 238, 252, 150) }
@@ -1093,7 +1135,7 @@ fn glass_tint(p: &Palette) -> Color32 {
 
 /// The glossy reflection on the upper half of a glass pane.
 fn glass_gloss(p: &Palette) -> Color32 {
-    Color32::from_rgba_unmultiplied(255, 255, 255, if p.dark { 18 } else { 70 })
+    Color32::from_rgba_unmultiplied(255, 255, 255, if p.dark { 26 } else { 80 })
 }
 
 /// The bright rim round a glass pane.
@@ -1108,16 +1150,16 @@ fn glass_card<R>(ui: &mut Ui, p: &Palette, r: f32, margin: Margin, edge: Stroke,
     let out = Frame::none().rounding(Rounding::same(r)).inner_margin(margin).show(ui, add);
     let rect = out.response.rect;
     let hover = out.response.hovered() as u8 as f32;
-    let mut shapes = vec![
+    // Shine over the upper part, fading out smoothly (no hard band across the content).
+    let gloss = Rect::from_min_max(rect.min + Vec2::splat(1.0), Pos2::new(rect.right() - 1.0, rect.top() + (rect.height() * 0.55).min(80.0)));
+    let shine = glass_gloss(p).gamma_multiply(0.9 + 0.4 * hover);
+    let shapes = vec![
         egui::Shape::rect_filled(rect.translate(Vec2::new(0.0, 4.0)).expand(1.5), Rounding::same(r + 1.5), Color32::from_black_alpha(45)),
         egui::Shape::rect_filled(rect, Rounding::same(r), glass_tint(p)),
+        grad_shape(gloss, (r - 1.0).max(0.0), 0.0, shine, Color32::TRANSPARENT),
+        egui::Shape::rect_stroke(rect.shrink(1.0), Rounding::same((r - 1.0).max(0.0)), Stroke::new(1.0, glass_rim(p).gamma_multiply(0.7))),
+        egui::Shape::rect_stroke(rect, Rounding::same(r), Stroke::new(edge.width, if edge.color == p.outline { Color32::from_black_alpha(60) } else { edge.color })),
     ];
-    let gloss = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.top() + (rect.height() * 0.46).min(60.0)));
-    shapes.push(egui::Shape::rect_filled(gloss, Rounding { nw: r, ne: r, sw: 0.0, se: 0.0 }, glass_gloss(p).gamma_multiply(1.0 + 0.4 * hover)));
-    // A thin bright line where the gloss ends, like the edge of a reflection.
-    shapes.push(egui::Shape::line_segment([Pos2::new(rect.left() + r, gloss.bottom()), Pos2::new(rect.right() - r, gloss.bottom())], Stroke::new(1.0, glass_gloss(p).gamma_multiply(0.6))));
-    shapes.push(egui::Shape::rect_stroke(rect.shrink(1.0), Rounding::same((r - 1.0).max(0.0)), Stroke::new(1.0, glass_rim(p))));
-    shapes.push(egui::Shape::rect_stroke(rect, Rounding::same(r), Stroke::new(edge.width, if edge.color == p.outline { glass_rim(p).gamma_multiply(0.6) } else { edge.color })));
     ui.painter().set(back, egui::Shape::Vec(shapes));
     out
 }
