@@ -444,7 +444,7 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
         let wide = rect.width() > rect.height() * 1.2;
         // Upright phone: the title and one column of buttons, all of it in the middle of the
         // screen.
-        let list_h = 8.0 * 56.0 + 30.0;
+        let list_h = 3.0 * 56.0 + 30.0;
         let (logo_area, list_area) = if wide {
             (Rect::from_min_max(rect.min, Pos2::new(rect.center().x, rect.bottom())), Rect::from_min_max(Pos2::new(rect.center().x, rect.top()), rect.max))
         } else {
@@ -478,11 +478,8 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
                         let next = if open == Some(want) { None } else { Some(want) };
                         ui.ctx().data_mut(|d| d.insert_temp(sheet_id, next));
                     };
-                    let rows: [[(u16, &str, u8); 2]; 3] = [
-                        [(icon::GLOBE, "Сеть", 0), (icon::BRUSH, "Скины", 1)],
-                        [(icon::BACKPACK, "Магазин", 2), (icon::STAR, "Новости", 3)],
-                        [(icon::PROPS, "Ещё", 4), (icon::GEAR, "Настройки", 5)],
-                    ];
+                    // Just three buttons: Играть, Настройки, Выход.
+                    let rows: [[(u16, &str, u8); 1]; 1] = [[(icon::GEAR, "Настройки", 5)]];
                     // Lying phone: pairs side by side; upright: one button under another.
                     let rows: Vec<Vec<(u16, &str, u8)>> = if wide { rows.iter().map(|r| r.to_vec()).collect() } else { rows.iter().flatten().map(|b| vec![*b]).collect() };
                     for row in rows {
@@ -2049,8 +2046,8 @@ mod tests {
                 frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
                 assert_eq!(action, expected, "{label}, {size:?}");
             }
-            // The dock under the menu.
-            for (label, expected) in [("Сеть", MenuAction::OpenNetwork), ("Магазин", MenuAction::OpenSettings), ("Скины", MenuAction::OpenSettings)] {
+            // Only three buttons now: the old dock items are gone.
+            for (label, expected) in [] as [(&str, MenuAction); 0] {
                 let mut action = MenuAction::None;
                 let mut frame = |events| ctx.run(egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), events, ..Default::default()
@@ -2064,8 +2061,6 @@ mod tests {
                 frame(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
                 assert_eq!(action, expected, "{label}, {size:?}");
             }
-            let tab: usize = ctx.data(|d| d.get_temp(egui::Id::new("settings-tab"))).unwrap_or(99);
-            assert_eq!(tab, 0, "«Скины» opens the profile settings");
         }
     }
 
@@ -2111,7 +2106,7 @@ mod tests {
             }, |ctx| { game_menu(ctx, &icons, "0.3.0", None); });
             render();
             let out = render();
-            for label in ["WOLFCRAFT", "Играть", "Настройки", "Выход", "Скины", "Магазин", "Сеть", "Новости", "Ещё"] {
+            for label in ["WOLFCRAFT", "Играть", "Настройки", "Выход"] {
                 let r = out.shapes.iter().find_map(|s| match &s.shape {
                     egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t.galley.rect.translate(t.pos.to_vec2())), _ => None
                 }).expect(label);
