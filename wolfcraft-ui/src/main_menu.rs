@@ -1611,6 +1611,10 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
     setting_row(ui, "Мультяшный свет", Some("Мягкие светлые тени, яркие краски, контур-подсветка мобов"), |ui| {
         res.changed |= toggle_switch(ui, &mut s.fx_toon).changed();
     });
+    ui.add_space(6.0);
+    setting_row(ui, "Быстрая листва", Some("Кроны без просветов — сильно быстрее на слабых телефонах"), |ui| {
+        res.changed |= toggle_switch(ui, &mut s.fast_leaves).changed();
+    });
     if (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading, s.fx_toon) != before {
         s.shaders = 3;
     }

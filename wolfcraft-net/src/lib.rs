@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 pub const DEFAULT_PORT: u16 = 25570;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -80,10 +80,36 @@ pub enum S2C {
     Voice { id: u32, data: String },
 }
 
+/// Messages longer than this go compressed (like the Krypton mod): the world's edit list on
+/// join, long chats, voice frames. Short ones (player states) stay plain — cheaper to send.
+const COMPRESS_OVER: usize = 512;
+
 pub fn write_msg<T: Serialize>(w: &mut impl Write, m: &T) -> std::io::Result<()> {
-    let mut line = serde_json::to_string(m).map_err(std::io::Error::other)?;
+    let json = serde_json::to_string(m).map_err(std::io::Error::other)?;
+    let mut line = if json.len() > COMPRESS_OVER { compress_line(&json).unwrap_or(json) } else { json };
     line.push('\n');
     w.write_all(line.as_bytes())
+}
+
+/// `~` + base64(deflate(json)); a line starting with `~` is never JSON.
+fn compress_line(json: &str) -> Option<String> {
+    use base64::Engine;
+    use flate2::Compression;
+    use flate2::write::DeflateEncoder;
+    let mut enc = DeflateEncoder::new(Vec::new(), Compression::fast());
+    enc.write_all(json.as_bytes()).ok()?;
+    let packed = enc.finish().ok()?;
+    let out = format!("~{}", base64::engine::general_purpose::STANDARD_NO_PAD.encode(packed));
+    (out.len() < json.len()).then_some(out)
+}
+
+fn decompress_line(line: &str) -> std::io::Result<String> {
+    use base64::Engine;
+    use std::io::Read;
+    let packed = base64::engine::general_purpose::STANDARD_NO_PAD.decode(line.trim_start_matches('~')).map_err(std::io::Error::other)?;
+    let mut out = String::new();
+    flate2::read::DeflateDecoder::new(&packed[..]).take(64 << 20).read_to_string(&mut out)?;
+    Ok(out)
 }
 
 /// Reads one message; `Ok(None)` when the peer closed the connection.
@@ -97,7 +123,12 @@ pub fn read_msg<T: DeserializeOwned>(r: &mut impl BufRead) -> std::io::Result<Op
         if line.trim().is_empty() {
             continue;
         }
-        return serde_json::from_str(line.trim()).map(Some).map_err(std::io::Error::other);
+        let text = line.trim();
+        if text.starts_with('~') {
+            let json = decompress_line(text)?;
+            return serde_json::from_str(&json).map(Some).map_err(std::io::Error::other);
+        }
+        return serde_json::from_str(text).map(Some).map_err(std::io::Error::other);
     }
 }
 
@@ -182,6 +213,20 @@ impl Drop for Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_messages_go_compressed_and_come_back_whole() {
+        let long = C2S::Chat("Привет, мир! ".repeat(200));
+        let mut data = Vec::new();
+        write_msg(&mut data, &long).unwrap();
+        assert_eq!(data[0], b'~', "compressed on the wire");
+        assert!(data.len() < serde_json::to_string(&long).unwrap().len() / 3);
+        let short = C2S::Chat("hi".into());
+        write_msg(&mut data, &short).unwrap();
+        let mut r = std::io::BufReader::new(data.as_slice());
+        assert_eq!(read_msg::<C2S>(&mut r).unwrap().unwrap(), long);
+        assert_eq!(read_msg::<C2S>(&mut r).unwrap().unwrap(), short);
+    }
 
     #[test]
     fn building_edits_do_not_truncate_wide_ids() {

@@ -2456,6 +2456,11 @@ impl App {
                 let mut sky = sky_color(day, twilight, altitude);
                 // Voxel look: creatures and items keep sharp cube edges (no rounded plastic).
                 wolfcraft_engine::renderer::model::set_rounded(false);
+                // "Fast leaves" switched: rebuild the chunk meshes with the new look.
+                if wolfcraft_engine::mesher::FAST_LEAVES.load(std::sync::atomic::Ordering::Relaxed) != self.settings.fast_leaves {
+                    wolfcraft_engine::mesher::set_fast_leaves(self.settings.fast_leaves);
+                    s.chunks.remesh_all();
+                }
                 if self.settings.fx_toon {
                     // Cartoon sky: a clean candy blue by day.
                     let k = (day as f32 * (1.0 - altitude)).clamp(0.0, 1.0) * 0.7;

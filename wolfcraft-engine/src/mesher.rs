@@ -190,6 +190,13 @@ fn face_visible(b: Block, n: Block) -> bool {
     }
 }
 
+/// "Fast" leaves (a setting): crowns drawn solid, no transparent holes — much cheaper on phones.
+pub static FAST_LEAVES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_fast_leaves(on: bool) {
+    FAST_LEAVES.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 fn is_leaves(b: Block) -> bool {
     matches!(b, Block::OakLeaves | Block::SpruceLeaves | Block::BirchLeaves | Block::AcaciaLeaves)
 }
@@ -558,7 +565,8 @@ fn mesh_direction(inp: &MeshInput, f: usize, out: &mut MeshData, bl: &dyn Fn([i3
                 let lit = bl(q) as u64;
                 let leaves = (info.render == RenderKind::Cutout && b.blocks_light()) as u64;
                 let turf = (a == 1 && sign > 0 && matches!(b, Block::Grass | Block::DryGrass | Block::SwampGrass)) as u64;
-                let key = (1u64 << 63) | (tile as u64) | (ao[0] << 16) | (ao[1] << 18) | (ao[2] << 20) | (ao[3] << 22) | (sky << 24) | (emit << 28) | (trans << 29) | (lit << 30) | (leaves << 34) | (turf << 35);
+                let solid_leaves = (leaves == 1 && FAST_LEAVES.load(std::sync::atomic::Ordering::Relaxed)) as u64;
+                let key = (1u64 << 63) | (tile as u64) | (ao[0] << 16) | (ao[1] << 18) | (ao[2] << 20) | (ao[3] << 22) | (sky << 24) | (emit << 28) | (trans << 29) | (lit << 30) | (leaves << 34) | (turf << 35) | (solid_leaves << 36);
                 mask[(i + j * 16) as usize] = key;
                 any = true;
             }
@@ -598,6 +606,8 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
     let emit = ((key >> 28) & 1) as u32;
     let trans = (key >> 29) & 1 == 1;
     let lit = ((key >> 30) & 15) as u32 | (((key >> 34) & 1) as u32) << 4 | (((key >> 35) & 1) as u32) << 6;
+    // Fast leaves: drawn solid (no see-through holes), like Minecraft's "Fast" graphics.
+    let solid = ((key >> 36) & 1) as u32;
 
     let plane = (s + if sign > 0 { 1 } else { 0 }) as f32;
     let corners = [(i0, j0), (i0 + w, j0), (i0 + w, j0 + h), (i0, j0 + h)];
@@ -618,7 +628,7 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
             (*cu as f32, -(*cv as f32))
         };
         let aof = [0.45, 0.65, 0.82, 1.0][ao[ci] as usize];
-        verts.push(Vertex { pos, uv: [tu, tv], flags: tile | (emit << 16) | ((f as u32) << 17) | (lit << 20), light: [aof, sky] });
+        verts.push(Vertex { pos, uv: [tu, tv], flags: tile | (emit << 16) | ((f as u32) << 17) | (lit << 20) | (solid << 27), light: [aof, sky] });
     }
     let flip = ao[0] + ao[2] < ao[1] + ao[3];
     let tri: [u32; 6] = match (sign > 0, flip) {
