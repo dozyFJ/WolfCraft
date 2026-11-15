@@ -119,6 +119,8 @@ pub struct TechState {
     /// Solar panel: in the sun right now / it is day.
     pub sunny: bool,
     pub day: bool,
+    /// Wind / lava / water around a generator (its share of the full rate).
+    pub env: f32,
 }
 
 pub struct GameSession {
@@ -1873,7 +1875,7 @@ impl GameSession {
         for c in net {
             if let Some(st) = self.tech.get(c) {
                 held += st.energy;
-                if self.chunks.get_block(*c).and_then(wolfcraft_engine::wolftech::kind).is_some_and(|k| matches!(k, wolfcraft_engine::wolftech::Kind::Generator | wolfcraft_engine::wolftech::Kind::Solar)) {
+                if self.chunks.get_block(*c).and_then(wolfcraft_engine::wolftech::kind).is_some_and(wolfcraft_engine::wolftech::is_source) {
                     make += st.flow;
                 }
             }
@@ -1944,6 +1946,25 @@ impl GameSession {
                     st.sunny = day && (1..40).all(|k| g.offset(*c, 0, 0, k).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
                 }
             }
+            // Wind, lava heat and water: what is around them, checked once a second.
+            let rain = self.weather.rain;
+            let sea = self.planet.radius - 1.0;
+            for (c, st) in self.tech.iter_mut() {
+                let Some(k) = self.chunks.get_block(*c).and_then(wt::kind) else { continue };
+                let around = |f: fn(wolfcraft_engine::block::Block) -> bool| {
+                    [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)].iter().filter(|(a, b, kk)| g.offset(*c, *a, *b, *kk).and_then(|n| self.chunks.get_block(n)).is_some_and(f)).count() as f32
+                };
+                st.env = match k {
+                    Kind::Wind => {
+                        let open = (1..20).all(|kk| g.offset(*c, 0, 0, kk).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
+                        let alt = (wolfcraft_engine::cubesphere::radial(g.cell_center(*c)) - sea).max(0.0) as f32;
+                        if open { (0.25 + (alt / 40.0).min(1.0) * 0.75) * (1.0 + 1.5 * rain) } else { 0.1 }
+                    }
+                    Kind::Geo => around(|b| b.is_lava()),
+                    Kind::Water => around(|b| b.is_water()),
+                    _ => 0.0,
+                };
+            }
         }
         // Each machine on its own: fuel, recipes, progress.
         let creative = self.player.is_creative();
@@ -1955,11 +1976,15 @@ impl GameSession {
             let mut st = self.tech[&c];
             st.working = false;
             match k {
-                Kind::Generator => {
+                Kind::Wind | Kind::Geo | Kind::Water => {
+                    st.flow = sp.rate * st.env;
+                    st.working = st.flow > 0.0;
+                }
+                Kind::Generator | Kind::Reactor => {
                     if st.burn <= 0.0 && st.energy < sp.capacity * 0.95 {
                         let v = self.container_slots(c, b);
-                        if let Some(f) = v.get(1).copied().flatten().filter(|f| wt::fuel(f.id) > 0.0) {
-                            st.burn = wt::fuel(f.id);
+                        if let Some(f) = v.get(1).copied().flatten().filter(|f| wt::fuel_for(k, f.id) > 0.0) {
+                            st.burn = wt::fuel_for(k, f.id);
                             v[1] = if f.count > 1 { Some(ItemStack { count: f.count - 1, ..f }) } else { None };
                         }
                     }

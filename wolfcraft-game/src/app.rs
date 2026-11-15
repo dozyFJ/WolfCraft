@@ -2267,7 +2267,7 @@ impl App {
                                             let sp = wolfcraft_engine::wolftech::spec(k);
                                             let what = if w {
                                                 match k {
-                                                    wolfcraft_engine::wolftech::Kind::Generator | wolfcraft_engine::wolftech::Kind::Solar => format!("даёт {:.0} ЭЕ/с", sp.rate),
+                                                    k if wolfcraft_engine::wolftech::is_source(k) => format!("даёт {:.0} ЭЕ/с", s.tech.get(&pos).map(|t| t.flow).unwrap_or(sp.rate)),
                                                     _ => format!("работает · {:.0} ЭЕ/с", sp.rate),
                                                 }
                                             } else {
@@ -2290,7 +2290,7 @@ impl App {
                                         if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
-                                                Kind::Generator => slot == 1 && wolfcraft_engine::wolftech::fuel(st.id) > 0.0,
+                                                Kind::Generator | Kind::Reactor => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k, st.id) > 0.0,
                                                 Kind::Crusher | Kind::Induction | Kind::Enricher => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
                                                 Kind::Cell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
                                                 _ => false,
@@ -2313,8 +2313,8 @@ impl App {
                                         layout: if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
-                                                Kind::Generator => wolfcraft_ui::container_ui::Layout::Generator,
-                                                Kind::Solar => wolfcraft_ui::container_ui::Layout::Panel,
+                                                Kind::Generator | Kind::Reactor => wolfcraft_ui::container_ui::Layout::Generator,
+                                                Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water => wolfcraft_ui::container_ui::Layout::Panel,
                                                 Kind::Cell => wolfcraft_ui::container_ui::Layout::Charger,
                                                 _ => wolfcraft_ui::container_ui::Layout::Machine,
                                             }

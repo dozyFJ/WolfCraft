@@ -203,6 +203,10 @@ pub mod tiles {
     pub const ENRICHER_FRONT: u16 = 205;
     pub const BUILDER_TOP: u16 = 206;
     pub const BUILDER_SIDE: u16 = 207;
+    pub const WIND_TOP: u16 = 208;
+    pub const GEO_FRONT: u16 = 209;
+    pub const WATER_FRONT: u16 = 210;
+    pub const REACTOR_SIDE: u16 = 211;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2120,6 +2124,44 @@ pub(crate) fn build() -> Vec<(String, Image)> {
                     }
                 }
             }
+            // Geothermal: a window onto glowing lava, wavy.
+            4 => {
+                for y in 5..12 {
+                    for x in 4..12 {
+                        let wave = ((x as f32 * 0.9).sin() * 1.2) as i32;
+                        if y as i32 >= 7 + wave {
+                            q.put(x, y, if (x + y) % 3 == 0 { Rgb(1.0, 0.85, 0.30) } else { c }, 1.0);
+                        }
+                    }
+                }
+            }
+            // Water mill: a blue wheel with spokes.
+            5 => {
+                for y in 4..12u32 {
+                    for x in 4..12u32 {
+                        let (dx, dy) = (x as i32 * 2 - 15, y as i32 * 2 - 15);
+                        let r2 = dx * dx + dy * dy;
+                        let spoke = dx == dy || dx == -dy || dx.abs() <= 1 || dy.abs() <= 1;
+                        if (40..=64).contains(&r2) || (r2 < 40 && spoke) {
+                            q.put(x, y, c, 1.0);
+                        }
+                    }
+                }
+            }
+            // Reactor: a green glowing core behind bars, hazard stripes at the edges.
+            6 => {
+                for y in 3..13u32 {
+                    for x in 3..13u32 {
+                        if x == 3 || x == 12 || y == 3 || y == 12 {
+                            q.put(x, y, if (x + y) % 4 < 2 { Rgb(0.95, 0.80, 0.15) } else { Rgb(0.10, 0.10, 0.10) }, 1.0);
+                        } else if x % 3 == 1 {
+                            q.put(x, y, Rgb(0.30, 0.32, 0.36), 1.0);
+                        } else {
+                            q.put(x, y, if (5..10).contains(&x) && (5..10).contains(&y) { Rgb(0.65, 1.0, 0.45) } else { c }, 1.0);
+                        }
+                    }
+                }
+            }
             // Enricher: a vessel with a bubbling liquid.
             _ => {
                 for y in 6..12 {
@@ -2169,6 +2211,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(CRUSHER_FRONT, "crusher", p(|q| front(q, 307, Rgb(0.75, 0.78, 0.82), 1)));
     l.add(INDUCTION_FRONT, "induction_furnace", p(|q| front(q, 308, Rgb(1.0, 0.40, 0.10), 2)));
     l.add(ENRICHER_FRONT, "enricher", p(|q| front(q, 309, Rgb(0.20, 0.80, 0.70), 3)));
+    // (the new generators are added after the builder table tiles, in id order)
     // Конструктор: a drafting table — a blue blueprint with white lines on top, a hammer and
     // a saw hanging on the side.
     l.add(BUILDER_TOP, "builder_table_top", p(|q| {
@@ -2211,6 +2254,25 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    // Wind turbine top: four white blades round a hub.
+    l.add(WIND_TOP, "wind_turbine_top", p(|q| {
+        casing(q, 312);
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as i32 - 8, y as i32 - 8);
+                let blade = (dx > 0 && dy.abs() <= 1 && dx < 7) || (dx < 0 && dx > -7 && (dy + 1).abs() <= 1) || (dy > 0 && dy < 7 && (dx + 1).abs() <= 1) || (dy < 0 && dy > -7 && dx.abs() <= 1);
+                if blade {
+                    q.put(x, y, Rgb(0.92, 0.94, 0.96), 1.0);
+                }
+                if dx.abs() <= 1 && dy.abs() <= 1 {
+                    q.put(x, y, Rgb(0.35, 0.38, 0.45), 1.0);
+                }
+            }
+        }
+    }));
+    l.add(GEO_FRONT, "geothermal_generator", p(|q| front(q, 313, Rgb(1.0, 0.42, 0.08), 4)));
+    l.add(WATER_FRONT, "water_mill", p(|q| front(q, 314, Rgb(0.30, 0.60, 1.0), 5)));
+    l.add(REACTOR_SIDE, "reactor", p(|q| front(q, 315, Rgb(0.25, 0.75, 0.30), 6)));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

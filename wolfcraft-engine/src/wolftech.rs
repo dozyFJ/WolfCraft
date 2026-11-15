@@ -19,6 +19,14 @@ pub enum Kind {
     Induction,
     /// Ore → 3 dust (the best yield).
     Enricher,
+    /// Spins in the wind: more up high under the open sky, much more in a storm.
+    Wind,
+    /// Draws heat from lava around it (each lava side adds).
+    Geo,
+    /// Turned by water around it (each water side adds).
+    Water,
+    /// Splits uranium: a lot of energy for a long time.
+    Reactor,
 }
 
 pub struct Spec {
@@ -41,6 +49,10 @@ pub fn kind(b: Block) -> Option<Kind> {
         Block::Crusher => Kind::Crusher,
         Block::InductionFurnace => Kind::Induction,
         Block::Enricher => Kind::Enricher,
+        Block::WindTurbine => Kind::Wind,
+        Block::GeoGenerator => Kind::Geo,
+        Block::WaterMill => Kind::Water,
+        Block::Reactor => Kind::Reactor,
         _ => return None,
     })
 }
@@ -52,7 +64,34 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Cell => Spec { name: "Энергоячейка", capacity: 40_000.0, rate: 0.0, time: 0.0, hint: "Хранит энергию, заряжает снаряжение (положите его слева)" },
         Kind::Crusher => Spec { name: "Дробитель", capacity: 200.0, rate: 10.0, time: 4.0, hint: "Руда → 2 пыли, камень → булыжник → гравий → песок" },
         Kind::Induction => Spec { name: "Индукционная печь", capacity: 160.0, rate: 8.0, time: 2.0, hint: "Плавит быстро, на энергии" },
+        Kind::Wind => Spec { name: "Ветрогенератор", capacity: 1_000.0, rate: 12.0, time: 0.0, hint: "Чем выше и чем сильнее непогода, тем больше энергии" },
+        Kind::Geo => Spec { name: "Геотермальный генератор", capacity: 2_000.0, rate: 8.0, time: 0.0, hint: "Поставьте рядом с лавой: каждая сторона с лавой — +8 ЭЕ/с" },
+        Kind::Water => Spec { name: "Гидрогенератор", capacity: 1_000.0, rate: 3.0, time: 0.0, hint: "Поставьте в воду: каждая сторона с водой — +3 ЭЕ/с" },
+        Kind::Reactor => Spec { name: "Ядерный реактор", capacity: 10_000.0, rate: 120.0, time: 0.0, hint: "Положите урановый слиток (10 минут) или сырой уран" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
+    }
+}
+
+/// Makes energy (generators of every kind).
+pub fn is_source(k: Kind) -> bool {
+    matches!(k, Kind::Generator | Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Reactor)
+}
+
+/// Burns fuel from its slot (the coal generator and the reactor).
+pub fn burns(k: Kind) -> bool {
+    matches!(k, Kind::Generator | Kind::Reactor)
+}
+
+/// Seconds of work one item of fuel gives this generator.
+pub fn fuel_for(k: Kind, id: ItemId) -> f32 {
+    match k {
+        Kind::Generator => fuel(id),
+        Kind::Reactor => match id {
+            ids::URANIUM_INGOT => 600.0,
+            ids::RAW_URANIUM => 200.0,
+            _ => 0.0,
+        },
+        _ => 0.0,
     }
 }
 
@@ -121,12 +160,12 @@ pub fn share(nodes: &[Node], dt: f32) -> Vec<f32> {
     let mut e: Vec<f32> = nodes.iter().map(|n| n.energy).collect();
     // 1. Generators produce into themselves (up to capacity).
     for (i, n) in nodes.iter().enumerate() {
-        if matches!(n.kind, Kind::Generator | Kind::Solar) {
+        if is_source(n.kind) {
             e[i] = (e[i] + n.flow * dt).min(n.cap);
         }
     }
     // 2. Pool everything that can be given: generators and cells.
-    let givers: Vec<usize> = (0..nodes.len()).filter(|&i| matches!(nodes[i].kind, Kind::Generator | Kind::Solar | Kind::Cell)).collect();
+    let givers: Vec<usize> = (0..nodes.len()).filter(|&i| is_source(nodes[i].kind) || nodes[i].kind == Kind::Cell).collect();
     let mut pool: f32 = givers.iter().map(|&i| e[i]).sum();
     for &i in &givers {
         e[i] = 0.0;

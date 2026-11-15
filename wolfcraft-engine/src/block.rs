@@ -1866,6 +1866,10 @@ blocks! {
     2472 EnricherD1 => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, mtiles(t::ENRICHER_FRONT, 1))),
     2473 EnricherD2 => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, mtiles(t::ENRICHER_FRONT, 2))),
     2474 EnricherD3 => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, mtiles(t::ENRICHER_FRONT, 3))),
+    2475 WindTurbine => needs_pick(info("Ветрогенератор", Opaque, 4.0, Pickaxe, column(t::TECH_SIDE, t::WIND_TOP, t::TECH_TOP))),
+    2476 GeoGenerator => needs_pick(info("Геотермальный генератор", Opaque, 4.0, Pickaxe, column(t::GEO_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2477 WaterMill => needs_pick(info("Гидрогенератор", Opaque, 4.0, Pickaxe, column(t::WATER_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2478 Reactor => needs_pick(info("Ядерный реактор", Opaque, 6.0, Pickaxe, column(t::REACTOR_SIDE, t::TECH_TOP, t::TECH_TOP))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
