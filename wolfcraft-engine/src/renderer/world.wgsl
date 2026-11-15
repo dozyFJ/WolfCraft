@@ -5,7 +5,8 @@ struct Globals {
     fog: vec4<f32>,      // rgb: fog colour, a: density (1 / fog distance)
     misc: vec4<f32>,     // x: time, y: underwater (0/1), z: crack, w: shader preset (0 off, 1 light, 2 ultra)
     env: vec4<f32>,      // x: season 0..4 (spring, summer, autumn, winter), y: snow cover, z: humidity
-    fx: vec4<f32>,       // x: relief mode (0 off, 1 lit, 2 parallax), y: relief strength, z: flags (1 wind, 2 water, 4 grading, 8 cartoon)
+    fx: vec4<f32>,       // x: relief mode (0 off, 1 lit, 2 parallax), y: relief strength, z: flags (1 wind, 2 water, 4 grading, 8 cartoon, 16 bloom, 32 rays, 64 wet, 128 sun shadows)
+    shadow: mat4x4<f32>, // camera-relative position -> sun shadow map clip space
     tiles: array<vec4<f32>, 256>, // xy: uv min, zw: uv size of every block sprite
 };
 
@@ -15,6 +16,8 @@ struct Globals {
 @group(0) @binding(3) var entities_atlas: texture_2d<f32>;
 @group(0) @binding(4) var items_atlas: texture_2d<f32>;
 @group(0) @binding(5) var relief: texture_2d<f32>; // height maps of the block tiles (red)
+@group(0) @binding(6) var shadow_map: texture_depth_2d;
+@group(0) @binding(7) var shadow_samp: sampler_comparison;
 
 fn fx_on(bit: u32) -> bool {
     return (u32(g.fx.z + 0.5) & bit) != 0u;
@@ -76,6 +79,35 @@ fn vs_main(in: VsIn) -> VsOut {
     out.fade = in.inst.w;
     out.world = g.cam.xyz + rel;
     return out;
+}
+
+// ---- sun shadows (the «RTX» preset) ----
+@vertex
+fn vs_shadow(in: VsIn) -> @builtin(position) vec4<f32> {
+    let rel = vec3<f32>(in.pos.xyz) / 1024.0 + in.inst.xyz;
+    return g.shadow * vec4<f32>(rel, 1.0);
+}
+
+// 1 = in the sun, 0 = in the shadow of a block (soft edged: 4 taps), fading out towards the
+// edge of the shadowed area.
+fn sun_shadow(rel: vec3<f32>, n: vec3<f32>) -> f32 {
+    if (!fx_on(128u)) {
+        return 1.0;
+    }
+    let p = g.shadow * vec4<f32>(rel + n * 0.08, 1.0);
+    let uv = vec2<f32>(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
+    if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0 || p.z >= 1.0) {
+        return 1.0;
+    }
+    let texel = 1.0 / f32(textureDimensions(shadow_map).x);
+    var s = 0.0;
+    for (var i = 0; i < 4; i = i + 1) {
+        let o = vec2<f32>(f32(i % 2) - 0.5, f32(i / 2) - 0.5) * texel * 1.5;
+        s = s + textureSampleCompareLevel(shadow_map, shadow_samp, uv + o, p.z - 0.0008);
+    }
+    s = s * 0.25;
+    let edge = smoothstep(0.85, 1.0, max(abs(p.x), abs(p.y)));
+    return mix(s, 1.0, edge);
 }
 
 fn face_normal(face: u32) -> vec3<f32> {
@@ -164,7 +196,7 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
         default: { face_k = 0.68; }
     }
     // Directional light comes from the sun, ambient from the sky; at night only dim moonlight.
-    var diffuse = max(dot(n, sun), 0.0);
+    var diffuse = max(dot(n, sun), 0.0) * sun_shadow(in.rel, n);
     let toon = fx_on(8u);
     var ao = in.light.x;
     var sky_amb = 0.58;

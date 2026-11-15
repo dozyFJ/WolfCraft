@@ -345,7 +345,8 @@ pub struct Settings {
     pub camera_smooth: f32,
     /// Phones: pick blocks with the finger instead of the crosshair (off: crosshair).
     pub tap_aim: bool,
-    /// Shader preset on top of the texture pack: 0 off, 1 light, 2 ultra, 3 custom, 4 cartoon.
+    /// Shader preset on top of the texture pack: 0 off, 1 light, 2 ultra, 3 custom, 4 cartoon,
+    /// 5 «RTX» (ultra + real sun shadows).
     pub shaders: u8,
     /// Texture relief: 0 off, 1 lit relief, 2 parallax depth.
     pub relief_mode: u8,
@@ -372,6 +373,9 @@ pub struct Settings {
     pub fx_rays: bool,
     #[serde(default = "yes")]
     pub fx_wet: bool,
+    /// Real sun shadows from every block (the «RTX» preset): slower, for strong devices.
+    #[serde(default)]
+    pub fx_shadows: bool,
     /// Look the settings were last moved to (1: the cartoon style became the default).
     /// Missing in old files, so they read 0 and get moved once.
     #[serde(default)]
@@ -421,12 +425,15 @@ impl Settings {
             1 => (1, 1.0, true),
             2 => (2, 1.2, true),
             4 => (0, 1.0, true),
+            // «RTX»: everything — deep relief, real sun shadows, glow, rays, wet blocks.
+            5 => (2, 1.3, true),
             _ => return,
         };
         self.fx_toon = preset == 4;
-        // Ultra adds the PC-style glow and sun rays.
-        self.fx_bloom = preset == 2;
-        self.fx_rays = preset == 2;
+        // Ultra and RTX add the PC-style glow and sun rays; RTX also casts real shadows.
+        self.fx_bloom = preset == 2 || preset == 5;
+        self.fx_rays = preset == 2 || preset == 5;
+        self.fx_shadows = preset == 5;
         self.fx_wet = preset != 0;
         self.relief_mode = relief;
         self.relief_strength = strength;
@@ -437,7 +444,7 @@ impl Settings {
 
     /// Effect flags for the renderer (1 wind, 2 water, 4 grading).
     pub fn fx_flags(&self) -> u8 {
-        self.fx_wind as u8 | (self.fx_water as u8) << 1 | (self.fx_grading as u8) << 2 | (self.fx_toon as u8) << 3 | (self.fx_bloom as u8) << 4 | (self.fx_rays as u8) << 5 | (self.fx_wet as u8) << 6
+        self.fx_wind as u8 | (self.fx_water as u8) << 1 | (self.fx_grading as u8) << 2 | (self.fx_toon as u8) << 3 | (self.fx_bloom as u8) << 4 | (self.fx_rays as u8) << 5 | (self.fx_wet as u8) << 6 | (self.fx_shadows as u8) << 7
     }
 }
 
@@ -466,6 +473,7 @@ impl Default for Settings {
             fx_bloom: false,
             fx_rays: false,
             fx_wet: true,
+            fx_shadows: false,
             // Phones are fill-rate bound: three quarters of the screen looks the same and is
             // close to twice as fast.
             render_scale: if cfg!(target_os = "android") { 0.75 } else { 1.0 },

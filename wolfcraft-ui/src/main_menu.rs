@@ -1570,9 +1570,9 @@ const SETTINGS_TABS: [(u16, &str); 7] = [(icon::HEART, "Профиль"), (icon:
 /// Resource packs: built-in ones and the player's own, plus import from a link.
 fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs: &PacksView, res: &mut SettingsResult) {
     // Shaders: a preset, then every effect on its own (changing one switches to "Свои").
-    setting_row(ui, "Шейдеры", Some("Лёгкие: рельеф, ветер, вода. Ультра: ещё глубина швов (параллакс). Мульт: мягкий яркий свет и сочные цвета, как в топовых симуляторах"), |ui| {
+    setting_row(ui, "Шейдеры", Some("Лёгкие: рельеф, ветер, вода. Ультра: ещё глубина швов (параллакс). Мульт: мягкий яркий свет и сочные цвета, как в топовых симуляторах. RTX: всё сразу и настоящие тени от солнца (для мощных устройств)"), |ui| {
         let mut preset = s.shaders;
-        if segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкие"), (2, "Ультра"), (4, "Мульт"), (3, "Свои")], &mut preset) {
+        if segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкие"), (2, "Ультра"), (5, "RTX"), (4, "Мульт"), (3, "Свои")], &mut preset) {
             if preset != 3 {
                 s.apply_shader_preset(preset);
             } else {
@@ -1623,6 +1623,10 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
     ui.add_space(6.0);
     setting_row(ui, "Мокрые блоки", Some("В дождь блоки под небом темнеют и блестят"), |ui| {
         res.changed |= toggle_switch(ui, &mut s.fx_wet).changed();
+    });
+    ui.add_space(6.0);
+    setting_row(ui, "Тени от солнца", Some("Как RTX: каждый блок, дерево и дом отбрасывают настоящую тень (заметно медленнее)"), |ui| {
+        res.changed |= toggle_switch(ui, &mut s.fx_shadows).changed();
     });
     if (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading, s.fx_toon) != before {
         s.shaders = 3;
