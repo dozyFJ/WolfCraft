@@ -2852,8 +2852,9 @@ impl App {
                         up: cam.up.as_vec3(),
                         punch_cycle: self.hand_cycle,
                         guard: self.settings.hand_anim.clamp(0.4, 1.0),
-                        bob_phase: s.player.anim_phase,
-                        bob_amount: if s.player.body.flying { 0.0 } else { s.player.anim_amount },
+                        // The hands bob in step with the camera (one walk cycle for both).
+                        bob_phase: s.view_bob().0,
+                        bob_amount: if s.player.body.flying { 0.0 } else { s.view_bob().1 },
                         holding: s.player.inventory.held().is_some(),
                         tool,
                         icon: s.player.inventory.held().and_then(|st| match st.info().icon {

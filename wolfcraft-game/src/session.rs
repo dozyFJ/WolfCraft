@@ -174,6 +174,8 @@ pub struct GameSession {
     /// View bobbing: step phase, smoothed strength, time off the ground.
     bob_phase: f64,
     bob_amp: f64,
+    /// Camera leans into sideways movement (radians, smoothed).
+    lean: f64,
     air_t: f64,
     prev_vy: f64,
     shoulder: f64,
@@ -341,6 +343,7 @@ impl GameSession {
             stuck_check: 0.0,
             bob_phase: 0.0,
             bob_amp: 0.0,
+            lean: 0.0,
             air_t: 0.0,
             prev_vy: 0.0,
             shoulder: 0.0,
@@ -679,6 +682,10 @@ impl GameSession {
             let target = if walking { (speed / 4.3).min(1.2) } else { 0.0 };
             self.bob_amp += (target - self.bob_amp) * (1.0 - (-6.0 * dt as f64).exp());
             self.bob_phase += speed.min(8.0) * dt as f64 * 1.9;
+            // Lean into a sideways run a little (like a body turning into the curve).
+            let side = if walking { v.dot(self.player.right()) / 5.0 } else { 0.0 };
+            let want = (-side * 0.035).clamp(-0.05, 0.05);
+            self.lean += (want - self.lean) * (1.0 - (-5.0 * dt as f64).exp());
         }
         // Third person behind: over the right shoulder (Fortnite/GTA), closer to the middle
         // when a wall is on the right.
@@ -2491,6 +2498,11 @@ impl GameSession {
         c
     }
 
+    /// Walk cycle of the view (phase, strength 0..1): the hands in front bob with it.
+    pub fn view_bob(&self) -> (f32, f32) {
+        (self.bob_phase as f32, self.bob_amp.min(1.0) as f32)
+    }
+
     fn camera_base(&self) -> Camera {
         if let Some(c) = self.cutscene {
             return c;
@@ -2501,18 +2513,26 @@ impl GameSession {
         let eye = along(wolfcraft_engine::cubesphere::col_dir(raw_eye), eye_r) + up * self.cam_lag;
         let look = self.player.look_dir();
         let eye = eye - up * self.land_dip;
-        // Hurt: the view rolls a little to one side and settles (Minecraft's damage tilt).
-        let roll = self.player.survival.hurt_flash as f64 * 0.35;
         let right0 = look.cross(up).normalize_or_zero();
-        let up = if roll > 0.0 && right0.length_squared() > 0.5 { (up * roll.cos() + right0 * roll.sin()).normalize() } else { up };
+        let first = self.camera_mode == CameraMode::First;
+        // The view rocks from side to side with the steps (more when running), leans into a
+        // sideways run, and rolls when hurt (Minecraft's damage tilt).
+        let a = self.bob_amp;
+        let ph = self.bob_phase;
+        let roll = self.player.survival.hurt_flash as f64 * 0.35 + if first { ph.sin() * 0.011 * a + self.lean } else { 0.0 };
+        let up = if roll.abs() > 1e-5 && right0.length_squared() > 0.5 { (up * roll.cos() + right0 * roll.sin()).normalize() } else { up };
         match self.camera_mode {
             // Gentle view bobbing (Minecraft-like): a small dip on every step and a sway
             // from side to side, scaled by the smoothed walking strength.
             CameraMode::First => {
-                let a = self.bob_amp;
-                let ph = self.bob_phase;
-                let eye = eye + right0 * (ph.sin() * 0.03 * a) - up * (ph.cos().abs() * 0.045 * a);
-                Camera { eye, forward: look, up }
+                // Steps: a smooth dip on each footfall (no kink), a sway to the side, and a
+                // slight nod; standing still, a slow breath.
+                let dip = (1.0 - (2.0 * ph).cos()) * 0.5;
+                let breath = (self.clock as f64 * 1.6).sin() * 0.008 * (1.0 - a.min(1.0));
+                let eye = eye + right0 * (ph.sin() * 0.035 * a) - up * (dip * 0.055 * a) + up * breath;
+                let nod = ((2.0 * ph).cos() * 0.006 * a) as f64;
+                let forward = (look + up * nod).normalize();
+                Camera { eye, forward, up }
             }
             CameraMode::ThirdBack | CameraMode::ThirdFront => {
                 let sign = if self.camera_mode == CameraMode::ThirdBack { -1.0 } else { 1.0 };
