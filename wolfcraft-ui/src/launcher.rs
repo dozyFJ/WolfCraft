@@ -11,7 +11,7 @@ use egui::{Align2, Color32, FontId, Frame, Id, Margin, Pos2, Rect, Rounding, Sen
 use wolfcraft_assets::gui as icon;
 
 const TOOLBAR_H: f32 = 56.0;
-const NAV_H: f32 = 70.0;
+const NAV_H: f32 = 56.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -135,32 +135,58 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
         // The living world from the loading splash, dimmed so cards stay readable.
         crate::main_menu::world_backdrop(&bg, full, ctx.input(|i| i.time) as f32);
         bg.rect_filled(full, 0.0, p.bg.gamma_multiply(if p.dark { 0.38 } else { 0.30 }));
-        // Aero glass bars: a tinted pane with a glossy upper half and a bright rim.
-        let top = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + TOOLBAR_H));
-        let nav = Rect::from_min_max(Pos2::new(full.left(), screen.bottom() - NAV_H), full.max);
-        let home_page = tabs[tab].0 == Tab::Home;
-        for (r, gloss_top) in [(top, screen.top()), (nav, nav.top())] {
-            // Главная has no top bar: the page runs up to the status bar.
-            if home_page && r == top {
-                continue;
-            }
-            bg.rect_filled(r, 0.0, glass_tint(&p));
-            let g = Rect::from_min_max(Pos2::new(r.left(), gloss_top), Pos2::new(r.right(), gloss_top + if r == top { TOOLBAR_H * 0.48 } else { NAV_H * 0.42 }));
-            bg.rect_filled(g, 0.0, glass_gloss(&p));
-        }
-        if !home_page {
-            bg.line_segment([Pos2::new(full.left(), screen.top() + TOOLBAR_H), Pos2::new(full.right(), screen.top() + TOOLBAR_H)], Stroke::new(1.0_f32, glass_rim(&p)));
-        }
-        bg.line_segment([Pos2::new(full.left(), screen.bottom() - NAV_H), Pos2::new(full.right(), screen.bottom() - NAV_H)], Stroke::new(1.0_f32, glass_rim(&p)));
+        // Aero glass header with the page menu across the top (no bottom dock).
+        let top = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + NAV_H));
+        bg.rect_filled(top, 0.0, glass_tint(&p));
+        bg.add(grad_shape(Rect::from_min_max(Pos2::new(top.left(), screen.top()), Pos2::new(top.right(), screen.top() + NAV_H * 0.6)), 0.0, 0.0, glass_gloss(&p), Color32::TRANSPARENT));
+        bg.line_segment([Pos2::new(full.left(), top.bottom()), Pos2::new(full.right(), top.bottom())], Stroke::new(1.0_f32, glass_rim(&p)));
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
+
+    // ---- Page menu: a row of glass pills along the top ----
+    egui::TopBottomPanel::top("launcher-nav")
+        .exact_height(NAV_H)
+        .frame(Frame::none().inner_margin(Margin::symmetric(10.0, 8.0)))
+        .show(ctx, |ui| {
+            let rect = ui.max_rect();
+            let gap = 6.0;
+            let w = (rect.width() - gap * (tabs.len() as f32 - 1.0)) / tabs.len() as f32;
+            for (i, (t, label)) in tabs.iter().enumerate() {
+                let r = Rect::from_min_size(Pos2::new(rect.left() + (w + gap) * i as f32, rect.top()), Vec2::new(w, rect.height()));
+                let resp = ui.interact(r, Id::new(("launcher-nav", i)), Sense::click());
+                let on = tab == i;
+                if on {
+                    gloss_capsule(ui, r, p.accent);
+                } else if resp.hovered() || resp.is_pointer_button_down_on() {
+                    ui.painter().rect_filled(r, Rounding::same(r.height() / 2.0), glass_gloss(&p));
+                }
+                let col = if on { Color32::WHITE } else { p.text };
+                // Icon and label side by side; just the icon when the pill is narrow.
+                let galley = ui.painter().layout_no_wrap(label.to_string(), bold_font(13.5), col);
+                let with_text = w > galley.size().x + 40.0;
+                let total = 20.0 + if with_text { 6.0 + galley.size().x } else { 0.0 };
+                let x = r.center().x - total / 2.0;
+                nav_icon(ui, icons, *t, Rect::from_center_size(Pos2::new(x + 10.0, r.center().y), Vec2::splat(18.0)), col);
+                if with_text {
+                    let pos = Pos2::new(x + 26.0, r.center().y);
+                    if on {
+                        shadow_text(ui.painter(), pos, Align2::LEFT_CENTER, label, bold_font(13.5), col);
+                    } else {
+                        ui.painter().text(pos, Align2::LEFT_CENTER, *label, bold_font(13.5), col);
+                    }
+                }
+                if resp.clicked() {
+                    tab = i;
+                }
+            }
+        });
 
     // ---- Toolbar: each page has its own (title and its own buttons) ----
     let page = tabs[tab].0;
     if page != Tab::Home {
     egui::TopBottomPanel::top("launcher-toolbar")
         .exact_height(TOOLBAR_H)
-        .frame(Frame::none().inner_margin(Margin::symmetric(16.0, 8.0)))
+        .frame(Frame::none().fill(glass_tint(&p).gamma_multiply(0.7)).inner_margin(Margin::symmetric(16.0, 8.0)))
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 if page == Tab::Home {
@@ -248,31 +274,6 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
             });
     }
 
-    // ---- Bottom navigation ----
-    egui::TopBottomPanel::bottom("launcher-nav")
-        .exact_height(NAV_H)
-        .frame(Frame::none())
-        .show(ctx, |ui| {
-            let rect = ui.max_rect();
-            let w = rect.width() / tabs.len() as f32;
-            for (i, (t, label)) in tabs.iter().enumerate() {
-                let r = Rect::from_min_size(Pos2::new(rect.left() + w * i as f32, rect.top()), Vec2::new(w, rect.height()));
-                let resp = ui.interact(r, Id::new(("launcher-nav", i)), Sense::click());
-                let on = tab == i;
-                let col = if on { p.accent } else if resp.hovered() { p.text } else { p.text_muted };
-                if on {
-                    let pill = Rect::from_center_size(Pos2::new(r.center().x, r.top() + 22.0), Vec2::new(56.0, 30.0));
-                    ui.painter().rect_filled(pill, Rounding::same(15.0), p.accent.gamma_multiply(0.18));
-                }
-                let ic = Rect::from_center_size(Pos2::new(r.center().x, r.top() + 22.0), Vec2::splat(22.0));
-                nav_icon(ui, icons, *t, ic, col);
-                // The label sits right under the icon, clear of the phone's home bar.
-                ui.painter().text(Pos2::new(r.center().x, r.top() + 47.0), Align2::CENTER_CENTER, *label, FontId::proportional(12.5), col);
-                if resp.clicked() {
-                    tab = i;
-                }
-            }
-        });
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
 
     // ---- Page ----
@@ -381,32 +382,22 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
             }
         });
     });
-    // Новости and Релизы in one glass block with a tab bar.
-    let tab_id = Id::new("launcher-home-feed");
-    let mut feed: usize = ui.ctx().data(|d| d.get_temp(tab_id)).unwrap_or(0);
-    glass_card(ui, p, 18.0, Margin::same(12.0), Stroke::new(1.0_f32, p.outline), |ui| {
-        ui.set_width(ui.available_width());
-        if let Some(t) = aero_tabs(ui, p, &["Новости", "Релизы"], feed) {
-            feed = t;
-        }
-        ui.add_space(8.0);
-        if feed == 0 {
-            for n in &NEWS {
-                news_card(ui, icons, p, n);
-                ui.add_space(2.0);
+    // Новости and Релизы: each its own section.
+    section(ui, p, "Новости", "");
+    for n in &NEWS {
+        news_card(ui, icons, p, n);
+        ui.add_space(2.0);
+    }
+    section(ui, p, "Релизы", "все версии");
+    egui::ScrollArea::horizontal().id_salt("launcher-releases").auto_shrink([false, true]).drag_to_scroll(true).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            for (i, r) in RELEASES.iter().enumerate() {
+                release_card(ui, p, r, i == 0);
             }
-        } else {
-            egui::ScrollArea::horizontal().id_salt("launcher-releases").auto_shrink([false, true]).drag_to_scroll(true).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    for (i, r) in RELEASES.iter().enumerate() {
-                        release_card(ui, p, r, i == 0);
-                    }
-                });
-            });
-        }
+        });
     });
-    ui.ctx().data_mut(|d| d.insert_temp(tab_id, feed));
+    ui.add_space(6.0);
     // Updates.
     glass_card(ui, p, 18.0, Margin::same(14.0), Stroke::new(1.0_f32, p.outline), |ui| {
         ui.set_width(ui.available_width());
@@ -427,6 +418,7 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
 }
 
 /// Aero segmented tabs: a glass groove with the chosen tab as a glossy accent capsule.
+#[allow(dead_code)]
 fn aero_tabs(ui: &mut Ui, p: &Palette, names: &[&str], cur: usize) -> Option<usize> {
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 38.0), Sense::hover());
@@ -464,8 +456,8 @@ fn gloss_capsule(ui: &Ui, r: Rect, c: Color32) {
     // Body: lighter at the top, deeper at the bottom.
     grad_rect(pt, r, rad, rad, mix(c, Color32::WHITE, 0.18), mix(c, Color32::BLACK, 0.22));
     // Shine: a soft reflection over the upper half that fades out before the middle.
-    let shine = Rect::from_min_max(r.min + Vec2::new(rad * 0.5, 2.0), Pos2::new(r.right() - rad * 0.5, r.center().y + 1.0));
-    grad_rect(pt, shine, shine.height(), 2.0, Color32::from_white_alpha(80), Color32::from_white_alpha(8));
+    let shine = Rect::from_min_max(r.min + Vec2::new(rad * 0.6, 2.5), Pos2::new(r.right() - rad * 0.6, r.center().y));
+    grad_rect(pt, shine, shine.height() * 0.7, shine.height() * 0.3, Color32::from_white_alpha(70), Color32::TRANSPARENT);
     pt.rect_stroke(r, Rounding::same(rad), Stroke::new(1.0, mix(c, Color32::BLACK, 0.4)));
     pt.rect_stroke(r.shrink(1.0), Rounding::same(rad - 1.0), Stroke::new(1.0, Color32::from_white_alpha(70)));
 }
@@ -480,8 +472,8 @@ fn aero_button(ui: &mut Ui, p: &Palette, icons: &GuiIcons, ic: Option<u16>, labe
     } else {
         let pt = ui.painter();
         pt.rect_filled(r, Rounding::same(21.0), Color32::from_black_alpha(if p.dark { 60 } else { 18 }));
-        let shine = Rect::from_min_max(r.min + Vec2::new(10.0, 2.0), Pos2::new(r.right() - 10.0, r.center().y + 1.0));
-        grad_rect(pt, shine, shine.height(), 2.0, glass_gloss(p).gamma_multiply(if resp.hovered() { 1.8 } else { 1.2 }), Color32::TRANSPARENT);
+        let shine = Rect::from_min_max(r.min + Vec2::new(14.0, 2.5), Pos2::new(r.right() - 14.0, r.center().y));
+        grad_rect(pt, shine, shine.height() * 0.7, shine.height() * 0.3, glass_gloss(p).gamma_multiply(if resp.hovered() { 1.8 } else { 1.2 }), Color32::TRANSPARENT);
         pt.rect_stroke(r, Rounding::same(21.0), Stroke::new(1.0, glass_rim(p).gamma_multiply(0.8)));
     }
     let col = if on { Color32::WHITE } else { p.text };
