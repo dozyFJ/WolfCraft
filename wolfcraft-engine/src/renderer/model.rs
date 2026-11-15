@@ -2927,3 +2927,85 @@ fn add_guardian(v:&mut Vec<ModelVertex>,f:&Frame,role:&crate::bosses::BossRole,a
         }
     }
 }
+
+
+/// «Механика»: the spinning shafts, cogwheels, water wheels and cranks, as boxes turned about
+/// their axis. `parts`: centre, axis, two directions across it, kind (0 shaft, 1 cog, 2 wheel,
+/// 3 crank) and the angle.
+pub fn build_kinetic(parts: &[(DVec3, DVec3, DVec3, DVec3, u8, f32)], eye: DVec3) -> Vec<ModelVertex> {
+    const STEEL: [f32; 3] = [0.62, 0.64, 0.68];
+    const STEEL_D: [f32; 3] = [0.45, 0.47, 0.52];
+    const WOOD: [f32; 3] = [0.60, 0.44, 0.26];
+    const WOOD_D: [f32; 3] = [0.42, 0.30, 0.17];
+    let mut v = Vec::new();
+    for &(c, ea, eu, ev, kind, angle) in parts {
+        let (sn, cs) = angle.sin_cos();
+        // Local (x along the axis, y and z across it, turned by the angle) → world.
+        let to_world = |x: f32, y: f32, z: f32| {
+            let (y2, z2) = (y * cs - z * sn, y * sn + z * cs);
+            c + ea * x as f64 + eu * y2 as f64 + ev * z2 as f64
+        };
+        let mut cuboid = |lo: [f32; 3], hi: [f32; 3], col: [f32; 3]| {
+            let p = |i: usize| {
+                let x = if i & 1 == 0 { lo[0] } else { hi[0] };
+                let y = if i & 2 == 0 { lo[1] } else { hi[1] };
+                let z = if i & 4 == 0 { lo[2] } else { hi[2] };
+                to_world(x, y, z)
+            };
+            let mid = to_world((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5);
+            for quad in [[0usize, 2, 6, 4], [1, 5, 7, 3], [0, 4, 5, 1], [2, 3, 7, 6], [0, 1, 3, 2], [4, 6, 7, 5]] {
+                let q = quad.map(p);
+                let fc = (q[0] + q[1] + q[2] + q[3]) / 4.0;
+                let n = (fc - mid).normalize_or_zero();
+                for tri in [[0usize, 1, 2], [0, 2, 3]] {
+                    let (a, b, cc) = (q[tri[0]], q[tri[1]], q[tri[2]]);
+                    // Outward winding for this renderer: (c - a) × (b - a) points out.
+                    let (b, cc) = if (cc - a).cross(b - a).dot(n) < 0.0 { (cc, b) } else { (b, cc) };
+                    for pt in [a, b, cc] {
+                        v.push(ModelVertex { pos: (pt - eye).as_vec3().to_array(), normal: n.as_vec3().to_array(), color: col, uv: [0.0; 2], tex: 0.0 });
+                    }
+                }
+            }
+        };
+        match kind {
+            0 => {
+                cuboid([-0.5, -0.11, -0.11], [0.5, 0.11, 0.11], STEEL);
+                for x in [-0.3f32, 0.1] {
+                    cuboid([x, -0.125, -0.125], [x + 0.05, 0.125, 0.125], STEEL_D);
+                }
+            }
+            1 => {
+                cuboid([-0.5, -0.1, -0.1], [0.5, 0.1, 0.1], STEEL);
+                cuboid([-0.11, -0.34, -0.34], [0.11, 0.34, 0.34], WOOD);
+                for t in 0..8 {
+                    let a = t as f32 * std::f32::consts::FRAC_PI_4;
+                    let (s, k) = a.sin_cos();
+                    let (y, z) = (k * 0.40, s * 0.40);
+                    let w = 0.06;
+                    // A tooth: a small box around (y, z), not turned (good enough at this size).
+                    cuboid([-0.10, y - w, z - w], [0.10, y + w, z + w], WOOD_D);
+                }
+            }
+            2 => {
+                cuboid([-0.5, -0.1, -0.1], [0.5, 0.1, 0.1], STEEL);
+                cuboid([-0.18, -0.16, -0.16], [0.18, 0.16, 0.16], WOOD_D);
+                for t in 0..8 {
+                    let a = t as f32 * std::f32::consts::FRAC_PI_4;
+                    let (s, k) = a.sin_cos();
+                    // Paddles: planks running out from the hub.
+                    for r in [0.24f32, 0.36, 0.46] {
+                        let (y, z) = (k * r, s * r);
+                        cuboid([-0.22, y - 0.05, z - 0.05], [0.22, y + 0.05, z + 0.05], if r > 0.4 { WOOD } else { WOOD_D });
+                    }
+                }
+            }
+            _ => {
+                // Crank: a stub under it, an arm out to the side and a handle up.
+                cuboid([-0.5, -0.08, -0.08], [0.0, 0.08, 0.08], STEEL);
+                cuboid([-0.05, -0.06, -0.06], [0.05, 0.36, 0.06], WOOD);
+                cuboid([-0.05, 0.30, -0.06], [0.35, 0.40, 0.06], WOOD_D);
+            }
+        }
+    }
+    v
+}

@@ -30,6 +30,8 @@ pub enum InteractionEvent {
     OpenCrafting,
     /// Armour (or a shield) was put on from the hand.
     Equipped,
+    /// A hand crank was turned.
+    Crank { pos: Cell },
     /// The «Конструктор» block: building pieces (forms × materials).
     OpenBuilder,
     FrameUse {pos:Cell},
@@ -243,6 +245,11 @@ impl Interaction {
                 if crate::construction::entry(h.block as u16).is_some_and(|(e,_)|e.form==crate::construction::Form::ItemFrame) {events.push(InteractionEvent::FrameUse{pos:h.cell});return events;}
                 if let Some(kind)=crate::construction::altar(h.block){events.push(InteractionEvent::ActivateBoss{pos:h.cell,kind});return events;}
             }
+            // A hand crank: every tap turns it for a few seconds.
+            if h.block == Block::HandCrank && !player.sneaking {
+                events.push(InteractionEvent::Crank { pos: h.cell });
+                return events;
+            }
             if h.block == Block::BuilderTable && !player.sneaking {
                 events.push(InteractionEvent::OpenBuilder);
                 return events;
@@ -298,7 +305,7 @@ impl Interaction {
             }
             // Chest and electric furnace open their own window (sneak to place blocks instead).
             let furniture_container = crate::construction::is_container(h.block);
-            if (furniture_container || (matches!(h.block.base_kind(), Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::EnchantTable | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) || crate::wolftech::kind(h.block).is_some())) && !player.sneaking {
+            if (furniture_container || (matches!(h.block.base_kind(), Block::Chest | Block::ElectricFurnace | Block::MachineCasing | Block::EnchantTable | Block::Battery | Block::CommandBlock | Block::Terminal | Block::Sign | Block::SignB) || crate::wolftech::kind(h.block).is_some() || crate::kinetic::part(h.block).is_some_and(crate::kinetic::is_machine))) && !player.sneaking {
                 events.push(InteractionEvent::OpenContainer { pos: h.cell, block: h.block.base_kind() });
                 return events;
             }
@@ -448,6 +455,12 @@ impl Interaction {
                     2
                 };
                 crate::block::Part::Piston { sticky, extended: false, dir }.block()
+            } else if matches!(crate::kinetic::part(block), Some(crate::kinetic::Part::Shaft(_) | crate::kinetic::Part::Cog(_))) && {
+                let ek = (g.point(target.f, target.i as f64, target.j as f64, target.k as f64 + 1.0) - p0).normalize_or_zero();
+                player.look_dir().dot(ek).abs() > 0.75
+            } {
+                // Looking steeply up or down: a vertical shaft or a lying cogwheel.
+                crate::kinetic::with_axis(block, 2)
             } else {
                 block.oriented(player.heading.dot(ei), player.heading.dot(ej))
             }

@@ -398,7 +398,8 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
                     continue;
                 }
                 let mut boxes = b.boxes();
-                if boxes.is_empty() {
+                // Spinning parts («Механика») are drawn as turning models, not in the mesh.
+                if boxes.is_empty() || crate::kinetic::spins(b) {
                     continue;
                 }
                 // The second leaf of a double door hangs on the far jamb.

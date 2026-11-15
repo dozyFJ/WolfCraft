@@ -117,6 +117,18 @@ pub struct Popup {
     pub big: bool,
 }
 
+/// One part of a «Механика» network: how fast it turns (RPM), which way, the network's
+/// stress (load / capacity), a machine's progress and a crank's turning time left.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct KinNode {
+    pub speed: f32,
+    pub sign: i8,
+    pub load: f32,
+    pub cap: f32,
+    pub progress: f32,
+    pub crank: f32,
+}
+
 /// State of one WolfTech machine.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TechState {
@@ -162,6 +174,9 @@ pub struct GameSession {
     /// WolfTech machines: energy, progress, fuel left; the networks (rebuilt every second).
     pub tech: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, TechState>,
     tech_nets: Vec<Vec<wolfcraft_engine::cubesphere::Cell>>,
+    /// «Механика»: every known shaft, cog, wheel, crank and machine, and when to re-solve.
+    pub kin: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, KinNode>,
+    kin_t: f32,
     tech_t: f32,
     /// Seconds to the next entity-culling pass.
     cull_t: f32,
@@ -342,6 +357,8 @@ impl GameSession {
             land_dip: 0.0,
             tech: std::collections::HashMap::new(),
             tech_nets: Vec::new(),
+            kin: std::collections::HashMap::new(),
+            kin_t: 0.0,
             tech_t: 0.0,
             cull_t: 0.0,
             fire_t: 0.0,
@@ -438,6 +455,14 @@ impl GameSession {
         s.boss_book=wolfcraft_engine::bosses::BossBook::load(&s.dir.join("bosses.txt"));
         s.load_containers();
         s.load_tech();
+        if let Ok(t) = std::fs::read_to_string(s.dir.join("kinetic.txt")) {
+            for line in t.lines() {
+                let n: Vec<i32> = line.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                if n.len() == 4 {
+                    s.kin.insert(wolfcraft_engine::cubesphere::Cell::new(n[0] as u8, n[1], n[2], n[3]), KinNode::default());
+                }
+            }
+        }
         if let Ok(t) = std::fs::read_to_string(s.dir.join("achievements.txt")) {
             s.achieved = t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
         }
@@ -998,6 +1023,7 @@ impl GameSession {
         self.tick_furnaces(dt);
         self.tick_tech(dt);
         self.tick_achievements(&events, dt);
+        self.tick_kinetic(&events, dt);
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
             if let InteractionEvent::Broken { pos, block } = e {
@@ -1891,7 +1917,8 @@ impl GameSession {
         let block=block.base_kind();
         let tech_machine = wolfcraft_engine::wolftech::kind(block).is_some_and(wolfcraft_engine::wolftech::is_machine);
         let reactor = wolfcraft_engine::wolftech::kind(block) == Some(wolfcraft_engine::wolftech::Kind::Reactor);
-        let n = if reactor { wolfcraft_engine::wolftech::REACTOR_SLOTS } else if tech_machine { 7 } else if matches!(block, B::ElectricFurnace | B::MachineCasing) || wolfcraft_engine::wolftech::kind(block).is_some() { 3 } else if block == B::EnchantTable { 2 } else { 27 };
+        let kin_machine = wolfcraft_engine::kinetic::part(block).is_some_and(wolfcraft_engine::kinetic::is_machine);
+        let n = if reactor { wolfcraft_engine::wolftech::REACTOR_SLOTS } else if tech_machine { 7 } else if kin_machine { 3 } else if matches!(block, B::ElectricFurnace | B::MachineCasing) || wolfcraft_engine::wolftech::kind(block).is_some() { 3 } else if block == B::EnchantTable { 2 } else { 27 };
         let v = self.containers.entry(pos).or_insert_with(|| {
             let mut slots=vec![None;n];
             // Player-placed chests use construction IDs; legacy chest IDs identify generated loot.
@@ -2187,6 +2214,188 @@ impl GameSession {
         self.achieved.is_empty() && self.clock < 30.0
     }
 
+    /// «Механика»: solves the turning networks four times a second (sources → shafts and cogs
+    /// → machines, overload stops everything), runs the machines and the cranks.
+    fn tick_kinetic(&mut self, events: &[InteractionEvent], dt: f32) {
+        use wolfcraft_engine::items::ItemStack;
+        use wolfcraft_engine::kinetic::{self as kn, Part};
+        for e in events {
+            match e {
+                InteractionEvent::Placed { pos, block } if kn::part(*block).is_some() => {
+                    self.kin.entry(*pos).or_default();
+                    self.kin_t = 0.0;
+                }
+                InteractionEvent::OpenContainer { pos, block } if kn::part(*block).is_some() => {
+                    self.kin.entry(*pos).or_default();
+                    self.kin_t = 0.0;
+                }
+                InteractionEvent::Crank { pos } => {
+                    self.kin.entry(*pos).or_default().crank = 6.0;
+                    self.kin_t = 0.0;
+                }
+                InteractionEvent::Broken { .. } | InteractionEvent::Blasted { .. } => self.kin_t = 0.0,
+                _ => {}
+            }
+        }
+        if self.kin.is_empty() {
+            return;
+        }
+        for n in self.kin.values_mut() {
+            n.crank = (n.crank - dt).max(0.0);
+        }
+        self.kin_t -= dt;
+        if self.kin_t <= 0.0 {
+            self.kin_t = 0.25;
+            let g = self.chunks.grid();
+            let cells: Vec<_> = self.kin.keys().copied().collect();
+            for c in &cells {
+                if self.chunks.get_block(*c).is_some_and(|b| kn::part(b).is_none()) {
+                    self.kin.remove(c);
+                }
+            }
+            let mut seen: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, i8> = std::collections::HashMap::new();
+            let start: Vec<_> = self.kin.keys().copied().collect();
+            for c0 in start {
+                if seen.contains_key(&c0) {
+                    continue;
+                }
+                let Some(p0) = self.chunks.get_block(c0).and_then(kn::part) else { continue };
+                let _ = p0;
+                let mut net = vec![(c0, 1i8)];
+                seen.insert(c0, 1);
+                let mut i = 0;
+                while i < net.len() && net.len() < 2048 {
+                    let (c, sg) = net[i];
+                    i += 1;
+                    let Some(pc) = self.chunks.get_block(c).and_then(kn::part) else { continue };
+                    for (ax, s) in [(0u8, 1i8), (0, -1), (1, 1), (1, -1), (2, 1), (2, -1)] {
+                        let d = s as i32;
+                        let (a, b, k) = match ax {
+                            0 => (d, 0, 0),
+                            1 => (0, d, 0),
+                            _ => (0, 0, d),
+                        };
+                        let Some(n) = g.offset(c, a, b, k) else { continue };
+                        if seen.contains_key(&n) {
+                            continue;
+                        }
+                        let Some(pn) = self.chunks.get_block(n).and_then(kn::part) else { continue };
+                        if let Some(flip) = kn::link(pc, pn, (ax, s)) {
+                            let ns = if flip { -sg } else { sg };
+                            seen.insert(n, ns);
+                            net.push((n, ns));
+                        }
+                    }
+                }
+                // Sources and load of this network.
+                let (mut speed, mut cap, mut load) = (0.0f32, 0.0f32, 0.0f32);
+                for (c, _) in &net {
+                    let Some(p) = self.chunks.get_block(*c).and_then(kn::part) else { continue };
+                    match p {
+                        Part::Wheel(_) => {
+                            let water = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)].iter().filter(|(a, b, k)| g.offset(*c, *a, *b, *k).and_then(|n| self.chunks.get_block(n)).is_some_and(|b| b.is_water())).count();
+                            if water > 0 {
+                                speed = speed.max((8.0 + 4.0 * water as f32).min(32.0));
+                                cap += 256.0;
+                            }
+                        }
+                        Part::Crank => {
+                            if self.kin.get(c).is_some_and(|n| n.crank > 0.0) {
+                                speed = speed.max(32.0);
+                                cap += 96.0;
+                            }
+                        }
+                        p => load += kn::load(p),
+                    }
+                }
+                let over = load > cap && speed > 0.0;
+                let run = if over { 0.0 } else { speed };
+                for (c, sg) in &net {
+                    let n = self.kin.entry(*c).or_default();
+                    n.speed = run;
+                    n.sign = *sg;
+                    n.load = load;
+                    n.cap = cap;
+                }
+            }
+        }
+        // Machines: two seconds an item at 16 RPM, faster when turning faster.
+        let machines: Vec<_> = self.kin.iter().filter(|(_, n)| n.speed > 0.0).map(|(c, _)| *c).collect();
+        for c in machines {
+            let Some(b) = self.chunks.get_block(c) else { continue };
+            let Some(p) = kn::part(b).filter(|p| kn::is_machine(*p)) else { continue };
+            let v = self.container_slots(c, b).clone();
+            let out = v.first().copied().flatten().and_then(|i| kn::recipe(p, i.id));
+            let room = out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
+                None => true,
+                Some(s) => s.id == o && s.count as u32 + n as u32 <= 64,
+            });
+            let node = self.kin.get_mut(&c).unwrap();
+            if !room {
+                node.progress = 0.0;
+                continue;
+            }
+            node.progress += dt * node.speed / 16.0;
+            if node.progress >= 2.0 {
+                node.progress = 0.0;
+                let (o, n) = out.unwrap();
+                let v = self.container_slots(c, b);
+                if let Some(i) = v[0].as_mut() {
+                    i.count -= 1;
+                    if i.count == 0 {
+                        v[0] = None;
+                    }
+                }
+                match v[2].as_mut() {
+                    Some(s) => s.count += n,
+                    None => v[2] = Some(ItemStack::new(o, n)),
+                }
+            }
+        }
+    }
+
+    /// The spinning parts near the player, for the renderer: centre, the axis and two
+    /// directions across it (world), the kind (0 shaft, 1 cog, 2 wheel, 3 crank) and the angle.
+    pub fn kinetic_models(&self) -> Vec<(DVec3, DVec3, DVec3, DVec3, u8, f32)> {
+        use wolfcraft_engine::kinetic::{self as kn, Part};
+        let g = self.chunks.grid();
+        let me = self.player.body.pos;
+        let mut out = Vec::new();
+        for (c, n) in &self.kin {
+            let Some(p) = self.chunks.get_block(*c).and_then(kn::part) else { continue };
+            let centre = g.cell_center(*c);
+            if (centre - me).length() > 64.0 {
+                continue;
+            }
+            let (kind, ax) = match p {
+                Part::Shaft(a) => (0u8, a),
+                Part::Cog(a) => (1, a),
+                Part::Wheel(a) => (2, a),
+                Part::Crank => (3, 2),
+                _ => continue,
+            };
+            let dir = |a: u8| {
+                let (x, y, z) = match a {
+                    0 => (1, 0, 0),
+                    1 => (0, 1, 0),
+                    _ => (0, 0, 1),
+                };
+                g.offset(*c, x, y, z).map(|o| (g.cell_center(o) - centre).normalize()).unwrap_or(DVec3::Y)
+            };
+            let (ea, eu, ev) = (dir(ax), dir((ax + 1) % 3), dir((ax + 2) % 3));
+            // Turns per second = RPM / 60; cogs side by side get half a tooth of offset.
+            let phase = if kind == 1 { ((c.i + c.j + c.k).rem_euclid(2)) as f32 * 0.39 } else { 0.0 };
+            let angle = n.sign as f32 * self.clock * n.speed / 60.0 * std::f32::consts::TAU + phase;
+            out.push((centre, ea, eu, ev, kind, angle));
+        }
+        out
+    }
+
+    fn save_kinetic(&self) {
+        let list: Vec<String> = self.kin.keys().map(|c| format!("{} {} {} {}", c.f, c.i, c.j, c.k)).collect();
+        let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("kinetic.txt"), list.join("\n").as_bytes());
+    }
+
     /// Grants an achievement once per world: a golden toast pops on the left.
     pub fn grant(&mut self, id: &str) {
         if self.achieved.contains(id) {
@@ -2421,6 +2630,7 @@ impl GameSession {
         self.save_containers();
         self.save_tech();
         self.containers.clear();
+        self.kin.clear();
         self.tech.clear();
         self.tech_nets.clear();
         let planet = Arc::new(if hell { Planet::new_hell(&self.cfg) } else { Planet::new(&self.cfg) });
@@ -2534,6 +2744,9 @@ impl GameSession {
 
     /// Writes player.dat, edited chunks and world.toml.
     pub fn save(&mut self) {
+        if !self.hell {
+            self.save_kinetic();
+        }
         if let Err(e)=self.storage_bank.save(&self.dir.join("storage_bank.bin")){log::error!("storage bank: {e}");}
         if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}
         self.save_containers();

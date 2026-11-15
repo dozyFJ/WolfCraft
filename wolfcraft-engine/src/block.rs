@@ -1873,6 +1873,17 @@ blocks! {
     2479 Compressor => needs_pick(info("Компрессор", Opaque, 4.0, Pickaxe, column(t::COMPRESSOR_FRONT, t::TECH_TOP, t::TECH_TOP))),
     2480 Sawmill => needs_pick(info("Пилорама", Opaque, 4.0, Pickaxe, column(t::SAWMILL_FRONT, t::TECH_TOP, t::TECH_TOP))),
     2481 Extractor => needs_pick(info("Экстрактор", Opaque, 4.0, Pickaxe, column(t::EXTRACTOR_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2482 Shaft => info("Вал", Shape, 1.5, Pickaxe, all(t::KIN_SHAFT)),
+    2483 ShaftJ => info("Вал", Shape, 1.5, Pickaxe, all(t::KIN_SHAFT)),
+    2484 ShaftK => info("Вал", Shape, 1.5, Pickaxe, all(t::KIN_SHAFT)),
+    2485 Cogwheel => info("Шестерня", Shape, 1.5, Axe, all(t::KIN_COG)),
+    2486 CogwheelJ => info("Шестерня", Shape, 1.5, Axe, all(t::KIN_COG)),
+    2487 CogwheelK => info("Шестерня", Shape, 1.5, Axe, all(t::KIN_COG)),
+    2488 WaterWheel => info("Водяное колесо", Shape, 2.0, Axe, all(t::KIN_WHEEL)),
+    2489 WaterWheelJ => info("Водяное колесо", Shape, 2.0, Axe, all(t::KIN_WHEEL)),
+    2490 HandCrank => info("Ручной кривошип", Shape, 1.0, Axe, all(t::KIN_CRANK)),
+    2491 MechPress => needs_pick(info("Механический пресс", Opaque, 3.5, Pickaxe, column(t::KIN_PRESS_SIDE, t::KIN_PRESS_TOP, t::KIN_PRESS_TOP))),
+    2492 Millstone => needs_pick(info("Жернова", Opaque, 3.5, Pickaxe, column(t::KIN_MILL_SIDE, t::KIN_MILL_TOP, t::KIN_MILL_TOP))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2089,6 +2100,16 @@ impl Block {
             Button => std::slice::from_ref(&BUTTON),
             Bones => &BONES,
             Cable => &[CABLE],
+            // «Механика»: thin shafts, cog and wheel discs, a crank on top of a block.
+            Shaft => &[[0.0, 0.375, 0.375, 1.0, 0.625, 0.625]],
+            ShaftJ => &[[0.375, 0.0, 0.375, 0.625, 1.0, 0.625]],
+            ShaftK => &[[0.375, 0.375, 0.0, 0.625, 0.625, 1.0]],
+            Cogwheel => &[[0.375, 0.06, 0.06, 0.625, 0.94, 0.94]],
+            CogwheelJ => &[[0.06, 0.375, 0.06, 0.94, 0.625, 0.94]],
+            CogwheelK => &[[0.06, 0.06, 0.375, 0.94, 0.94, 0.625]],
+            WaterWheel => &[[0.25, 0.0, 0.0, 0.75, 1.0, 1.0]],
+            WaterWheelJ => &[[0.0, 0.25, 0.0, 1.0, 0.75, 1.0]],
+            HandCrank => &[[0.3, 0.3, 0.0, 0.7, 0.7, 0.6]],
             SolarPanel => &[SOLAR],
             ButtonOn => std::slice::from_ref(&BUTTON_ON),
             SwitchOff => &LEVER_OFF,
@@ -2145,6 +2166,8 @@ impl Block {
             StoneSlabVerticalA => ab(StoneSlabVerticalA, StoneSlabVerticalB),
             PlankSlabVerticalA => ab(PlankSlabVerticalA, PlankSlabVerticalB),
             BrickSlabVerticalA => ab(BrickSlabVerticalA, BrickSlabVerticalB),
+            // «Механика»: shafts, cogs and wheels lie along the way the player looks.
+            Shaft | ShaftJ | ShaftK | Cogwheel | CogwheelJ | CogwheelK | WaterWheel | WaterWheelJ => crate::kinetic::with_axis(self, if along_i { 0 } else { 1 }),
             // WolfTech machines turn their front to the player (like a furnace).
             TechGenerator | Crusher | InductionFurnace | Enricher => {
                 let d = if along_i { if dir_i > 0.0 { 1 } else { 0 } } else if dir_j > 0.0 { 3 } else { 2 };
@@ -2230,6 +2253,9 @@ impl Block {
             ButtonOn => Button,
             PressurePlateOn => PressurePlate,
             b if b.machine_dir().is_some() => b.machine_dir().unwrap().0,
+            ShaftJ | ShaftK => Shaft,
+            CogwheelJ | CogwheelK => Cogwheel,
+            WaterWheelJ => WaterWheel,
             b => b,
         }
     }

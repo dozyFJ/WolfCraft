@@ -210,6 +210,14 @@ pub mod tiles {
     pub const COMPRESSOR_FRONT: u16 = 212;
     pub const SAWMILL_FRONT: u16 = 213;
     pub const EXTRACTOR_FRONT: u16 = 214;
+    pub const KIN_SHAFT: u16 = 215;
+    pub const KIN_COG: u16 = 216;
+    pub const KIN_WHEEL: u16 = 217;
+    pub const KIN_CRANK: u16 = 218;
+    pub const KIN_PRESS_SIDE: u16 = 219;
+    pub const KIN_PRESS_TOP: u16 = 220;
+    pub const KIN_MILL_SIDE: u16 = 221;
+    pub const KIN_MILL_TOP: u16 = 222;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -306,15 +314,55 @@ fn p(f: impl FnOnce(&mut Painter)) -> Image {
     q.finish()
 }
 
+/// Earthy pixels: three tones of the base mixed in little clumps, with a few grey pebbles.
+fn earth(q: &mut Painter, base: Rgb, seed: u32) {
+    for y in 0..S {
+        for x in 0..S {
+            let h = hash(x / 2 + (y % 2), y, seed) % 6;
+            let tone = [0.84, 0.92, 1.0, 1.0, 1.06, 1.12][h as usize];
+            let n = (rnd(x, y, seed + 7) - 0.5) * 0.05;
+            q.put(x, y, base.scale(tone).add(n), 1.0);
+        }
+    }
+    // Pebbles: a handful of grey stones, some two pixels wide.
+    for k in 0..7u32 {
+        let x = hash(k, 1, seed + 11) % S;
+        let y = 3 + hash(k, 2, seed + 11) % (S - 3);
+        let g = 0.46 + (hash(k, 3, seed) % 4) as f32 * 0.04;
+        q.put(x, y, Rgb(g, g, g + 0.02), 1.0);
+        if k % 2 == 0 {
+            q.put((x + 1) % S, y, Rgb(g * 0.85, g * 0.85, g * 0.87), 1.0);
+        }
+    }
+}
+
+/// The side of a grass-topped block: earth with pebbles under a grass edge that hangs down
+/// in uneven drips (two to six pixels), lighter on top, darker at the tips, with a thin
+/// shadow on the earth right under it.
 fn side_with_top(base: Rgb, top: Rgb, seed: u32) -> Image {
     p(|q| {
-        q.noisy(base, 0.09, 3);
-        q.speckle(base.scale(0.88), 0.2, 4);
+        earth(q, base, seed);
         for x in 0..S {
-            let depth = 3 + (hash(x, 0, seed) % 3);
+            let mut depth = 2 + hash(x, 0, seed) % 2;
+            if hash(x, 1, seed) % 4 == 0 {
+                depth += 2;
+            }
+            if hash(x, 2, seed) % 7 == 0 {
+                depth += 1;
+            }
             for y in 0..depth {
-                let n = (rnd(x, y, seed + 1) - 0.5) * 0.12;
-                q.put(x, y, top.add(n), 1.0);
+                let n = (rnd(x, y, seed + 1) - 0.5) * 0.10;
+                let c = if y == 0 {
+                    top.scale(1.08)
+                } else if y + 1 == depth {
+                    top.scale(0.82)
+                } else {
+                    top.scale(0.95 + (hash(x, y, seed + 3) % 3) as f32 * 0.04)
+                };
+                q.put(x, y, c.add(n), 1.0);
+            }
+            if depth < S {
+                q.put(x, depth, base.scale(0.72), 1.0);
             }
         }
     })
@@ -726,10 +774,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         q.speckle(Rgb(0.37, 0.61, 0.25), 0.18, 2);
     }));
     l.add(GRASS_SIDE, "grass_side", side_with_top(dirt, grass, 9));
-    l.add(DIRT, "dirt", p(|q| {
-        q.noisy(dirt, 0.09, 3);
-        q.speckle(Rgb(0.46, 0.32, 0.21), 0.2, 4);
-    }));
+    l.add(DIRT, "dirt", p(|q| earth(q, dirt, 3)));
     l.add(STONE, "stone", p(|q| {
         q.noisy(stone, 0.12, 5);
         q.speckle(Rgb(0.42, 0.42, 0.44), 0.25, 6);
@@ -2318,6 +2363,92 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(COMPRESSOR_FRONT, "compressor", p(|q| front(q, 316, Rgb(0.85, 0.85, 0.90), 7)));
     l.add(SAWMILL_FRONT, "sawmill", p(|q| front(q, 317, Rgb(0.80, 0.80, 0.84), 8)));
     l.add(EXTRACTOR_FRONT, "extractor", p(|q| front(q, 318, Rgb(0.45, 0.70, 0.95), 9)));
+    // «Механика» (Create-like): steel shaft, wooden cog with an iron rim, a paddle wheel,
+    // a crank; the press and the millstone in andesite-grey casings.
+    let andesite = Rgb(0.62, 0.63, 0.60);
+    let casing = |q: &mut Painter, seed: u32| {
+        for y in 0..S {
+            for x in 0..S {
+                let edge = x == 0 || y == 0 || x == S - 1 || y == S - 1;
+                let n = (rnd(x, y, seed) - 0.5) * 0.08;
+                q.put(x, y, if edge { Rgb(0.42, 0.30, 0.18) } else { andesite.add(n) }, 1.0);
+            }
+        }
+        for (x, y) in [(1u32, 1u32), (S - 2, 1), (1, S - 2), (S - 2, S - 2)] {
+            q.put(x, y, Rgb(0.80, 0.80, 0.82), 1.0);
+        }
+    };
+    l.add(KIN_SHAFT, "kin_shaft", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let band = (y as f32 / S as f32 * 4.0) as u32 % 2 == 0;
+                q.put(x, y, if band { Rgb(0.62, 0.64, 0.68) } else { Rgb(0.50, 0.52, 0.56) }.add((rnd(x, y, 320) - 0.5) * 0.05), 1.0);
+            }
+        }
+    }));
+    l.add(KIN_COG, "kin_cog", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let r = (dx * dx + dy * dy).sqrt();
+                let c = if r < 2.0 { Rgb(0.55, 0.57, 0.60) } else if r < 6.0 { Rgb(0.60, 0.44, 0.26).add((rnd(x, y, 321) - 0.5) * 0.06) } else if r < 7.6 && (dy.atan2(dx) * 4.0 / std::f32::consts::PI).round() as i32 % 2 == 0 { Rgb(0.48, 0.34, 0.20) } else { Rgb(0.36, 0.26, 0.15) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(KIN_WHEEL, "kin_wheel", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let plank = (x / 4 + y / 8) % 2 == 0;
+                q.put(x, y, if plank { Rgb(0.62, 0.46, 0.28) } else { Rgb(0.54, 0.40, 0.24) }.add((rnd(x, y, 322) - 0.5) * 0.06), 1.0);
+            }
+        }
+    }));
+    l.add(KIN_CRANK, "kin_crank", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                q.put(x, y, Rgb(0.58, 0.42, 0.25).add((rnd(x, y, 323) - 0.5) * 0.08), 1.0);
+            }
+        }
+    }));
+    l.add(KIN_PRESS_SIDE, "kin_press_side", p(|q| {
+        casing(q, 324);
+        for x in 3..13 {
+            q.put(x, 5, Rgb(0.35, 0.36, 0.38), 1.0);
+            q.put(x, 10, Rgb(0.35, 0.36, 0.38), 1.0);
+        }
+        for y in 5..11 {
+            q.put(7, y, Rgb(0.75, 0.76, 0.78), 1.0);
+            q.put(8, y, Rgb(0.75, 0.76, 0.78), 1.0);
+        }
+    }));
+    l.add(KIN_PRESS_TOP, "kin_press_top", p(|q| {
+        casing(q, 325);
+        for y in 5..11 {
+            for x in 5..11 {
+                q.put(x, y, Rgb(0.50, 0.52, 0.56), 1.0);
+            }
+        }
+    }));
+    l.add(KIN_MILL_SIDE, "kin_mill_side", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let n = (rnd(x, y, 326) - 0.5) * 0.10;
+                let c = if y < 7 { Rgb(0.66, 0.66, 0.64) } else if y == 7 || y == 8 { Rgb(0.42, 0.30, 0.18) } else { Rgb(0.58, 0.58, 0.56) };
+                q.put(x, y, c.add(n), 1.0);
+            }
+        }
+    }));
+    l.add(KIN_MILL_TOP, "kin_mill_top", p(|q| {
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let r = (dx * dx + dy * dy).sqrt();
+                let groove = ((dy.atan2(dx) * 3.0 + r * 0.4).sin() > 0.7) as u32 as f32 * -0.1;
+                q.put(x, y, if r < 1.6 { Rgb(0.42, 0.30, 0.18) } else { Rgb(0.66, 0.66, 0.64).add(groove + (rnd(x, y, 327) - 0.5) * 0.06) }, 1.0);
+            }
+        }
+    }));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

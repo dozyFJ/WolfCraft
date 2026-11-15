@@ -21,7 +21,7 @@ const ARMOR: usize = 95;
 
 /// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
 // "Техника" is put away for now (its items are still under "Все" and in the search).
-const CREATIVE_TABS: [&str; 18] = ["Все", "Мебель", "Стекло", "Двери", "Декор", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Хранилища", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "WolfTech", "Инвентарь"];
+const CREATIVE_TABS: [&str; 19] = ["Все", "Мебель", "Стекло", "Двери", "Декор", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Хранилища", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "WolfTech", "Механика", "Инвентарь"];
 const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 
 

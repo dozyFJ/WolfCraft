@@ -134,7 +134,11 @@ pub mod ids {
     /// Electric tools: a drill (pickaxe + shovel) and a chainsaw (axe + leaves), fast, on charge.
     pub const DRILL: ItemId = 409;
     pub const CHAINSAW: ItemId = 410;
-    pub const LAST: ItemId = 410;
+    /// «Механика»: plates from the mechanical press.
+    pub const IRON_PLATE: ItemId = 411;
+    pub const COPPER_PLATE: ItemId = 412;
+    pub const GOLD_PLATE: ItemId = 413;
+    pub const LAST: ItemId = 413;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -276,6 +280,9 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::COOLANT_CELL => ItemInfo { max_stack: 1, durability: 2000, ..plain("Охлаждающая капсула", sp::COOLANT_CELL) },
         ids::REACTOR_PLATING => ItemInfo { max_stack: 1, ..plain("Обшивка реактора", sp::REACTOR_PLATING) },
         ids::DRILL => ItemInfo { max_stack: 1, durability: 600, attack: 4.0, tool: Some((ToolKind::Pickaxe, 3)), ..plain("Электробур", sp::DRILL) },
+        ids::IRON_PLATE => plain("Железная пластина", sp::IRON_PLATE),
+        ids::COPPER_PLATE => plain("Медная пластина", sp::COPPER_PLATE),
+        ids::GOLD_PLATE => plain("Золотая пластина", sp::GOLD_PLATE),
         ids::CHAINSAW => ItemInfo { max_stack: 1, durability: 600, attack: 7.0, tool: Some((ToolKind::Axe, 3)), ..plain("Электропила", sp::CHAINSAW) },
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
         ids::BRONZE_INGOT => plain("Бронзовый слиток", sp::BRONZE_INGOT),
@@ -669,6 +676,9 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
+    if (ids::IRON_PLATE..=ids::GOLD_PLATE).contains(&id) || (id < 4096 && crate::kinetic::part(crate::block::Block::from_id(id)).is_some()) {
+        return "Механика";
+    }
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
     if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
         return "WolfTech";
