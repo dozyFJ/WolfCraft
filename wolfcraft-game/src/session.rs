@@ -301,6 +301,10 @@ pub struct GameSession {
     /// (item, how many, seconds shown).
     pub popups: Vec<Popup>,
     pub pickups: Vec<(wolfcraft_engine::items::ItemId, u32, f32)>,
+    /// Achievements of this world, and the toasts showing now (index in the list, seconds).
+    pub achieved: std::collections::HashSet<String>,
+    pub ach_toasts: Vec<(usize, f32)>,
+    ach_t: f32,
     /// Radiation dose from uranium (seconds of exposure); every 3 s of it costs half a heart.
     radiation: f32,
     /// Flowing water and lava around edits.
@@ -412,6 +416,9 @@ impl GameSession {
             picked_up: 0,
             popups: Vec::new(),
             pickups: Vec::new(),
+            achieved: std::collections::HashSet::new(),
+            ach_toasts: Vec::new(),
+            ach_t: 0.0,
             aim_dir: None,
             fx_amount: 1.0,
             fx_lights: Vec::new(),
@@ -428,6 +435,9 @@ impl GameSession {
         s.boss_book=wolfcraft_engine::bosses::BossBook::load(&s.dir.join("bosses.txt"));
         s.load_containers();
         s.load_tech();
+        if let Ok(t) = std::fs::read_to_string(s.dir.join("achievements.txt")) {
+            s.achieved = t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+        }
         s.petsim = wolfcraft_engine::petsim::PetSim::from_text(&std::fs::read_to_string(s.dir.join("petsim.txt")).unwrap_or_default());
         // Old saves kept the pets in petsim.txt: they move into the inventory once.
         for k in std::mem::take(&mut s.petsim.owned) {
@@ -947,6 +957,7 @@ impl GameSession {
                 self.title = Some((format!("{} ПОВЕРЖЕН", death.kind.name().to_uppercase()), "Победа!".into(), 0.0));
                 self.boss_seen = None;
             }
+            self.grant("boss");
             if self.boss_book.finish(death.kind,death.home) {
                 for reward in death.kind.rewards() {if let Some(rest)=self.player.inventory.add(reward){self.drops.pop_shiny(rest,death.at);}}
                 self.player.survival.add_xp(100);
@@ -983,6 +994,7 @@ impl GameSession {
         }
         self.tick_furnaces(dt);
         self.tick_tech(dt);
+        self.tick_achievements(&events, dt);
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
             if let InteractionEvent::Broken { pos, block } = e {
@@ -2153,6 +2165,56 @@ impl GameSession {
         }
     }
 
+    /// Grants an achievement once per world: a golden toast pops on the left.
+    pub fn grant(&mut self, id: &str) {
+        if self.achieved.contains(id) {
+            return;
+        }
+        let Some((i, _)) = crate::achievements::find(id) else { return };
+        self.achieved.insert(id.to_string());
+        self.ach_toasts.push((i, 0.0));
+        let list: Vec<&str> = self.achieved.iter().map(|s| s.as_str()).collect();
+        let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("achievements.txt"), list.join("\n").as_bytes());
+    }
+
+    fn tick_achievements(&mut self, events: &[InteractionEvent], dt: f32) {
+        for t in &mut self.ach_toasts {
+            t.1 += dt;
+        }
+        // One toast at a time: the next waits until the first has slid away.
+        if self.ach_toasts.first().is_some_and(|t| t.1 > 4.5) {
+            self.ach_toasts.remove(0);
+        }
+        for e in events {
+            if let InteractionEvent::Placed { block, .. } = e {
+                if let Some(id) = crate::achievements::for_placed(*block) {
+                    self.grant(id);
+                }
+            }
+        }
+        self.ach_t -= dt;
+        if self.ach_t > 0.0 {
+            return;
+        }
+        self.ach_t = 1.0;
+        let held: Vec<_> = self.player.inventory.slots.iter().flatten().filter_map(|s| crate::achievements::for_item(s.id)).collect();
+        for id in held {
+            self.grant(id);
+        }
+        if self.player.jetting {
+            self.grant("jetpack");
+        }
+        if self.player.inventory.armor[1].is_some_and(|s| s.id == wolfcraft_engine::items::ids::NANO_BASE + 1) {
+            self.grant("nano");
+        }
+        if self.riding.is_some() {
+            self.grant("dragon");
+        }
+        if self.hell {
+            self.grant("hell");
+        }
+    }
+
     /// Hull heat and its limit of the reactor at `pos`.
     pub fn reactor_heat(&self, pos: wolfcraft_engine::cubesphere::Cell) -> (f32, f32) {
         let plating = self.containers.get(&pos).map(|v| v.iter().flatten().filter(|s| s.id == wolfcraft_engine::items::ids::REACTOR_PLATING).count()).unwrap_or(0);
@@ -2203,6 +2265,7 @@ impl GameSession {
             self.shake = self.shake.max(1.0);
             self.flash = Some(([0.75, 1.0, 0.65], 0.5));
             self.item_name = Some(("☢ Реактор взорвался!".into(), 3.0));
+            self.grant("meltdown");
         }
     }
 
@@ -4121,6 +4184,7 @@ impl GameSession {
         self.mobs.chips(at - look * 0.3, &[[0.95, 0.15, 0.12], [1.0, 1.0, 1.0], [0.75, 0.05, 0.05]], n, 2.2 + dmg as f64 * 0.15);
         self.damage_popup(at, dmg);
         if let Some(kind) = self.mobs.hurt(i, dmg, self.player.body.pos) {
+            self.grant("hunter");
             // Finishing blow: a puff of smoke and a ring of little stars.
             {
                 use wolfcraft_engine::mobs::FxKind;

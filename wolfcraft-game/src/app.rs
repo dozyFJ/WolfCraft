@@ -2120,6 +2120,10 @@ impl App {
                             compact: cfg!(target_os = "android"),
                             crosshair: !(touch.seen && settings.tap_aim),
                             effects: p.effects.iter().map(|a| (format!("{} {}", a.effect.name(), wolfcraft_engine::magic::roman(a.level)), a.effect.color(), a.left)).collect(),
+                            achievement: s.ach_toasts.first().map(|(i, age)| {
+                                let a = &crate::achievements::ALL[*i];
+                                (wolfcraft_engine::items::ItemStack::new(a.icon, 1), a.name.to_string(), a.desc.to_string(), *age)
+                            }),
                             pickups: s.pickups.iter().map(|(id, n, age)| (wolfcraft_engine::items::ItemStack::new(*id, (*n).min(255) as u8), *age)).collect(),
                             popups: {
                                 // Damage numbers: from the world onto the screen.
