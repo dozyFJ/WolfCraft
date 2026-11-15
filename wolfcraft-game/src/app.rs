@@ -2848,6 +2848,8 @@ impl App {
                                 ids::STAR_BLASTER => 6,
                                 ids::STAR_REMOTE => 7,
                                 ids::STAR_HAMMER => 8,
+                                ids::PLASMA_RIFLE => 9,
+                                ids::RAILGUN => 10,
                                 _ => return None,
                             };
                             let ammo = wolfcraft_engine::explosives::weapon(st.id).map(|w| w.0).unwrap_or(0);
@@ -3858,6 +3860,8 @@ fn held_visual(inv: &wolfcraft_engine::inventory::Inventory, tile_colors: &[[[f3
             ids::STAR_BLASTER => Some(6),
             ids::STAR_REMOTE => Some(7),
             ids::STAR_HAMMER => Some(8),
+            ids::PLASMA_RIFLE => Some(9),
+            ids::RAILGUN => Some(10),
             _ => None,
         };
         if let Some(k) = gun {
