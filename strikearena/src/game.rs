@@ -2,7 +2,7 @@
 
 use crate::gfx::Scene;
 use crate::render::{self, Spark, Tracer};
-use crate::sim::{Event, GUNS, Gun, Input, Match, gun};
+use crate::sim::{Event, GUNS, Gun, Input, Item, Match, SHOP, gun};
 use egui::{Align2, Color32, FontId, Pos2, Rect, RichText, Stroke, Vec2 as EV};
 use glam::{Vec2, Vec3};
 use std::collections::{HashMap, HashSet};
@@ -16,6 +16,8 @@ pub enum Screen {
     Playing,
     Paused,
     Over,
+    /// The buy menu; the match goes on behind it.
+    Shop,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -25,7 +27,7 @@ enum Btn {
     FireLeft,
     Aim,
     Reload,
-    Swap,
+    Shop,
     Pause,
 }
 
@@ -68,6 +70,8 @@ pub struct Game {
     skill: usize,
     sens: f32,
     pub quit: bool,
+    pending_switch: Option<usize>,
+    shop_msg: (String, f32),
 }
 
 impl Game {
@@ -99,6 +103,8 @@ impl Game {
             skill,
             sens,
             quit: false,
+            pending_switch: None,
+            shop_msg: (String::new(), 0.0),
         }
     }
 
@@ -134,9 +140,8 @@ impl Game {
             KeyCode::KeyR => {
                 self.taps.insert(Btn::Reload);
             }
-            KeyCode::Tab => {
-                self.taps.insert(Btn::Swap);
-            }
+            KeyCode::Tab => self.next_gun(),
+            KeyCode::KeyB => self.toggle_shop(),
             KeyCode::Escape | KeyCode::BrowserBack => self.back(),
             _ => {}
         }
@@ -151,7 +156,35 @@ impl Game {
                 Screen::Title
             }
             Screen::Over => Screen::Title,
+            Screen::Shop => Screen::Playing,
         };
+    }
+
+    fn toggle_shop(&mut self) {
+        self.screen = match self.screen {
+            Screen::Playing => Screen::Shop,
+            Screen::Shop => Screen::Playing,
+            s => s,
+        };
+        self.touches.clear();
+    }
+
+    fn next_gun(&mut self) {
+        if let Some(m) = &self.m {
+            let s = &m.men[0];
+            let next = (1..=4).map(|d| (s.gun + d) % 4).find(|&k| s.owned[k]);
+            self.pending_switch = next;
+        }
+    }
+
+    /// The weapon hotbar at the bottom (WolfCraft style): one tile per gun.
+    fn hotbar(&self) -> Vec<(usize, Rect)> {
+        let t = 54.0;
+        let gap = 6.0;
+        let total = 4.0 * t + 3.0 * gap;
+        let x0 = self.view.x / 2.0 - total / 2.0;
+        let y = self.view.y - t - 10.0;
+        (0..4).map(|k| (k, Rect::from_min_size(Pos2::new(x0 + k as f32 * (t + gap), y), EV::splat(t)))).collect()
     }
 
     fn unit(&self) -> f32 {
@@ -170,8 +203,8 @@ impl Game {
             (Btn::FireLeft, Pos2::new(1.3 * u, h - 4.9 * u), 0.62 * u, "Огонь"),
             (Btn::Aim, Pos2::new(w - 3.7 * u, h - 1.2 * u), 0.62 * u, "Прицел"),
             (Btn::Reload, Pos2::new(w - 1.1 * u, h - 4.0 * u), 0.55 * u, "Перезар."),
-            (Btn::Swap, Pos2::new(w - 3.3 * u, h - 3.3 * u), 0.55 * u, "Оружие"),
-            (Btn::Pause, Pos2::new(w / 2.0, 26.0), 0.42 * u, "II"),
+            (Btn::Shop, Pos2::new(w - 3.3 * u, h - 3.3 * u), 0.55 * u, "Магазин"),
+            (Btn::Pause, Pos2::new(26.0, 26.0), 0.36 * u, "II"),
         ]
     }
 
@@ -183,6 +216,10 @@ impl Game {
         let p = Pos2::new(px.0 as f32 / ppp, px.1 as f32 / ppp);
         match phase {
             TouchPhase::Started => {
+                if let Some((k, _)) = self.hotbar().into_iter().find(|(_, r)| r.expand(3.0).contains(p)) {
+                    self.pending_switch = Some(k);
+                    return;
+                }
                 let hit = self.buttons().into_iter().filter(|b| b.1.distance(p) < b.2 * 1.15).min_by(|a, b| a.1.distance(p).total_cmp(&b.1.distance(p))).map(|b| b.0);
                 if let Some(b) = hit {
                     match b {
@@ -191,8 +228,12 @@ impl Game {
                             return;
                         }
                         Btn::Aim => self.aim_toggle = !self.aim_toggle,
-                        Btn::Reload | Btn::Swap => {
+                        Btn::Reload => {
                             self.taps.insert(b);
+                        }
+                        Btn::Shop => {
+                            self.toggle_shop();
+                            return;
                         }
                         Btn::Fire | Btn::FireLeft => {}
                     }
@@ -252,12 +293,8 @@ impl Game {
         let me = self.m.as_ref().map(|m| &m.men[0]);
         let zoom = me.map(|s| if s.aiming { s.spec().zoom } else { 1.0 }).unwrap_or(1.0);
         let k_look = 0.0055 * self.sens / zoom;
-        let mut switch = None;
-        if taps.contains(&Btn::Swap) {
-            if let Some(s) = me {
-                switch = Some((s.gun + 1) % GUNS.len());
-            }
-        }
+        let _ = &me;
+        let mut switch = self.pending_switch.take();
         for (i, key) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].into_iter().enumerate() {
             if k(key) {
                 switch = Some(i);
@@ -281,10 +318,11 @@ impl Game {
             f.2 -= dt;
         }
         self.feed.retain(|f| f.2 > 0.0);
-        if self.screen != Screen::Playing {
+        self.shop_msg.1 -= dt;
+        if !matches!(self.screen, Screen::Playing | Screen::Shop) {
             return;
         }
-        let input = self.input();
+        let input = if self.screen == Screen::Playing { self.input() } else { Input::default() };
         let Some(m) = self.m.as_mut() else { return };
         m.update(dt, input);
         let me = &m.men[0];
@@ -340,7 +378,7 @@ impl Game {
 
     pub fn build_scene(&mut self) {
         let fov = self.fov();
-        let playing = self.m.is_some() && matches!(self.screen, Screen::Playing | Screen::Paused | Screen::Over);
+        let playing = self.m.is_some() && matches!(self.screen, Screen::Playing | Screen::Paused | Screen::Over | Screen::Shop);
         if self.m.is_none() {
             // Title: a calm match on the warehouse floor to fly over.
             self.m = Some(Match::new(1, 0.5));
@@ -403,6 +441,87 @@ impl Game {
                 self.pause(ctx);
             }
             Screen::Over => self.over(ctx),
+            Screen::Shop => {
+                self.hud(ctx);
+                self.shop(ctx);
+            }
+        }
+    }
+
+    fn shop(&mut self, ctx: &egui::Context) {
+        dim(ctx, 0.45);
+        let Some(m) = &self.m else { return };
+        let me = &m.men[0];
+        let (money, owned, gun_now) = (me.money, me.owned, me.gun);
+        let mut buy = None;
+        let mut close = false;
+        egui::CentralPanel::default().frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(24.0, 14.0))).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("МАГАЗИН").size(26.0).strong().color(Color32::WHITE));
+                ui.add_space(16.0);
+                ui.label(RichText::new(format!("$ {money}")).size(24.0).strong().color(Color32::from_rgb(120, 220, 110)));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new(RichText::new("Закрыть").size(18.0)).min_size(EV::new(120.0, 40.0))).clicked() {
+                        close = true;
+                    }
+                    if self.shop_msg.1 > 0.0 {
+                        ui.label(RichText::new(&self.shop_msg.0).size(16.0).color(Color32::from_rgb(255, 150, 120)));
+                    }
+                });
+            });
+            ui.add_space(8.0);
+            let cols = 4;
+            let gap = 10.0;
+            let card_w = ((ui.available_width() - gap * (cols as f32 - 1.0)) / cols as f32).floor();
+            let card_h = ((ui.available_height() - gap) / 2.0).clamp(90.0, 150.0);
+            for row in SHOP.chunks(cols) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for (item, name, price) in row {
+                        let (rect, resp) = ui.allocate_exact_size(EV::new(card_w, card_h), egui::Sense::click());
+                        let have = matches!(item, Item::Gun(k) if owned[*k]);
+                        let afford = money >= *price;
+                        let p = ui.painter();
+                        let hot = resp.hovered() || resp.is_pointer_button_down_on();
+                        p.rect_filled(rect, 12.0, Color32::from_black_alpha(if hot { 200 } else { 160 }));
+                        let border = if matches!(item, Item::Gun(k) if *k == gun_now) { Color32::from_rgb(90, 150, 255) } else if have { Color32::from_white_alpha(60) } else if afford { Color32::from_white_alpha(130) } else { Color32::from_rgb(140, 60, 50) };
+                        p.rect_stroke(rect, 12.0, Stroke::new(2.0_f32, border));
+                        let icon = Rect::from_center_size(rect.center() - EV::new(0.0, card_h * 0.12), EV::new(card_w * 0.7, card_h * 0.42));
+                        item_icon(p, icon, *item, if have || afford { Color32::from_white_alpha(230) } else { Color32::from_white_alpha(90) });
+                        p.text(rect.left_bottom() + EV::new(10.0, -10.0), Align2::LEFT_BOTTOM, *name, FontId::proportional(15.0), Color32::WHITE);
+                        let tag = if have { "Есть".to_string() } else { format!("${price}") };
+                        p.text(rect.right_bottom() + EV::new(-10.0, -10.0), Align2::RIGHT_BOTTOM, tag, FontId::proportional(15.0), if have { Color32::from_white_alpha(140) } else if afford { Color32::from_rgb(120, 220, 110) } else { Color32::from_rgb(230, 90, 80) });
+                        if resp.clicked() {
+                            if have {
+                                if let Item::Gun(k) = item {
+                                    self.pending_switch = Some(*k);
+                                }
+                            } else {
+                                buy = Some(*item);
+                            }
+                        }
+                    }
+                });
+                ui.add_space(gap);
+            }
+        });
+        if let Some(item) = buy {
+            if let Some(m) = self.m.as_mut() {
+                match m.buy(0, item) {
+                    Ok(()) => self.shop_msg = (String::new(), 0.0),
+                    Err(e) => self.shop_msg = (e.to_string(), 2.0),
+                }
+            }
+        }
+        if let Some(k) = self.pending_switch.take() {
+            if let Some(m) = self.m.as_mut() {
+                if m.men[0].owned[k] {
+                    m.men[0].gun = k;
+                }
+            }
+        }
+        if close {
+            self.screen = Screen::Playing;
         }
     }
 
@@ -566,26 +685,64 @@ impl Game {
             let a = (me.hurt * 200.0) as u8;
             p.circle_filled(c + dir * h * 0.3, 10.0, Color32::from_rgba_unmultiplied(230, 40, 30, a));
         }
-        // Score and time.
-        let top = Pos2::new(w / 2.0, 62.0);
-        p.rect_filled(Rect::from_center_size(top, EV::new(190.0, 30.0)), 8.0, Color32::from_black_alpha(140));
-        p.text(top - EV::new(40.0, 0.0), Align2::RIGHT_CENTER, m.score[0].to_string(), FontId::proportional(20.0), Color32::from_rgb(120, 170, 255));
-        p.text(top + EV::new(40.0, 0.0), Align2::LEFT_CENTER, m.score[1].to_string(), FontId::proportional(20.0), Color32::from_rgb(255, 120, 110));
+        // CS-style top bar: score boxes around the timer, a figure for every soldier (dim = dead).
+        let top = Pos2::new(w / 2.0, 30.0);
+        let blue = Color32::from_rgb(90, 150, 255);
+        let red = Color32::from_rgb(240, 95, 80);
+        p.rect_filled(Rect::from_center_size(top, EV::new(76.0, 34.0)), 6.0, Color32::from_black_alpha(170));
         let secs = m.time.ceil() as u32;
-        p.text(top, Align2::CENTER_CENTER, format!("{}:{:02}", secs / 60, secs % 60), FontId::proportional(16.0), Color32::WHITE);
-        // Health.
-        let hb = Rect::from_min_size(Pos2::new(16.0, 14.0), EV::new((w * 0.26).min(240.0), 12.0));
-        p.rect_filled(hb.expand(2.0), 5.0, Color32::from_black_alpha(150));
-        let k = (me.hp / 100.0).clamp(0.0, 1.0);
-        let hc = if k > 0.5 { Color32::from_rgb(90, 210, 120) } else if k > 0.25 { Color32::from_rgb(240, 190, 60) } else { Color32::from_rgb(235, 70, 60) };
-        p.rect_filled(Rect::from_min_size(hb.min, EV::new(hb.width() * k, hb.height())), 4.0, hc);
-        p.text(Pos2::new(16.0, 30.0), Align2::LEFT_TOP, format!("{:.0} · {}", me.hp, spec.name), FontId::proportional(14.0), Color32::WHITE);
-        // Kill feed.
+        let tcol = if m.time < 30.0 { red } else { Color32::WHITE };
+        p.text(top, Align2::CENTER_CENTER, format!("{}:{:02}", secs / 60, secs % 60), FontId::proportional(18.0), tcol);
+        for team in 0..2u8 {
+            let sgn = if team == 0 { -1.0 } else { 1.0 };
+            let col = if team == 0 { blue } else { red };
+            let sc = Rect::from_center_size(top + EV::new(sgn * 66.0, 0.0), EV::new(52.0, 34.0));
+            p.rect_filled(sc, 6.0, Color32::from_rgba_unmultiplied(col.r() / 2, col.g() / 2, col.b() / 2, 200));
+            p.text(sc.center(), Align2::CENTER_CENTER, m.score[team as usize].to_string(), FontId::proportional(20.0), Color32::WHITE);
+            for (i, o) in m.men.iter().filter(|o| o.team == team).enumerate() {
+                let cx = top.x + sgn * (106.0 + i as f32 * 22.0);
+                let cell = Rect::from_center_size(Pos2::new(cx, top.y), EV::new(20.0, 34.0));
+                p.rect_filled(cell, 4.0, Color32::from_black_alpha(140));
+                let c = if o.alive() { col } else { Color32::from_white_alpha(45) };
+                p.circle_filled(Pos2::new(cx, top.y - 7.0), 4.5, c);
+                p.rect_filled(Rect::from_center_size(Pos2::new(cx, top.y + 6.0), EV::new(10.0, 13.0)), 3.0, c);
+                if o.bot.is_none() {
+                    p.rect_stroke(cell, 4.0, Stroke::new(1.5_f32, Color32::from_rgb(255, 215, 90)));
+                }
+            }
+        }
+        // Money, health, armour (top left, next to pause).
+        p.text(Pos2::new(54.0, 12.0), Align2::LEFT_TOP, format!("$ {}", me.money), FontId::proportional(18.0), Color32::from_rgb(120, 220, 110));
+        let hk = (me.hp / 100.0).clamp(0.0, 1.0);
+        let hc = if hk > 0.5 { Color32::WHITE } else if hk > 0.25 { Color32::from_rgb(240, 190, 60) } else { Color32::from_rgb(235, 70, 60) };
+        let hp_at = Pos2::new(54.0, 40.0);
+        p.rect_filled(Rect::from_center_size(hp_at + EV::new(6.0, 0.0), EV::new(12.0, 4.0)), 1.0, hc);
+        p.rect_filled(Rect::from_center_size(hp_at + EV::new(6.0, 0.0), EV::new(4.0, 12.0)), 1.0, hc);
+        p.text(hp_at + EV::new(16.0, 0.0), Align2::LEFT_CENTER, format!("{:.0}", me.hp.max(0.0)), FontId::proportional(18.0), hc);
+        let ar_at = hp_at + EV::new(66.0, 0.0);
+        let shield = vec![ar_at + EV::new(0.0, -6.0), ar_at + EV::new(10.0, -6.0), ar_at + EV::new(10.0, 1.0), ar_at + EV::new(5.0, 7.0), ar_at + EV::new(0.0, 1.0)];
+        p.add(egui::Shape::convex_polygon(shield, if me.armor > 0.0 { Color32::from_rgb(150, 190, 230) } else { Color32::from_white_alpha(50) }, Stroke::NONE));
+        p.text(ar_at + EV::new(15.0, 0.0), Align2::LEFT_CENTER, format!("{:.0}", me.armor), FontId::proportional(18.0), Color32::from_rgb(150, 190, 230));
+        // Kill feed, under the top bar on the right.
         for (i, (text, col, life)) in self.feed.iter().enumerate() {
             let a = (life.min(1.0) * 255.0) as u8;
-            let pos = Pos2::new(w - 14.0, 14.0 + i as f32 * 20.0);
+            let pos = Pos2::new(w - 14.0, 60.0 + i as f32 * 20.0);
             p.text(pos + EV::new(1.0, 1.0), Align2::RIGHT_TOP, text, FontId::proportional(13.0), Color32::from_black_alpha(a / 2 + 40));
             p.text(pos, Align2::RIGHT_TOP, text, FontId::proportional(13.0), Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), a));
+        }
+        // Weapon hotbar (WolfCraft style).
+        if me.alive() {
+            for (k, r) in self.hotbar() {
+                let sel = k == me.gun;
+                let has = me.owned[k];
+                p.rect_filled(r, 10.0, Color32::from_black_alpha(if sel { 170 } else { 120 }));
+                p.rect_stroke(r, 10.0, if sel { Stroke::new(2.5_f32, Color32::from_rgb(90, 150, 255)) } else { Stroke::new(1.0_f32, Color32::from_white_alpha(90)) });
+                p.text(r.left_top() + EV::new(5.0, 3.0), Align2::LEFT_TOP, (k + 1).to_string(), FontId::proportional(11.0), Color32::from_white_alpha(170));
+                item_icon(&p, r.shrink2(EV::new(7.0, 14.0)), Item::Gun(k), if has { Color32::from_white_alpha(235) } else { Color32::from_white_alpha(45) });
+                if has {
+                    p.text(r.right_bottom() + EV::new(-5.0, -3.0), Align2::RIGHT_BOTTOM, me.mag[k].to_string(), FontId::proportional(12.0), Color32::WHITE);
+                }
+            }
         }
         if !me.alive() {
             // A compact panel at the bottom: who killed you, whom you watch, the respawn bar.
@@ -656,6 +813,54 @@ impl Game {
         let (_, fire_at, fr, _) = self.buttons()[0];
         let ammo = if me.reload > 0.0 { "перезарядка…".to_string() } else { format!("{} / {}", me.mag[me.gun], me.reserve[me.gun]) };
         shadow_text(&p, fire_at - EV::new(0.0, fr + 16.0), &ammo, 18.0, if me.mag[me.gun] == 0 { Color32::from_rgb(255, 90, 70) } else { Color32::WHITE });
+    }
+}
+
+/// Simple flat pictures of the shop items and the guns.
+fn item_icon(p: &egui::Painter, r: Rect, item: Item, c: Color32) {
+    let at = |x: f32, y: f32| Pos2::new(r.left() + r.width() * x, r.top() + r.height() * y);
+    let bar = |x0: f32, y0: f32, x1: f32, y1: f32| Rect::from_min_max(at(x0, y0), at(x1, y1));
+    match item {
+        Item::Gun(0) => {
+            p.rect_filled(bar(0.22, 0.35, 0.78, 0.55), 2.0, c);
+            p.rect_filled(bar(0.78, 0.42, 1.0, 0.5), 1.0, c);
+            p.rect_filled(bar(0.0, 0.38, 0.22, 0.62), 2.0, c);
+            p.rect_filled(bar(0.48, 0.55, 0.58, 0.9), 1.0, c);
+            p.rect_filled(bar(0.32, 0.55, 0.4, 0.8), 1.0, c);
+        }
+        Item::Gun(1) => {
+            p.rect_filled(bar(0.25, 0.36, 1.0, 0.5), 2.0, c);
+            p.rect_filled(bar(0.45, 0.5, 0.75, 0.6), 2.0, c);
+            p.rect_filled(bar(0.0, 0.4, 0.25, 0.66), 3.0, c);
+        }
+        Item::Gun(2) => {
+            p.rect_filled(bar(0.18, 0.42, 0.7, 0.56), 2.0, c);
+            p.rect_filled(bar(0.7, 0.46, 1.0, 0.52), 1.0, c);
+            p.rect_filled(bar(0.3, 0.26, 0.6, 0.38), 3.0, c);
+            p.rect_filled(bar(0.0, 0.44, 0.18, 0.66), 2.0, c);
+            p.rect_filled(bar(0.38, 0.56, 0.45, 0.78), 1.0, c);
+        }
+        Item::Gun(_) => {
+            p.rect_filled(bar(0.25, 0.3, 0.8, 0.46), 2.0, c);
+            p.rect_filled(bar(0.28, 0.46, 0.45, 0.85), 2.0, c);
+        }
+        Item::Armor => {
+            let pts = vec![at(0.3, 0.1), at(0.7, 0.1), at(0.82, 0.3), at(0.75, 0.9), at(0.25, 0.9), at(0.18, 0.3)];
+            p.add(egui::Shape::convex_polygon(pts, c, Stroke::NONE));
+        }
+        Item::Medkit => {
+            p.rect_filled(bar(0.2, 0.15, 0.8, 0.85), 6.0, c);
+            let red = Color32::from_rgb(220, 60, 50);
+            p.rect_filled(bar(0.44, 0.27, 0.56, 0.73), 1.0, red);
+            p.rect_filled(bar(0.32, 0.44, 0.68, 0.56), 1.0, red);
+        }
+        Item::Ammo => {
+            for k in 0..4 {
+                let x = 0.18 + k as f32 * 0.17;
+                p.rect_filled(bar(x, 0.35, x + 0.11, 0.85), 2.0, c);
+                p.circle_filled(at(x + 0.055, 0.33), r.width() * 0.055, c);
+            }
+        }
     }
 }
 

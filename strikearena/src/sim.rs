@@ -83,6 +83,11 @@ pub struct Soldier {
     pub dead_t: f32,
     pub bot: Option<Bot>,
     trigger_was: bool,
+    /// Guns this soldier has (bots carry all; the player buys them in the shop).
+    pub owned: [bool; 4],
+    pub money: u32,
+    /// Body armour: takes half of every hit while it lasts.
+    pub armor: f32,
 }
 
 impl Soldier {
@@ -134,6 +139,27 @@ pub struct Match {
 }
 
 pub const WARMUP: f32 = 5.0;
+pub const START_MONEY: u32 = 1600;
+pub const KILL_REWARD: u32 = 300;
+pub const HEAD_BONUS: u32 = 100;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Item {
+    Gun(usize),
+    Armor,
+    Medkit,
+    Ammo,
+}
+
+pub const SHOP: [(Item, &str, u32); 7] = [
+    (Item::Gun(0), "Автомат", 1500),
+    (Item::Gun(1), "Дробовик", 1100),
+    (Item::Gun(2), "Снайперка", 2400),
+    (Item::Gun(3), "Пистолет", 200),
+    (Item::Armor, "Бронежилет", 650),
+    (Item::Medkit, "Аптечка", 400),
+    (Item::Ammo, "Патроны", 200),
+];
 
 const NAMES: [&str; 10] = ["Ты", "Ястреб", "Гром", "Сокол", "Буря", "Кобра", "Шторм", "Призрак", "Клык", "Вихрь"];
 
@@ -157,7 +183,7 @@ impl Match {
                 hp: 100.0,
                 respawn: 0.0,
                 protect: 1.5,
-                gun: if k == 0 { 0 } else { gun_k },
+                gun: if k == 0 { 3 } else { gun_k },
                 mag: [0; 4],
                 reserve: [0; 4],
                 reload: 0.0,
@@ -175,6 +201,9 @@ impl Match {
                 dead_t: 0.0,
                 bot: (k != 0).then(|| Bot { path: Vec::new(), repath: 0.0, target: None, seen: 0.0, strafe: 1.0, skill }),
                 trigger_was: false,
+                owned: if k == 0 { [false, false, false, true] } else { [true; 4] },
+                money: START_MONEY,
+                armor: 0.0,
             };
             refill(&mut s);
             men.push(s);
@@ -249,7 +278,7 @@ impl Match {
         s.yaw -= inp.look.x;
         s.pitch = (s.pitch + inp.look.y).clamp(-1.3, 1.3);
         if let Some(k) = inp.switch {
-            if k != s.gun && k < 4 {
+            if k != s.gun && k < 4 && s.owned[k] {
                 s.gun = k;
                 s.reload = 0.0;
                 s.cooldown = 0.35;
@@ -337,7 +366,10 @@ impl Match {
         if !v.alive() || v.protect > 0.0 {
             return;
         }
-        v.hp -= dmg;
+        // Armour soaks half of the hit while it lasts.
+        let soak = (dmg * 0.5).min(v.armor);
+        v.armor -= soak;
+        v.hp -= dmg - soak;
         v.hurt = 1.0;
         v.hurt_from = from;
         v.last_by = by;
@@ -353,11 +385,51 @@ impl Match {
             v.respawn = 3.0;
             v.dead_t = 0.0;
             v.reload = 0.0;
+            v.armor = 0.0;
             let team = self.men[by].team as usize;
             self.men[by].kills += 1;
+            self.men[by].money = (self.men[by].money + KILL_REWARD + if head { HEAD_BONUS } else { 0 }).min(16_000);
             self.score[team] += 1;
             self.events.push(Event::Kill { killer: by, victim, gun: g, head });
         }
+    }
+
+    /// Buys an item for soldier `i`. Err: why not.
+    pub fn buy(&mut self, i: usize, item: Item) -> Result<(), &'static str> {
+        let price = SHOP.iter().find(|s| s.0 == item).map(|s| s.2).unwrap_or(0);
+        let s = &mut self.men[i];
+        if !s.alive() {
+            return Err("Сначала возродись");
+        }
+        match item {
+            Item::Gun(k) if s.owned[k] => return Err("Уже есть"),
+            Item::Armor if s.armor >= 100.0 => return Err("Броня целая"),
+            Item::Medkit if s.hp >= 100.0 => return Err("Здоровье полное"),
+            _ => {}
+        }
+        if s.money < price {
+            return Err("Не хватает денег");
+        }
+        s.money -= price;
+        match item {
+            Item::Gun(k) => {
+                s.owned[k] = true;
+                s.gun = k;
+                s.reload = 0.0;
+                s.cooldown = 0.4;
+                let g = gun(GUNS[k]);
+                s.mag[k] = g.mag;
+                s.reserve[k] = g.reserve;
+            }
+            Item::Armor => s.armor = 100.0,
+            Item::Medkit => s.hp = 100.0,
+            Item::Ammo => {
+                for (k, g) in GUNS.iter().enumerate() {
+                    s.reserve[k] = gun(*g).reserve;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn think(&mut self, i: usize, dt: f32) -> Input {
@@ -507,6 +579,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_shop_sells_for_money_and_kills_pay() {
+        let mut m = Match::new(2, 0.5);
+        assert_eq!(m.men[0].gun, 3);
+        assert_eq!(m.buy(0, Item::Gun(2)), Err("Не хватает денег"));
+        m.buy(0, Item::Gun(0)).unwrap();
+        assert!(m.men[0].owned[0] && m.men[0].gun == 0);
+        assert_eq!(m.men[0].money, START_MONEY - 1500);
+        assert_eq!(m.buy(0, Item::Gun(0)), Err("Уже есть"));
+        m.men[0].money = 5000;
+        m.buy(0, Item::Armor).unwrap();
+        // Armour halves a hit.
+        m.warmup = 0.0;
+        m.men[0].protect = 0.0;
+        m.damage(0, 5, 40.0, false, Vec3::ZERO);
+        assert_eq!(m.men[0].hp, 80.0);
+        assert_eq!(m.men[0].armor, 80.0);
+        // A kill pays.
+        let before = m.men[5].money;
+        m.men[0].hp = 10.0;
+        m.damage(0, 5, 40.0, true, Vec3::ZERO);
+        assert_eq!(m.men[5].money, before + KILL_REWARD + HEAD_BONUS);
+    }
+
+    #[test]
     fn nobody_moves_or_shoots_before_the_start() {
         let mut m = Match::new(4, 0.9);
         let start: Vec<Vec2> = m.men.iter().map(|s| s.pos).collect();
@@ -546,6 +642,8 @@ mod tests {
         m.men[5].bot = None;
         m.men[5].mag = [0; 4];
         m.men[5].reserve = [0; 4];
+        m.men[0].owned = [true; 4];
+        m.men[0].gun = 0;
         let mut t = 0.0;
         while m.men[5].alive() && t < 5.0 {
             m.update(1.0 / 60.0, Input { fire: true, aim: true, ..Default::default() });
@@ -575,6 +673,8 @@ mod tests {
     fn reloading_refills_the_magazine() {
         let mut m = Match::new(3, 0.5);
         m.warmup = 0.0;
+        m.men[0].owned[0] = true;
+        m.men[0].gun = 0;
         m.men[0].mag[0] = 0;
         let mut t = 0.0;
         while t < 2.5 {
