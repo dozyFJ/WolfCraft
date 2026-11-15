@@ -225,7 +225,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                         }
                     }
                 } else if page == Tab::Server {
-                    for (place, title) in [(false, "Сервер"), (true, "Плейс")] {
+                    for (place, title) in [(false, "Сервер"), (true, "Мини-игры")] {
                         if pill_button(ui, icons, None, title, if place_mode == place { ButtonKind::Primary } else { ButtonKind::Secondary }, 86.0, true).clicked() {
                             place_mode = place;
                             ctx.data_mut(|d| d.insert_temp(Id::new("server-page-tab"), 0usize));
@@ -277,8 +277,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                             if round_icon(ui, icons, &p, icon::SEARCH).clicked() {
                                 action = MenuAction::OpenNetwork;
                             }
-                            if round_icon(ui, icons, &p, icon::PLUS).clicked() {
-                                action = if place_mode { MenuAction::NewStudioProject } else { MenuAction::HostServer(None) };
+                            if !place_mode && round_icon(ui, icons, &p, icon::PLUS).on_hover_text("Новый сетевой мир").clicked() {
+                                action = MenuAction::HostServer(None);
                             }
                         }
                         Tab::Skins | Tab::Settings => {
@@ -739,7 +739,7 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
     };
     // Join or edit by code / address (the page title is in the toolbar).
     card(ui, &mut |ui| {
-        ui.label(egui::RichText::new(if place_mode { "ВОЙТИ В ПЛЕЙС" } else { "ВОЙТИ НА СЕРВЕР" }).size(11.5).color(p.text_muted));
+        ui.label(egui::RichText::new(if place_mode { "ВОЙТИ В МИНИ-ИГРУ" } else { "ВОЙТИ НА СЕРВЕР" }).size(11.5).color(p.text_muted));
         let w = ui.available_width();
         crate::ui_components::text_input(ui, icons, &mut addr, "Код K7QX2 или адрес 192.168.0.10", w, Some(icon::GLOBE));
         ui.add_space(6.0);
@@ -760,8 +760,8 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
     });
     // Host: a world or a place, opened for friends (a code appears in the chat).
     card(ui, &mut |ui| {
-        ui.label(egui::RichText::new(if place_mode { "ЗАПУСТИТЬ СВОЙ ПЛЕЙС" } else { "ЗАПУСТИТЬ СВОЙ СЕРВЕР" }).size(11.5).color(p.text_muted));
-        ui.label(egui::RichText::new(if place_mode { "Выберите плейс — в чате появится код входа для друзей." } else { "Выберите мир — в чате появится код входа для друзей." }).size(13.0).color(p.text_muted));
+        ui.label(egui::RichText::new(if place_mode { "ЗАПУСТИТЬ МИНИ-ИГРУ" } else { "ЗАПУСТИТЬ СВОЙ СЕРВЕР" }).size(11.5).color(p.text_muted));
+        ui.label(egui::RichText::new(if place_mode { "Выберите мини-игру — в чате появится код входа для друзей." } else { "Выберите мир — в чате появится код входа для друзей." }).size(13.0).color(p.text_muted));
         ui.add_space(4.0);
         for w in worlds.iter().filter(|w| w.cfg.studio_project == place_mode).take(40) {
             ui.horizontal(|ui| {
@@ -776,7 +776,7 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
                 }
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(15.0)).color(p.text));
-                    ui.label(egui::RichText::new(if w.cfg.studio_project { "Плейс" } else { "Мир" }).size(12.0).color(p.text_muted));
+                    ui.label(egui::RichText::new(if w.cfg.studio_project { "Мини-игра" } else { "Мир" }).size(12.0).color(p.text_muted));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if pill_button(ui, icons, Some(icon::GLOBE), "Запустить", ButtonKind::Primary, 120.0, true).clicked() {
@@ -787,10 +787,11 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
             ui.add_space(4.0);
         }
         if !worlds.iter().any(|w| w.cfg.studio_project == place_mode) {
-            ui.label(egui::RichText::new(if place_mode { "Плейсов пока нет — создайте плейс в «Редакторе»." } else { "Миров пока нет — создайте мир в «Главной»." }).size(13.0).color(p.text_muted));
+            ui.label(egui::RichText::new(if place_mode { "Мини-игр пока нет — создайте её в «Редакторе» → «Мини-игры»." } else { "Миров пока нет — создайте мир в «Главной»." }).size(13.0).color(p.text_muted));
         }
-        if pill_button(ui, icons, Some(icon::PLUS), if place_mode { "Новый плейс" } else { "Новый сетевой мир" }, ButtonKind::Secondary, ui.available_width(), true).clicked() {
-            *action = if place_mode { MenuAction::NewStudioProject } else { MenuAction::HostServer(None) };
+        // Mini-games are made in «Редактор»; here they are only started.
+        if !place_mode && pill_button(ui, icons, Some(icon::PLUS), "Новый сетевой мир", ButtonKind::Secondary, ui.available_width(), true).clicked() {
+            *action = MenuAction::HostServer(None);
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(addr_id, addr));
