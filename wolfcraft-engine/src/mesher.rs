@@ -427,9 +427,10 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
                 }
                 // WolfTech cables: arms towards every neighbour that carries energy.
                 let wired;
-                if b == Block::Cable {
-                    let lo = 0.34f32;
-                    let hi = 0.66f32;
+                if b == Block::Cable || crate::pipes::is_pipe(b) {
+                    let pipe = b != Block::Cable;
+                    let lo = if pipe { 0.30f32 } else { 0.34 };
+                    let hi = if pipe { 0.70f32 } else { 0.66 };
                     let mut v: Vec<[f32; 6]> = boxes.to_vec();
                     // (i, j, k) boxes; padded axes are (x, y, z) = (j, k, i).
                     for (n, arm) in [
@@ -440,7 +441,7 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
                         (inp.get(x, y + 1, z), [lo, lo, hi, hi, hi, 1.0]),
                         (inp.get(x, y - 1, z), [lo, lo, 0.0, hi, hi, lo]),
                     ] {
-                        if crate::wolftech::conducts(n) {
+                        if if pipe { crate::pipes::joins(n) } else { crate::wolftech::conducts(n) } {
                             v.push(arm);
                         }
                     }

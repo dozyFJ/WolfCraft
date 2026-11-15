@@ -177,6 +177,9 @@ pub struct GameSession {
     /// «Механика»: every known shaft, cog, wheel, crank and machine, and when to re-solve.
     pub kin: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, KinNode>,
     kin_t: f32,
+    /// WolfTech item pipes placed in this world, and the timer of their next push.
+    pub pipes: std::collections::HashSet<wolfcraft_engine::cubesphere::Cell>,
+    pipe_t: f32,
     tech_t: f32,
     /// Seconds to the next entity-culling pass.
     cull_t: f32,
@@ -359,6 +362,8 @@ impl GameSession {
             tech_nets: Vec::new(),
             kin: std::collections::HashMap::new(),
             kin_t: 0.0,
+            pipes: Default::default(),
+            pipe_t: 0.0,
             tech_t: 0.0,
             cull_t: 0.0,
             fire_t: 0.0,
@@ -460,6 +465,14 @@ impl GameSession {
                 let n: Vec<i32> = line.split_whitespace().filter_map(|x| x.parse().ok()).collect();
                 if n.len() == 4 {
                     s.kin.insert(wolfcraft_engine::cubesphere::Cell::new(n[0] as u8, n[1], n[2], n[3]), KinNode::default());
+                }
+            }
+        }
+        if let Ok(t) = std::fs::read_to_string(s.dir.join("pipes.txt")) {
+            for line in t.lines() {
+                let n: Vec<i32> = line.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                if n.len() == 4 {
+                    s.pipes.insert(wolfcraft_engine::cubesphere::Cell::new(n[0] as u8, n[1], n[2], n[3]));
                 }
             }
         }
@@ -1024,6 +1037,7 @@ impl GameSession {
         self.tick_tech(dt);
         self.tick_achievements(&events, dt);
         self.tick_kinetic(&events, dt);
+        self.tick_pipes(&events, dt);
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
             if let InteractionEvent::Broken { pos, block } = e {
@@ -2398,6 +2412,106 @@ impl GameSession {
         out
     }
 
+    fn save_pipes(&self) {
+        let list: Vec<String> = self.pipes.iter().map(|c| format!("{} {} {} {}", c.f, c.i, c.j, c.k)).collect();
+        let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("pipes.txt"), list.join("\n").as_bytes());
+    }
+
+    /// WolfTech item pipes, twice a second: each network takes what its machines made (and
+    /// what extracting pipes pull out of chests) and hands it on — to a machine that can work
+    /// it or burn it first, then into a chest — up to 4 items per source each push.
+    fn tick_pipes(&mut self, events: &[InteractionEvent], dt: f32) {
+        use wolfcraft_engine::block::Block;
+        use wolfcraft_engine::pipes::{self as pp, Port};
+        for e in events {
+            if let InteractionEvent::Placed { pos, block } = e {
+                if pp::is_pipe(*block) {
+                    self.pipes.insert(*pos);
+                }
+            }
+        }
+        if self.pipes.is_empty() {
+            return;
+        }
+        self.pipe_t -= dt;
+        if self.pipe_t > 0.0 {
+            return;
+        }
+        self.pipe_t = 0.5;
+        let g = self.chunks.grid();
+        let gone: Vec<_> = self.pipes.iter().copied().filter(|c| !self.chunks.get_block(*c).is_some_and(pp::is_pipe)).collect();
+        for c in gone {
+            self.pipes.remove(&c);
+        }
+        let dirs = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
+        let mut seen = std::collections::HashSet::new();
+        for start in self.pipes.iter().copied().collect::<Vec<_>>() {
+            if !seen.insert(start) {
+                continue;
+            }
+            // One network: its pipes and the inventories round them.
+            let mut ports: Vec<(wolfcraft_engine::cubesphere::Cell, Block, Port, bool)> = Vec::new();
+            let mut queue = vec![start];
+            while let Some(x) = queue.pop() {
+                let extract = self.chunks.get_block(x) == Some(Block::PipeExtractor);
+                for (a, b, k) in dirs {
+                    let Some(n) = g.offset(x, a, b, k) else { continue };
+                    let Some(nb) = self.chunks.get_block(n) else { continue };
+                    if pp::is_pipe(nb) {
+                        if seen.insert(n) {
+                            self.pipes.insert(n);
+                            queue.push(n);
+                        }
+                    } else if let Some(p) = pp::port(nb) {
+                        match ports.iter_mut().find(|q| q.0 == n) {
+                            Some(q) => q.3 |= extract,
+                            None => ports.push((n, nb, p, extract)),
+                        }
+                    }
+                }
+                if seen.len() > 4096 {
+                    break;
+                }
+            }
+            if ports.len() < 2 {
+                continue;
+            }
+            // Machines and furnaces before chests.
+            ports.sort_by_key(|q| matches!(q.2, Port::Store));
+            for si in 0..ports.len() {
+                let (sc, sb, sp, ex) = ports[si];
+                let src = self.container_slots(sc, sb).clone();
+                let mut budget = 4u8;
+                for slot in pp::outputs(sp, ex, src.len()) {
+                    let Some(st) = src[slot] else { continue };
+                    let mut left = st.count.min(budget);
+                    for (di, &(dc, db, dp, _)) in ports.iter().enumerate() {
+                        if di == si || left == 0 || (matches!(sp, Port::Store) && matches!(dp, Port::Store)) {
+                            continue;
+                        }
+                        let dst = self.container_slots(dc, db);
+                        let cand = pp::order(dst, pp::inputs(dp, st.id, dst.len()), st.id);
+                        for i in cand {
+                            left -= pp::insert(dst, i, st, left);
+                            if left == 0 {
+                                break;
+                            }
+                        }
+                    }
+                    let moved = st.count.min(budget) - left;
+                    if moved > 0 {
+                        budget -= moved;
+                        let v = self.container_slots(sc, sb);
+                        v[slot] = if st.count > moved { Some(wolfcraft_engine::items::ItemStack { count: st.count - moved, ..st }) } else { None };
+                    }
+                    if budget == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     fn save_kinetic(&self) {
         let list: Vec<String> = self.kin.keys().map(|c| format!("{} {} {} {}", c.f, c.i, c.j, c.k)).collect();
         let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("kinetic.txt"), list.join("\n").as_bytes());
@@ -2753,6 +2867,7 @@ impl GameSession {
     pub fn save(&mut self) {
         if !self.hell {
             self.save_kinetic();
+            self.save_pipes();
         }
         if let Err(e)=self.storage_bank.save(&self.dir.join("storage_bank.bin")){log::error!("storage bank: {e}");}
         if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}

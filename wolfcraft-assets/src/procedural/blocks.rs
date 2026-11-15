@@ -223,6 +223,8 @@ pub mod tiles {
     pub const INSOLATOR_TOP: u16 = 225;
     pub const GLACIER_FRONT: u16 = 226;
     pub const MAGMA_GEN_FRONT: u16 = 227;
+    pub const PIPE: u16 = 228;
+    pub const PIPE_EXTRACT: u16 = 229;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2514,6 +2516,22 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }));
     l.add(GLACIER_FRONT, "glacier", p(|q| front(q, 331, Rgb(0.80, 0.93, 1.0), 12)));
     l.add(MAGMA_GEN_FRONT, "magma_generator", p(|q| front(q, 332, Rgb(1.0, 0.50, 0.10), 13)));
+    // Item pipes: a glass tube with steel rings (the extractor's rings are orange).
+    let pipe = |q: &mut Painter, seed: u32, ring: Rgb| {
+        q.noisy(Rgb(0.78, 0.88, 0.92), 0.04, seed);
+        for y in 0..S {
+            for x in 0..S {
+                if y == 2 || y == 3 {
+                    q.put(x, y, Rgb(0.95, 0.98, 1.0), 1.0);
+                }
+                if x % 8 < 2 {
+                    q.put(x, y, ring, 1.0);
+                }
+            }
+        }
+    };
+    l.add(PIPE, "item_pipe", p(|q| pipe(q, 333, Rgb(0.55, 0.57, 0.62))));
+    l.add(PIPE_EXTRACT, "pipe_extractor", p(|q| pipe(q, 334, Rgb(0.95, 0.55, 0.15))));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);
