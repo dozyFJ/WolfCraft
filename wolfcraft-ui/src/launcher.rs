@@ -11,7 +11,7 @@ use egui::{Align2, Color32, FontId, Frame, Id, Margin, Pos2, Rect, Rounding, Sen
 use wolfcraft_assets::gui as icon;
 
 const TOOLBAR_H: f32 = 56.0;
-const NAV_H: f32 = 64.0;
+const NAV_H: f32 = 70.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -251,7 +251,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 }
                 let ic = Rect::from_center_size(Pos2::new(r.center().x, r.top() + 22.0), Vec2::splat(22.0));
                 nav_icon(ui, icons, *t, ic, col);
-                ui.painter().text(Pos2::new(r.center().x, r.bottom() - 13.0), Align2::CENTER_CENTER, *label, FontId::proportional(12.5), col);
+                // The label sits right under the icon, clear of the phone's home bar.
+                ui.painter().text(Pos2::new(r.center().x, r.top() + 47.0), Align2::CENTER_CENTER, *label, FontId::proportional(12.5), col);
                 if resp.clicked() {
                     tab = i;
                 }
@@ -343,7 +344,7 @@ fn nav_icon(ui: &Ui, icons: &GuiIcons, t: Tab, r: Rect, col: Color32) {
 }
 
 fn section(ui: &mut Ui, p: &Palette, title: &str, more: &str) {
-    ui.add_space(4.0);
+    ui.add_space(16.0);
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(title).font(bold_font(18.0)).color(p.text));
         if !more.is_empty() {
@@ -352,6 +353,7 @@ fn section(ui: &mut Ui, p: &Palette, title: &str, more: &str) {
             });
         }
     });
+    ui.add_space(4.0);
 }
 
 fn gradient(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
@@ -382,13 +384,16 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
     section(ui, p, "Новости", "");
     for n in &NEWS {
         news_card(ui, icons, p, n);
+        ui.add_space(4.0);
     }
 }
 
 fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, action: &mut MenuAction) {
     let ctx = ui.ctx().clone();
     let w = ui.available_width();
-    let h = (w * 0.36).clamp(180.0, 220.0);
+    // Phones held upright get a taller banner: the text and the planet each have room.
+    let narrow = w < 480.0;
+    let h = if narrow { (w * 0.62).clamp(220.0, 270.0) } else { (w * 0.36).clamp(180.0, 220.0) };
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click_and_drag());
     let id = Id::new("launcher-banner");
     let now = ctx.input(|i| i.time);
@@ -438,8 +443,14 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
         // Decoration on the right: the planet, or big pixel cubes.
         if b.planet {
             if let Some(tex) = planet {
-                let d = r.height() * 1.25;
-                let c = Pos2::new(r.right() - d * 0.32, r.center().y + d * 0.18);
+                // Upright: a smaller planet tucked into the lower right corner, under the text.
+                let (d, c) = if narrow {
+                    let d = r.width() * 0.58;
+                    (d, Pos2::new(r.right() - d * 0.22, r.bottom() - d * 0.12))
+                } else {
+                    let d = r.height() * 1.25;
+                    (d, Pos2::new(r.right() - d * 0.32, r.center().y + d * 0.18))
+                };
                 clip.image(tex.id(), Rect::from_center_size(c, Vec2::splat(d)), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
             }
         } else if r.width() > 480.0 {
@@ -452,7 +463,18 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
             }
         }
         // Text on the left, over a soft shade.
-        let text_w = if r.width() > 480.0 { r.width() * 0.62 } else { r.width() - 40.0 };
+        let text_w = if r.width() > 480.0 { r.width() * 0.62 } else if b.planet { r.width() * 0.6 } else { r.width() - 48.0 };
+        // A soft shade behind the text so it reads over the planet.
+        let shade = Rect::from_min_max(r.left_top(), Pos2::new(r.left() + text_w + 36.0, r.bottom()));
+        let mut sm = egui::Mesh::default();
+        let dark = Color32::from_black_alpha(90);
+        sm.colored_vertex(shade.left_top(), dark);
+        sm.colored_vertex(shade.right_top(), Color32::TRANSPARENT);
+        sm.colored_vertex(shade.right_bottom(), Color32::TRANSPARENT);
+        sm.colored_vertex(shade.left_bottom(), dark);
+        sm.add_triangle(0, 1, 2);
+        sm.add_triangle(0, 2, 3);
+        clip.add(egui::Shape::mesh(sm));
         let x = r.left() + 20.0;
         clip.text(Pos2::new(x, r.top() + 22.0), Align2::LEFT_TOP, "WOLFCRAFT", FontId::proportional(11.0), Color32::from_white_alpha(170));
         let title = clip.layout(b.title.to_string(), bold_font(22.0), Color32::WHITE, text_w);
@@ -486,7 +508,9 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
 }
 
 fn release_card(ui: &mut Ui, p: &Palette, r: &Release, latest: bool) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(210.0, 168.0), Sense::hover());
+    // Upright phones: wider cards, the next one peeks in from the right (swipe for more).
+    let cw = if ui.ctx().screen_rect().width() < 480.0 { (ui.ctx().screen_rect().width() - 32.0) * 0.8 } else { 210.0 };
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(cw, 176.0), Sense::hover());
     let pt = ui.painter();
     pt.rect_filled(rect, Rounding::same(12.0), p.surface);
     pt.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0_f32, if latest { p.accent } else { p.outline }));
@@ -513,19 +537,16 @@ fn release_card(ui: &mut Ui, p: &Palette, r: &Release, latest: bool) {
 fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
     Frame::none().fill(p.surface).rounding(Rounding::same(12.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(12.0)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(52.0), Sense::hover());
             gradient(ui, r, n.color, n.color.gamma_multiply(0.55));
             icons.paint(ui.painter(), r.shrink(13.0), n.icon, Color32::WHITE);
-            ui.add_space(6.0);
+            ui.add_space(8.0);
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 3.0;
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(n.title).font(bold_font(15.0)).color(p.text));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(n.date).size(12.0).color(p.text_muted));
-                    });
-                });
+                ui.spacing_mut().item_spacing.y = 4.0;
+                // Title, then the date on its own line: nothing squeezes on a narrow screen.
+                ui.label(egui::RichText::new(n.title).font(bold_font(15.0)).color(p.text));
+                ui.label(egui::RichText::new(n.date).size(11.5).color(p.accent));
                 ui.label(egui::RichText::new(n.text).size(13.0).color(p.text_muted));
             });
         });
