@@ -2299,6 +2299,12 @@ impl App {
                                             };
                                             let (make, held, n) = s.tech_net(pos);
                                             let (tm, em, _) = s.tech_mods(pos, block);
+                                            let what = if k == wolfcraft_engine::wolftech::Kind::Reactor {
+                                                let (h, m) = s.reactor_heat(pos);
+                                                format!("нагрев {:.0} / {:.0} · {what}", h, m)
+                                            } else {
+                                                what
+                                            };
                                             let what = if wolfcraft_engine::wolftech::is_machine(k) && tm < 0.999 {
                                                 format!("{what} · скорость ×{:.1}, расход ×{:.1}", 1.0 / tm, em)
                                             } else {
@@ -2314,7 +2320,8 @@ impl App {
                                         if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
-                                                Kind::Generator | Kind::Reactor => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k, st.id) > 0.0,
+                                                Kind::Generator => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k, st.id) > 0.0,
+                                                Kind::Reactor => wolfcraft_engine::wolftech::is_reactor_part(st.id),
                                                 Kind::Crusher | Kind::Induction | Kind::Enricher => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
                                                 Kind::Cell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
                                                 _ => false,
@@ -2337,7 +2344,8 @@ impl App {
                                         layout: if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
-                                                Kind::Generator | Kind::Reactor => wolfcraft_ui::container_ui::Layout::Generator,
+                                                Kind::Generator => wolfcraft_ui::container_ui::Layout::Generator,
+                                                Kind::Reactor => wolfcraft_ui::container_ui::Layout::Reactor,
                                                 Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water => wolfcraft_ui::container_ui::Layout::Panel,
                                                 Kind::Cell => wolfcraft_ui::container_ui::Layout::Charger,
                                                 _ => wolfcraft_ui::container_ui::Layout::Machine,
@@ -2345,6 +2353,10 @@ impl App {
                                         } else if furnace { wolfcraft_ui::container_ui::Layout::Furnace } else if forge { wolfcraft_ui::container_ui::Layout::Forge } else if magic { wolfcraft_ui::container_ui::Layout::Enchant } else { wolfcraft_ui::container_ui::Layout::Grid },
                                         working: (furnace || tech.is_some()) && working,
                                         energy: s.tech_status(pos, block).map(|(_, _, e, cap)| e / cap.max(1.0)),
+                                        heat: (tech == Some(wolfcraft_engine::wolftech::Kind::Reactor)).then(|| {
+                                            let (h, m) = s.reactor_heat(pos);
+                                            h / m.max(1.0)
+                                        }),
                                         status: if furnace || tech.is_some() {
                                             Some((status_text, prog))
                                         } else if forge {

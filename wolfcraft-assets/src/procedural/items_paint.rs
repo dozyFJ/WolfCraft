@@ -99,7 +99,11 @@ pub mod items {
     pub const MECH: u16 = 146;
     pub const OVERCLOCKER: u16 = 147;
     pub const STORAGE_UPGRADE: u16 = 148;
-    pub const COUNT: u16 = 149;
+    pub const URANIUM_ROD: u16 = 149;
+    pub const HEAT_VENT: u16 = 150;
+    pub const COOLANT_CELL: u16 = 151;
+    pub const REACTOR_PLATING: u16 = 152;
+    pub const COUNT: u16 = 153;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1206,6 +1210,12 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     // Upgrades: a green board with a cyan arrow (speed) / a blue battery (store).
     l.add(OVERCLOCKER, "overclocker", art(&["", "", "..GGGGGGGGGGGG", "..GDDDDDDDDDDG", "..GDDDDccDDDDG", "..GDDDcccDDDDG", "..GDDccccccDDG", "..GDDDcccDDDDG", "..GDDDDccDDDDG", "..GDDDDDDDDDDG", "..GYDYDYDYDYDG", "..GGGGGGGGGGGG"]));
     l.add(STORAGE_UPGRADE, "storage_upgrade", art(&["", "", "..GGGGGGGGGGGG", "..GDDDDDDDDDDG", "..GDbbbbbbbbDG", "..GDbccccccbbG", "..GDbccccccbbG", "..GDbbbbbbbbDG", "..GDDDDDDDDDDG", "..GDDDDDDDDDDG", "..GYDYDYDYDYDG", "..GGGGGGGGGGGG"]));
+    // Reactor parts: a glowing green rod in a steel sleeve, a fan grille, a blue coolant
+    // capsule, a riveted plate.
+    l.add(URANIUM_ROD, "uranium_rod", art(&["......GGG", "......GcG", "......GcG", "......GWG", "......GcG", "......GcG", "......GWG", "......GcG", "......GcG", "......GWG", "......GcG", "......GcG", "......GGG"]));
+    l.add(HEAT_VENT, "heat_vent", art(&["", "", "..GGGGGGGGGGGG", "..GDGDGDGDGDGG", "..GGGGGGGGGGGG", "..GDGDGDGDGDGG", "..GGGGGGGGGGGG", "..GDGDGDGDGDGG", "..GGGGGGGGGGGG", "..GDGDGDGDGDGG", "..GGGGGGGGGGGG"]));
+    l.add(COOLANT_CELL, "coolant_cell", art(&["", ".....GGGGG", "....GbbbbbG", "....GbcccbG", "....GbcWcbG", "....GbcccbG", "....GbcccbG", "....GbcccbG", "....GbcccbG", "....GbbbbbG", ".....GGGGG"]));
+    l.add(REACTOR_PLATING, "reactor_plating", art(&["", "", "..GGGGGGGGGGGG", "..GWDDDDDDDDWG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GWDDDDDDDDWG", "..GGGGGGGGGGGG"]));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

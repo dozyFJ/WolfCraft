@@ -1465,13 +1465,13 @@ impl GameSession {
                     let r = (1.0 - e * e).sqrt();
                     let dir = ta * (a.cos() * r) + tb * (a.sin() * r) + up * e.abs();
                     let col = [[1.0, 0.95, 0.70], [1.0, 0.70, 0.22], [0.98, 0.42, 0.10], [0.85, 0.22, 0.06]][i % 4];
-                    self.mobs.fx_glow(b.pos + dir * 0.3, dir * (4.0 + (i % 3) as f64) * k, col, (0.45 + (i % 4) as f32 * 0.15) * k as f32, 0.55 + (i % 3) as f32 * 0.15, FxKind::Rise);
+                    self.mobs.fx_glow(b.pos + dir * 0.3, dir * (4.0 + (i % 3) as f64) * k, col, (0.20 + (i % 4) as f32 * 0.07) * k as f32, 0.45 + (i % 3) as f32 * 0.12, FxKind::Rise);
                 }
                 let n_ring = (20.0 * k) as usize;
                 for i in 0..n_ring {
                     let a = i as f64 * std::f64::consts::TAU / n_ring as f64;
                     let dir = ta * a.cos() + tb * a.sin();
-                    self.mobs.fx(b.pos + dir * 0.5, dir * 9.0 * k + up * 0.6, [0.62, 0.58, 0.52], 0.4 * k as f32, 1.0, FxKind::Rise);
+                    self.mobs.fx(b.pos + dir * 0.5, dir * 9.0 * k + up * 0.6, [0.62, 0.58, 0.52], 0.18 * k as f32, 0.9, FxKind::Rise);
                 }
                 for i in 0..(14.0 * k) as usize {
                     let a = i as f64 * 1.9;
@@ -1480,7 +1480,7 @@ impl GameSession {
                     // Stem, then the cap spreading out at the top.
                     let cap = i % 2 == 0;
                     let v = if cap { up * 5.0 * k + dir * 2.5 * k } else { up * 3.0 * k + dir * 0.4 };
-                    self.mobs.fx(b.pos + up * 0.5, v, [shade, shade * 0.97, shade * 0.95], (0.7 + (i % 3) as f32 * 0.25) * k as f32, 3.0, FxKind::Rise);
+                    self.mobs.fx(b.pos + up * 0.5, v, [shade, shade * 0.97, shade * 0.95], (0.32 + (i % 3) as f32 * 0.12) * k as f32, 2.4, FxKind::Rise);
                 }
                 for i in 0..36 {
                     let a = i as f64 * 2.399;
@@ -1868,7 +1868,8 @@ impl GameSession {
         if wolfcraft_engine::construction::is_shared(block) {return &mut self.storage_bank.shared;}
         let block=block.base_kind();
         let tech_machine = wolfcraft_engine::wolftech::kind(block).is_some_and(wolfcraft_engine::wolftech::is_machine);
-        let n = if tech_machine { 7 } else if matches!(block, B::ElectricFurnace | B::MachineCasing) || wolfcraft_engine::wolftech::kind(block).is_some() { 3 } else if block == B::EnchantTable { 2 } else { 27 };
+        let reactor = wolfcraft_engine::wolftech::kind(block) == Some(wolfcraft_engine::wolftech::Kind::Reactor);
+        let n = if reactor { wolfcraft_engine::wolftech::REACTOR_SLOTS } else if tech_machine { 7 } else if matches!(block, B::ElectricFurnace | B::MachineCasing) || wolfcraft_engine::wolftech::kind(block).is_some() { 3 } else if block == B::EnchantTable { 2 } else { 27 };
         let v = self.containers.entry(pos).or_insert_with(|| {
             let mut slots=vec![None;n];
             // Player-placed chests use construction IDs; legacy chest IDs identify generated loot.
@@ -1882,6 +1883,10 @@ impl GameSession {
         // WolfTech machines from before the upgrade slots: four more on the right.
         if tech_machine && v.len() < 7 {
             v.resize(7, None);
+        }
+        // Reactors from before the core grid: 18 slots.
+        if reactor && v.len() < wolfcraft_engine::wolftech::REACTOR_SLOTS {
+            v.resize(wolfcraft_engine::wolftech::REACTOR_SLOTS, None);
         }
         // Furnaces from before the fuel slot: [input, output] → [input, fuel, output].
         if block == B::ElectricFurnace && v.len() == 2 {
@@ -2007,12 +2012,13 @@ impl GameSession {
                     }
                     Kind::Geo => around(|b| b.is_lava()),
                     Kind::Water => around(|b| b.is_water()),
-                    _ => 0.0,
+                    _ => st.env,
                 };
             }
         }
         // Each machine on its own: fuel, recipes, progress.
         let creative = self.player.is_creative();
+        let mut meltdowns = Vec::new();
         let cells: Vec<_> = self.tech.keys().copied().collect();
         for c in cells {
             let Some(b) = self.chunks.get_block(c) else { continue };
@@ -2025,7 +2031,23 @@ impl GameSession {
                     st.flow = sp.rate * st.env;
                     st.working = st.flow > 0.0;
                 }
-                Kind::Generator | Kind::Reactor => {
+                Kind::Reactor => {
+                    // Once a second: the rods pulse, the hull heats or cools (heat = progress).
+                    st.burn += dt;
+                    if st.burn >= 1.0 {
+                        st.burn -= 1.0;
+                        let v = self.container_slots(c, b);
+                        let t = wt::reactor_second(v, st.progress);
+                        st.progress = (st.progress + t.heat).max(0.0);
+                        st.env = t.power;
+                        if st.progress >= t.max_heat {
+                            meltdowns.push(c);
+                        }
+                    }
+                    st.flow = st.env;
+                    st.working = st.flow > 0.0;
+                }
+                Kind::Generator => {
                     if st.burn <= 0.0 && st.energy < sp.capacity * 0.95 {
                         let v = self.container_slots(c, b);
                         if let Some(f) = v.get(1).copied().flatten().filter(|f| wt::fuel_for(k, f.id) > 0.0) {
@@ -2102,6 +2124,8 @@ impl GameSession {
             }
             self.tech.insert(c, st);
         }
+        // Reactors: smoke and sparks when hot, a meltdown when the hull gives way.
+        self.reactor_fx(meltdowns, dt);
         // Energy flows inside each network.
         for net in &self.tech_nets {
             let mut nodes = Vec::with_capacity(net.len());
@@ -2119,6 +2143,59 @@ impl GameSession {
                     st.energy = v;
                 }
             }
+        }
+    }
+
+    /// Hull heat and its limit of the reactor at `pos`.
+    pub fn reactor_heat(&self, pos: wolfcraft_engine::cubesphere::Cell) -> (f32, f32) {
+        let plating = self.containers.get(&pos).map(|v| v.iter().flatten().filter(|s| s.id == wolfcraft_engine::items::ids::REACTOR_PLATING).count()).unwrap_or(0);
+        (self.tech.get(&pos).map(|t| t.progress).unwrap_or(0.0), wolfcraft_engine::wolftech::REACTOR_MAX_HEAT + 1_000.0 * plating as f32)
+    }
+
+    fn reactor_fx(&mut self, meltdowns: Vec<wolfcraft_engine::cubesphere::Cell>, dt: f32) {
+        use wolfcraft_engine::mobs::FxKind;
+        let hot: Vec<_> = self
+            .tech
+            .keys()
+            .copied()
+            .filter(|c| self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::Reactor))
+            .map(|c| (c, self.reactor_heat(c)))
+            .filter(|(_, (h, m))| *h > m * 0.6)
+            .collect();
+        for (c, (h, m)) in hot {
+            let f = h / m;
+            let p = self.chunks.grid().cell_center(c);
+            let up = wolfcraft_engine::physics::up_at(p);
+            if self.mobs.rand() < (f as f64 - 0.5) * 6.0 * dt as f64 * 10.0 {
+                self.mobs.fx(p + up * 0.6, up * 1.4, [0.30, 0.30, 0.32], 0.25, 2.0, FxKind::Rise);
+            }
+            if f > 0.85 {
+                if self.mobs.rand() < 0.3 {
+                    self.mobs.fx_glow(p + up * 0.55, up * 2.0, [1.0, 0.55, 0.15], 0.10, 0.6, FxKind::Rise);
+                }
+                if (self.player.body.pos - p).length() < 40.0 && self.item_name.as_ref().is_none_or(|n| !n.0.starts_with("⚠")) {
+                    self.item_name = Some((format!("⚠ Реактор перегревается: {:.0} %", f * 100.0), 1.5));
+                }
+            }
+        }
+        for c in meltdowns {
+            // Meltdown: the reactor goes up in a chain of blasts, its core is lost.
+            let p = self.chunks.grid().cell_center(c);
+            if self.chunks.set_block(c, wolfcraft_engine::block::Block::Air) {
+                self.net_out.push((c, wolfcraft_engine::block::Block::Air));
+            }
+            self.tech.remove(&c);
+            self.containers.remove(&c);
+            let up = wolfcraft_engine::physics::up_at(p);
+            let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+            let ta = up.cross(helper).normalize();
+            let tb = up.cross(ta);
+            for (k, (a, b)) in [(0.0, 0.0), (2.5, 0.0), (-2.5, 0.0), (0.0, 2.5), (0.0, -2.5), (1.8, 1.8), (-1.8, -1.8), (1.8, -1.8), (-1.8, 1.8)].iter().enumerate() {
+                self.explosives.lit.push(wolfcraft_engine::explosives::Lit { pos: p + ta * *a + tb * *b, fuse: 0.05 + k as f32 * 0.06 });
+            }
+            self.shake = self.shake.max(1.0);
+            self.flash = Some(([0.75, 1.0, 0.65], 0.5));
+            self.item_name = Some(("☢ Реактор взорвался!".into(), 3.0));
         }
     }
 

@@ -67,7 +67,7 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Wind => Spec { name: "Ветрогенератор", capacity: 1_000.0, rate: 12.0, time: 0.0, hint: "Чем выше и чем сильнее непогода, тем больше энергии" },
         Kind::Geo => Spec { name: "Геотермальный генератор", capacity: 2_000.0, rate: 8.0, time: 0.0, hint: "Поставьте рядом с лавой: каждая сторона с лавой — +8 ЭЕ/с" },
         Kind::Water => Spec { name: "Гидрогенератор", capacity: 1_000.0, rate: 3.0, time: 0.0, hint: "Поставьте в воду: каждая сторона с водой — +3 ЭЕ/с" },
-        Kind::Reactor => Spec { name: "Ядерный реактор", capacity: 10_000.0, rate: 120.0, time: 0.0, hint: "Положите урановый слиток (10 минут) или сырой уран" },
+        Kind::Reactor => Spec { name: "Ядерный реактор", capacity: 10_000.0, rate: 0.0, time: 0.0, hint: "Урановые стержни дают энергию и жар; теплоотводы и капсулы охлаждают. Перегрев — взрыв!" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
     }
 }
@@ -82,15 +82,91 @@ pub fn burns(k: Kind) -> bool {
     matches!(k, Kind::Generator | Kind::Reactor)
 }
 
+/// Slots in the reactor's core (6 × 3), and its hull heat limit before plating.
+pub const REACTOR_SLOTS: usize = 18;
+pub const REACTOR_COLS: usize = 6;
+pub const REACTOR_MAX_HEAT: f32 = 5_000.0;
+
+/// A part that goes into the reactor core.
+pub fn is_reactor_part(id: ItemId) -> bool {
+    matches!(id, ids::URANIUM_ROD | ids::HEAT_VENT | ids::COOLANT_CELL | ids::REACTOR_PLATING)
+}
+
+/// What one second of the reactor does (IC2-like).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ReactorTick {
+    /// ЭЕ/s made.
+    pub power: f32,
+    /// Heat added to the hull this second (after vents and capsules).
+    pub heat: f32,
+    /// Hull heat limit (more with plating).
+    pub max_heat: f32,
+    pub rods: u32,
+}
+
+/// One second of the reactor: every uranium rod pulses once, plus once more for each rod next
+/// to it (left, right, above, below in the 6×3 core) — packed rods give more energy, but heat
+/// grows faster than energy. Heat vents carry 6 heat/s off the hull each; coolant capsules
+/// soak up to 12 heat/s each into themselves (they fill up: their wear); plating raises the
+/// hull's limit by 1 000. Rods and full capsules wear (`slots` is changed).
+pub fn reactor_second(slots: &mut [Option<crate::items::ItemStack>], hull: f32) -> ReactorTick {
+    let n = slots.len().min(REACTOR_SLOTS);
+    let id_at = |s: &[Option<crate::items::ItemStack>], i: usize| s.get(i).copied().flatten().map(|x| x.id);
+    let rod = |s: &[Option<crate::items::ItemStack>], i: usize| id_at(s, i) == Some(ids::URANIUM_ROD);
+    let mut t = ReactorTick { max_heat: REACTOR_MAX_HEAT, ..Default::default() };
+    let mut made_heat = 0.0;
+    let mut vents = 0.0;
+    let mut capsules = Vec::new();
+    for i in 0..n {
+        match id_at(slots, i) {
+            Some(ids::URANIUM_ROD) => {
+                let (x, y) = (i % REACTOR_COLS, i / REACTOR_COLS);
+                let mut p = 1;
+                for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx >= 0 && ny >= 0 && (nx as usize) < REACTOR_COLS && rod(slots, ny as usize * REACTOR_COLS + nx as usize) {
+                        p += 1;
+                    }
+                }
+                t.power += 10.0 * p as f32;
+                made_heat += 2.0 * (p * (p + 1)) as f32;
+                t.rods += 1;
+                if let Some(s) = slots[i].as_mut() {
+                    s.damage += 1;
+                    if s.damage >= 600 {
+                        slots[i] = None;
+                    }
+                }
+            }
+            Some(ids::HEAT_VENT) => vents += 6.0,
+            Some(ids::COOLANT_CELL) => capsules.push(i),
+            Some(ids::REACTOR_PLATING) => t.max_heat += 1_000.0,
+            _ => {}
+        }
+    }
+    // Heat on the hull: what the rods made, minus the vents (they also cool a hot hull down).
+    let mut excess = made_heat - vents;
+    // Capsules take what the vents could not.
+    for i in capsules {
+        if excess <= 0.0 {
+            break;
+        }
+        if let Some(s) = slots[i].as_mut() {
+            let room = 2_000u16.saturating_sub(s.damage) as f32;
+            let take = excess.min(12.0).min(room);
+            s.damage += take.ceil() as u16;
+            excess -= take;
+        }
+    }
+    t.heat = if excess < 0.0 { excess.max(-hull) } else { excess };
+    t
+}
+
 /// Seconds of work one item of fuel gives this generator.
 pub fn fuel_for(k: Kind, id: ItemId) -> f32 {
     match k {
         Kind::Generator => fuel(id),
-        Kind::Reactor => match id {
-            ids::URANIUM_INGOT => 600.0,
-            ids::RAW_URANIUM => 200.0,
-            _ => 0.0,
-        },
+        Kind::Reactor => 0.0,
         _ => 0.0,
     }
 }
@@ -259,6 +335,26 @@ mod tests {
         assert_eq!(upgrades(&[]), (1.0, 1.0, 0.0));
         let (t, e, s) = upgrades(&[Some(ItemStack::new(ids::OVERCLOCKER, 2)), Some(ItemStack::new(ids::STORAGE_UPGRADE, 1))]);
         assert!((t - 0.49).abs() < 1e-4 && (e - 2.56).abs() < 1e-4 && s == 2_000.0);
+    }
+
+    #[test]
+    fn packed_rods_give_more_and_overheat_without_vents() {
+        use crate::items::ItemStack;
+        let rod = Some(ItemStack::new(ids::URANIUM_ROD, 1));
+        let vent = Some(ItemStack::new(ids::HEAT_VENT, 1));
+        let mut one = vec![None; REACTOR_SLOTS];
+        one[0] = rod;
+        one[1] = vent;
+        let t = reactor_second(&mut one, 0.0);
+        assert_eq!((t.power, t.rods), (10.0, 1));
+        assert!(t.heat <= 0.0, "one rod, one vent: stays cool");
+        let mut two = vec![None; REACTOR_SLOTS];
+        two[0] = rod;
+        two[1] = rod;
+        let t = reactor_second(&mut two, 0.0);
+        assert_eq!(t.power, 40.0, "neighbours pulse each other");
+        assert!(t.heat > 20.0, "and heat up fast without vents");
+        assert_eq!(two[0].unwrap().damage, 1, "rods wear");
     }
 
     #[test]
