@@ -1701,6 +1701,11 @@ impl App {
                         match e {
                             InteractionEvent::FrameUse{..}|InteractionEvent::ActivateBoss{..}=>{},
                             InteractionEvent::Slept { .. } | InteractionEvent::Sat { .. } => {}
+                            InteractionEvent::OpenBuilder => {
+                                self.inv_ui = InventoryUiState { builder: true, ..InventoryUiState::default() };
+                                self.screen = Screen::Inventory;
+                                self.near_table = false;
+                            }
                             InteractionEvent::OpenCrafting => {
                                 self.inv_ui = InventoryUiState::default();
                                 self.screen = Screen::Inventory;
@@ -2379,6 +2384,7 @@ impl App {
         if close_inventory {
             self.screen = Screen::Playing;
             self.near_table = false;
+            self.inv_ui.builder = false;
             self.container = None;
         }
         if std::mem::take(&mut self.world_select.paste_request) {

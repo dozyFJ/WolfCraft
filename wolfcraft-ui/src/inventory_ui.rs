@@ -21,7 +21,7 @@ const ARMOR: usize = 95;
 
 /// Creative tabs (icons along the top): item categories plus the backpack as the last tab.
 // "Техника" is put away for now (its items are still under "Все" and in the search).
-const CREATIVE_TABS: [&str; 19] = ["Все", "Конструктор", "Мебель", "Стекло", "Двери", "Декор", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Хранилища", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "WolfTech", "Инвентарь"];
+const CREATIVE_TABS: [&str; 18] = ["Все", "Мебель", "Стекло", "Двери", "Декор", "Природа", "Дерево", "Строительство", "Руды", "Растения", "Хранилища", "Предметы", "Инструменты", "Вооружение", "Доспехи", "Мобы", "WolfTech", "Инвентарь"];
 const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 
 
@@ -32,6 +32,10 @@ pub struct InventoryUiState {
     pub build_form: usize,
     pub build_material: usize,
     pub build_open: bool,
+    /// Opened from the «Конструктор» block: only the building-piece maker is shown.
+    pub builder: bool,
+    /// The builder in creative: pieces are taken for free.
+    builder_free: bool,
     pub grid: CraftGrid,
     /// Slot being dragged (inventory or grid id).
     drag_slot: Option<usize>,
@@ -177,8 +181,9 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     let mut result = InventoryResult::default();
     let mut slot_rects: Vec<(usize, Rect)> = Vec::new();
     let mut trash_rect: Option<Rect> = None;
-    // The workbench always opens its own 3×3 window, in creative too.
-    let creative = creative && !near_table;
+    // The workbench and the «Конструктор» always open their own window, in creative too.
+    state.builder_free = creative && state.builder;
+    let creative = creative && !near_table && !state.builder;
     if !creative {
         let want = if near_table { 3 } else { 2 };
         if state.grid.size != want {
@@ -215,7 +220,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         let sw = ctx.screen_rect().width() - ins[0] - ins[2] - 32.0;
         let s = ((sw - 80.0 - 70.0) / 10.0).min((h - 40.0) / 5.0).clamp(36.0, 64.0).floor();
         let tab = 52.0f32;
-        let title = if near_table { "Верстак" } else { "Инвентарь" };
+        let title = if state.builder { "Конструктор" } else if near_table { "Верстак" } else { "Инвентарь" };
         let esc = crate::ui_components::full_screen(ctx, "inventory", |ui| {
             let content_h = ui.available_height();
             state.tab = 0;
@@ -401,7 +406,7 @@ fn construction_panel(ui: &mut Ui, icons: &GuiIcons, state: &mut InventoryUiStat
     });
     let recipe=c::recipe(entry.id)?;
     if !creative {
-        ui.label("Нужно на верстаке:");
+        ui.label("Нужно:");
         for (id,count) in &recipe.ingredients {ui.label(format!("{} ×{}  (есть {})",items::info(*id).name,count,inv.count(*id)));}
     }
     let can=creative||inv.can_craft(&recipe,true);
@@ -420,16 +425,12 @@ fn construction_panel(ui: &mut Ui, icons: &GuiIcons, state: &mut InventoryUiStat
 fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, near_table: bool, width: f32, slot_rects: &mut Vec<(usize, Rect)>, hotbar: bool) -> Option<String> {
     let mut crafted = None;
     ui.set_width(width);
-    if near_table {
-        ui.horizontal(|ui| {
-            use crate::ui_components::{pill_button, ButtonKind};
-            if pill_button(ui, icons, None, "Рецепты", if state.build_open {ButtonKind::Secondary}else{ButtonKind::Primary}, 120.0, true).clicked() { state.build_open=false; }
-            if pill_button(ui, icons, Some(icon::HAMMER), "Конструктор", if state.build_open {ButtonKind::Primary}else{ButtonKind::Secondary}, 160.0, true).clicked() { state.build_open=true; }
-        });
-        ui.add_space(8.0);
-        if state.build_open {
-            crafted = construction_panel(ui, icons, state, inv, false);
-        } else {
+    if state.builder {
+        // The «Конструктор» block: form, material, the piece and what it takes.
+        let free = state.builder_free;
+        crafted = construction_panel(ui, icons, state, inv, free);
+    } else if near_table {
+        {
         // The crafting table has its own screen: a recipe book on the left (tap a recipe to
         // lay it out), the big 3×3 grid on the right; no character panel.
         ui.horizontal_top(|ui| {
@@ -821,10 +822,6 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             }
         });
         return;
-    } else if CREATIVE_TABS[state.tab] == "Конструктор" && !state.search_open {
-        egui::ScrollArea::vertical().id_salt("creative-constructor").max_height(grid_h).show(ui, |ui| {
-            if let Some(message) = construction_panel(ui, icons, state, inv, true) { result.crafted = Some(message); }
-        });
     } else {
         let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| (state.search_open || in_tab(*id, state.tab) || !state.search.trim().is_empty()) && matches_search(*id, &state.search)).collect();
         // Sorted: by category (in "Все"), then full blocks, shaped blocks (stairs, slabs,
