@@ -236,7 +236,7 @@ impl Storage {
         let Ok(mut regions) = self.regions.lock() else { return };
         let region = regions.entry(r).or_insert_with(|| self.read_region(r));
         let data = match chunk.raw() {
-            Some(raw) => rle_encode(raw),
+            Some(raw) => rle_encode(&raw[..]),
             None => Vec::new(),
         };
         region.chunks.insert(idx, data);
