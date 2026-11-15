@@ -94,10 +94,11 @@ fn slot_widget(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, stack: Op
     let resp = ui.interact(rect, id, sense);
     let hv = ui.ctx().animate_bool_with_time(id.with("hv"), resp.hovered() || resp.is_pointer_button_down_on(), ANIM_TIME);
     // Like the hotbar: a dark see-through tile, a faint light edge, the accent when chosen.
-    let fill = HUD_TILE.lerp_to_gamma(HUD_TILE_HOT, hv);
-    ui.painter().rect_filled(rect, Rounding::same(8.0), fill);
-    let edge = if selected { Stroke::new(2.5_f32, p.accent) } else { Stroke::new(1.5_f32, Color32::from_white_alpha(40).lerp_to_gamma(p.accent, hv * 0.6)) };
-    ui.painter().rect_stroke(rect, Rounding::same(8.0), edge);
+    // Like the slots of the block windows (machines, chests): a solid tile with a firm edge.
+    let fill = p.surface_hi.lerp_to_gamma(p.surface_hover, hv);
+    ui.painter().rect_filled(rect, Rounding::same(4.0), fill);
+    let edge = if selected { Stroke::new(2.5_f32, p.accent) } else { Stroke::new(2.0_f32, p.outline.lerp_to_gamma(p.accent, hv * 0.7)) };
+    ui.painter().rect_stroke(rect, Rounding::same(4.0), edge);
     if let Some(s) = stack {
         draw_stack(ui.painter(), icons, rect, s, p);
     }
@@ -192,20 +193,19 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     }
 
     if creative {
-        // Full screen, no title bar: cells as big as fit, as many columns as fit beside the
-        // sidebar (back, search, categories), as many rows as fit above the hotbar.
-        let ins = crate::gui_renderer::SAFE_INSETS.read().map(|i| *i).unwrap_or([0.0; 4]);
-        let (sw, h) = (ctx.screen_rect().width() - ins[0] - ins[2] - 32.0, ctx.screen_rect().height() - ins[1] - ins[3] - 32.0);
-        // Grid rows plus the hotbar row along the bottom; the hotbar (9 slots + bin) must fit
-        // across beside the tab panel.
-        let by_height = (h - 46.0 - 12.0) / 5.0;
-        let sidebar = 60.0;
-        let by_width = (sw - sidebar - 24.0 - 70.0) / 10.0;
-        let cell = by_height.min(by_width).clamp(38.0, 80.0).floor();
-        let rows = (((h - 46.0 - cell - 12.0 + GAP) / (cell + GAP)).floor() as usize).clamp(2, 9);
-        let cols = (((sw - sidebar - 24.0 + GAP) / (cell + GAP)).floor() as usize).clamp(4, 24);
+        // A block window like the machines' (WolfTech): a metal banner with the title, the
+        // categories and the item grid in recessed panels, the hotbar under them; the window
+        // is scaled to fit the screen.
+        let cell = 46.0f32;
+        let (rows, cols) = (5usize, 9usize);
         let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;
-        let esc = crate::ui_components::full_screen(ctx, "inventory", |ui| {
+        let width = 56.0 + 12.0 + grid_w + 8.0;
+        let esc = crate::ui_components::block_screen(ctx, "inventory", width, |ui| {
+            let (banner, _) = ui.allocate_exact_size(Vec2::new(width, 30.0), Sense::hover());
+            icons.paint_panel(ui.painter(), banner, wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
+            let title = if state.search_open { "Творческий · Поиск".to_string() } else { format!("Творческий · {}", CREATIVE_TABS[state.tab]) };
+            ui.painter().text(banner.center(), Align2::CENTER_CENTER, title, FontId::proportional(16.0), Color32::WHITE);
+            ui.add_space(8.0);
             creative_layout(ui, icons, &p, state, inv, cell, rows, cols, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
         let dismissed = esc || result.close;
@@ -641,14 +641,13 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     // ---- Categories: one panel on the left in the style of the top bars, icons inside ----
     let tab = 44.0f32;
     let side_w = tab + 12.0;
-    let content_h = ui.available_height().max(30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + cell + 12.0);
+    let content_h = 30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + cell + 34.0;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         ui.allocate_ui_with_layout(Vec2::new(side_w, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
             ui.set_width(side_w);
             let panel = Rect::from_min_size(ui.cursor().min, Vec2::new(side_w, content_h));
-            ui.painter().rect_filled(panel, Rounding::same(18.0), Color32::from_black_alpha(150));
-            ui.painter().rect_stroke(panel, Rounding::same(18.0), Stroke::new(1.0_f32, Color32::from_white_alpha(28)));
+            icons.paint_panel(ui.painter(), panel, wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
             egui::ScrollArea::vertical().id_salt("creative-tabs").max_height(content_h).auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                 ui.set_width(side_w);
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
@@ -656,12 +655,9 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 let tab_button = |ui: &mut Ui, on: bool| -> (Rect, egui::Response) {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
                     let hot = resp.hovered() || resp.is_pointer_button_down_on();
-                    if on {
-                        ui.painter().rect_filled(rect, Rounding::same(12.0), p.accent.gamma_multiply(0.28));
-                        ui.painter().rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.5_f32, p.accent));
-                    } else if hot {
-                        ui.painter().rect_filled(rect, Rounding::same(12.0), Color32::from_white_alpha(18));
-                    }
+                    // Tabs are slots like in the block windows; the chosen one is lit.
+                    ui.painter().rect_filled(rect, Rounding::same(4.0), if on { p.accent.gamma_multiply(0.30) } else if hot { p.surface_hover } else { p.surface_hi });
+                    ui.painter().rect_stroke(rect, Rounding::same(4.0), Stroke::new(2.0_f32, if on || hot { p.accent } else { p.outline }));
                     (rect, resp)
                 };
                 // Back and search at the top of the panel, a thin line, then the categories.
@@ -718,7 +714,8 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 ui.set_width(grid_w);
                 creative_main(ui, icons, p, state, inv, cell, rows, cols, grid_w, palette_all, slot_rects, trash_rect, result);
             });
-            ui.add_space(6.0);
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Панель быстрого доступа").size(13.0).color(p.text_muted));
             hotbar_row(ui, icons, p, state, inv, cell, slot_rects, trash_rect);
         });
     });
@@ -815,6 +812,9 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         // The survival inventory inside the creative one: armor, second hand, 2x2 crafting,
         // backpack and hotbar (scrolls on small screens).
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
+        // A recessed metal panel behind the slots, like in the block windows.
+        icons.paint_panel(ui.painter(), area.expand(3.0), wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
+        let area = area.shrink(4.0);
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
         egui::ScrollArea::vertical().id_salt("creative-survival-inv").auto_shrink([false, false]).show(&mut ui2, |ui| {
             if let Some(msg) = survival_layout(ui, icons, p, state, inv, false, grid_w - 16.0, slot_rects, false) {
@@ -833,6 +833,9 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         let cells = group_cells(&list, state.open_group, state.search.trim().is_empty());
         let list = cells;
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
+        // A recessed metal panel behind the slots, like in the block windows.
+        icons.paint_panel(ui.painter(), area.expand(3.0), wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
+        let area = area.shrink(4.0);
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
         // Swipe scrolls the list (a slot only reacts to a tap, so the finger drag goes to the
         // scroll area); the bar stays visible so it is clear there is more below.
