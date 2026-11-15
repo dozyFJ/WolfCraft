@@ -218,6 +218,11 @@ pub mod tiles {
     pub const KIN_PRESS_TOP: u16 = 220;
     pub const KIN_MILL_SIDE: u16 = 221;
     pub const KIN_MILL_TOP: u16 = 222;
+    pub const EXTRUDER_FRONT: u16 = 223;
+    pub const INSOLATOR_FRONT: u16 = 224;
+    pub const INSOLATOR_TOP: u16 = 225;
+    pub const GLACIER_FRONT: u16 = 226;
+    pub const MAGMA_GEN_FRONT: u16 = 227;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2249,6 +2254,52 @@ pub(crate) fn build() -> Vec<(String, Image)> {
                 q.put(8, 10, Rgb(0.4, 0.85, 0.4), 1.0);
                 q.put(7, 11, Rgb(0.3, 0.7, 0.3), 1.0);
             }
+            // Extruder: lava on the left, water on the right, a cobble block between.
+            10 => {
+                for y in 5..12 {
+                    for x in 4..6 {
+                        q.put(x, y, Rgb(1.0, 0.45 + 0.05 * (y % 3) as f32, 0.08), 1.0);
+                    }
+                    for x in 10..12 {
+                        q.put(x, y, Rgb(0.25, 0.50 + 0.05 * (y % 2) as f32, 1.0), 1.0);
+                    }
+                }
+                for y in 7..11 {
+                    for x in 6..10 {
+                        q.put(x, y, if (x + y * 3) % 4 == 0 { Rgb(0.38, 0.38, 0.40) } else { c }, 1.0);
+                    }
+                }
+            }
+            // Greenhouse: green sprouts on brown soil behind glass.
+            11 => {
+                for x in 4..12 {
+                    q.put(x, 11, Rgb(0.42, 0.28, 0.16), 1.0);
+                }
+                for (x, h) in [(5u32, 4u32), (8, 6), (10, 3)] {
+                    for y in (11 - h)..11 {
+                        q.put(x, y, c, 1.0);
+                    }
+                    q.put(x - 1, 11 - h, c, 1.0);
+                    q.put(x + 1, 12 - h, c, 1.0);
+                }
+            }
+            // Ice maker: a snowflake.
+            12 => {
+                for k in 0..7i32 {
+                    for (x, y) in [(8, 4 + k), (5 + k, 7), (5 + k, 4 + k), (11 - k, 4 + k)] {
+                        q.put(x as u32, y as u32, c, 1.0);
+                    }
+                }
+            }
+            // Magmatic generator: glowing magma cracks.
+            13 => {
+                for y in 4..12u32 {
+                    for x in 4..12u32 {
+                        let crack = (x * 7 + y * 3) % 5 == 0 || (x + 2 * y) % 7 == 0;
+                        q.put(x, y, if crack { c } else { Rgb(0.30, 0.10, 0.06) }, 1.0);
+                    }
+                }
+            }
             // Enricher: a vessel with a bubbling liquid.
             _ => {
                 for y in 6..12 {
@@ -2449,6 +2500,20 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    // Thermal-style devices.
+    l.add(EXTRUDER_FRONT, "extruder", p(|q| front(q, 328, Rgb(0.55, 0.55, 0.58), 10)));
+    l.add(INSOLATOR_FRONT, "insolator", p(|q| front(q, 329, Rgb(0.35, 0.85, 0.30), 11)));
+    l.add(INSOLATOR_TOP, "insolator_top", p(|q| {
+        q.noisy(Rgb(0.72, 0.86, 0.92), 0.04, 330);
+        for i in 0..S {
+            for j in [0, 7, 8, S - 1] {
+                q.put(i, j, Rgb(0.62, 0.64, 0.68), 1.0);
+                q.put(j, i, Rgb(0.62, 0.64, 0.68), 1.0);
+            }
+        }
+    }));
+    l.add(GLACIER_FRONT, "glacier", p(|q| front(q, 331, Rgb(0.80, 0.93, 1.0), 12)));
+    l.add(MAGMA_GEN_FRONT, "magma_generator", p(|q| front(q, 332, Rgb(1.0, 0.50, 0.10), 13)));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

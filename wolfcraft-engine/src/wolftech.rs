@@ -33,6 +33,15 @@ pub enum Kind {
     Sawmill,
     /// Extracts: bone → 4 bone meal, gravel → flint, leaves → sapling-free mulch (bone meal).
     Extractor,
+    /// Thermal-style: lava and water on its sides → cobblestone forever (stone or obsidian
+    /// when one lies in the slot as a pattern).
+    Extruder,
+    /// Thermal-style farm in a box: grows more of the seed or flower in its slot.
+    Insolator,
+    /// Thermal-style: water on a side → snow (or ice with ice in the slot).
+    Glacier,
+    /// Thermal-style dynamo: burns magma and netherrack.
+    Magma,
 }
 
 pub struct Spec {
@@ -62,6 +71,10 @@ pub fn kind(b: Block) -> Option<Kind> {
         Block::Compressor => Kind::Compressor,
         Block::Sawmill => Kind::Sawmill,
         Block::Extractor => Kind::Extractor,
+        Block::Extruder => Kind::Extruder,
+        Block::Insolator => Kind::Insolator,
+        Block::Glacier => Kind::Glacier,
+        Block::MagmaGenerator => Kind::Magma,
         _ => return None,
     })
 }
@@ -80,18 +93,22 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Compressor => Spec { name: "Компрессор", capacity: 240.0, rate: 12.0, time: 4.0, hint: "Песок → песчаник, снег → лёд → плотный лёд, 32 угля → алмаз" },
         Kind::Sawmill => Spec { name: "Пилорама", capacity: 160.0, rate: 6.0, time: 1.5, hint: "Бревно → 6 досок, доски → 4 палки" },
         Kind::Extractor => Spec { name: "Экстрактор", capacity: 200.0, rate: 8.0, time: 3.0, hint: "Кость → 4 костной муки, гравий → кремень, листва → костная мука" },
+        Kind::Extruder => Spec { name: "Магмовый экструдер", capacity: 200.0, rate: 6.0, time: 1.0, hint: "Нужны лава и вода по бокам → булыжник. Камень или обсидиан в слоте — делает их" },
+        Kind::Insolator => Spec { name: "Теплица", capacity: 400.0, rate: 10.0, time: 8.0, hint: "Семена, морковь, картофель или цветок в слоте — растит ещё (сам образец не тратится)" },
+        Kind::Glacier => Spec { name: "Ледогенератор", capacity: 200.0, rate: 8.0, time: 2.0, hint: "Нужна вода сбоку → снег. Лёд в слоте — делает лёд" },
+        Kind::Magma => Spec { name: "Магматический генератор", capacity: 4_000.0, rate: 40.0, time: 0.0, hint: "Положите магму или адский камень" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
     }
 }
 
 /// Makes energy (generators of every kind).
 pub fn is_source(k: Kind) -> bool {
-    matches!(k, Kind::Generator | Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Reactor)
+    matches!(k, Kind::Generator | Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Reactor | Kind::Magma)
 }
 
 /// Burns fuel from its slot (the coal generator and the reactor).
 pub fn burns(k: Kind) -> bool {
-    matches!(k, Kind::Generator | Kind::Reactor)
+    matches!(k, Kind::Generator | Kind::Reactor | Kind::Magma)
 }
 
 /// Slots in the reactor's core (6 × 3), and its hull heat limit before plating.
@@ -178,13 +195,51 @@ pub fn reactor_second(slots: &mut [Option<crate::items::ItemStack>], hull: f32) 
 pub fn fuel_for(k: Kind, id: ItemId) -> f32 {
     match k {
         Kind::Generator => fuel(id),
+        Kind::Magma => match id {
+            x if x == Block::Magma as ItemId => 40.0,
+            x if x == Block::Netherrack as ItemId => 8.0,
+            _ => 0.0,
+        },
         Kind::Reactor => 0.0,
         _ => 0.0,
     }
 }
 
 pub fn is_machine(k: Kind) -> bool {
-    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor)
+    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor | Kind::Extruder | Kind::Insolator | Kind::Glacier)
+}
+
+/// Machines whose slot item is only a pattern: it stays, the output is made from nothing
+/// (the extruder, the greenhouse, the ice maker).
+pub fn keeps(k: Kind) -> bool {
+    matches!(k, Kind::Extruder | Kind::Insolator | Kind::Glacier)
+}
+
+/// What a machine makes with nothing in its slot (the extruder: cobblestone).
+pub fn idle_recipe(k: Kind) -> Option<(ItemId, u8)> {
+    match k {
+        Kind::Extruder => Some((Block::Cobblestone as ItemId, 1)),
+        Kind::Glacier => Some((Block::Snow as ItemId, 1)),
+        _ => None,
+    }
+}
+
+/// Whether the surroundings let it work (`env` is filled once a second by the game:
+/// 1 when lava and water touch the extruder, the number of water sides for the ice maker).
+pub fn env_ok(k: Kind, env: f32) -> bool {
+    match k {
+        Kind::Extruder | Kind::Glacier => env > 0.0,
+        _ => true,
+    }
+}
+
+/// How many times longer one operation takes for this input (obsidian is slow).
+pub fn slow(k: Kind, input: ItemId) -> f32 {
+    match k {
+        Kind::Extruder if input == Block::Obsidian as ItemId => 12.0,
+        Kind::Extruder if input == Block::Stone as ItemId => 2.0,
+        _ => 1.0,
+    }
 }
 
 /// How many of `input` one operation takes (most take one).
@@ -264,6 +319,15 @@ pub fn recipe(k: Kind, input: ItemId) -> Option<(ItemId, u8)> {
             })
         }
         Kind::Induction => crate::interaction::smelt_result(input).map(|o| (o, 1)),
+        Kind::Extruder => [Block::Cobblestone, Block::Stone, Block::Obsidian].iter().find(|b| **b as ItemId == input).map(|b| (*b as ItemId, 1)),
+        Kind::Glacier => [Block::Snow, Block::Ice].iter().find(|b| **b as ItemId == input).map(|b| (*b as ItemId, 1)),
+        Kind::Insolator => match input {
+            ids::WHEAT_SEEDS => Some((ids::WHEAT, 1)),
+            ids::CARROT => Some((ids::CARROT, 2)),
+            ids::POTATO => Some((ids::POTATO, 2)),
+            x if [Block::FlowerRed, Block::FlowerYellow, Block::FlowerBlue].iter().any(|f| *f as ItemId == x) => Some((x, 2)),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -415,5 +479,9 @@ mod tests {
         assert_eq!((recipe(Kind::Compressor, ids::COAL), need(Kind::Compressor, ids::COAL)), (Some((ids::DIAMOND, 1)), 32));
         assert_eq!(recipe(Kind::Induction, ids::IRON_DUST), Some((ids::IRON_INGOT, 1)));
         assert_eq!(recipe(Kind::Crusher, Block::Cobblestone as ItemId), Some((Block::Gravel as ItemId, 1)));
+        assert_eq!(idle_recipe(Kind::Extruder), Some((Block::Cobblestone as ItemId, 1)));
+        assert_eq!(recipe(Kind::Insolator, ids::WHEAT_SEEDS), Some((ids::WHEAT, 1)));
+        assert!(keeps(Kind::Insolator) && !keeps(Kind::Crusher) && !env_ok(Kind::Extruder, 0.0));
+        assert!(fuel_for(Kind::Magma, Block::Magma as ItemId) > 0.0 && is_source(Kind::Magma));
     }
 }

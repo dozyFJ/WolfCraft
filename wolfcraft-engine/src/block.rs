@@ -1884,6 +1884,10 @@ blocks! {
     2490 HandCrank => info("Ручной кривошип", Shape, 1.0, Axe, all(t::KIN_CRANK)),
     2491 MechPress => needs_pick(info("Механический пресс", Opaque, 3.5, Pickaxe, column(t::KIN_PRESS_SIDE, t::KIN_PRESS_TOP, t::KIN_PRESS_TOP))),
     2492 Millstone => needs_pick(info("Жернова", Opaque, 3.5, Pickaxe, column(t::KIN_MILL_SIDE, t::KIN_MILL_TOP, t::KIN_MILL_TOP))),
+    2493 Extruder => needs_pick(info("Магмовый экструдер", Opaque, 4.0, Pickaxe, column(t::EXTRUDER_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2494 Insolator => needs_pick(info("Теплица", Opaque, 3.0, Pickaxe, column(t::INSOLATOR_FRONT, t::INSOLATOR_TOP, t::TECH_TOP))),
+    2495 Glacier => needs_pick(info("Ледогенератор", Opaque, 4.0, Pickaxe, column(t::GLACIER_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2496 MagmaGenerator => needs_pick(info("Магматический генератор", Opaque, 4.0, Pickaxe, column(t::MAGMA_GEN_FRONT, t::TECH_TOP, t::TECH_TOP))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
