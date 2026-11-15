@@ -770,7 +770,8 @@ impl MobManager {
             for _ in 0..2 {
                 let j = DVec3::new(self.rand() - 0.5, self.rand() - 0.5, self.rand() - 0.5) * 0.6;
                 let g = 0.35 + self.rand() as f32 * 0.4;
-                self.fx_glow(at + j, up * (1.2 + self.rand() * 0.8), [1.0, g, 0.08], 0.11, 0.5, FxKind::Rise);
+                let rise = 1.2 + self.rand() * 0.8;
+                self.fx_glow(at + j, up * rise, [1.0, g, 0.08], 0.11, 0.5, FxKind::Rise);
             }
         }
         let _ = vanished;
