@@ -108,6 +108,8 @@ pub struct TouchState {
     pub place_play: bool,
     /// Width covered on the left (the studio's tools sidebar), physical pixels.
     pub left_inset: f32,
+    /// When the multi-button was last tapped (a second tap soon after toggles flight).
+    last_jump: Option<Instant>,
 }
 
 /// Stick deflection from the fixed base to the thumb: a small dead zone, then smooth to full.
@@ -152,10 +154,11 @@ fn button_rect(b: Btn, size: (u32, u32), hotbar: Option<(f32, f32, f32, f32)>) -
     match b {
         // Right-hand cluster in two tidy columns: the outer one holds the movement pair
         // (jump/up over sneak/down), the inner one place, sprint and flight.
-        Btn::Jump => (w - 120.0 * u, h - 255.0 * u, 56.0 * u),
+        // One multi-button: jump, double tap = flight, swipe down = crouch, flying = up/down.
+        Btn::Jump => (w - 120.0 * u, h - 175.0 * u, 70.0 * u),
         Btn::Sneak => (w - 120.0 * u, h - 110.0 * u, 50.0 * u),
-        Btn::Place => (w - 255.0 * u, h - 320.0 * u, 42.0 * u),
-        Btn::Sprint => (w - 255.0 * u, h - 200.0 * u, 40.0 * u),
+        Btn::Place => (w - 265.0 * u, h - 270.0 * u, 42.0 * u),
+        Btn::Sprint => (w - 265.0 * u, h - 140.0 * u, 40.0 * u),
         Btn::Fly => (w - 255.0 * u, h - 85.0 * u, 36.0 * u),
         Btn::Inventory => (w - 70.0 * u, h - 50.0 * u, 34.0 * u),
         Btn::Chat | Btn::Voice | Btn::Camera | Btn::Tab | Btn::Pause => {
@@ -205,7 +208,16 @@ impl TouchState {
         if self.place_play {
             return b == Btn::Jump;
         }
-        b != Btn::Fly || self.creative
+        // Flight and crouch / down live in the multi-button now.
+        !matches!(b, Btn::Fly | Btn::Sneak)
+    }
+
+    /// Multi-button while flying: upper half rises, lower half sinks (follows the thumb).
+    fn fly_dir(&mut self, p: (f32, f32), size: (u32, u32)) {
+        let (_, cy, r) = button_rect(Btn::Jump, size, self.hotbar);
+        let dy = p.1 - cy;
+        self.jump_held = dy < r * 0.1;
+        self.down_held = dy > r * 0.1;
     }
 
     /// Handles a touch event while playing. Returns actions to apply.
@@ -236,9 +248,24 @@ impl TouchState {
                 } else if let Some(b) = BUTTONS.iter().copied().filter(|b| self.shown(*b)).find(|b| hit(*b, size, self.hotbar, p)) {
                     match b {
                         Btn::Jump => {
-                            // Held: jump on the ground, rise while flying. Flight itself has
-                            // its own button, so no double-tap toggling here.
-                            self.jump_held = true;
+                            let double = self.last_jump.is_some_and(|t| t.elapsed().as_millis() < 300);
+                            self.last_jump = Some(Instant::now());
+                            if double && self.creative {
+                                // Double tap: take off / land.
+                                self.last_jump = None;
+                                self.jump_held = false;
+                                self.down_held = false;
+                                self.sneak = false;
+                                out.push(TouchAction::Fly);
+                            } else if self.flying {
+                                self.fly_dir(p, size);
+                            } else {
+                                if self.sneak {
+                                    // A tap while crouching stands up first.
+                                    self.sneak = false;
+                                }
+                                self.jump_held = true;
+                            }
                         }
                         Btn::Fly => out.push(TouchAction::Fly),
                         Btn::Sneak if self.flying => self.down_held = true,
@@ -294,6 +321,26 @@ impl TouchState {
                             f.moved += (p.0 - f.last.0).abs() + (p.1 - f.last.1).abs();
                         }
                         Role::Slot => f.moved += (p.0 - f.last.0).abs() + (p.1 - f.last.1).abs(),
+                        Role::Button(Btn::Jump) => {
+                            f.last = p;
+                            let start = f.start;
+                            let used = f.throws > 0;
+                            if self.flying {
+                                self.fly_dir(p, size);
+                            } else if !used && p.1 - start.1 > unit(size) * 45.0 {
+                                // Swipe down on the ground: crouch on / off.
+                                if let Some(f) = self.fingers.iter_mut().find(|f| f.id == t.id) {
+                                    f.throws = 1;
+                                }
+                                self.jump_held = false;
+                                self.last_jump = None;
+                                self.sneak = !self.sneak;
+                                if self.sneak {
+                                    self.sprint = false;
+                                }
+                            }
+                            return out;
+                        }
                         Role::Button(_) | Role::Hotbar => {}
                     }
                     f.last = p;
@@ -312,7 +359,10 @@ impl TouchState {
                                 out.push(TouchAction::Place);
                             }
                         }
-                        Role::Button(Btn::Jump) => self.jump_held = false,
+                        Role::Button(Btn::Jump) => {
+                            self.jump_held = false;
+                            self.down_held = false;
+                        }
                         Role::Button(Btn::Sneak) => self.down_held = false,
                         Role::Button(Btn::Place) => self.place_held = false,
                         Role::Button(Btn::Voice) => {
@@ -501,7 +551,7 @@ impl TouchState {
                 Btn::Sneak if self.flying => self.down_held,
                 Btn::Sneak => self.sneak,
                 Btn::Sprint => self.sprint,
-                Btn::Jump => self.jump_held,
+                Btn::Jump => false,
                 Btn::Fly => self.flying,
                 _ => false,
             };
@@ -512,7 +562,49 @@ impl TouchState {
             let k = r * 0.42 / ppp;
             let st = Stroke::new(2.6, white);
             match b {
-                Btn::Jump | Btn::Sneak => {
+                Btn::Jump => {
+                    // Halves light up: upper = jump / up, lower = crouch / down.
+                    let hi = Color32::from_rgba_unmultiplied(38, 198, 218, 170);
+                    let half = |up: bool| {
+                        let n = 20;
+                        let mut v = vec![c];
+                        for i in 0..=n {
+                            let a = std::f32::consts::PI * i as f32 / n as f32;
+                            let a = if up { -a } else { a };
+                            v.push(c + egui::vec2(a.cos(), a.sin()) * (r / ppp - 1.5));
+                        }
+                        egui::Shape::convex_polygon(v, hi, Stroke::NONE)
+                    };
+                    if self.jump_held {
+                        painter.add(half(true));
+                    }
+                    if self.down_held || (self.sneak && !self.flying) {
+                        painter.add(half(false));
+                    }
+                    let dim = Color32::from_rgba_unmultiplied(220, 230, 240, 60);
+                    painter.line_segment([c - egui::vec2(r / ppp * 0.7, 0.0), c + egui::vec2(r / ppp * 0.7, 0.0)], Stroke::new(1.5, dim));
+                    // Big up arrow, smaller down arrow (crouch / sink).
+                    let tri = |cy: f32, k: f32, up: bool| {
+                        let s = if up { -1.0 } else { 1.0 };
+                        let o = c + egui::vec2(0.0, cy);
+                        egui::Shape::convex_polygon(vec![o + egui::vec2(0.0, s * k), o + egui::vec2(-k, -s * k * 0.7), o + egui::vec2(k, -s * k * 0.7)], white, Stroke::NONE)
+                    };
+                    painter.add(tri(-k * 1.0, k * 0.8, true));
+                    painter.add(tri(k * 1.0, k * if self.flying { 0.8 } else { 0.5 }, false));
+                    if self.flying {
+                        // Small wings on the side: flight is on.
+                        for sgn in [-1.0f32, 1.0] {
+                            let o = c + egui::vec2(sgn * k * 1.75, 0.0);
+                            let w = k * 0.45;
+                            painter.add(egui::Shape::convex_polygon(
+                                vec![o + egui::vec2(-sgn * w * 0.4, w * 0.4), o + egui::vec2(sgn * w, -w * 0.7), o + egui::vec2(sgn * w * 0.6, w * 0.3)],
+                                white,
+                                Stroke::NONE,
+                            ));
+                        }
+                    }
+                }
+                Btn::Sneak => {
                     // The pixel font has no arrow glyphs: draw the triangle as a shape.
                     let sgn = if b == Btn::Jump { -1.0 } else { 1.0 };
                     painter.add(egui::Shape::convex_polygon(vec![c + egui::vec2(0.0, sgn * k), c + egui::vec2(-k, -sgn * k * 0.7), c + egui::vec2(k, -sgn * k * 0.7)], white, Stroke::NONE));
@@ -544,7 +636,9 @@ impl TouchState {
                 _ => {}
             }
             let label = match b {
-                Btn::Jump if self.flying => "Вверх",
+                Btn::Jump if self.flying => "Вверх / Вниз",
+                Btn::Jump if self.sneak => "Присесть",
+                Btn::Jump if self.creative => "Прыжок · 2× полёт",
                 Btn::Sneak if self.flying => "Вниз",
                 Btn::Jump => "Прыжок",
                 Btn::Sneak => "Присесть",
