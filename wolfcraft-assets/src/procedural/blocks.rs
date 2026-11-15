@@ -190,6 +190,7 @@ pub mod tiles {
     /// «Кнопки»: multiplier buttons (4 tiers) and the rebirth button, then their side.
     pub const BUTTON_PAD: u16 = 190;
     pub const BUTTON_PAD_SIDE: u16 = 195;
+    pub const FIRE: u16 = 196;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2030,6 +2031,23 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         q.noisy(Rgb(0.22, 0.23, 0.26), 0.03, 196);
         for x in 0..S {
             q.put(x, 0, Rgb(0.40, 0.42, 0.46), 1.0);
+        }
+    }));
+    l.add(FIRE, "fire", p(|q| {
+        // Tongues of flame rising from the bottom: yellow at the root, orange, red tips.
+        q.clear();
+        for x in 0..S {
+            let h = 7 + ((x * 7 + 3) % 5) + if x % 3 == 1 { 3 } else { 0 };
+            for k in 0..h.min(15) {
+                let y = S - 1 - k;
+                let f = k as f32 / h as f32;
+                let c = if f < 0.35 { Rgb(1.0, 0.92, 0.45) } else if f < 0.7 { Rgb(1.0, 0.58, 0.12) } else { Rgb(0.88, 0.22, 0.06) };
+                // Ragged edges.
+                if f > 0.8 && (x + k) % 2 == 0 {
+                    continue;
+                }
+                q.put(x, y, c, 1.0);
+            }
         }
     }));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {

@@ -662,8 +662,8 @@ fn mesh_cross(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32)
                     let _ = sky;
                     continue;
                 }
-                // Torches and other emissive "plants" stay still.
-                let sway = if b.info().emissive { 0 } else { 1u32 << 25 };
+                // Torches and other emissive "plants" stay still; flames flicker like grass in wind.
+                let sway = if b.info().emissive && b != Block::Fire { 0 } else { 1u32 << 25 };
                 let tile = b.info().tiles[0] as u32 | (bl([x, y, z]) << 20) | sway;
                 let verts = &mut out.opaque;
                 let idx = &mut out.opaque_idx;

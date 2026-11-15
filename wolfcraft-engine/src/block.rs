@@ -1834,6 +1834,8 @@ blocks! {
     2451 ButtonMult3 => emissive(info("Кнопка: +120 множитель", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD + 2, t::BUTTON_PAD_SIDE))),
     2452 ButtonMult4 => emissive(info("Кнопка: +1500 множитель", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD + 3, t::BUTTON_PAD_SIDE))),
     2453 ButtonRebirth => emissive(info("Кнопка перерождения", Opaque, 1.0, Hand, column(t::BUTTON_PAD_SIDE, t::BUTTON_PAD + 4, t::BUTTON_PAD_SIDE))),
+    // Fire: burns on top of a block, spreads over wood and leaves, goes out in the rain.
+    2454 Fire => emissive(not_solid(info("Огонь", Cross, 0.0, Hand, all(t::FIRE)))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2299,7 +2301,7 @@ impl Block {
         match self {
             Lava | LavaFall | Glowstone | Lamp | Lantern | ElectricLampOn | IskritLampOn | InnerCore => 15,
             LavaFlow1 | LavaFlow2 | LavaFlow3 => 13,
-            Torch => 14,
+            Torch | Fire => 14,
             UraniumBlock => 10,
             UraniumOre => 6,
             NetherPortal => 11,
@@ -2332,6 +2334,15 @@ impl Block {
         self.fluid().is_some()
     }
     #[inline]
+    /// Catches fire: wood (logs, planks, wooden furniture), leaves, plants, wool and the like.
+    pub fn flammable(self) -> bool {
+        let i = self.info();
+        if self == Block::Fire || i.hardness < 0.0 {
+            return false;
+        }
+        i.tool == ToolKind::Axe || i.name.contains("листв") || i.name.contains("хвоя") || i.name.contains("Шерсть") || i.name.contains("шерсть") || (i.render == RenderKind::Cross && !i.emissive)
+    }
+
     pub fn is_water(self) -> bool {
         self.fluid().is_some_and(|f| !f.lava)
     }

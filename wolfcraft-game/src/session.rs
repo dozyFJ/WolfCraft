@@ -131,6 +131,8 @@ pub struct GameSession {
     /// Camera feel: dip after a hard landing, last vertical speed (to spot the landing),
     /// third-person shoulder offset (smoothed, shrinks near walls).
     land_dip: f64,
+    /// Seconds to the next fire step (spreading, burning out).
+    fire_t: f32,
     /// Rain, thunderstorms and snow.
     pub weather: crate::weather::Weather,
     /// Seconds to the next "am I stuck in blocks?" check.
@@ -292,6 +294,7 @@ impl GameSession {
             rest_camera: None,
             cam_lag: 0.0,
             land_dip: 0.0,
+            fire_t: 0.0,
             weather: crate::weather::Weather::new(seed),
             stuck_check: 0.0,
             bob_phase: 0.0,
@@ -924,6 +927,7 @@ impl GameSession {
         }
         self.special_effects(dt);
         self.weather_tick(dt);
+        self.fire_tick(dt);
         // Radiation: uranium carried or within two blocks hurts slowly. A full set of armour
         // keeps it out.
         if !self.player.survival.dead && !self.player.is_creative() {
@@ -2165,6 +2169,91 @@ impl GameSession {
                 }
                 self.flash = Some(([0.9, 0.92, 1.0], 0.25));
                 self.shake = self.shake.max(0.25);
+                // Sometimes the strike sets the spot on fire (grass, a tree).
+                if self.mobs.rand() < 0.4 {
+                    let g = self.chunks.grid();
+                    let c = g.world_to_cell(ground + gup * 0.5);
+                    let below = g.offset(c, 0, 0, -1).and_then(|b| self.chunks.get_block(b));
+                    if self.chunks.get_block(c) == Some(wolfcraft_engine::block::Block::Air) && below.is_some_and(|b| b.is_solid() || b.flammable()) {
+                        self.chunks.set_block(c, wolfcraft_engine::block::Block::Fire);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Fire, like Minecraft's: it burns the block under it away, spreads to air next to wood,
+    /// leaves and plants, dies out on stone, goes out in the rain; it hurts what stands in it.
+    fn fire_tick(&mut self, dt: f32) {
+        use wolfcraft_engine::block::Block;
+        let g = self.chunks.grid();
+        // Standing in fire hurts and sets creatures alight (every frame).
+        let feet = g.world_to_cell(self.player.body.pos + self.player.up() * 0.3);
+        if self.chunks.get_block(feet) == Some(Block::Fire) && !self.player.is_creative() {
+            self.player.damage(2.0 * dt, self.cfg.difficulty);
+        }
+        self.fire_t -= dt;
+        if self.fire_t > 0.0 {
+            return;
+        }
+        self.fire_t = 0.5;
+        for m in &mut self.mobs.mobs {
+            let c = g.world_to_cell(m.body.pos + wolfcraft_engine::physics::up_at(m.body.pos) * 0.3);
+            if self.chunks.get_block(c) == Some(Block::Fire) {
+                m.burning = m.burning.max(4.0);
+            }
+        }
+        let fires: Vec<_> = self.fx_lights.iter().filter(|(_, b)| *b == Block::Fire).map(|(p, _)| g.world_to_cell(*p)).take(64).collect();
+        let raining = self.rain_amount() > 0.4 && self.environment().1 < 0.5;
+        for c in fires {
+            if self.chunks.get_block(c) != Some(Block::Fire) {
+                continue;
+            }
+            let roll = self.mobs.rand();
+            // Rain puts out fires under the open sky.
+            if raining && roll < 0.4 {
+                let p = g.cell_center(c);
+                let up = wolfcraft_engine::physics::up_at(p);
+                let open = (1..30).all(|k| !self.chunks.block_at_world(p + up * k as f64).is_solid());
+                if open {
+                    self.chunks.set_block(c, Block::Air);
+                    self.mobs.fx(p, up * 2.0, [0.6, 0.6, 0.62], 0.25, 2.0, wolfcraft_engine::mobs::FxKind::Rise);
+                    continue;
+                }
+            }
+            let below = g.offset(c, 0, 0, -1);
+            let fuel = below.and_then(|b| self.chunks.get_block(b)).is_some_and(|b| b.flammable());
+            if !fuel {
+                // Nothing to burn: dies out after a while.
+                if roll < 0.12 {
+                    self.chunks.set_block(c, Block::Air);
+                }
+            } else if roll < 0.06 {
+                // The block underneath burns away; the fire moves down onto what is left.
+                if let Some(b) = below {
+                    self.chunks.set_block(b, Block::Fire);
+                    self.chunks.set_block(c, Block::Air);
+                    let p = g.cell_center(b);
+                    self.mobs.chips(p, &[[0.25, 0.18, 0.12], [0.1, 0.08, 0.06]], 6, 3.0);
+                }
+                continue;
+            }
+            // Spread: a random neighbour (sideways, up, diagonals) that is air and touches fuel.
+            let (di, dj, dk) = {
+                let r = (self.mobs.rand() * 26.0) as i32;
+                let (a, b, k) = (r % 3 - 1, (r / 3) % 3 - 1, r / 9 - 1);
+                (a, b, k)
+            };
+            if (di, dj, dk) == (0, 0, 0) || self.mobs.rand() > 0.35 {
+                continue;
+            }
+            let Some(n) = g.offset(c, di, dj, dk) else { continue };
+            if self.chunks.get_block(n) != Some(Block::Air) {
+                continue;
+            }
+            let touches_fuel = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)].iter().any(|&(a, b, k)| g.offset(n, a, b, k).and_then(|x| self.chunks.get_block(x)).is_some_and(|x| x.flammable()));
+            if touches_fuel {
+                self.chunks.set_block(n, Block::Fire);
             }
         }
     }
