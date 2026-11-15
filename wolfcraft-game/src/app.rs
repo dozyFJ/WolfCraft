@@ -1265,7 +1265,10 @@ impl App {
     /// the turn is spread over a few frames instead of jumping. Nothing is lost: the rest of
     /// the turn is applied in the next frames.
     fn smooth_look(&mut self, raw: (f64, f64)) -> (f64, f64) {
+        // A mouse moves in jumpy steps too: on PC the view always glides a little.
+        let mouse = !self.touch.seen;
         let s = self.settings.camera_smooth.clamp(0.0, 1.0) as f64;
+        let s = if mouse { s.max(0.45) } else { s };
         self.look_pending.0 += raw.0;
         self.look_pending.1 += raw.1;
         if s < 0.02 {
@@ -1303,7 +1306,9 @@ impl App {
     fn take_input_frame(&mut self) -> InputFrame {
         let k = &self.input.keys;
         let axis = |pos: KeyCode, neg: KeyCode| (k.contains(&pos) as i32 - k.contains(&neg) as i32) as f32;
+        // The mouse turns slower than a finger drag (it was far too quick on PC).
         let sens = 0.0022 * self.settings.mouse_sensitivity as f64;
+        let mouse_sens = if cfg!(target_os = "android") { sens } else { sens * 0.6 };
         self.touch.tick();
         let throws = std::mem::take(&mut self.touch.throws);
         if throws > 0 {
@@ -1324,7 +1329,7 @@ impl App {
             jump_pressed: std::mem::take(&mut self.input.jump_press),
             sprint: k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight) || self.touch.sprint,
             sneak: k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || if self.touch.flying { self.touch.down_held } else { self.touch.sneak },
-            look: self.smooth_look(((self.input.mouse_dx + tl.0 as f64 * 1.4) * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy + tl.1 as f64 * 1.4) * sens)),
+            look: self.smooth_look((self.input.mouse_dx * mouse_sens + tl.0 as f64 * 1.4 * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy * mouse_sens + tl.1 as f64 * 1.4 * sens))),
             break_held: self.input.left || (self.touch.breaking && !bow) || self.tap_hit > 0.0,
             use_pressed: std::mem::take(&mut self.input.right_press),
             use_held: self.input.right || self.touch.place_held || (bow && self.touch.breaking),
