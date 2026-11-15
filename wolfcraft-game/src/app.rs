@@ -130,6 +130,44 @@ fn read_world_script(dir: &std::path::Path) -> String {
     }
 }
 
+impl App {
+    /// `/gui` lists the pages in the world's «gui» folder (an example is put there first);
+    /// `/gui <name>` opens one, `/gui close` closes them all.
+    fn open_web_page(&mut self, name: &str, now: f64) {
+        use wolfcraft_ui::chat_ui::ChatKind;
+        let Some(s) = &self.session else { return };
+        let dir = s.dir.join("gui");
+        let _ = std::fs::create_dir_all(&dir);
+        let example = dir.join("пульт.html");
+        if !example.exists() {
+            let _ = std::fs::write(&example, wolfcraft_ui::webgui::EXAMPLE);
+        }
+        if name == "close" || name == "закрыть" {
+            self.web_pages.clear();
+            return;
+        }
+        let mut list: Vec<String> = std::fs::read_dir(&dir).map(|r| r.filter_map(|e| e.ok()).filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".html")).map(String::from)).collect()).unwrap_or_default();
+        list.sort();
+        if name.is_empty() {
+            self.chat.push(ChatKind::System, format!("Окна модов (HTML/CSS/JS) в папке {}: {}. Открыть: /gui <имя>", dir.display(), list.join(", ")), now);
+            return;
+        }
+        let Some(file) = list.iter().find(|n| n.to_lowercase() == name.to_lowercase()) else {
+            self.chat.push(ChatKind::Error, format!("Нет окна «{name}». Есть: {}", list.join(", ")), now);
+            return;
+        };
+        match std::fs::read_to_string(dir.join(format!("{file}.html"))) {
+            Ok(src) => {
+                self.web_pages.retain(|p| p.name != *file);
+                let page = wolfcraft_ui::webgui::Page::load(file, &src, Some(dir.join(format!("{file}.save"))));
+                self.web_pages.push(page);
+                self.chat.open = false;
+            }
+            Err(e) => self.chat.push(ChatKind::Error, format!("Не открыть {file}.html: {e}"), now),
+        }
+    }
+}
+
 /// Draws the script's GUI (ScreenGui-like) over the game; returns the ids of pressed buttons.
 fn draw_lua_gui(ctx: &egui::Context, icons:&wolfcraft_ui::GuiIcons, els: &[crate::lua::GuiElement]) -> Vec<String> {
     use crate::lua::GuiKind;
@@ -248,6 +286,8 @@ pub struct App {
     studio_world: Option<String>,
     /// The world's Luau script while it runs (GUI, events, timers).
     lua: Option<crate::lua::LuaHost>,
+    /// Open WolfHTML windows of mods (HTML + CSS + JS), opened with /gui <name>.
+    web_pages: Vec<wolfcraft_ui::webgui::Page>,
     /// The world list was read for the launcher since it was last shown.
     main_worlds_fresh: bool,
     /// Listens for servers on the local network while the world list is open.
@@ -418,6 +458,7 @@ impl App {
             portrait: None,
             studio: None,
             studio_world: None,
+            web_pages: Vec::new(),
             lua: None,
             main_worlds_fresh: false,
             discovery: None,
@@ -1204,6 +1245,7 @@ impl App {
                 self.settings.fullscreen = !self.settings.fullscreen;
                 self.pending_apply = true;
             }
+            (Screen::Playing, KeyCode::Escape) if !self.web_pages.is_empty() => self.web_pages.clear(),
             (Screen::Playing, KeyCode::Escape) => self.screen = Screen::Paused,
             (Screen::Map, KeyCode::Escape | KeyCode::KeyM) => self.screen = Screen::Playing,
             (Screen::Playing, KeyCode::KeyM) => {
@@ -1958,7 +2000,7 @@ impl App {
         let upload_budget = if self.screen == Screen::Loading { 64 } else { 16 };
         self.pump_meshes(gfx, upload_budget);
 
-        let want_grab = self.screen == Screen::Playing && !self.chat.open;
+        let want_grab = self.screen == Screen::Playing && !self.chat.open && self.web_pages.is_empty();
         if want_grab != self.grabbed {
             let w = gfx.window.clone();
             self.set_grab(&w, want_grab);
@@ -2003,6 +2045,15 @@ impl App {
         let debug_info = if self.debug && self.screen.in_world() { self.session.as_ref().map(|s| self.debug_info(s, gfx)) } else { None };
         let screen = self.screen;
         let dark = self.settings.theme == ThemeMode::Dark;
+        // What WolfHTML pages read through `wolf.*`.
+        let web_host = self.session.as_ref().map(|s| {
+            let p = s.player.body.pos;
+            let f = wolfcraft_engine::player::day_fraction(s.player.world_time);
+            let mins = (f * 24.0 * 60.0) as u32;
+            wolfcraft_ui::webgui::Host { health: s.player.health, max_health: 20.0, hunger: s.player.hunger, pos: [p.x, p.y, p.z], time: format!("{:02}:{:02}", mins / 60 % 24, mins % 60), nick: s.nickname.clone(), creative: s.player.is_creative() }
+        }).unwrap_or_default();
+        let mut web_fx: Vec<wolfcraft_ui::webgui::Effect> = Vec::new();
+        let mut web_log: Vec<String> = Vec::new();
 
         gfx.gui.hide_cursor = self.grabbed;
         // Minimap: rebuilt 4 times a second while in the world.
@@ -2052,7 +2103,7 @@ impl App {
         let minimap_tex = self.minimap.as_ref().map(|t| t.id());
         let studio_view = if self.studio.is_some() { self.studio_view() } else { None };
         let frame = {
-            let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, studio, studio_world, voice, voice_menu, net_players, net, .. } = self;
+            let App { world_map, map_view, map_marks, map_grid, settings, world_select, create, worlds, create_preview, menu_planet, crash_report, packs, pack_status, session, inv_ui, load, near_table, time, chat, container, touch, studio, studio_world, voice, voice_menu, net_players, net, web_pages, .. } = self;
             let touch_size = studio_touch_size(gfx.gpu.size(), studio.as_ref(), gfx.gui.ctx.pixels_per_point());
             let random_seed = create.preview_seed;
             let ctx_dt = dt;
@@ -2227,6 +2278,14 @@ impl App {
                         // The world script's own GUI (Luau, like Roblox ScreenGui).
                         if screen == Screen::Playing && !lua_gui.is_empty() {
                             lua_clicks.extend(draw_lua_gui(ctx, &icons, &lua_gui));
+                        }
+                        // Mod windows in HTML + CSS + JS.
+                        if screen == Screen::Playing {
+                            for p in web_pages.iter_mut() {
+                                web_fx.extend(p.show(ctx, &web_host, dt));
+                                web_log.extend(p.take_log());
+                            }
+                            web_pages.retain(|p| p.open);
                         }
                         if screen == Screen::Playing {
                             if let Some(line) = chat_ui::draw(ctx, &icons, chat, time.elapsed() as f64) {
@@ -2548,6 +2607,24 @@ impl App {
         if self.session.is_some() && self.screen == Screen::Playing && !self.queued_chat.is_empty() {
             submitted.extend(std::mem::take(&mut self.queued_chat));
         }
+        // What the mod pages asked for: chat lines and commands.
+        for l in web_log {
+            self.chat.push(wolfcraft_ui::chat_ui::ChatKind::System, l, now);
+        }
+        for e in web_fx {
+            match e {
+                wolfcraft_ui::webgui::Effect::Chat(t) => submitted.push(t),
+                wolfcraft_ui::webgui::Effect::Command(c) => submitted.push(c),
+                wolfcraft_ui::webgui::Effect::Close => {}
+            }
+        }
+        // /gui: WolfHTML pages from the world's «gui» folder.
+        submitted.retain(|line| {
+            let t = line.trim();
+            let Some(arg) = t.strip_prefix("/gui").filter(|r| r.is_empty() || r.starts_with(' ')) else { return true };
+            self.open_web_page(arg.trim(), now);
+            false
+        });
         for line in submitted {
             // Online: plain chat lines go to the server, which sends them back to everyone.
             if let Some(net) = &mut self.net {
