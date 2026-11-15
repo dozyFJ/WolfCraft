@@ -199,6 +199,8 @@ pub struct App {
     pack_dl: Option<Receiver<Result<String, String>>>,
     /// Text of the last crash (logs/crash.txt), shown once in the main menu.
     crash_report: Option<String>,
+    /// The world tick panicked this frame: save what can be saved and go back to the menu.
+    world_panic: bool,
     /// World map screen: texture, pixels being rebuilt row by row, view and the colours of
     /// every column seen so far (so explored land stays on the map).
     world_map: Option<TextureHandle>,
@@ -378,6 +380,7 @@ impl App {
             map_view: MapView::default(),
             map_explored: HashMap::new(),
             crash_report,
+            world_panic: false,
             menu_planet: None,
             menu_planet_requested: false,
             create_preview_key: 0,
@@ -1497,6 +1500,23 @@ impl App {
     }
 
     fn redraw(&mut self, gfx: &mut Gfx) {
+        // Like Java's "Saving world" on a crash: an error inside the world does not kill the
+        // app — the world is saved, the report is shown, the player is back in the menu.
+        if std::mem::take(&mut self.world_panic) {
+            log::error!("world tick failed: saving and leaving the world");
+            if let Some(s) = self.session.take() {
+                let saved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    let mut s = s;
+                    s.save();
+                }));
+                if saved.is_err() {
+                    log::error!("saving after the crash failed too");
+                }
+            }
+            self.leave_world();
+            let report = std::fs::read_to_string(self.data_dir.join("logs").join("crash.txt")).unwrap_or_default();
+            self.crash_report = Some(format!("Мир остановлен из-за ошибки. Прогресс сохранён, можно зайти снова.\n\n{report}"));
+        }
         // The launcher lists the worlds as studio projects: read them whenever it opens.
         if self.screen == Screen::Main {
             if !self.main_worlds_fresh {
@@ -1590,7 +1610,13 @@ impl App {
                             }
                         }
                     }
-                    let events = s.update(&input, dt, view, frozen);
+                    let events = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.update(&input, dt, view, frozen))) {
+                        Ok(e) => e,
+                        Err(_) => {
+                            self.world_panic = true;
+                            Vec::new()
+                        }
+                    };
                     // Script: «block.on_step» when the player steps onto a new block.
                     if let Some(l) = &mut self.lua {
                         let g = s.chunks.grid();
@@ -2004,7 +2030,10 @@ impl App {
                     actions.push(main_menu::main_menu(ctx, &icons, version, &data_dir_str, dark, menu_planet.as_ref(), settings.skin, &settings.nickname, worlds));
                     crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
                 }
-                Screen::GameMenu => actions.push(main_menu::game_menu(ctx, &icons, version, menu_planet.as_ref())),
+                Screen::GameMenu => {
+                    actions.push(main_menu::game_menu(ctx, &icons, version, menu_planet.as_ref()));
+                    crash_close |= show_crash_report(ctx, &icons, crash_report.as_deref());
+                }
                 Screen::WorldSelect => actions.push(main_menu::world_select(ctx, &icons, world_select, worlds, version)),
                 Screen::Create => actions.push(main_menu::create_world(ctx, &icons, create, create_preview.as_ref(), version, random_seed)),
                 Screen::Settings => {
@@ -3481,7 +3510,8 @@ fn show_crash_report(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::Gu
     use wolfcraft_ui::ui_components::{ButtonKind, modal, pill_button};
     let Some(text) = text else { return false };
     let mut close = false;
-    let dismissed = modal(ctx, "crash-report", "Игра упала в прошлый раз", 560.0, |ui| {
+    let title = if text.starts_with("Мир остановлен") { "Ошибка в мире" } else { "Игра упала в прошлый раз" };
+    let dismissed = modal(ctx, "crash-report", title, 560.0, |ui| {
         ui.label("Сделайте скриншот или скопируйте текст и отправьте разработчику:");
         ui.add_space(6.0);
         egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
