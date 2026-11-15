@@ -93,6 +93,27 @@ pub struct HudState<'a> {
     pub popups: Vec<(Pos2, String, [u8; 3], f32, bool)>,
     /// Achievement toast: icon, name, what it was for, seconds shown.
     pub achievement: Option<(ItemStack, String, String, f32)>,
+    /// Newcomer help: the next goal (icon, text) and a line about the controls.
+    pub goal: Option<(ItemStack, String)>,
+    pub tip: Option<String>,
+}
+
+/// The next goal at the top of the screen, and the controls under it at the very start.
+fn draw_goal(painter: &Painter, icons: &GuiIcons, p: &Palette, screen: Rect, s: &HudState) {
+    let mut y = screen.top() + 14.0;
+    if let Some((st, text)) = &s.goal {
+        let g = painter.layout_no_wrap(format!("Цель: {text}"), FontId::proportional(14.0), Color32::WHITE);
+        let w = g.size().x + 44.0;
+        let r = Rect::from_center_size(Pos2::new(screen.center().x, y + 15.0), Vec2::new(w, 30.0));
+        painter.rect_filled(r, Rounding::same(15.0), Color32::from_rgba_unmultiplied(14, 16, 22, 190));
+        painter.rect_stroke(r, Rounding::same(15.0), Stroke::new(1.5_f32, p.accent.gamma_multiply(0.7)));
+        icons.paint_stack(painter, Rect::from_center_size(Pos2::new(r.left() + 17.0, r.center().y), Vec2::splat(20.0)), st);
+        painter.galley(Pos2::new(r.left() + 32.0, r.center().y - g.size().y / 2.0), g, Color32::WHITE);
+        y = r.bottom() + 6.0;
+    }
+    if let Some(t) = &s.tip {
+        painter.text(Pos2::new(screen.center().x, y + 2.0), Align2::CENTER_TOP, t, FontId::proportional(13.0), Color32::from_white_alpha(210));
+    }
 }
 
 /// "Достижение получено!": a golden plate slides in on the left (like the pickup feed, but
@@ -514,6 +535,7 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     }
     draw_popups(&painter, icons, &p, screen, s);
     draw_achievement(&painter, icons, screen, s);
+    draw_goal(&painter, icons, &p, screen, s);
     // Selected item name.
     if let Some((name, t)) = &s.item_name {
         let a = (t * 2.0).clamp(0.0, 1.0);
@@ -714,6 +736,8 @@ mod tests {
                     pickups: Vec::new(),
                     popups: Vec::new(),
                     achievement: None,
+                    goal: None,
+                    tip: None,
                 };
                 draw(ctx, &icons, &s);
             });
