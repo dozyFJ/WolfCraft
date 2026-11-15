@@ -187,6 +187,25 @@ fn add_gun_3p(v: &mut Vec<ModelVertex>, frame: &Frame, hand: Vec3, pivot: Vec3, 
             b([-0.012, 0.018, 0.42], [0.012, 0.042, 0.43], CYAN);
             b([-0.03, -0.17, -0.02], [0.03, -0.02, 0.07], GUN);
         }
+        9 => {
+            b([-0.045, -0.05, -0.06], [0.045, 0.06, 0.36], [0.20, 0.23, 0.30]);
+            b([-0.035, -0.035, 0.36], [0.035, 0.045, 0.70], GUN);
+            for k in 0..4 {
+                let z = 0.40 + k as f32 * 0.07;
+                b([-0.045, -0.02, z], [0.045, 0.03, z + 0.025], CYAN);
+            }
+            b([-0.03, -0.17, -0.02], [0.03, -0.05, 0.05], DARK);
+            b([-0.04, -0.10, -0.38], [0.04, 0.04, -0.06], [0.20, 0.23, 0.30]);
+        }
+        10 => {
+            b([-0.05, -0.07, -0.08], [0.05, 0.07, 0.34], [0.20, 0.23, 0.30]);
+            for sx in [-1.0f32, 1.0] {
+                b([sx * 0.034 - 0.012, -0.04, 0.34], [sx * 0.034 + 0.012, 0.05, 0.95], STEEL);
+            }
+            b([-0.02, -0.015, 0.36], [0.02, 0.025, 0.92], [0.30, 0.50, 1.0]);
+            b([-0.03, -0.18, -0.02], [0.03, -0.07, 0.05], DARK);
+            b([-0.04, -0.13, -0.46], [0.04, 0.045, -0.08], [0.20, 0.23, 0.30]);
+        }
         7 => {
             b([-0.055, -0.03, -0.02], [0.055, 0.02, 0.18], [0.12, 0.13, 0.18]);
             b([-0.022, 0.02, 0.04], [0.022, 0.034, 0.08], [0.95, 0.12, 0.10]);
@@ -683,7 +702,7 @@ fn add_held(v: &mut Vec<ModelVertex>, frame: &Frame, hand: Vec3, pivot: Vec3, an
     let s = if matches!(held, Held::Tool(..)) { 0.62 } else { 0.42 };
     let grip = if matches!(held, Held::Tool(..)) { (12.5, 12.5) } else { (8.0, 12.0) };
     let o = hand - u * (grip.0 / 16.0 * s) - w * ((16.0 - grip.1) / 16.0 * s) - n * 0.02;
-    add_voxel_icon(v, frame, &px, o, u, w, n, s, pivot, angle);
+    add_voxel_icon(v, frame, &px, o, u, w, n, s, icon_depth(sprite), pivot, angle);
 }
 
 /// Builds all creatures relative to `camera` (original blocky designs, flat colours).
@@ -1142,14 +1161,18 @@ pub fn build_dropped_models(drops: &[crate::drops::Dropped], camera: DVec3, time
                     crate::items::Icon::Item(i) => tex.as_ref().and_then(|t| t.item_pixels.get(i as usize).cloned()),
                     crate::items::Icon::Block(_) => None,
                 };
+                let depth = match info.icon {
+                    crate::items::Icon::Item(i) => icon_depth(i as usize),
+                    crate::items::Icon::Block(_) => 1.0,
+                };
                 if let Some(px) = px.filter(|p| p.len() == 256) {
                     let s = 0.34f32;
                     if d.resting {
                         // Lying flat on the ground, one pixel thick.
                         let (u, w) = (Vec3::X, Vec3::NEG_Z);
-                        add_voxel_icon(&mut v, &frame, &px, Vec3::new(-s * 0.5, s / 16.0 + 0.004, s * 0.5), u, w, u.cross(w), s, Vec3::ZERO, 0.0);
+                        add_voxel_icon(&mut v, &frame, &px, Vec3::new(-s * 0.5, s / 16.0 * depth + 0.004, s * 0.5), u, w, u.cross(w), s, depth, Vec3::ZERO, 0.0);
                     } else {
-                        add_voxel_icon(&mut v, &frame, &px, Vec3::new(-s * 0.5, 0.0, 0.0), Vec3::X, Vec3::Y, Vec3::NEG_Z, s, Vec3::ZERO, 0.0);
+                        add_voxel_icon(&mut v, &frame, &px, Vec3::new(-s * 0.5, 0.0, 0.0), Vec3::X, Vec3::Y, Vec3::NEG_Z, s, depth, Vec3::ZERO, 0.0);
                     }
                 } else if let crate::items::Icon::Block(t) = info.icon {
                     // Plants and other non-cube blocks: a two-sided card with the block sprite.
@@ -1687,7 +1710,7 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
                 let a = 0.55f32;
                 let u = Vec3::new(-a.cos(), 0.0, a.sin());
                 let n = u.cross(Vec3::Y).normalize();
-                add_voxel_icon(&mut v, &frame, &px, f + Vec3::new(0.04, -0.10, 0.0), u, Vec3::Y, n, 0.32, pivot, angle);
+                add_voxel_icon(&mut v, &frame, &px, f + Vec3::new(0.04, -0.10, 0.0), u, Vec3::Y, n, 0.32, icon_depth(pose.icon.unwrap_or(0) as usize), pivot, angle);
             }
         } else if pose.shield {
             add_shield(&mut v, &frame, f, pivot, angle);
@@ -1831,6 +1854,7 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
     let cycle = (g.reload.clamp(0.0, 1.0) * std::f32::consts::PI).sin();
     let anchor = match g.kind {
         2 | 6 => Vec3::new(0.15, -0.16, 0.30),
+        9 | 10 => Vec3::new(0.18, -0.20, 0.16),
         7 => Vec3::new(0.17, -0.15, 0.32),
         8 => Vec3::new(0.24, -0.08, 0.36),
         5 => Vec3::new(0.17, -0.19, 0.12),
@@ -1994,6 +2018,76 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             bx(&mut v, [-0.045, -0.20, -0.045], [0.045, -0.08, 0.045], skin_c);
             bx(&mut v, [-0.06, -0.55, -0.20], [0.06, -0.18, 0.02], sleeve_c);
         }
+        9 => {
+            // WolfTech plasma rifle: graphite body, a glowing cyan coil wound round the barrel,
+            // a battery pack under it, a short emitter with fins.
+            const GRAPH: [f32; 3] = [0.20, 0.23, 0.30];
+            const CYAN: [f32; 3] = [0.35, 0.92, 1.0];
+            bx(&mut v, [-0.042, -0.050, -0.06], [0.042, 0.060, 0.40], GRAPH);
+            bx(&mut v, [-0.030, -0.030, 0.40], [0.030, 0.040, 0.78], GUN);
+            for k in 0..5 {
+                let z = 0.44 + k as f32 * 0.065;
+                bx(&mut v, [-0.040, -0.040, z], [0.040, 0.050, z + 0.025], DARK);
+            }
+            bx(&mut v, [-0.050, -0.055, 0.78], [0.050, 0.065, 0.84], DARK);
+            bx(&mut v, [-0.034, -0.11, 0.08], [0.034, -0.05, 0.30], DARK);
+            bx(&mut v, [-0.026, 0.060, 0.04], [0.026, 0.11, 0.28], DARK);
+            bx(&mut v, [-0.040, -0.12, -0.42], [0.040, 0.040, -0.06], GRAPH);
+            bx(&mut v, [-0.028, -0.17, -0.02], [0.028, -0.05, 0.05], DARK);
+            let glow_from = v.len();
+            for k in 0..5 {
+                let z = 0.465 + k as f32 * 0.065;
+                bx(&mut v, [-0.044, -0.020, z], [0.044, 0.030, z + 0.02], CYAN);
+            }
+            bx(&mut v, [0.042, -0.02, 0.06], [0.050, 0.035, 0.34], CYAN);
+            bx(&mut v, [-0.020, -0.010, 0.841], [0.020, 0.030, 0.845], CYAN);
+            bx(&mut v, [-0.018, 0.066, 0.25], [0.018, 0.104, 0.282], CYAN);
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            muzzle_z = 0.85;
+            bx(&mut v, [-0.060, -0.19, -0.05], [0.060, -0.07, 0.07], skin_c);
+            bx(&mut v, [-0.070, -0.55, -0.20], [0.070, -0.18, 0.02], sleeve_c);
+            bx(&mut v, [-0.065, -0.15, 0.46], [0.065, -0.04, 0.60], skin_c);
+            bx(&mut v, [-0.30, -0.56, 0.36], [-0.04, -0.12, 0.54], sleeve_c);
+        }
+        10 => {
+            // WolfTech railgun: two long blue rails with a charge glowing between them, a
+            // heavy breech with capacitors, a stock.
+            const GRAPH: [f32; 3] = [0.20, 0.23, 0.30];
+            const BLUE: [f32; 3] = [0.30, 0.50, 1.0];
+            let charge = if g.loaded { 1.0 } else { 0.3 };
+            bx(&mut v, [-0.050, -0.070, -0.08], [0.050, 0.070, 0.36], GRAPH);
+            for sx in [-1.0f32, 1.0] {
+                bx(&mut v, [sx * 0.034 - 0.012, -0.040, 0.36], [sx * 0.034 + 0.012, 0.050, 1.10], STEEL);
+                bx(&mut v, [sx * 0.034 - 0.014, -0.044, 0.40], [sx * 0.034 + 0.014, -0.030, 1.06], DARK);
+            }
+            for z in [0.50f32, 0.75, 1.00] {
+                bx(&mut v, [-0.052, 0.050, z], [0.052, 0.066, z + 0.04], DARK);
+            }
+            for k in 0..3 {
+                let z = 0.0 + k as f32 * 0.11;
+                bx(&mut v, [0.050, -0.040, z], [0.080, 0.040, z + 0.08], DARK);
+            }
+            bx(&mut v, [-0.036, 0.070, 0.0], [0.036, 0.13, 0.30], DARK);
+            bx(&mut v, [-0.040, -0.14, -0.50], [0.040, 0.045, -0.08], GRAPH);
+            bx(&mut v, [-0.028, -0.18, -0.02], [0.028, -0.07, 0.05], DARK);
+            let glow_from = v.len();
+            bx(&mut v, [-0.020, -0.015, 0.38], [0.020, 0.025, 0.38 + 0.70 * charge], BLUE);
+            for k in 0..3 {
+                let z = 0.02 + k as f32 * 0.11;
+                bx(&mut v, [0.080, -0.020, z], [0.084, 0.020, z + 0.04], BLUE);
+            }
+            bx(&mut v, [-0.026, 0.131, 0.27], [0.026, 0.135, 0.30], [0.45, 0.80, 1.0]);
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            muzzle_z = 1.12;
+            bx(&mut v, [-0.060, -0.20, -0.05], [0.060, -0.08, 0.07], skin_c);
+            bx(&mut v, [-0.070, -0.56, -0.20], [0.070, -0.19, 0.02], sleeve_c);
+            bx(&mut v, [-0.065, -0.16, 0.50], [0.065, -0.05, 0.64], skin_c);
+            bx(&mut v, [-0.30, -0.57, 0.40], [-0.04, -0.13, 0.58], sleeve_c);
+        }
         _ => {
             // Sniper rifle: long barrel, big scope, bolt that is worked after every shot.
             let bolt = -0.08 * cycle;
@@ -2071,7 +2165,7 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         let s = 0.46;
         // The grip pixel (12.5, 12.5 from the top-left) sits in the fist.
         let o = f + Vec3::new(-0.01, 0.03, 0.02) - u * (s * 0.78) - w * (s * 0.22);
-        add_voxel_icon(v, frame, &px, o, u, w, n, s, pivot, angle);
+        add_voxel_icon(v, frame, &px, o, u, w, n, s, 1.0, pivot, angle);
         return;
     }
     if let Some(r) = textures().and_then(|t| t.items.get(sprite).copied()) {
@@ -2206,7 +2300,14 @@ fn add_shield(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, ang
 /// Extrudes a 16x16 icon into pixel boxes in the plane (`u` right, `w` up), one pixel deep
 /// along `n`; `o` is the icon's bottom-left corner. Inner side faces are skipped.
 #[allow(clippy::too_many_arguments)]
-fn add_voxel_icon(out: &mut Vec<ModelVertex>, frame: &Frame, px: &[[u8; 4]], o: Vec3, u: Vec3, w: Vec3, n: Vec3, s: f32, pivot: Vec3, angle: f32) {
+/// Thickness in pixels of a held or dropped icon: WolfTech items are chunky (3 px), the rest
+/// one pixel like in Minecraft.
+pub fn icon_depth(sprite: usize) -> f32 {
+    if (wolfcraft_assets::items::IRON_DUST as usize..wolfcraft_assets::items::COUNT as usize).contains(&sprite) { 3.0 } else { 1.0 }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_voxel_icon(out: &mut Vec<ModelVertex>, frame: &Frame, px: &[[u8; 4]], o: Vec3, u: Vec3, w: Vec3, n: Vec3, s: f32, depth: f32, pivot: Vec3, angle: f32) {
     let (sn, cs) = angle.sin_cos();
     let rot = |p: Vec3| {
         let d = p - pivot;
@@ -2223,8 +2324,8 @@ fn add_voxel_icon(out: &mut Vec<ModelVertex>, frame: &Frame, px: &[[u8; 4]], o: 
             let c = px[(y * 16 + x) as usize];
             let color = [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0];
             // Pixel cell: image row 0 is the top.
-            let base = o + u * (x as f32 * d) + w * ((15 - y) as f32 * d) - n * (d * 0.5);
-            let corner = |a: f32, b: f32, k: f32| base + u * (a * d) + w * (b * d) + n * (k * d);
+            let base = o + u * (x as f32 * d) + w * ((15 - y) as f32 * d) - n * (d * depth * 0.5);
+            let corner = |a: f32, b: f32, k: f32| base + u * (a * d) + w * (b * d) + n * (k * d * depth);
             // (normal, 4 corners in (u, w, n) unit coords, neighbour that hides the face)
             let faces: [(Vec3, [(f32, f32, f32); 4], Option<(i32, i32)>); 6] = [
                 (n, [(0.0, 0.0, 1.0), (1.0, 0.0, 1.0), (1.0, 1.0, 1.0), (0.0, 1.0, 1.0)], None),
