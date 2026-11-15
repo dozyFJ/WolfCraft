@@ -116,8 +116,9 @@ pub struct TechState {
     /// ЭЕ/s made (generators) or wanted (machines) this frame.
     pub flow: f32,
     pub working: bool,
-    /// Solar panel: in the sun right now.
+    /// Solar panel: in the sun right now / it is day.
     pub sunny: bool,
+    pub day: bool,
 }
 
 pub struct GameSession {
@@ -946,6 +947,12 @@ impl GameSession {
                 wolfcraft_engine::power::update_around(&mut self.chunks, *pos);
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, *pos);
             }
+            if let InteractionEvent::OpenContainer { pos, block } = e {
+                if wolfcraft_engine::wolftech::kind(*block).is_some() && !self.tech.contains_key(pos) {
+                    self.tech.insert(*pos, TechState::default());
+                    self.tech_t = 0.0;
+                }
+            }
             if let InteractionEvent::Placed { pos, block } = e {
                 if wolfcraft_engine::wolftech::kind(*block).is_some() {
                     self.tech.entry(*pos).or_default();
@@ -1244,12 +1251,23 @@ impl GameSession {
                     if !self.explosives.ready() {
                         continue;
                     }
-                    if !creative && self.player.inventory.count(ammo) == 0 {
+                    // Guns that are their own ammo run on charge (WolfTech) or on nothing (the star blaster).
+                    let self_powered = ammo == id;
+                    if self_powered && wolfcraft_engine::items::rechargeable(id) && !creative {
+                        let sel = self.player.inventory.selected;
+                        let Some(g) = self.player.inventory.slots[sel].as_mut().filter(|g| g.id == id) else { continue };
+                        let dur = g.info().durability;
+                        if g.damage >= dur {
+                            self.item_name = Some(("Разряжено — зарядите в энергоячейке".into(), 1.5));
+                            continue;
+                        }
+                        g.damage += 1;
+                    }
+                    if !creative && !self_powered && self.player.inventory.count(ammo) == 0 {
                         self.item_name = Some((format!("Нет боеприпасов: {}", wolfcraft_engine::items::info(ammo).name), 1.5));
                         continue;
                     }
-                    // The star blaster needs no ammo.
-                    if !creative && ammo != wolfcraft_engine::items::ids::STAR_BLASTER {
+                    if !creative && !self_powered {
                         self.player.inventory.take(ammo, 1);
                     }
                     if let Some(gun) = wolfcraft_engine::explosives::firearm(id) {
@@ -1831,6 +1849,23 @@ impl GameSession {
         Some((prog.clamp(0.0, 1.0), st.working, st.energy, sp.capacity))
     }
 
+    /// WolfTech: what the network of the machine at `pos` makes (ЭЕ/s), holds and how many
+    /// machines it has.
+    pub fn tech_net(&self, pos: wolfcraft_engine::cubesphere::Cell) -> (f32, f32, usize) {
+        let Some(net) = self.tech_nets.iter().find(|n| n.contains(&pos)) else { return (0.0, 0.0, 1) };
+        let mut make = 0.0;
+        let mut held = 0.0;
+        for c in net {
+            if let Some(st) = self.tech.get(c) {
+                held += st.energy;
+                if self.chunks.get_block(*c).and_then(wolfcraft_engine::wolftech::kind).is_some_and(|k| matches!(k, wolfcraft_engine::wolftech::Kind::Generator | wolfcraft_engine::wolftech::Kind::Solar)) {
+                    make += st.flow;
+                }
+            }
+        }
+        (make, held, net.len())
+    }
+
     /// WolfTech: generators burn and shine, machines work, energy flows through the cables.
     fn tick_tech(&mut self, dt: f32) {
         use wolfcraft_engine::items::ItemStack;
@@ -1873,7 +1908,12 @@ impl GameSession {
                         if seen.contains(&n) {
                             continue;
                         }
-                        if self.chunks.get_block(n).is_some_and(wt::conducts) {
+                        if let Some(nb) = self.chunks.get_block(n).filter(|b| wt::conducts(*b)) {
+                            // A machine nobody registered yet (placed by a script, an older
+                            // version, another player): it joins the network now.
+                            if wt::kind(nb).is_some() {
+                                self.tech.entry(n).or_default();
+                            }
                             seen.insert(n);
                             queue.push(n);
                         }
@@ -1885,11 +1925,13 @@ impl GameSession {
             let day = self.daylight() > 0.45 && self.weather.rain < 0.5;
             for (c, st) in self.tech.iter_mut() {
                 if self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::SolarPanel) {
+                    st.day = day;
                     st.sunny = day && (1..40).all(|k| g.offset(*c, 0, 0, k).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
                 }
             }
         }
         // Each machine on its own: fuel, recipes, progress.
+        let creative = self.player.is_creative();
         let cells: Vec<_> = self.tech.keys().copied().collect();
         for c in cells {
             let Some(b) = self.chunks.get_block(c) else { continue };
@@ -1906,6 +1948,10 @@ impl GameSession {
                             v[1] = if f.count > 1 { Some(ItemStack { count: f.count - 1, ..f }) } else { None };
                         }
                     }
+                    // Creative: the generator runs without fuel.
+                    if creative && st.burn <= 0.0 {
+                        st.burn = 1.0;
+                    }
                     if st.burn > 0.0 {
                         st.burn -= dt;
                         st.flow = sp.rate;
@@ -1915,10 +1961,21 @@ impl GameSession {
                     }
                 }
                 Kind::Solar => {
-                    st.flow = if st.sunny { sp.rate } else { 0.0 };
-                    st.working = st.sunny;
+                    // Full power in the open sun, a quarter in the shade by day, nothing at night.
+                    st.flow = if st.sunny { sp.rate } else if st.day { sp.rate * 0.25 } else { 0.0 };
+                    st.working = st.flow > 0.0;
                 }
-                Kind::Cell => st.flow = 0.0,
+                Kind::Cell => {
+                    st.flow = 0.0;
+                    // Charges WolfTech gear lying in its first slot: 5 ЭЕ per point of charge.
+                    let v = self.container_slots(c, b);
+                    if let Some(g) = v.first_mut().and_then(|g| g.as_mut()).filter(|g| wolfcraft_engine::items::rechargeable(g.id) && g.damage > 0) {
+                        let pts = ((st.energy / 5.0).floor() as u16).min(g.damage).min((40.0 * dt).ceil() as u16);
+                        g.damage -= pts;
+                        st.energy -= pts as f32 * 5.0;
+                        st.working = pts > 0;
+                    }
+                }
                 _ => {
                     let v = self.container_slots(c, b).clone();
                     let out = v.first().copied().flatten().and_then(|i| wt::recipe(k, i.id));

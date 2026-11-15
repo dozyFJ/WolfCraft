@@ -210,6 +210,9 @@ pub fn armor_color(m: u8) -> [f32; 3] {
         0 => [0.55, 0.36, 0.20],
         1 => [0.80, 0.56, 0.26],
         2 => [0.80, 0.81, 0.84],
+        // WolfTech: nano plating (graphite with a cyan sheen) and the jetpack's steel.
+        4 => [0.22, 0.26, 0.34],
+        5 => [0.45, 0.47, 0.52],
         _ => [0.36, 0.90, 0.86],
     }
 }

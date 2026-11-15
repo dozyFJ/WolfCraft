@@ -113,7 +113,17 @@ pub mod ids {
     pub const TIN_DUST: ItemId = 391;
     pub const SILVER_DUST: ItemId = 392;
     pub const CIRCUIT: ItemId = 393;
-    pub const LAST: ItemId = 393;
+    /// WolfTech arsenal: energy weapons, gear and the mech (charge = durability; an energy
+    /// cell recharges them).
+    pub const PLASMA_RIFLE: ItemId = 394;
+    pub const RAILGUN: ItemId = 395;
+    pub const ENERGY_SWORD: ItemId = 396;
+    pub const JETPACK: ItemId = 397;
+    /// Nano armour: helmet, chestplate, leggings, boots.
+    pub const NANO_BASE: ItemId = 398;
+    pub const NANO_LAST: ItemId = 401;
+    pub const MECH: ItemId = 402;
+    pub const LAST: ItemId = 402;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -160,6 +170,12 @@ const ARMOR_POINTS: [[u8; 4]; 4] = [[1, 3, 2, 1], [2, 4, 3, 2], [2, 6, 5, 2], [3
 
 /// Defence points of an armor item (0 for anything else).
 pub fn armor_points(id: ItemId) -> u8 {
+    if (ids::NANO_BASE..=ids::NANO_LAST).contains(&id) {
+        return [4, 9, 7, 4][(id - ids::NANO_BASE) as usize];
+    }
+    if id == ids::JETPACK {
+        return 3;
+    }
     if (ids::ARMOR_BASE..=ids::ARMOR_LAST).contains(&id) {
         let n = (id - ids::ARMOR_BASE) as usize;
         ARMOR_POINTS[n / 4][n % 4]
@@ -170,11 +186,30 @@ pub fn armor_points(id: ItemId) -> u8 {
 
 /// Armor slot (0 helmet … 3 boots) of an armor item.
 pub fn armor_slot(id: ItemId) -> Option<usize> {
-    if id == ids::WINGS { return Some(1); }
+    if id == ids::WINGS || id == ids::JETPACK { return Some(1); }
+    if (ids::NANO_BASE..=ids::NANO_LAST).contains(&id) {
+        return Some((id - ids::NANO_BASE) as usize);
+    }
     (ids::ARMOR_BASE..=ids::ARMOR_LAST).contains(&id).then(|| ((id - ids::ARMOR_BASE) % 4) as usize)
 }
 
 const DURABILITY: [u16; 4] = [59, 131, 250, 1561];
+
+/// Look of worn armour for the models: 0 leather, 1 bronze, 2 iron, 3 diamond, 4 nano, 5 jetpack.
+pub fn armor_material(id: ItemId) -> Option<u8> {
+    if (ids::ARMOR_BASE..=ids::ARMOR_LAST).contains(&id) {
+        return Some(((id - ids::ARMOR_BASE) / 4) as u8);
+    }
+    if (ids::NANO_BASE..=ids::NANO_LAST).contains(&id) {
+        return Some(4);
+    }
+    (id == ids::JETPACK).then_some(5)
+}
+
+/// WolfTech gear that runs on charge (durability) and is recharged in an energy cell.
+pub fn rechargeable(id: ItemId) -> bool {
+    matches!(id, ids::PLASMA_RIFLE | ids::RAILGUN | ids::ENERGY_SWORD | ids::JETPACK) || (ids::NANO_BASE..=ids::NANO_LAST).contains(&id)
+}
 
 fn plain(name: &'static str, icon: u16) -> ItemInfo {
     ItemInfo { name, max_stack: 64, icon: Icon::Item(icon), place: None, tool: None, attack: 1.0, food: None, durability: 0 }
@@ -213,6 +248,16 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::TIN_DUST => plain("Оловянная пыль", sp::TIN_DUST),
         ids::SILVER_DUST => plain("Серебряная пыль", sp::SILVER_DUST),
         ids::CIRCUIT => plain("Микросхема", sp::CIRCUIT),
+        ids::PLASMA_RIFLE => ItemInfo { max_stack: 1, attack: 3.0, durability: 400, ..plain("Плазменная винтовка", sp::PLASMA_RIFLE) },
+        ids::RAILGUN => ItemInfo { max_stack: 1, attack: 3.0, durability: 60, ..plain("Рельсотрон", sp::RAILGUN) },
+        ids::ENERGY_SWORD => ItemInfo { max_stack: 1, attack: 14.0, durability: 1500, ..plain("Энергомеч", sp::ENERGY_SWORD) },
+        ids::JETPACK => ItemInfo { max_stack: 1, durability: 400, ..plain("Реактивный ранец", sp::JETPACK) },
+        n if (ids::NANO_BASE..=ids::NANO_LAST).contains(&n) => {
+            const NAMES: [&str; 4] = ["Нано-шлем", "Нано-нагрудник", "Нано-поножи", "Нано-ботинки"];
+            let i = (n - ids::NANO_BASE) as usize;
+            ItemInfo { max_stack: 1, durability: 2000, ..plain(NAMES[i], sp::NANO_BASE + i as u16) }
+        }
+        ids::MECH => ItemInfo { max_stack: 1, ..plain("Мех «Волк»", sp::MECH) },
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
         ids::BRONZE_INGOT => plain("Бронзовый слиток", sp::BRONZE_INGOT),
         ids::SILVER_INGOT => plain("Серебряный слиток", sp::SILVER_INGOT),
@@ -604,7 +649,7 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
-    if (ids::IRON_DUST..=ids::CIRCUIT).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
+    if (ids::IRON_DUST..=ids::MECH).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
         return "WolfTech";
     }
     if (ITEM_BASE..1024).contains(&id) {

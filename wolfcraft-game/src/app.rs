@@ -2273,7 +2273,8 @@ impl App {
                                             } else {
                                                 sp.hint.to_string()
                                             };
-                                            format!("⚡ {:.0} / {:.0} ЭЕ · {}", e, cap, what)
+                                            let (make, held, n) = s.tech_net(pos);
+                                            format!("⚡ {:.0} / {:.0} ЭЕ · {} · сеть: {} шт., +{:.0} ЭЕ/с, всего {:.0}", e, cap, what, n, make, held)
                                         }
                                         _ => String::new(),
                                     };
@@ -2285,6 +2286,7 @@ impl App {
                                             match k {
                                                 Kind::Generator => slot == 1 && wolfcraft_engine::wolftech::fuel(st.id) > 0.0,
                                                 Kind::Crusher | Kind::Induction | Kind::Enricher => slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some(),
+                                                Kind::Cell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
                                                 _ => false,
                                             }
                                         } else if furnace {
@@ -3885,7 +3887,7 @@ fn block_outline(world: &impl wolfcraft_engine::physics::Voxels, c: wolfcraft_en
 fn worn_armor(inv: &wolfcraft_engine::inventory::Inventory) -> [Option<u8>; 4] {
     let mut out = [None; 4];
     for (i, slot) in inv.armor.iter().enumerate() {
-        out[i] = slot.filter(|s| (wolfcraft_engine::items::ids::ARMOR_BASE..=wolfcraft_engine::items::ids::ARMOR_LAST).contains(&s.id)).map(|s| ((s.id - wolfcraft_engine::items::ids::ARMOR_BASE) / 4) as u8);
+        out[i] = slot.and_then(|s| wolfcraft_engine::items::armor_material(s.id));
     }
     out
 }

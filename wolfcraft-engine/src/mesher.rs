@@ -424,6 +424,28 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
                     joined = v;
                     boxes = &joined;
                 }
+                // WolfTech cables: arms towards every neighbour that carries energy.
+                let wired;
+                if b == Block::Cable {
+                    let lo = 0.34f32;
+                    let hi = 0.66f32;
+                    let mut v: Vec<[f32; 6]> = boxes.to_vec();
+                    // (i, j, k) boxes; padded axes are (x, y, z) = (j, k, i).
+                    for (n, arm) in [
+                        (inp.get(x, y, z + 1), [hi, lo, lo, 1.0, hi, hi]),
+                        (inp.get(x, y, z - 1), [0.0, lo, lo, lo, hi, hi]),
+                        (inp.get(x + 1, y, z), [lo, hi, lo, hi, 1.0, hi]),
+                        (inp.get(x - 1, y, z), [lo, 0.0, lo, hi, lo, hi]),
+                        (inp.get(x, y + 1, z), [lo, lo, hi, hi, hi, 1.0]),
+                        (inp.get(x, y - 1, z), [lo, lo, 0.0, hi, hi, lo]),
+                    ] {
+                        if crate::wolftech::conducts(n) {
+                            v.push(arm);
+                        }
+                    }
+                    wired = v;
+                    boxes = &wired;
+                }
                 let info = b.info();
                 for s in boxes {
                 let sky = if info.emissive { 1.0 } else { sky_at(inp, [x, y, z]).max(sky_at(inp, [x, y + 1, z])) as f32 / 15.0 };
