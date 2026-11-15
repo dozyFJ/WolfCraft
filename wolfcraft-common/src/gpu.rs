@@ -86,6 +86,12 @@ impl GpuContext {
 
     fn pick_present_mode(caps: &wgpu::SurfaceCapabilities, vsync: bool) -> wgpu::PresentMode {
         if vsync {
+            // PC: Mailbox is tear-free too but never waits for the screen, so a frame that is
+            // a little late does not halve the rate (60 → 30 → 24 jumps with plain vsync).
+            // Phones keep Fifo (they flicker otherwise).
+            if !cfg!(target_os = "android") && caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+                return wgpu::PresentMode::Mailbox;
+            }
             return wgpu::PresentMode::Fifo;
         }
         for m in [wgpu::PresentMode::Immediate, wgpu::PresentMode::Mailbox] {
