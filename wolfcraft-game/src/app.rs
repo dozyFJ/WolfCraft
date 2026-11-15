@@ -323,6 +323,9 @@ pub struct App {
     /// Seconds since the sky (stars, planets, clouds) was last rebuilt: 20 times a second is
     /// plenty, it hardly moves.
     sky_age: f32,
+    /// First-person animations: eating and putting armour on (1 → 0).
+    eat_anim: f32,
+    equip_anim: f32,
     /// Minimap pixels being rebuilt a few rows per frame, and the next row to do.
     minimap_px: Vec<egui::Color32>,
     minimap_row: usize,
@@ -465,6 +468,8 @@ impl App {
             minimap: None,
             minimap_age: 10.0,
             sky_age: 10.0,
+            eat_anim: 0.0,
+            equip_anim: 0.0,
             minimap_px: vec![egui::Color32::from_rgb(12, 14, 18); 64 * 64],
             minimap_row: 0,
             block_colors: Vec::new(),
@@ -1844,7 +1849,18 @@ impl App {
                                     s.mobs.chips(at, &[cols[0]], (2.0 * self.settings.particles) as usize, 2.0);
                                 }
                             }
-                            InteractionEvent::Ate { .. } => self.audio.play(crate::audio::Sfx::Eat, 1.0),
+                            InteractionEvent::Ate { .. } => {
+                                self.audio.play(crate::audio::Sfx::Eat, 1.0);
+                                self.eat_anim = 1.0;
+                                // Crumbs fly from the mouth.
+                                let eye = s.player.eye_pos();
+                                let look = s.player.look_dir();
+                                s.mobs.chips(eye + look * 0.45 - s.player.up() * 0.15, &[[0.85, 0.62, 0.32], [0.95, 0.85, 0.6], [0.7, 0.45, 0.25]], (6.0 * self.settings.particles) as usize, 1.0);
+                            }
+                            InteractionEvent::Equipped => {
+                                self.audio.play(crate::audio::Sfx::Equip, 1.0);
+                                self.equip_anim = 1.0;
+                            }
                             InteractionEvent::Dropped { .. } => {}
                             InteractionEvent::Ignite { pos } => {
                                 // The dynamite block turned into a burning charge.
@@ -1861,6 +1877,8 @@ impl App {
                                     ids::RIFLE => (0.55, Some(1)),
                                     ids::SHOTGUN => (1.0, Some(2)),
                                     ids::SNIPER => (1.0, Some(3)),
+                                    ids::RAILGUN => (1.0, Some(3)),
+                                    ids::PLASMA_RIFLE => (0.4, Some(1)),
                                     _ => (1.0, None),
                                 };
                                 self.gun_recoil = self.gun_recoil.max(kick);
@@ -2692,6 +2710,12 @@ impl App {
                 }
                 gfx.world.set_model(&gfx.gpu.device, &gfx.gpu.queue, &model_verts);
                 self.sky_age += dt as f32;
+                self.eat_anim = (self.eat_anim - dt as f32 / 0.9).max(0.0);
+                self.equip_anim = (self.equip_anim - dt as f32 / 0.45).max(0.0);
+                if s.ach_new > 0 {
+                    s.ach_new = 0;
+                    self.audio.play(crate::audio::Sfx::Achievement, 1.0);
+                }
                 if self.sky_age >= 0.05 {
                     self.sky_age = 0.0;
                     let sky_verts = wolfcraft_engine::renderer::sky::build_sky(&wolfcraft_engine::renderer::sky::SkyParams { eye: cam.eye, sun_dir: sun.as_vec3(), day, planet_radius: s.planet.radius, sky, time: self.time.elapsed(), underwater, cube: s.planet.grid.cube });
@@ -2899,6 +2923,8 @@ impl App {
                         bow: bow.then_some(s.bow_charge),
                         glint: s.player.inventory.held().is_some_and(|h| h.enchanted()),
                         arrow_tip: s.bow_arrow.and_then(crate::session::tipped_effect).map(|e| e.color()),
+                        eat: self.eat_anim,
+                        equip: self.equip_anim,
                         gun: s.player.inventory.held().and_then(|st| {
                             use wolfcraft_engine::items::ids;
                             let kind = match st.id {

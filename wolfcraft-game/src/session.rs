@@ -304,6 +304,8 @@ pub struct GameSession {
     /// Achievements of this world, and the toasts showing now (index in the list, seconds).
     pub achieved: std::collections::HashSet<String>,
     pub ach_toasts: Vec<(usize, f32)>,
+    /// Achievements granted since the game last played their chime.
+    pub ach_new: u32,
     ach_t: f32,
     /// Radiation dose from uranium (seconds of exposure); every 3 s of it costs half a heart.
     radiation: f32,
@@ -418,6 +420,7 @@ impl GameSession {
             pickups: Vec::new(),
             achieved: std::collections::HashSet::new(),
             ach_toasts: Vec::new(),
+            ach_new: 0,
             ach_t: 0.0,
             aim_dir: None,
             fx_amount: 1.0,
@@ -2191,6 +2194,7 @@ impl GameSession {
         let Some((i, _)) = crate::achievements::find(id) else { return };
         self.achieved.insert(id.to_string());
         self.ach_toasts.push((i, 0.0));
+        self.ach_new += 1;
         let list: Vec<&str> = self.achieved.iter().map(|s| s.as_str()).collect();
         let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("achievements.txt"), list.join("\n").as_bytes());
     }
