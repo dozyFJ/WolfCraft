@@ -765,6 +765,10 @@ mod tests {
             if b.torch_boxes().is_none() && b.boxes().is_empty() && !constr {
                 continue;
             }
+            // Spinning «Механика» parts are drawn as models, not meshed.
+            if crate::kinetic::spins(b) {
+                continue;
+            }
             for bx in b.boxes().iter().chain(b.torch_boxes().unwrap_or(&[]).iter()) {
                 let inside = bx.iter().all(|v| (-0.001..=1.001).contains(v)) && (0..3).all(|k| bx[k] <= bx[k + 3]);
                 if !inside && !constr {
