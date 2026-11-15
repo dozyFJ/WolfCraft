@@ -690,6 +690,9 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3
     use crate::mobs::MobKind;
     let mut v = Vec::with_capacity(mobs.len() * 10 * 36);
     for m in mobs {
+        if m.hidden {
+            continue;
+        }
         let to = m.body.pos - camera;
         if to.length_squared() > max_dist * max_dist || (to.dot(forward) < -2.0 && to.length_squared() > 9.0) {
             continue;

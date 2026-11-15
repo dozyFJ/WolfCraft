@@ -244,6 +244,10 @@ struct ChunkGpu {
     detail_start: u32,
     /// When the chunk first appeared (it fades in over `CHUNK_FADE` s).
     born: std::time::Instant,
+    /// Opaque index ranges per face direction (see `MeshData::dirs`) and those directions in
+    /// world space at the chunk's middle: groups facing away from the camera are not drawn.
+    dirs: [u32; 7],
+    normals: [Vec3; 6],
 }
 
 /// How long a newly loaded chunk takes to dissolve in.
@@ -860,7 +864,14 @@ impl WorldRenderer {
         }
         if opaque.is_some() || water.is_some() {
             let (center, radius) = self.grid.chunk_bounds(key);
-            self.chunks.insert(key, ChunkGpu { opaque, water, origin: self.grid.chunk_ref(key), center, radius, detail_start: mesh.detail_start, born });
+            // Mesh axes: x = j, y = k (up), z = i of the grid.
+            let o = key.origin();
+            let (ci, cj, ck) = (o.x as f64 + 8.0, o.y as f64 + 8.0, o.z as f64 + 8.0);
+            let p0 = self.grid.point(key.f, ci, cj, ck);
+            let ax = |d: DVec3| (d - p0).normalize_or_zero().as_vec3();
+            let (xj, yk, zi) = (ax(self.grid.point(key.f, ci, cj + 1.0, ck)), ax(self.grid.point(key.f, ci, cj, ck + 1.0)), ax(self.grid.point(key.f, ci + 1.0, cj, ck)));
+            let normals = [xj, -xj, yk, -yk, zi, -zi];
+            self.chunks.insert(key, ChunkGpu { opaque, water, origin: self.grid.chunk_ref(key), center, radius, detail_start: mesh.detail_start, born, dirs: mesh.dirs, normals });
         }
     }
 
@@ -1085,9 +1096,39 @@ impl WorldRenderer {
                         }
                         pass.set_vertex_buffer(0, m.vb.slice(..));
                         pass.set_index_buffer(m.ib.slice(..), wgpu::IndexFormat::Uint32);
-                        pass.draw_indexed(0..count, 0, i as u32..i as u32 + 1);
-                        stats.draw_calls += 1;
-                        stats.triangles += count / 3;
+                        // Like Sodium: face groups that point away from the camera are skipped
+                        // (about half of all block faces); the rest goes in as few draws as possible.
+                        let rel = (p.eye - c.center).as_vec3();
+                        let slack = c.radius as f32 + 1.0;
+                        let mut runs: [(u32, u32); 7] = [(0, 0); 7];
+                        let mut n = 0usize;
+                        let mut push = |a: u32, b: u32| {
+                            if b <= a {
+                                return;
+                            }
+                            if n > 0 && runs[n - 1].1 == a {
+                                runs[n - 1].1 = b;
+                            } else {
+                                runs[n] = (a, b);
+                                n += 1;
+                            }
+                        };
+                        let dirs_ok = c.dirs[6] <= count;
+                        if dirs_ok {
+                            for f in 0..6 {
+                                if c.normals[f].dot(rel) > -slack {
+                                    push(c.dirs[f], c.dirs[f + 1]);
+                                }
+                            }
+                            push(c.dirs[6], count);
+                        } else {
+                            push(0, count);
+                        }
+                        for &(a, b) in &runs[..n] {
+                            pass.draw_indexed(a..b, 0, i as u32..i as u32 + 1);
+                            stats.draw_calls += 1;
+                            stats.triangles += (b - a) / 3;
+                        }
                     }
                 }
             }
@@ -1257,6 +1298,18 @@ mod tests {
         assert!(set.contains(&ChunkKey::new(4, 40, 40, 66)), "the air above is open");
         let all = reachable_chunks(&grid, start, 4.0, |_| crate::mesher::VIS_ALL);
         assert!(all.contains(&ChunkKey::new(4, 40, 40, 62)), "without rock everything is reachable");
+    }
+
+    #[test]
+    fn faces_pointing_away_are_culled_only_beyond_the_chunk() {
+        // The rule used when drawing: a group is kept if dot(normal, eye - centre) > -(r + 1).
+        let keep = |n: Vec3, rel: Vec3, r: f32| n.dot(rel) > -(r + 1.0);
+        let r = 14.0;
+        // Camera far to the +x side: +x faces stay, -x faces go.
+        assert!(keep(Vec3::X, Vec3::new(60.0, 0.0, 0.0), r));
+        assert!(!keep(-Vec3::X, Vec3::new(60.0, 0.0, 0.0), r));
+        // Camera inside the chunk: everything stays.
+        assert!(keep(-Vec3::X, Vec3::new(3.0, 0.0, 0.0), r));
     }
 
     #[test]
