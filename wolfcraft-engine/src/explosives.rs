@@ -33,6 +33,9 @@ const ROCKET_LIFE: f32 = 6.0;
 /// Bullets drop a little and vanish after a second and a half (about 200 blocks).
 const BULLET_GRAVITY: f64 = 3.0;
 const BULLET_LIFE: f32 = 1.5;
+/// Most dynamite charges that go off in one frame.
+pub const BLASTS_PER_FRAME: usize = 4;
+
 /// Hard cap of live projectiles and lit charges (protects against huge chain reactions).
 const MAX_LIVE: usize = 256;
 
@@ -213,10 +216,18 @@ impl Explosives {
         for l in &mut self.lit {
             l.fuse -= dt;
         }
-        for l in self.lit.iter().filter(|l| l.fuse <= 0.0) {
-            blasts.push(Blast { pos: l.pos, power: DYNAMITE_POWER });
-        }
-        self.lit.retain(|l| l.fuse > 0.0);
+        // A chain of dynamite goes off a few charges per frame, not all at once: a hundred blasts
+        // in one frame froze the game. The rest wait (already due) for the next frames.
+        let mut due = 0usize;
+        self.lit.retain(|l| {
+            if l.fuse <= 0.0 && due < BLASTS_PER_FRAME {
+                due += 1;
+                blasts.push(Blast { pos: l.pos, power: DYNAMITE_POWER });
+                false
+            } else {
+                true
+            }
+        });
 
         let dtd = dt as f64;
         let mut i = 0;
@@ -472,6 +483,30 @@ mod tests {
         }
         assert!(broken.len() > 10, "a crater appears: {}", broken.len());
         assert_eq!(w.cell_block(Cell::new(4, 20, 20, 49)), Block::Obsidian);
+    }
+
+    #[test]
+    fn a_big_chain_goes_off_a_few_charges_per_frame() {
+        let (mut w, _) = world();
+        let mut e = Explosives::new(3);
+        let mut lit = 0;
+        for k in 0..12 {
+            let c = Cell::new(4, 4 + k * 3, 4, 50);
+            w.blocks.insert(c, Block::Dynamite);
+            if e.light(&mut w, c, 0.01) {
+                lit += 1;
+            }
+        }
+        assert!(lit >= 8);
+        let (b, _) = e.update(&mut w, &[], 0.05);
+        assert!(!b.is_empty() && b.len() <= BLASTS_PER_FRAME, "{} blasts in one frame", b.len());
+        let mut total = b.len();
+        for _ in 0..30 {
+            let (b, _) = e.update(&mut w, &[], 0.05);
+            assert!(b.len() <= BLASTS_PER_FRAME);
+            total += b.len();
+        }
+        assert!(total >= lit, "every charge still goes off: {total} of {lit}");
     }
 
     #[test]

@@ -234,6 +234,17 @@ pub fn block_obbs(grid: &Grid, cell: Cell, block: Block) -> Vec<Obb> {
     if boxes.is_empty() { vec![o] } else { boxes.iter().map(|s| sub_obb(&o, s)).collect() }
 }
 
+/// Where to stand if `feet` is buried in blocks (a broken save, a block placed on top of the
+/// player, a server correction): straight up along the local "up", one block at a time, at most
+/// `max` blocks. Unchanged if already free; `None` if nothing free was found.
+pub fn free_spot_above(world: &impl Voxels, feet: DVec3, max: i32) -> Option<DVec3> {
+    if !overlaps(world, feet) {
+        return Some(feet);
+    }
+    let up = up_at(feet);
+    (1..=max).map(|k| feet + up * k as f64).find(|p| !overlaps(world, *p))
+}
+
 /// True if a body with its feet at `feet` intersects any solid block.
 fn overlaps(world: &impl Voxels, feet: DVec3) -> bool {
     let g = world.grid();
@@ -436,6 +447,17 @@ pub(crate) mod tests {
             step(world, &mut b, &MoveInput::default(), 1.0 / 60.0);
         }
         b
+    }
+
+    #[test]
+    fn a_player_buried_in_stone_is_lifted_to_the_surface() {
+        let w = Ball::new(60.0);
+        let buried = DVec3::Y * 50.0;
+        let free = free_spot_above(&w, buried, 32).expect("a free spot above");
+        assert!(free.length() >= 60.0 && free.length() < 63.0, "lifted to the surface: {}", free.length());
+        let standing = DVec3::Y * 60.5;
+        assert_eq!(free_spot_above(&w, standing, 32), Some(standing));
+        assert_eq!(free_spot_above(&w, DVec3::Y * 10.0, 5), None);
     }
 
     #[test]
