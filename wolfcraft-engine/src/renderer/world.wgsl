@@ -424,6 +424,21 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         rgb = mix(rgb, g.fog.rgb * mix(0.35, 1.0, day), fres * 0.55) + vec3<f32>(1.0, 0.95, 0.85) * spec * 1.4;
         a = mix(a, 1.0, fres * 0.5);
     }
+    // Foam along the shore (Hytale-like): the water's corner shading darkens next to the
+    // bank, which marks where the land is; there a broken white band laps back and forth.
+    if (fx_on(2u) && g.misc.y < 0.5 && (in.flags & (1u << 27u)) == 0u) {
+        let upw = normalize(in.world);
+        let top = step(0.7, dot(n, upw));
+        let shore = 1.0 - in.light.x;
+        let t = g.misc.x;
+        let w = in.world;
+        let lap = 0.5 + 0.5 * sin(t * 1.6 + dot(w, vec3<f32>(0.9, 0.4, 1.1)));
+        let grain = fract(sin(dot(floor(w * 4.0), vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+        let foam = smoothstep(0.06 + 0.10 * lap, 0.30, shore) * step(0.25, grain) * top;
+        let dayw = smoothstep(-0.10, 0.14, dot(upw, normalize(g.sun.xyz)));
+        rgb = mix(rgb, vec3<f32>(0.92, 0.97, 1.0) * mix(0.35, 1.0, dayw) * max(in.light.y, 0.3), foam * 0.75);
+        a = mix(a, 1.0, foam * 0.8);
+    }
     return vec4<f32>(to_srgb(grade(rgb)), a);
 }
 

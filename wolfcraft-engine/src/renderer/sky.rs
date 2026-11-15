@@ -123,6 +123,76 @@ impl Out {
     }
 }
 
+/// A layer of blocky clouds 110 blocks above the sea, drawn on the sky dome's scale (so the
+/// world always covers them). They drift slowly; the top is white, the sides and the belly
+/// shaded, warm at sunset, dim at night; far ones fade into the sky.
+fn clouds(o: &mut Out, p: &SkyParams, up: Vec3, altitude: f64) {
+    const LAYER: f64 = 110.0;
+    const CELL: f32 = 48.0;
+    const VIEW: f32 = 420.0;
+    if p.underwater || altitude > LAYER - 6.0 {
+        return;
+    }
+    let k = 30.0 / VIEW; // blocks → dome units
+    let h = (LAYER - altitude) as f32;
+    // A frame fixed to the world (two axes across the face of the cube we are on), so the
+    // clouds stay put while we walk under them.
+    let ax = if up.x.abs() >= up.y.abs() && up.x.abs() >= up.z.abs() { 0 } else if up.y.abs() >= up.z.abs() { 1 } else { 2 };
+    let axis = |i: usize| [Vec3::X, Vec3::Y, Vec3::Z][i];
+    let (a_ax, b_ax) = (axis((ax + 1) % 3), axis((ax + 2) % 3));
+    let t1 = (a_ax - up * a_ax.dot(up)).normalize_or_zero();
+    let t2 = up.cross(t1).normalize_or_zero();
+    let t2 = if t2.dot(b_ax) < 0.0 { -t2 } else { t2 };
+    let drift = p.time * 1.6;
+    let ou = p.eye.dot(a_ax.as_dvec3()) as f32 + drift;
+    let ov = p.eye.dot(b_ax.as_dvec3()) as f32;
+    let (ci, cj) = ((ou / CELL).floor() as i32, (ov / CELL).floor() as i32);
+    let n = (VIEW / CELL) as i32;
+    let sun = p.sun_dir.normalize_or_zero();
+    let twilight = 1.0 - (p.day * 2.0 - 1.0).abs();
+    let lightc = mix(mix([0.32, 0.36, 0.48], [1.0, 1.0, 1.0], p.day), [1.0, 0.80, 0.66], twilight * 0.6);
+    for i in ci - n..=ci + n {
+        for j in cj - n..=cj + n {
+            let id = (i as u32).wrapping_mul(73_856_093) ^ (j as u32).wrapping_mul(19_349_663);
+            if rnd(id, 11) > 0.42 {
+                continue;
+            }
+            let cx = i as f32 * CELL + rnd(id, 12) * 20.0 - ou;
+            let cz = j as f32 * CELL + rnd(id, 13) * 20.0 - ov;
+            let dist = (cx * cx + cz * cz).sqrt();
+            if dist > VIEW {
+                continue;
+            }
+            let fade = (1.0 - dist / VIEW).clamp(0.0, 1.0).powf(0.7);
+            let parts = 2 + (rnd(id, 14) * 2.0) as u32;
+            for q in 0..parts {
+                let w = 14.0 + rnd(id, 20 + q) * 22.0;
+                let d = 10.0 + rnd(id, 30 + q) * 18.0;
+                let ox = (rnd(id, 40 + q) - 0.5) * 24.0;
+                let oz = (rnd(id, 50 + q) - 0.5) * 18.0;
+                let th = 4.0 + rnd(id, 60 + q) * 3.0;
+                let c = (t1 * (cx + ox) + t2 * (cz + oz) + up * (h + th * 0.5)) * k;
+                let half = [t1 * (w * 0.5 * k), up * (th * 0.5 * k), t2 * (d * 0.5 * k)];
+                for (axis, base) in [(1usize, 1.0f32), (0, 0.86), (2, 0.80)] {
+                    for sign in [-1.0f32, 1.0] {
+                        let nrm = half[axis].normalize_or_zero() * sign;
+                        let fc = c + half[axis] * sign;
+                        // Only the faces turned to the camera (it sits at the origin).
+                        if nrm.dot(-fc) <= 0.0 {
+                            continue;
+                        }
+                        let shade = if axis == 1 { if sign > 0.0 { 1.0 } else { 0.72 } } else { base } * (0.85 + 0.15 * nrm.dot(sun).max(0.0));
+                        let col = mix(p.sky, [lightc[0] * shade, lightc[1] * shade, lightc[2] * shade], fade * 0.92);
+                        let (a, b) = (half[(axis + 1) % 3], half[(axis + 2) % 3]);
+                        o.tri(fc - a - b, fc + a - b, fc + a + b, col);
+                        o.tri(fc - a - b, fc + a + b, fc - a + b, col);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn basis(dir: Vec3) -> (Vec3, Vec3) {
     let helper = if dir.y.abs() < 0.95 { Vec3::Y } else { Vec3::X };
     let t1 = dir.cross(helper).normalize_or_zero();
@@ -226,6 +296,9 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
             }
         }
     }
+
+    // ---- clouds: puffy cartoon blocks drifting over the land (like Hytale / Minecraft) ----
+    clouds(&mut o, p, up, altitude as f64);
 
     // ---- our planet seen from above, with an atmosphere halo ----
     if altitude > 300.0 {
