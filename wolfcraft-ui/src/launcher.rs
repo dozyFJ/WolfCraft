@@ -138,18 +138,26 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
         // Aero glass bars: a tinted pane with a glossy upper half and a bright rim.
         let top = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + TOOLBAR_H));
         let nav = Rect::from_min_max(Pos2::new(full.left(), screen.bottom() - NAV_H), full.max);
+        let home_page = tabs[tab].0 == Tab::Home;
         for (r, gloss_top) in [(top, screen.top()), (nav, nav.top())] {
+            // Главная has no top bar: the page runs up to the status bar.
+            if home_page && r == top {
+                continue;
+            }
             bg.rect_filled(r, 0.0, glass_tint(&p));
             let g = Rect::from_min_max(Pos2::new(r.left(), gloss_top), Pos2::new(r.right(), gloss_top + if r == top { TOOLBAR_H * 0.48 } else { NAV_H * 0.42 }));
             bg.rect_filled(g, 0.0, glass_gloss(&p));
         }
-        bg.line_segment([Pos2::new(full.left(), screen.top() + TOOLBAR_H), Pos2::new(full.right(), screen.top() + TOOLBAR_H)], Stroke::new(1.0_f32, glass_rim(&p)));
+        if !home_page {
+            bg.line_segment([Pos2::new(full.left(), screen.top() + TOOLBAR_H), Pos2::new(full.right(), screen.top() + TOOLBAR_H)], Stroke::new(1.0_f32, glass_rim(&p)));
+        }
         bg.line_segment([Pos2::new(full.left(), screen.bottom() - NAV_H), Pos2::new(full.right(), screen.bottom() - NAV_H)], Stroke::new(1.0_f32, glass_rim(&p)));
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
     // ---- Toolbar: each page has its own (title and its own buttons) ----
     let page = tabs[tab].0;
+    if page != Tab::Home {
     egui::TopBottomPanel::top("launcher-toolbar")
         .exact_height(TOOLBAR_H)
         .frame(Frame::none().inner_margin(Margin::symmetric(16.0, 8.0)))
@@ -227,6 +235,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
             });
         });
 
+    }
+
     // «Сервер»: its own tabs right under the toolbar.
     let mut server_tab = 0;
     if page == Tab::Server {
@@ -265,35 +275,12 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
         });
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
 
-    // Account and launch controls stay visible while Home scrolls.
-    if tabs[tab].0 == Tab::Home {
-        egui::TopBottomPanel::bottom("launcher-launch")
-            .exact_height(100.0)
-            .frame(Frame::none().fill(glass_tint(&p)).inner_margin(Margin::symmetric(16.0, 10.0)).stroke(Stroke::new(1.0_f32, glass_rim(&p))))
-            .show(ctx, |ui| {
-                ui.label(egui::RichText::new(format!("Ник: {nickname}")).color(p.text));
-                ui.horizontal(|ui| {
-                    let width = (ui.available_width() - 118.0).max(100.0);
-                    egui::ComboBox::from_id_salt("launcher-version")
-                        .width(width).selected_text(format!("WolfCraft {version}"))
-                        .show_ui(ui, |ui| {
-                            ui.label(format!("{version} — установлена"));
-                            ui.separator();
-                            ui.label("Обновить игру можно кнопкой «Обновить» в шапке");
-                        });
-                    if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, 108.0, true).clicked() {
-                        action = MenuAction::LaunchVersion(version.to_string());
-                    }
-                });
-            });
-    }
-
     // ---- Page ----
     egui::CentralPanel::default().frame(Frame::none().inner_margin(Margin::symmetric(16.0, 14.0))).show(ctx, |ui| {
         egui::ScrollArea::vertical().id_salt(("launcher-page", tab)).auto_shrink([false, false]).drag_to_scroll(true).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 10.0;
             match tabs[tab].0 {
-                Tab::Home => home(ui, icons, &p, planet, &mut action),
+                Tab::Home => home(ui, icons, &p, planet, version, nickname, dark, &mut action),
                 Tab::Settings => launcher_settings(ui, icons, &p, version, dark, &mut action),
                 Tab::Studio => studio(ui, icons, &p, version, worlds, &mut action),
                 Tab::Server => match (server_tab, data_dir()) {
@@ -375,21 +362,198 @@ fn gradient(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
 // ---------------------------------------------------------------------------------------------
 // Главная
 
-fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandle>, action: &mut MenuAction) {
+fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandle>, version: &str, nickname: &str, dark: bool, action: &mut MenuAction) {
+    ui.add_space(4.0);
     banner_slider(ui, p, planet, action);
-    section(ui, p, "Релизы", "все версии");
-    egui::ScrollArea::horizontal().id_salt("launcher-releases").auto_shrink([false, true]).drag_to_scroll(true).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            for (i, r) in RELEASES.iter().enumerate() {
-                release_card(ui, p, r, i == 0);
+    // Новости and Релизы in one glass block with a tab bar.
+    let tab_id = Id::new("launcher-home-feed");
+    let mut feed: usize = ui.ctx().data(|d| d.get_temp(tab_id)).unwrap_or(0);
+    glass_card(ui, p, 18.0, Margin::same(12.0), Stroke::new(1.0_f32, p.outline), |ui| {
+        ui.set_width(ui.available_width());
+        if let Some(t) = aero_tabs(ui, p, &["Новости", "Релизы"], feed) {
+            feed = t;
+        }
+        ui.add_space(8.0);
+        if feed == 0 {
+            for n in &NEWS {
+                news_card(ui, icons, p, n);
+                ui.add_space(2.0);
+            }
+        } else {
+            egui::ScrollArea::horizontal().id_salt("launcher-releases").auto_shrink([false, true]).drag_to_scroll(true).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    for (i, r) in RELEASES.iter().enumerate() {
+                        release_card(ui, p, r, i == 0);
+                    }
+                });
+            });
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(tab_id, feed));
+    // Theme: dark or light.
+    glass_card(ui, p, 18.0, Margin::same(14.0), Stroke::new(1.0_f32, p.outline), |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(egui::RichText::new("Тема").font(bold_font(16.0)).color(p.text));
+        ui.add_space(4.0);
+        ui.columns(2, |c| {
+            if aero_button(&mut c[0], p, icons, Some(icon::MOON), "Тёмная", dark).clicked() && !dark {
+                *action = MenuAction::ToggleTheme;
+            }
+            if aero_button(&mut c[1], p, icons, Some(icon::SUN), "Светлая", !dark).clicked() && dark {
+                *action = MenuAction::ToggleTheme;
             }
         });
     });
-    section(ui, p, "Новости", "");
-    for n in &NEWS {
-        news_card(ui, icons, p, n);
-        ui.add_space(4.0);
+    // Updates.
+    glass_card(ui, p, 18.0, Margin::same(14.0), Stroke::new(1.0_f32, p.outline), |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Обновления").font(bold_font(16.0)).color(p.text));
+                ui.label(egui::RichText::new(format!("Установлена v{version}")).size(12.5).color(p.text_muted));
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.set_max_width(170.0);
+                if aero_button(ui, p, icons, Some(icon::REFRESH), "Проверить", false).clicked() {
+                    *action = MenuAction::CheckUpdates;
+                }
+            });
+        });
+    });
+    // Play: a banner at the end with the nickname and the version.
+    play_banner(ui, icons, p, version, nickname, action);
+    ui.add_space(8.0);
+}
+
+/// Aero segmented tabs: a glass groove with the chosen tab as a glossy accent capsule.
+fn aero_tabs(ui: &mut Ui, p: &Palette, names: &[&str], cur: usize) -> Option<usize> {
+    let w = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 38.0), Sense::hover());
+    let pt = ui.painter();
+    pt.rect_filled(rect, Rounding::same(19.0), Color32::from_black_alpha(if p.dark { 70 } else { 28 }));
+    pt.rect_stroke(rect, Rounding::same(19.0), Stroke::new(1.0, glass_rim(p).gamma_multiply(0.7)));
+    let tw = w / names.len() as f32;
+    let mut out = None;
+    for (i, n) in names.iter().enumerate() {
+        let r = Rect::from_min_size(Pos2::new(rect.left() + tw * i as f32, rect.top()), Vec2::new(tw, rect.height())).shrink(3.0);
+        let resp = ui.interact(r, Id::new(("aero-tab", n)), Sense::click());
+        if i == cur {
+            gloss_capsule(ui, r, p.accent);
+        } else if resp.hovered() {
+            ui.painter().rect_filled(r, Rounding::same(16.0), glass_gloss(p));
+        }
+        let col = if i == cur { Color32::WHITE } else { p.text };
+        ui.painter().text(r.center(), Align2::CENTER_CENTER, *n, bold_font(14.0), col);
+        if resp.clicked() {
+            out = Some(i);
+        }
+    }
+    out
+}
+
+/// A glossy Aero capsule in colour `c`: lighter at the top, a white shine over the upper half,
+/// a bright rim.
+fn gloss_capsule(ui: &Ui, r: Rect, c: Color32) {
+    let round = Rounding::same(r.height() / 2.0);
+    let pt = ui.painter();
+    pt.rect_filled(r.translate(Vec2::new(0.0, 2.0)), round, Color32::from_black_alpha(50));
+    let top = Color32::from_rgb(c.r().saturating_add(40), c.g().saturating_add(40), c.b().saturating_add(40));
+    let bottom = c.gamma_multiply(0.8);
+    let mut m = egui::Mesh::default();
+    m.colored_vertex(r.left_top(), top);
+    m.colored_vertex(r.right_top(), top);
+    m.colored_vertex(r.right_bottom(), bottom);
+    m.colored_vertex(r.left_bottom(), bottom);
+    m.add_triangle(0, 1, 2);
+    m.add_triangle(0, 2, 3);
+    // Round ends: paint the gradient clipped by a capsule made of the fill and two circles.
+    pt.rect_filled(r, round, c);
+    let inner = r.shrink2(Vec2::new(r.height() / 2.0, 0.0));
+    let mut mi = egui::Mesh::default();
+    for v in [inner.left_top(), inner.right_top(), inner.right_bottom(), inner.left_bottom()] {
+        mi.colored_vertex(v, if v.y == inner.top() { top } else { bottom });
+    }
+    mi.add_triangle(0, 1, 2);
+    mi.add_triangle(0, 2, 3);
+    pt.add(egui::Shape::mesh(mi));
+    let _ = m;
+    let shine = Rect::from_min_max(r.min + Vec2::new(r.height() * 0.3, 1.5), Pos2::new(r.right() - r.height() * 0.3, r.center().y));
+    pt.rect_filled(shine, Rounding { nw: shine.height(), ne: shine.height(), sw: 2.0, se: 2.0 }, Color32::from_white_alpha(70));
+    pt.rect_stroke(r, round, Stroke::new(1.0, Color32::from_white_alpha(120)));
+}
+
+/// A glossy Aero button: accent when `on`, clear glass otherwise.
+fn aero_button(ui: &mut Ui, p: &Palette, icons: &GuiIcons, ic: Option<u16>, label: &str, on: bool) -> egui::Response {
+    let w = ui.available_width();
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 42.0), Sense::click());
+    let press = resp.is_pointer_button_down_on();
+    if on {
+        gloss_capsule(ui, r, if press { p.accent.gamma_multiply(0.85) } else { p.accent });
+    } else {
+        let round = Rounding::same(21.0);
+        ui.painter().rect_filled(r, round, glass_tint(p));
+        let shine = Rect::from_min_max(r.min + Vec2::new(12.0, 1.5), Pos2::new(r.right() - 12.0, r.center().y));
+        ui.painter().rect_filled(shine, Rounding { nw: 20.0, ne: 20.0, sw: 2.0, se: 2.0 }, glass_gloss(p).gamma_multiply(if resp.hovered() { 1.6 } else { 1.0 }));
+        ui.painter().rect_stroke(r, round, Stroke::new(1.0, glass_rim(p)));
+    }
+    let col = if on { Color32::WHITE } else { p.text };
+    let galley = ui.painter().layout_no_wrap(label.to_string(), bold_font(15.0), col);
+    let total = galley.size().x + if ic.is_some() { 26.0 } else { 0.0 };
+    let x = r.center().x - total / 2.0;
+    if let Some(ic) = ic {
+        icons.paint(ui.painter(), Rect::from_min_size(Pos2::new(x, r.center().y - 9.0), Vec2::splat(18.0)), ic, col);
+    }
+    ui.painter().galley(Pos2::new(x + total - galley.size().x, r.center().y - galley.size().y / 2.0), galley, col);
+    resp
+}
+
+/// The last block of Главная: who plays, which version, and a big glossy «Играть».
+fn play_banner(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, nickname: &str, action: &mut MenuAction) {
+    let w = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 170.0), Sense::hover());
+    let pt = ui.painter();
+    pt.rect_filled(rect.translate(Vec2::new(0.0, 4.0)).expand(1.5), Rounding::same(20.0), Color32::from_black_alpha(50));
+    // Deep blue-green Aero gradient with a sheen.
+    let (a, b) = (Color32::from_rgb(40, 120, 200), Color32::from_rgb(20, 60, 110));
+    let inner = rect.shrink2(Vec2::new(0.0, 20.0));
+    let mut m = egui::Mesh::default();
+    m.colored_vertex(inner.left_top(), a);
+    m.colored_vertex(inner.right_top(), a);
+    m.colored_vertex(inner.right_bottom(), b);
+    m.colored_vertex(inner.left_bottom(), b);
+    m.add_triangle(0, 1, 2);
+    m.add_triangle(0, 2, 3);
+    pt.rect_filled(Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.top() + 40.0)), Rounding { nw: 20.0, ne: 20.0, sw: 0.0, se: 0.0 }, a);
+    pt.rect_filled(Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 40.0), rect.max), Rounding { nw: 0.0, ne: 0.0, sw: 20.0, se: 20.0 }, b);
+    pt.add(egui::Shape::mesh(m));
+    let shine = Rect::from_min_max(rect.min + Vec2::new(1.0, 1.0), Pos2::new(rect.right() - 1.0, rect.top() + rect.height() * 0.42));
+    pt.rect_filled(shine, Rounding { nw: 19.0, ne: 19.0, sw: 0.0, se: 0.0 }, Color32::from_white_alpha(34));
+    pt.rect_stroke(rect, Rounding::same(20.0), Stroke::new(1.0, Color32::from_white_alpha(140)));
+    let x = rect.left() + 18.0;
+    pt.text(Pos2::new(x, rect.top() + 16.0), Align2::LEFT_TOP, "ГОТОВЫ?", FontId::proportional(11.0), Color32::from_white_alpha(190));
+    pt.text(Pos2::new(x, rect.top() + 32.0), Align2::LEFT_TOP, format!("Играть как {nickname}"), bold_font(20.0), Color32::WHITE);
+    // Version picker and the button, inside the banner.
+    let row = Rect::from_min_max(Pos2::new(x, rect.bottom() - 92.0), Pos2::new(rect.right() - 18.0, rect.bottom() - 14.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(row).layout(egui::Layout::top_down(egui::Align::Min)));
+    child.spacing_mut().item_spacing.y = 8.0;
+    egui::ComboBox::from_id_salt("launcher-version")
+        .width(row.width())
+        .selected_text(egui::RichText::new(format!("WolfCraft {version}")).color(Color32::WHITE))
+        .show_ui(&mut child, |ui| {
+            ui.label(format!("{version} — установлена"));
+            ui.separator();
+            ui.label("Новые версии — кнопкой «Проверить» в блоке «Обновления»");
+        });
+    let (br, resp) = child.allocate_exact_size(Vec2::new(row.width(), 44.0), Sense::click());
+    gloss_capsule(&child, br, if resp.is_pointer_button_down_on() { Color32::from_rgb(70, 170, 60) } else { Color32::from_rgb(90, 200, 70) });
+    let galley = child.painter().layout_no_wrap("Играть".to_string(), bold_font(18.0), Color32::WHITE);
+    let tw = galley.size().x + 28.0;
+    let gx = br.center().x - tw / 2.0;
+    icons.paint(child.painter(), Rect::from_min_size(Pos2::new(gx, br.center().y - 10.0), Vec2::splat(20.0)), icon::PLAY, Color32::WHITE);
+    child.painter().galley(Pos2::new(gx + 28.0, br.center().y - galley.size().y / 2.0), galley, Color32::WHITE);
+    if resp.clicked() {
+        *action = MenuAction::LaunchVersion(version.to_string());
     }
 }
 
@@ -491,7 +655,11 @@ fn banner_slider(ui: &mut Ui, p: &Palette, planet: Option<&TextureHandle>, actio
         clip.rect_filled(btn, Rounding::same(16.0), Color32::WHITE);
         clip.text(btn.center(), Align2::CENTER_CENTER, b.button, bold_font(14.0), b.top);
     }
-    ui.painter().rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0_f32, p.outline));
+    // Aero: a sheen over the upper half and a bright rim; the square corners are rounded off
+    // with the page backdrop's tint.
+    let shine = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.top() + rect.height() * 0.42));
+    ui.painter().rect_filled(shine, Rounding { nw: 14.0, ne: 14.0, sw: 0.0, se: 0.0 }, Color32::from_white_alpha(26));
+    ui.painter().rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0_f32, glass_rim(p)));
     // Dots.
     let dots_w = n as f32 * 14.0;
     for i in 0..n {
@@ -517,12 +685,13 @@ fn release_card(ui: &mut Ui, p: &Palette, r: &Release, latest: bool) {
     let cw = if ui.ctx().screen_rect().width() < 480.0 { (ui.ctx().screen_rect().width() - 32.0) * 0.8 } else { 210.0 };
     let (rect, _) = ui.allocate_exact_size(Vec2::new(cw, 176.0), Sense::hover());
     let pt = ui.painter();
-    pt.rect_filled(rect, Rounding::same(12.0), p.surface);
-    pt.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0_f32, if latest { p.accent } else { p.outline }));
+    pt.rect_filled(rect, Rounding::same(12.0), glass_tint(p));
+    pt.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0_f32, if latest { p.accent } else { glass_rim(p) }));
     let head = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 54.0));
     let (a, b) = if latest { (p.accent, p.accent.gamma_multiply(0.45)) } else { (Color32::from_rgb(60, 66, 80), Color32::from_rgb(36, 40, 50)) };
     let shape = egui::epaint::RectShape::filled(head, Rounding { nw: 12.0, ne: 12.0, sw: 0.0, se: 0.0 }, a);
     pt.add(shape);
+    pt.rect_filled(Rect::from_min_max(head.min, Pos2::new(head.right(), head.center().y)), Rounding { nw: 12.0, ne: 12.0, sw: 0.0, se: 0.0 }, Color32::from_white_alpha(40));
     let _ = b;
     pt.text(Pos2::new(rect.left() + 14.0, head.top() + 10.0), Align2::LEFT_TOP, format!("v{}", r.version), bold_font(18.0), Color32::WHITE);
     pt.text(Pos2::new(rect.left() + 14.0, head.top() + 33.0), Align2::LEFT_TOP, r.date, FontId::proportional(11.5), Color32::from_white_alpha(200));
