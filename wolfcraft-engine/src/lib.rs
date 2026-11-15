@@ -24,6 +24,7 @@ pub mod planet;
 pub mod power;
 pub mod wolftech;
 pub mod kinetic;
+pub mod pipes;
 pub mod projectiles;
 pub mod renderer;
 pub mod player;

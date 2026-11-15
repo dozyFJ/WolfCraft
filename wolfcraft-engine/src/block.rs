@@ -1888,6 +1888,8 @@ blocks! {
     2494 Insolator => needs_pick(info("Теплица", Opaque, 3.0, Pickaxe, column(t::INSOLATOR_FRONT, t::INSOLATOR_TOP, t::TECH_TOP))),
     2495 Glacier => needs_pick(info("Ледогенератор", Opaque, 4.0, Pickaxe, column(t::GLACIER_FRONT, t::TECH_TOP, t::TECH_TOP))),
     2496 MagmaGenerator => needs_pick(info("Магматический генератор", Opaque, 4.0, Pickaxe, column(t::MAGMA_GEN_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2497 ItemPipe => info("Труба для предметов", Shape, 0.8, Pickaxe, all(t::PIPE)),
+    2498 PipeExtractor => info("Извлекающая труба", Shape, 0.8, Pickaxe, all(t::PIPE_EXTRACT)),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2032,6 +2034,7 @@ impl Block {
         const DOOR_OPEN: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 0.19, 1.0];
         const WIRE: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.0625];
         const CABLE: [f32; 6] = [0.34, 0.34, 0.34, 0.66, 0.66, 0.66];
+        const PIPE: [f32; 6] = [0.30, 0.30, 0.30, 0.70, 0.70, 0.70];
         const SOLAR: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.375];
         const BUTTON: [f32; 6] = [0.32, 0.32, 0.0, 0.68, 0.68, 0.14];
         // A heap of bones: two long bones crossed, a skull and a small piece.
@@ -2104,6 +2107,7 @@ impl Block {
             Button => std::slice::from_ref(&BUTTON),
             Bones => &BONES,
             Cable => &[CABLE],
+            ItemPipe | PipeExtractor => &[PIPE],
             // «Механика»: thin shafts, cog and wheel discs, a crank on top of a block.
             Shaft => &[[0.0, 0.375, 0.375, 1.0, 0.625, 0.625]],
             ShaftJ => &[[0.375, 0.0, 0.375, 0.625, 1.0, 0.625]],

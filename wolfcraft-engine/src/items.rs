@@ -680,7 +680,7 @@ pub fn category(id: ItemId) -> &'static str {
         return "Механика";
     }
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
-    if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
+    if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId || crate::pipes::is_pipe(crate::block::Block::from_id(id)))) {
         return "WolfTech";
     }
     if (ITEM_BASE..1024).contains(&id) {

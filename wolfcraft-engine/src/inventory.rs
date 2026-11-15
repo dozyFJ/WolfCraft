@@ -412,6 +412,9 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_INGOT, 6), (ids::CIRCUIT, 1), (b(Block::Obsidian), 1)], (b(Block::Compressor), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::OakPlanks), 4)], (b(Block::Sawmill), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Glass), 2)], (b(Block::Extractor), 1), true, "WolfTech"));
+        // Item pipes (Thermal Dynamics / Ender IO).
+        v.push(r(&[(ids::IRON_INGOT, 3), (b(Block::Glass), 2)], (b(Block::ItemPipe), 8), true, "WolfTech"));
+        v.push(r(&[(b(Block::ItemPipe), 1), (ids::IRON_INGOT, 2), (ids::CIRCUIT, 1)], (b(Block::PipeExtractor), 1), true, "WolfTech"));
         // Thermal-style devices.
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Cobblestone), 4)], (b(Block::Extruder), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 3), (ids::CIRCUIT, 1), (b(Block::Glass), 4), (b(Block::Dirt), 2)], (b(Block::Insolator), 1), true, "WolfTech"));
