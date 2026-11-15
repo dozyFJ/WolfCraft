@@ -191,14 +191,14 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         // sidebar (back, search, categories), as many rows as fit above the hotbar.
         let ins = crate::gui_renderer::SAFE_INSETS.read().map(|i| *i).unwrap_or([0.0; 4]);
         let (sw, h) = (ctx.screen_rect().width() - ins[0] - ins[2] - 32.0, ctx.screen_rect().height() - ins[1] - ins[3] - 32.0);
-        let by_height = (h - 46.0) / 5.0;
-        let by_width = (sw - 30.0) / 12.0;
-        let cell = by_height.min(by_width).clamp(40.0, 84.0).floor();
-        let sidebar = (cell * 0.92).floor() + 16.0;
-        let rows = (((h - 46.0 + GAP) / (cell + GAP)).floor() as usize).clamp(2, 9);
-        // The hotbar and the bin are a two-column sidebar on the right.
-        let right = 2.0 * cell + GAP + 10.0;
-        let cols = (((sw - sidebar - right - 14.0 + GAP) / (cell + GAP)).floor() as usize).clamp(4, 24);
+        // Grid rows plus the hotbar row along the bottom; the hotbar (9 slots + bin) must fit
+        // across beside the tab panel.
+        let by_height = (h - 46.0 - 12.0) / 5.0;
+        let sidebar = 60.0;
+        let by_width = (sw - sidebar - 24.0 - 70.0) / 10.0;
+        let cell = by_height.min(by_width).clamp(38.0, 80.0).floor();
+        let rows = (((h - 46.0 - cell - 12.0 + GAP) / (cell + GAP)).floor() as usize).clamp(2, 9);
+        let cols = (((sw - sidebar - 24.0 + GAP) / (cell + GAP)).floor() as usize).clamp(4, 24);
         let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;
         let esc = crate::ui_components::full_screen(ctx, "inventory", |ui| {
             creative_layout(ui, icons, &p, state, inv, cell, rows, cols, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
@@ -209,11 +209,12 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         }
     } else {
         // Full screen like the creative one: back on the left, the inventory in the middle
-        // (scrolls on short screens), the hotbar and the bin as a sidebar on the right.
+        // (scrolls on short screens), the hotbar and the bin along the bottom.
         let ins = crate::gui_renderer::SAFE_INSETS.read().map(|i| *i).unwrap_or([0.0; 4]);
         let h = ctx.screen_rect().height() - ins[1] - ins[3] - 32.0;
-        let s = ((h - 4.0 * GAP) / 5.0).clamp(40.0, 84.0).floor();
-        let tab = (s * 0.92).floor();
+        let sw = ctx.screen_rect().width() - ins[0] - ins[2] - 32.0;
+        let s = ((sw - 80.0 - 70.0) / 10.0).min((h - 40.0) / 5.0).clamp(36.0, 64.0).floor();
+        let tab = 52.0f32;
         let title = if near_table { "Верстак" } else { "Инвентарь" };
         let esc = crate::ui_components::full_screen(ctx, "inventory", |ui| {
             let content_h = ui.available_height();
@@ -228,17 +229,16 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
                         result.close = true;
                     }
                 });
-                let mid_w = (ui.available_width() - (2.0 * s + GAP) - 10.0).max(CELL * 4.0);
-                ui.allocate_ui_with_layout(Vec2::new(mid_w, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                let mid_w = ui.available_width().max(CELL * 4.0);
+                ui.allocate_ui_with_layout(Vec2::new(mid_w, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
                     ui.set_width(mid_w);
                     ui.label(egui::RichText::new(title).font(bold_font(16.0)).color(p.text));
                     ui.add_space(6.0);
-                    egui::ScrollArea::vertical().id_salt("survival-inv").auto_shrink([false, false]).max_height(content_h - 30.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical().id_salt("survival-inv").auto_shrink([false, false]).max_height(content_h - 30.0 - s - 12.0).show(ui, |ui| {
                         result.crafted = survival_layout(ui, icons, &p, state, inv, near_table, mid_w - 16.0, &mut slot_rects, false);
                     });
-                });
-                ui.allocate_ui_with_layout(Vec2::new(2.0 * s + GAP, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
-                    hotbar_column(ui, icons, &p, state, inv, s, &mut slot_rects, &mut trash_rect);
+                    ui.add_space(6.0);
+                    hotbar_row(ui, icons, &p, state, inv, s, &mut slot_rects, &mut trash_rect);
                 });
             });
         });
@@ -637,22 +637,36 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool, armor: [Optio
 #[allow(clippy::too_many_arguments)]
 fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, cols: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let palette_all = items::creative_palette();
-    // ---- Categories: a vertical sidebar on the left (scrolls if the screen is short) ----
-    let tab = (cell * 0.92).floor();
-    let content_h = ui.available_height().max(30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP);
+    // ---- Categories: one panel on the left in the style of the top bars, icons inside ----
+    let tab = 44.0f32;
+    let side_w = tab + 12.0;
+    let content_h = ui.available_height().max(30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + cell + 12.0);
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
-        // Top-down column (a plain child of the horizontal row would lay the tabs out in a row).
-        ui.allocate_ui_with_layout(Vec2::new(tab + 6.0, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.set_width(tab + 6.0);
+        ui.allocate_ui_with_layout(Vec2::new(side_w, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.set_width(side_w);
+            let panel = Rect::from_min_size(ui.cursor().min, Vec2::new(side_w, content_h));
+            ui.painter().rect_filled(panel, Rounding::same(18.0), Color32::from_black_alpha(150));
+            ui.painter().rect_stroke(panel, Rounding::same(18.0), Stroke::new(1.0_f32, Color32::from_white_alpha(28)));
             egui::ScrollArea::vertical().id_salt("creative-tabs").max_height(content_h).auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
-                ui.set_width(tab + 6.0);
+                ui.set_width(side_w);
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
-                // Back and search sit at the top of the sidebar (there is no title bar).
-                for (k, ic) in [(0usize, icon::ARROW_LEFT), (1, icon::SEARCH)] {
+                ui.add_space(6.0);
+                let tab_button = |ui: &mut Ui, on: bool| -> (Rect, egui::Response) {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
+                    let hot = resp.hovered() || resp.is_pointer_button_down_on();
+                    if on {
+                        ui.painter().rect_filled(rect, Rounding::same(12.0), p.accent.gamma_multiply(0.28));
+                        ui.painter().rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.5_f32, p.accent));
+                    } else if hot {
+                        ui.painter().rect_filled(rect, Rounding::same(12.0), Color32::from_white_alpha(18));
+                    }
+                    (rect, resp)
+                };
+                // Back and search at the top of the panel, a thin line, then the categories.
+                for (k, ic) in [(0usize, icon::ARROW_LEFT), (1, icon::SEARCH)] {
                     let on = k == 1 && state.search_open;
-                    hud_button(ui, rect, on, resp.hovered() || resp.is_pointer_button_down_on(), p);
+                    let (rect, resp) = tab_button(ui, on);
                     icons.paint(ui.painter(), rect.shrink(tab * 0.24), ic, if on { p.accent } else { Color32::from_white_alpha(225) });
                     if resp.clicked() {
                         if k == 0 {
@@ -668,12 +682,12 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                         }
                     }
                 }
-                ui.add_space(6.0);
+                let (line, _) = ui.allocate_exact_size(Vec2::new(tab * 0.7, 6.0), Sense::hover());
+                ui.painter().line_segment([line.left_center(), line.right_center()], Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
                 for (i, name) in CREATIVE_TABS.iter().enumerate() {
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
                     let sel = state.tab == i && !state.search_open;
-                    hud_button(ui, rect, sel, resp.hovered() || resp.is_pointer_button_down_on(), p);
-                    let inner = rect.shrink(tab * 0.18);
+                    let (rect, resp) = tab_button(ui, sel);
+                    let inner = rect.shrink(tab * 0.2);
                     match i {
                         0 => icons.paint(ui.painter(), inner, icon::STAR, if sel { p.accent } else { p.text }),
                         _ if *name == "Конструктор" => icons.paint(ui.painter(), inner, icon::HAMMER, if sel { p.accent } else { p.text }),
@@ -692,32 +706,37 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                     }
                     resp.on_hover_text(*name);
                 }
+                ui.add_space(6.0);
             });
         });
-        ui.allocate_ui_with_layout(Vec2::new(grid_w, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.set_width(grid_w);
-            creative_main(ui, icons, p, state, inv, cell, rows, cols, grid_w, palette_all, slot_rects, trash_rect, result);
-        });
-        // ---- Hotbar + bin: a sidebar on the right, two columns going down ----
-        let s = ((content_h - 4.0 * GAP) / 5.0).min(cell).floor();
-        ui.allocate_ui_with_layout(Vec2::new(2.0 * s + GAP, content_h), egui::Layout::top_down(egui::Align::Min), |ui| {
-            hotbar_column(ui, icons, p, state, inv, s, slot_rects, trash_rect);
+        // ---- The tab's content in the middle, the hotbar along the bottom ----
+        let rest = ui.available_width();
+        ui.allocate_ui_with_layout(Vec2::new(rest, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.set_width(rest);
+            ui.allocate_ui_with_layout(Vec2::new(grid_w, content_h - cell - 12.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(grid_w);
+                creative_main(ui, icons, p, state, inv, cell, rows, cols, grid_w, palette_all, slot_rects, trash_rect, result);
+            });
+            ui.add_space(6.0);
+            hotbar_row(ui, icons, p, state, inv, cell, slot_rects, trash_rect);
         });
     });
 }
 
-/// The hotbar as a 2×5 column (slots 1–9 top-down, left then right) with the bin last.
+/// The hotbar as one row along the bottom (slots 1–9) with the bin at the end, centred.
 #[allow(clippy::too_many_arguments)]
-fn hotbar_column(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, s: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>) {
-    let origin = ui.cursor().min;
-    let (_, _) = ui.allocate_exact_size(Vec2::new(2.0 * s + GAP, 5.0 * s + 4.0 * GAP), Sense::hover());
-    let at = |i: usize| Rect::from_min_size(origin + Vec2::new((i / 5) as f32 * (s + GAP), (i % 5) as f32 * (s + GAP)), Vec2::splat(s));
+fn hotbar_row(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, s: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>) {
+    let (area, _) = ui.allocate_exact_size(Vec2::new(10.0 * s + 9.0 * GAP + 8.0, s), Sense::hover());
+    let at = |i: usize| Rect::from_min_size(area.min + Vec2::new(i as f32 * (s + GAP) + if i == 9 { 8.0 } else { 0.0 }, 0.0), Vec2::splat(s));
     for slot in 0..HOTBAR {
         let rect = at(slot);
         slot_rects.push((slot, rect));
         draw_slot(ui, icons, p, state, inv, slot, rect);
     }
-    let rect = at(9);
+    bin(ui, icons, p, state, inv, at(9), s, trash_rect);
+}
+
+fn bin(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, rect: Rect, s: f32, trash_rect: &mut Option<Rect>) {
     let resp = ui.interact(rect, Id::new("inv-bin"), Sense::click());
     let hot = resp.hovered() || state.drag_slot.is_some();
     ui.painter().rect_filled(rect, Rounding::same(10.0), p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
