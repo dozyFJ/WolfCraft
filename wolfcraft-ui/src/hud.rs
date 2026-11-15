@@ -49,6 +49,20 @@ pub struct DebugInfo {
     pub ui_ms: f32,
 }
 
+/// «Что это?» (like WAILA in Java Minecraft): what the crosshair is on, in a plate under the
+/// minimap — icon, name, which part of the game it comes from, a few facts and a bar.
+#[derive(Clone, Debug)]
+pub struct LookInfo {
+    pub icon: ItemStack,
+    pub name: String,
+    /// "WolfCraft", "WolfTech", "Существо"…
+    pub source: String,
+    /// Lines under the name, each with its colour.
+    pub lines: Vec<(String, Color32)>,
+    /// A bar (fill 0..1, colour, caption): energy, health, heat.
+    pub bar: Option<(f32, Color32, String)>,
+}
+
 pub struct HudState<'a> {
     pub coords: [f64; 3],
     pub fps: f32,
@@ -96,6 +110,45 @@ pub struct HudState<'a> {
     /// Newcomer help: the next goal (icon, text) and a line about the controls.
     pub goal: Option<(ItemStack, String)>,
     pub tip: Option<String>,
+    /// What the crosshair is on (block or creature).
+    pub look: Option<LookInfo>,
+}
+
+/// The WAILA-style plate at `top_right` (its top-right corner). Returns its bottom.
+fn draw_look(painter: &Painter, icons: &GuiIcons, p: &Palette, top_right: Pos2, l: &LookInfo) -> f32 {
+    let name = painter.layout_no_wrap(l.name.clone(), bold_font(15.0), Color32::WHITE);
+    let src = painter.layout_no_wrap(l.source.clone(), FontId::proportional(11.5), Color32::from_rgb(110, 170, 255));
+    let mut w = name.size().x.max(src.size().x);
+    for (t, _) in &l.lines {
+        w = w.max(painter.layout_no_wrap(t.clone(), FontId::proportional(12.5), Color32::WHITE).size().x);
+    }
+    if let Some((_, _, cap)) = &l.bar {
+        w = w.max(painter.layout_no_wrap(cap.clone(), FontId::proportional(11.5), Color32::WHITE).size().x + 8.0);
+    }
+    let icon = 34.0;
+    let w = (w + icon + 30.0).clamp(150.0, 320.0);
+    let h = 44.0 + l.lines.len() as f32 * 17.0 + if l.bar.is_some() { 20.0 } else { 0.0 };
+    let r = Rect::from_min_size(Pos2::new(top_right.x - w, top_right.y), Vec2::new(w, h));
+    painter.rect_filled(r, Rounding::same(14.0), Color32::from_rgba_unmultiplied(14, 16, 22, 220));
+    painter.rect_stroke(r, Rounding::same(14.0), Stroke::new(2.0_f32, p.accent.gamma_multiply(0.75)));
+    let ic = Rect::from_min_size(r.min + Vec2::new(10.0, 8.0), Vec2::splat(icon));
+    painter.circle_filled(ic.center(), icon * 0.55, Color32::from_white_alpha(14));
+    icons.paint_stack(painter, ic, &l.icon);
+    let tx = ic.right() + 10.0;
+    painter.galley(Pos2::new(tx, r.top() + 7.0), name, Color32::WHITE);
+    painter.galley(Pos2::new(tx, r.top() + 26.0), src, Color32::WHITE);
+    let mut y = r.top() + 44.0;
+    for (t, c) in &l.lines {
+        painter.text(Pos2::new(r.left() + 12.0, y), Align2::LEFT_TOP, t, FontId::proportional(12.5), *c);
+        y += 17.0;
+    }
+    if let Some((f, c, cap)) = &l.bar {
+        let bar = Rect::from_min_size(Pos2::new(r.left() + 12.0, y + 2.0), Vec2::new(w - 24.0, 14.0));
+        painter.rect_filled(bar, Rounding::same(7.0), Color32::from_rgb(28, 30, 38));
+        painter.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * f.clamp(0.0, 1.0), bar.height())), Rounding::same(7.0), *c);
+        painter.text(bar.center(), Align2::CENTER_CENTER, cap, FontId::proportional(11.0), Color32::WHITE);
+    }
+    r.bottom()
 }
 
 /// The next goal at the top of the screen, and the controls under it at the very start.
@@ -542,10 +595,16 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         let y = if s.compass.is_some() && !s.compact { compass_bottom - 32.0 } else { stack_top - 14.0 };
         painter.text(Pos2::new(hotbar.center().x, y), Align2::CENTER_BOTTOM, name, FontId::proportional(16.0), p.text.gamma_multiply(a));
     }
+    // «Что это?»: under the minimap on phones, in the top-right corner on PC.
+    let mut look_bottom = if s.compact { screen.top() + 160.0 } else { screen.top() + 20.0 };
+    if let Some(l) = &s.look {
+        let at = Pos2::new(screen.right() - 9.0, look_bottom - 8.0);
+        look_bottom = draw_look(&painter, icons, &p, at, l) + 10.0;
+    }
     // Potion effects: a column of chips on the right, under the minimap on phones.
     if !s.effects.is_empty() {
         let x = screen.right() - 14.0;
-        let mut y = if s.compact { screen.top() + 160.0 } else { screen.top() + 20.0 };
+        let mut y = look_bottom;
         for (name, c, left) in &s.effects {
             let col = Color32::from_rgb((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8);
             let secs = left.max(0.0) as u32;
@@ -738,6 +797,7 @@ mod tests {
                     achievement: None,
                     goal: None,
                     tip: None,
+                    look: None,
                 };
                 draw(ctx, &icons, &s);
             });

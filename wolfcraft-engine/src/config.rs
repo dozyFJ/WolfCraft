@@ -386,6 +386,9 @@ pub struct Settings {
     pub theme: ThemeMode,
     pub fullscreen: bool,
     pub show_fps: bool,
+    /// «Что это?» (like WAILA): a plate with what the crosshair is on.
+    #[serde(default = "yes")]
+    pub show_look: bool,
     /// Player name shown in chat.
     pub nickname: String,
     /// Skin preset index.
@@ -483,6 +486,7 @@ impl Default for Settings {
             theme: ThemeMode::Dark,
             fullscreen: false,
             show_fps: true,
+            show_look: true,
             nickname: "Игрок".to_string(),
             skin: 0,
             vm_fov: 62.0,
