@@ -343,6 +343,41 @@ pub fn autoexec(data: &Path) -> Vec<String> {
     std::fs::read_to_string(root(data).join("autoexec.txt")).unwrap_or_default().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
 }
 
+/// Hosting statistics of one profile (server or mini-games): samples every 10 s while it
+/// runs (`unix_time players`) in `server/stats.txt`, and launches in `server/runs.txt`.
+#[derive(Clone, Debug, Default)]
+pub struct Stats {
+    pub samples: Vec<(u64, u32)>,
+    pub runs: Vec<u64>,
+}
+
+pub fn read_stats(data: &Path) -> Stats {
+    let r = data.join("server");
+    let nums = |f: &str| -> Vec<Vec<u64>> { std::fs::read_to_string(r.join(f)).unwrap_or_default().lines().map(|l| l.split_whitespace().filter_map(|x| x.parse().ok()).collect()).collect() };
+    Stats {
+        samples: nums("stats.txt").into_iter().filter(|v| v.len() >= 2).map(|v| (v[0], v[1] as u32)).collect(),
+        runs: nums("runs.txt").into_iter().filter_map(|v| v.first().copied()).collect(),
+    }
+}
+
+/// Adds a sample (keeps the last 2000, about 5½ hours of hosting).
+pub fn add_sample(data: &Path, t: u64, players: u32) {
+    let f = root(data).join("stats.txt");
+    let mut lines: Vec<String> = std::fs::read_to_string(&f).unwrap_or_default().lines().map(String::from).collect();
+    lines.push(format!("{t} {players}"));
+    let skip = lines.len().saturating_sub(2000);
+    let _ = std::fs::write(&f, lines[skip..].join("\n"));
+}
+
+/// Notes a launch (keeps the last 500).
+pub fn add_run(data: &Path, t: u64) {
+    let f = root(data).join("runs.txt");
+    let mut lines: Vec<String> = std::fs::read_to_string(&f).unwrap_or_default().lines().map(String::from).collect();
+    lines.push(t.to_string());
+    let skip = lines.len().saturating_sub(500);
+    let _ = std::fs::write(&f, lines[skip..].join("\n"));
+}
+
 /// Max players from server.toml (16 if not set).
 pub fn max_players(data: &Path) -> usize {
     config_value(data, "max_players").and_then(|v| v.parse().ok()).unwrap_or(16).clamp(1, 64)

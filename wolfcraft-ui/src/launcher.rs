@@ -64,7 +64,8 @@ fn tabs() -> &'static [(Tab, &'static str)] {
         &[(Tab::Studio, "Проекты"), (Tab::Settings, "Настройки")]
     } else {
         // One app: play, build and host — settings are under the gear on top and in Профиль.
-        &[(Tab::Home, "Главная"), (Tab::Studio, "Редактор"), (Tab::Server, "Сервер"), (Tab::Skins, "Профиль")]
+        // No separate «Редактор»: tap a mini-game card on «Сервер» to edit it.
+        &[(Tab::Home, "Главная"), (Tab::Server, "Сервер"), (Tab::Skins, "Профиль")]
     }
 }
 
@@ -215,15 +216,6 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                     icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
                     ui.add_space(4.0);
                     ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
-                } else if page == Tab::Studio {
-                    // Редактор: Серверы (live worlds in the network) and Мини-игры (your places).
-                    let sid = Id::new("studio-page-tab");
-                    let cur: usize = ctx.data(|d| d.get_temp(sid)).unwrap_or(1);
-                    for (k, title) in [(0usize, "Серверы"), (1, "Мини-игры")] {
-                        if pill_button(ui, icons, None, title, if cur == k { ButtonKind::Primary } else { ButtonKind::Secondary }, 96.0, true).clicked() {
-                            ctx.data_mut(|d| d.insert_temp(sid, k));
-                        }
-                    }
                 } else if page == Tab::Server {
                     for (place, title) in [(false, "Сервер"), (true, "Мини-игры")] {
                         if pill_button(ui, icons, None, title, if place_mode == place { ButtonKind::Primary } else { ButtonKind::Secondary }, 86.0, true).clicked() {
@@ -277,8 +269,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                             if round_icon(ui, icons, &p, icon::SEARCH).clicked() {
                                 action = MenuAction::OpenNetwork;
                             }
-                            if !place_mode && round_icon(ui, icons, &p, icon::PLUS).on_hover_text("Новый сетевой мир").clicked() {
-                                action = MenuAction::HostServer(None);
+                            if round_icon(ui, icons, &p, icon::PLUS).on_hover_text(if place_mode { "Новая мини-игра" } else { "Новый сетевой мир" }).clicked() {
+                                action = if place_mode { MenuAction::NewStudioProject } else { MenuAction::HostServer(None) };
                             }
                         }
                         Tab::Skins | Tab::Settings => {
@@ -737,6 +729,13 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
             add(ui);
         });
     };
+    // Statistics of this profile (server or mini-games each have their own).
+    if let Some(d) = data_dir() {
+        let prof = crate::server_page::profile_data(&d, place_mode);
+        let stats = crate::server_page::read_stats(&prof);
+        let count = |f: &str| std::fs::read_dir(crate::server_page::root(&prof).join(f)).map(|r| r.flatten().count()).unwrap_or(0);
+        stats_slider(ui, p, &stats, place_mode, count("plugins"), count("modules"));
+    }
     // Join or edit by code / address (the page title is in the toolbar).
     card(ui, &mut |ui| {
         ui.label(egui::RichText::new(if place_mode { "ВОЙТИ В МИНИ-ИГРУ" } else { "ВОЙТИ НА СЕРВЕР" }).size(11.5).color(p.text_muted));
@@ -764,7 +763,7 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
         ui.label(egui::RichText::new(if place_mode { "Выберите мини-игру — в чате появится код входа для друзей." } else { "Выберите мир — в чате появится код входа для друзей." }).size(13.0).color(p.text_muted));
         ui.add_space(4.0);
         for w in worlds.iter().filter(|w| w.cfg.studio_project == place_mode).take(40) {
-            ui.horizontal(|ui| {
+            let row = ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
                 match &w.preview {
                     Some(t) => {
@@ -776,7 +775,7 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
                 }
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(15.0)).color(p.text));
-                    ui.label(egui::RichText::new(if w.cfg.studio_project { "Мини-игра" } else { "Мир" }).size(12.0).color(p.text_muted));
+                    ui.label(egui::RichText::new(if w.cfg.studio_project { "Мини-игра · нажмите, чтобы редактировать" } else { "Мир" }).size(12.0).color(p.text_muted));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if pill_button(ui, icons, Some(icon::GLOBE), "Запустить", ButtonKind::Primary, 120.0, true).clicked() {
@@ -784,17 +783,164 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
                     }
                 });
             });
+            // Tap the mini-game itself (not «Запустить») to open it in the editor.
+            if place_mode {
+                let tap = ui.interact(row.response.rect, Id::new(("place-card", &w.cfg.id)), Sense::click());
+                if tap.clicked() && matches!(action, MenuAction::None) {
+                    *action = MenuAction::OpenStudio(w.cfg.id.clone());
+                }
+            }
             ui.add_space(4.0);
         }
         if !worlds.iter().any(|w| w.cfg.studio_project == place_mode) {
-            ui.label(egui::RichText::new(if place_mode { "Мини-игр пока нет — создайте её в «Редакторе» → «Мини-игры»." } else { "Миров пока нет — создайте мир в «Главной»." }).size(13.0).color(p.text_muted));
+            ui.label(egui::RichText::new(if place_mode { "Мини-игр пока нет — нажмите «Новая мини-игра»." } else { "Миров пока нет — создайте мир в «Главной»." }).size(13.0).color(p.text_muted));
         }
-        // Mini-games are made in «Редактор»; here they are only started.
-        if !place_mode && pill_button(ui, icons, Some(icon::PLUS), "Новый сетевой мир", ButtonKind::Secondary, ui.available_width(), true).clicked() {
-            *action = MenuAction::HostServer(None);
+        if pill_button(ui, icons, Some(icon::PLUS), if place_mode { "Новая мини-игра" } else { "Новый сетевой мир" }, ButtonKind::Secondary, ui.available_width(), true).clicked() {
+            *action = if place_mode { MenuAction::NewStudioProject } else { MenuAction::HostServer(None) };
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(addr_id, addr));
+}
+
+/// Dashboard banner: swipeable glass cards with charts — players online, launches per day,
+/// hours hosted, content. Each profile (server / mini-games) has its own numbers.
+fn stats_slider(ui: &mut Ui, p: &Palette, st: &crate::server_page::Stats, place: bool, plugins: usize, mods: usize) {
+    let w = ui.available_width();
+    let h = 190.0;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click_and_drag());
+    let id = Id::new(("dash-slider", place));
+    let n = 4usize;
+    let mut cur: usize = ui.ctx().data(|d| d.get_temp(id)).unwrap_or(0);
+    let off_id = id.with("off");
+    let mut off: f32 = ui.ctx().data(|d| d.get_temp(off_id)).unwrap_or(0.0);
+    if resp.dragged() {
+        off += resp.drag_delta().x;
+    }
+    if resp.drag_stopped() {
+        if off < -w * 0.15 && cur + 1 < n {
+            cur += 1;
+        } else if off > w * 0.15 && cur > 0 {
+            cur -= 1;
+        }
+        off = 0.0;
+    }
+    ui.ctx().data_mut(|d| {
+        d.insert_temp(id, cur);
+        d.insert_temp(off_id, off);
+    });
+    let now = st.samples.last().map(|s| s.0).unwrap_or(0).max(st.runs.last().copied().unwrap_or(0));
+    let day = |t: u64| t / 86_400;
+    let today = day(now.max(1));
+    // Last 7 days: launches and hours hosted.
+    let mut runs = [0f32; 7];
+    let mut hours = [0f32; 7];
+    for t in &st.runs {
+        let k = today.saturating_sub(day(*t));
+        if k < 7 {
+            runs[6 - k as usize] += 1.0;
+        }
+    }
+    for (t, _) in &st.samples {
+        let k = today.saturating_sub(day(*t));
+        if k < 7 {
+            hours[6 - k as usize] += 10.0 / 3600.0;
+        }
+    }
+    let players: Vec<f32> = st.samples.iter().rev().take(60).rev().map(|s| s.1 as f32).collect();
+    let peak = st.samples.iter().map(|s| s.1).max().unwrap_or(0);
+    let total_h: f32 = st.samples.len() as f32 * 10.0 / 3600.0;
+    let accent = p.accent;
+    let clip = ui.painter().with_clip_rect(rect);
+    for k in 0..n {
+        let r = rect.translate(Vec2::new((k as f32 - cur as f32) * (w + 12.0) + off, 0.0));
+        if !r.intersects(rect) {
+            continue;
+        }
+        let (top, bottom) = match k {
+            0 => (Color32::from_rgb(40, 110, 200), Color32::from_rgb(18, 44, 96)),
+            1 => (Color32::from_rgb(120, 70, 200), Color32::from_rgb(48, 24, 96)),
+            2 => (Color32::from_rgb(30, 150, 120), Color32::from_rgb(12, 66, 58)),
+            _ => (Color32::from_rgb(200, 120, 40), Color32::from_rgb(96, 50, 16)),
+        };
+        clip.add(grad_shape(r, 18.0, 18.0, top, bottom));
+        clip.add(grad_shape(Rect::from_min_max(r.min + Vec2::splat(2.0), Pos2::new(r.right() - 2.0, r.top() + 60.0)), 16.0, 0.0, Color32::from_white_alpha(40), Color32::TRANSPARENT));
+        clip.rect_stroke(r, Rounding::same(18.0), Stroke::new(1.0, Color32::from_white_alpha(110)));
+        let x = r.left() + 16.0;
+        let (label, big, note) = match k {
+            0 => ("ИГРОКИ ОНЛАЙН", players.last().map(|v| format!("{v:.0}")).unwrap_or_else(|| "0".into()), format!("пик {peak}")),
+            1 => ("ЗАПУСКИ ЗА НЕДЕЛЮ", format!("{:.0}", runs.iter().sum::<f32>()), format!("всего {}", st.runs.len())),
+            2 => ("ЧАСЫ РАБОТЫ", format!("{:.1} ч", hours.iter().sum::<f32>()), format!("всего {total_h:.1} ч")),
+            _ => (if place { "МИНИ-ИГРЫ: КОНТЕНТ" } else { "СЕРВЕР: КОНТЕНТ" }, format!("{}", plugins + mods), format!("плагинов {plugins} · модов {mods}")),
+        };
+        clip.text(Pos2::new(x, r.top() + 14.0), Align2::LEFT_TOP, label, FontId::proportional(11.0), Color32::from_white_alpha(200));
+        shadow_text(&clip, Pos2::new(x, r.top() + 30.0), Align2::LEFT_TOP, &big, bold_font(30.0), Color32::WHITE);
+        clip.text(Pos2::new(r.right() - 16.0, r.top() + 14.0), Align2::RIGHT_TOP, note, FontId::proportional(12.0), Color32::from_white_alpha(210));
+        // The chart along the bottom of the card.
+        let chart = Rect::from_min_max(Pos2::new(x, r.top() + 82.0), Pos2::new(r.right() - 16.0, r.bottom() - 26.0));
+        clip.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0, Color32::from_white_alpha(70)));
+        match k {
+            0 => {
+                // Line chart of players (last 10 minutes of hosting).
+                if players.len() >= 2 {
+                    let max = players.iter().cloned().fold(1.0f32, f32::max);
+                    let pts: Vec<Pos2> = players.iter().enumerate().map(|(i, v)| Pos2::new(chart.left() + chart.width() * i as f32 / (players.len() - 1) as f32, chart.bottom() - chart.height() * v / max)).collect();
+                    let mut area = pts.clone();
+                    area.push(chart.right_bottom());
+                    area.push(chart.left_bottom());
+                    let mut m = egui::Mesh::default();
+                    for (i, p) in pts.iter().enumerate() {
+                        let b = Pos2::new(p.x, chart.bottom());
+                        m.colored_vertex(*p, Color32::from_white_alpha(70));
+                        m.colored_vertex(b, Color32::from_white_alpha(0));
+                        if i > 0 {
+                            let j = (i * 2) as u32;
+                            m.add_triangle(j - 2, j - 1, j);
+                            m.add_triangle(j - 1, j + 1, j);
+                        }
+                    }
+                    clip.add(egui::Shape::mesh(m));
+                    clip.add(egui::Shape::line(pts, Stroke::new(2.5, Color32::WHITE)));
+                } else {
+                    clip.text(chart.center(), Align2::CENTER_CENTER, "Запустите — здесь появится график", FontId::proportional(12.5), Color32::from_white_alpha(190));
+                }
+            }
+            1 | 2 => {
+                let vals = if k == 1 { runs } else { hours };
+                let max = vals.iter().cloned().fold(0.001f32, f32::max);
+                let bw = chart.width() / 7.0;
+                for (i, v) in vals.iter().enumerate() {
+                    let hgt = (chart.height() * v / max).max(2.0);
+                    let b = Rect::from_min_max(Pos2::new(chart.left() + bw * i as f32 + bw * 0.18, chart.bottom() - hgt), Pos2::new(chart.left() + bw * (i as f32 + 1.0) - bw * 0.18, chart.bottom()));
+                    clip.add(grad_shape(b, 4.0, 0.0, Color32::from_white_alpha(if i == 6 { 240 } else { 170 }), Color32::from_white_alpha(70)));
+                    let lab = ["-6", "-5", "-4", "-3", "-2", "вч", "сг"][i];
+                    clip.text(Pos2::new(b.center().x, chart.bottom() + 4.0), Align2::CENTER_TOP, lab, FontId::proportional(10.0), Color32::from_white_alpha(170));
+                }
+            }
+            _ => {
+                // Two bars: plugins and mods.
+                let max = (plugins.max(mods).max(1)) as f32;
+                for (i, (name, v)) in [("Плагины", plugins), ("Моды", mods)].iter().enumerate() {
+                    let y = chart.top() + 6.0 + i as f32 * 26.0;
+                    clip.text(Pos2::new(chart.left(), y + 9.0), Align2::LEFT_CENTER, *name, FontId::proportional(12.5), Color32::WHITE);
+                    let bar = Rect::from_min_size(Pos2::new(chart.left() + 70.0, y + 2.0), Vec2::new((chart.width() - 90.0) * *v as f32 / max, 14.0));
+                    clip.rect_filled(Rect::from_min_size(bar.min, Vec2::new(chart.width() - 90.0, 14.0)), Rounding::same(7.0), Color32::from_white_alpha(30));
+                    clip.add(grad_shape(bar, 7.0, 7.0, Color32::from_white_alpha(230), Color32::from_white_alpha(150)));
+                    clip.text(Pos2::new(chart.right(), y + 9.0), Align2::RIGHT_CENTER, v.to_string(), bold_font(13.0), Color32::WHITE);
+                }
+            }
+        }
+    }
+    // Dots.
+    for i in 0..n {
+        let c = Pos2::new(rect.center().x - (n as f32 - 1.0) * 7.0 + i as f32 * 14.0, rect.bottom() - 10.0);
+        if i == cur {
+            ui.painter().rect_filled(Rect::from_center_size(c, Vec2::new(16.0, 6.0)), Rounding::same(3.0), Color32::WHITE);
+        } else {
+            ui.painter().circle_filled(c, 3.0, Color32::from_white_alpha(110));
+        }
+    }
+    let _ = accent;
+    ui.add_space(4.0);
 }
 
 fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[crate::main_menu::WorldEntry], action: &mut MenuAction) {
@@ -805,7 +951,6 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project || is_studio_app()).collect();
 
     // «+» is in the page's toolbar; the toolbar also switches Серверы / Мини-игры.
-    let page_tab: usize = ui.ctx().data(|d| d.get_temp(Id::new("studio-page-tab"))).unwrap_or(1);
 
     // Creating a server: name and template, right here in the menu (not in the editor).
     if let Some((name, template)) = &mut form {
@@ -832,7 +977,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     }
     ui.ctx().data_mut(|d| d.insert_temp(form_id, form.clone()));
 
-    if page_tab == 1 {
+    {
     if projects.is_empty() && form.is_none() {
         ui.add_space(8.0);
         ui.vertical_centered(|ui| {
@@ -870,18 +1015,15 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
             *action = MenuAction::OpenStudio(w.cfg.id.clone());
         }
     }
-    return;
     }
 
     // Worlds of WolfServer (phone or PC) in this network: they appear here by themselves as
     // soon as a server starts, and open with the studio tools — edits go straight to the server.
+    // Servers running in the network: open them with the editor tools (edits go live).
     let nearby = NEARBY.lock().map(|n| n.clone()).unwrap_or_default();
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
-    if nearby.is_empty() {
-        ui.add_space(8.0);
-        ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("Запущенные серверы в вашей сети появятся здесь сами").size(13.5).color(p.text_muted));
-        });
+    if !nearby.is_empty() {
+        section(ui, p, "Серверы в сети", "");
     }
     for (name, addr, players, max) in &nearby {
         glass_card(ui, p, 16.0, Margin::same(12.0), Stroke::new(1.0_f32, p.outline), |ui| {

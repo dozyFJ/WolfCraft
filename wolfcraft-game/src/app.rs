@@ -352,6 +352,9 @@ pub struct App {
     net: Option<wolfcraft_net::Client>,
     /// Server running inside the game ("host on this device").
     host: Option<wolfcraft_net::server::ServerHandle>,
+    /// The profile folder of what is hosted (server or mini-games) and the stats timer.
+    host_profile: Option<std::path::PathBuf>,
+    host_stat_t: f32,
     net_players: Vec<wolfcraft_net::PlayerState>,
     /// Every edit the server told us about, per dimension (`[overworld, hell]`).
     net_edits: [std::collections::HashMap<[i32; 4], u16>; 2],
@@ -503,6 +506,8 @@ impl App {
                 .collect(),
             net: None,
             host: None,
+            host_profile: None,
+            host_stat_t: 0.0,
             net_players: Vec::new(),
             net_edits: Default::default(),
             net_send_t: 0.0,
@@ -701,7 +706,12 @@ impl App {
         let profile_data = wolfcraft_ui::server_page::profile_data(&self.data_dir, cfg.studio_project);
         let options = wolfcraft_net::server::ServerOptions { max_players: wolfcraft_ui::server_page::max_players(&profile_data), ..Default::default() };
         match wolfcraft_net::server::start_with_options(&cfg.name, toml, &dir, port, false, options) {
-            Ok(h) => self.host = Some(h),
+            Ok(h) => {
+                self.host = Some(h);
+                wolfcraft_ui::server_page::add_run(&profile_data, platform::unix_now());
+                self.host_profile = Some(profile_data.clone());
+                self.host_stat_t = 0.0;
+            }
             Err(e) => {
                 self.world_select.net_error = Some(format!("сервер не запущен: {e}"));
                 return;
@@ -1632,6 +1642,16 @@ impl App {
         }
         self.time.tick();
         let dt = self.time.delta();
+        // Dashboard statistics: players online every 10 s while we host.
+        if let (Some(h), Some(prof)) = (&self.host, &self.host_profile) {
+            if h.is_running() {
+                self.host_stat_t -= dt;
+                if self.host_stat_t <= 0.0 {
+                    self.host_stat_t = 10.0;
+                    wolfcraft_ui::server_page::add_sample(prof, platform::unix_now(), self.net_players.len() as u32 + 1);
+                }
+            }
+        }
         self.frames += 1;
         self.last_cpu = self.cpu.sample();
         let t_frame = ScopeTimer::start();
@@ -3290,7 +3310,7 @@ impl App {
                 // An empty baseplate world, creative and peaceful, opened in the Studio.
                 self.net = None;
                 let n = self.worlds.iter().filter(|w| w.cfg.studio_project).count() + 1;
-                let mut cfg = WorldConfig::new(&format!("Сервер {n}"), splitmix(self.random_seed ^ platform::unix_now()) % 1_000_000_000);
+                let mut cfg = WorldConfig::new(&format!("Мини-игра {n}"), splitmix(self.random_seed ^ platform::unix_now()) % 1_000_000_000);
                 cfg.world_type = wolfcraft_engine::config::WorldType::Baseplate;
                 cfg.mode = wolfcraft_engine::config::GameMode::Creative;
                 cfg.difficulty = wolfcraft_engine::config::Difficulty::Peaceful;
