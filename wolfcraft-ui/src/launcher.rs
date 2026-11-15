@@ -215,6 +215,15 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                     icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
                     ui.add_space(4.0);
                     ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
+                } else if page == Tab::Studio {
+                    // Редактор: Серверы (live worlds in the network) and Мини-игры (your places).
+                    let sid = Id::new("studio-page-tab");
+                    let cur: usize = ctx.data(|d| d.get_temp(sid)).unwrap_or(1);
+                    for (k, title) in [(0usize, "Серверы"), (1, "Мини-игры")] {
+                        if pill_button(ui, icons, None, title, if cur == k { ButtonKind::Primary } else { ButtonKind::Secondary }, 96.0, true).clicked() {
+                            ctx.data_mut(|d| d.insert_temp(sid, k));
+                        }
+                    }
                 } else if page == Tab::Server {
                     for (place, title) in [(false, "Сервер"), (true, "Плейс")] {
                         if pill_button(ui, icons, None, title, if place_mode == place { ButtonKind::Primary } else { ButtonKind::Secondary }, 86.0, true).clicked() {
@@ -256,9 +265,12 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                         }
                         Tab::Studio => {
                             // «+ Новый» opens the new-place form on the page.
-                            if pill_button(ui, icons, Some(icon::PLUS), "Новый", ButtonKind::Primary, 110.0, true).clicked() {
+                            if pill_button(ui, icons, Some(icon::PLUS), "", ButtonKind::Primary, 44.0, true).on_hover_text("Новая мини-игра").clicked() {
                                 let n = worlds.iter().filter(|w| w.cfg.studio_project || is_studio_app()).count() + 1;
-                                ui.ctx().data_mut(|d| d.insert_temp(Id::new("studio-new-form"), Some((format!("Сервер {n}"), 0u8))));
+                                ui.ctx().data_mut(|d| {
+                                    d.insert_temp(Id::new("studio-new-form"), Some((format!("Мини-игра {n}"), 0u8)));
+                                    d.insert_temp(Id::new("studio-page-tab"), 1usize);
+                                });
                             }
                         }
                         Tab::Server => {
@@ -791,14 +803,15 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     // In the WolfStudio app every world is a server (its own folder, apart from game worlds).
     let projects: Vec<&crate::main_menu::WorldEntry> = worlds.iter().filter(|w| w.cfg.studio_project || is_studio_app()).collect();
 
-    // «+ Новый» is in the page's toolbar.
+    // «+» is in the page's toolbar; the toolbar also switches Серверы / Мини-игры.
+    let page_tab: usize = ui.ctx().data(|d| d.get_temp(Id::new("studio-page-tab"))).unwrap_or(1);
 
     // Creating a server: name and template, right here in the menu (not in the editor).
     if let Some((name, template)) = &mut form {
         let mut close = false;
         glass_card(ui, p, 18.0, Margin::same(16.0), Stroke::new(1.5_f32, p.accent), |ui| {
             ui.set_width(ui.available_width());
-            ui.label(egui::RichText::new("НОВЫЙ СЕРВЕР").size(11.5).color(p.text_muted));
+            ui.label(egui::RichText::new("НОВАЯ МИНИ-ИГРА").size(11.5).color(p.text_muted));
             ui.add(egui::TextEdit::singleline(name).char_limit(32).hint_text("Название").desired_width(ui.available_width()));
             ui.label(egui::RichText::new("Пустая плоская основа с сеткой, без построек — как Baseplate в Roblox Studio").size(12.5).color(p.text_muted));
             *template = 0;
@@ -818,16 +831,16 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
     }
     ui.ctx().data_mut(|d| d.insert_temp(form_id, form.clone()));
 
+    if page_tab == 1 {
     if projects.is_empty() && form.is_none() {
-        glass_card(ui, p, 18.0, Margin::same(18.0), Stroke::new(1.0_f32, p.outline), |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(egui::RichText::new("Пока нет серверов").font(bold_font(16.0)).color(p.text));
-            ui.label(egui::RichText::new("Сервер — это ваша игра, как плейс в Roblox Studio. Создайте его, откройте в редакторе, стройте и пишите скрипт на Luau, потом «Запустить» — и друзья заходят.").size(13.0).color(p.text_muted));
+        ui.add_space(8.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("Нажмите «+», чтобы создать мини-игру").size(13.5).color(p.text_muted));
         });
     }
     // Server cards: tap the card to open the editor scene.
     for w in projects {
-        let name = w.cfg.name.strip_prefix("Проект").map(|rest| format!("Сервер{rest}")).unwrap_or_else(|| w.cfg.name.clone());
+        let name = w.cfg.name.strip_prefix("Проект").map(|rest| format!("Мини-игра{rest}")).unwrap_or_else(|| w.cfg.name.clone());
         let out = glass_card(ui, p, 16.0, Margin::same(12.0), Stroke::new(1.0_f32, p.outline), |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -856,21 +869,18 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
             *action = MenuAction::OpenStudio(w.cfg.id.clone());
         }
     }
+    return;
+    }
 
     // Worlds of WolfServer (phone or PC) in this network: they appear here by themselves as
     // soon as a server starts, and open with the studio tools — edits go straight to the server.
-    section(ui, p, "Миры на серверах", "");
     let nearby = NEARBY.lock().map(|n| n.clone()).unwrap_or_default();
-    ui.horizontal(|ui| {
-        let t = ui.ctx().input(|i| i.time) as f32;
-        let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-        ui.painter().circle_stroke(r.center(), 3.0 + (t * 1.5).fract() * 6.0, Stroke::new(1.5_f32, p.accent.gamma_multiply(1.0 - (t * 1.5).fract())));
-        ui.painter().circle_filled(r.center(), 2.5, p.accent);
-        ui.label(egui::RichText::new("Запущенные серверы в вашей сети появляются здесь сами").size(13.0).color(p.text_muted));
-    });
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
     if nearby.is_empty() {
-        ui.label(egui::RichText::new("Пока нет. Запустите сервер на вкладке «Сервер» в WolfStudio или WolfServer.exe на ПК.").size(13.0).color(p.text_muted));
+        ui.add_space(8.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("Запущенные серверы в вашей сети появятся здесь сами").size(13.5).color(p.text_muted));
+        });
     }
     for (name, addr, players, max) in &nearby {
         glass_card(ui, p, 16.0, Margin::same(12.0), Stroke::new(1.0_f32, p.outline), |ui| {
