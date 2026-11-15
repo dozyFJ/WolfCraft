@@ -398,6 +398,11 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Obsidian), 2), (ids::COPPER_INGOT, 2)], (b(Block::GeoGenerator), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::OakPlanks), 4)], (b(Block::WaterMill), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 12), (ids::CIRCUIT, 4), (ids::URANIUM_INGOT, 2), (b(Block::EnergyCell), 1)], (b(Block::Reactor), 1), true, "WolfTech"));
+        // Reactor parts.
+        v.push(r(&[(ids::URANIUM_INGOT, 3), (ids::IRON_INGOT, 2)], (ids::URANIUM_ROD, 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 5), (ids::COPPER_INGOT, 2)], (ids::HEAT_VENT, 1), true, "WolfTech"));
+        v.push(r(&[(ids::TIN_INGOT, 4), (b(Block::Ice), 2), (ids::COPPER_INGOT, 1)], (ids::COOLANT_CELL, 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 4), (ids::BRONZE_INGOT, 2), (b(Block::Obsidian), 1)], (ids::REACTOR_PLATING, 1), true, "WolfTech"));
         v.push(r(&[(ids::COPPER_INGOT, 3), (ids::CIRCUIT, 1), (b(Block::IskritBlock), 1)], (ids::STORAGE_UPGRADE, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));
