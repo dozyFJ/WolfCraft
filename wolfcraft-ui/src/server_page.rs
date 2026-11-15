@@ -184,7 +184,7 @@ fn modules(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
     let mut name: String = ui.ctx().data(|d| d.get_temp(new_id)).unwrap_or_default();
     card(ui, p, |ui| {
         caption(ui, p, "НОВЫЙ МОД");
-        ui.label(egui::RichText::new("Мод — Luau-модуль: общие функции для плагинов и плейсов.").size(12.5).color(p.text_muted));
+        ui.label(egui::RichText::new("Мод — Luau-модуль: общие функции для плагинов и мини-игр.").size(12.5).color(p.text_muted));
         let w = ui.available_width();
         crate::ui_components::text_input(ui, icons, &mut name, "ID, например economy", w, Some(icon::CODE));
         ui.add_space(6.0);
@@ -303,7 +303,7 @@ fn console(ui: &mut Ui, icons: &GuiIcons, p: &Palette, data: &Path) {
     card(ui, p, |ui| {
         caption(ui, p, "КОНСОЛЬ");
         let text = read_log(data, Some(&["server", "сервер", "net", "join", "игрок"]), 40);
-        ui.label(egui::RichText::new(if text.is_empty() { "Пока тихо. Запустите сервер или плейс на вкладке «Дашборд».".to_string() } else { text }).font(FontId::monospace(11.0)).color(Color32::from_rgb(190, 198, 208)));
+        ui.label(egui::RichText::new(if text.is_empty() { "Пока тихо. Запустите сервер или мини-игру на вкладке «Дашборд».".to_string() } else { text }).font(FontId::monospace(11.0)).color(Color32::from_rgb(190, 198, 208)));
     });
     card(ui, p, |ui| {
         caption(ui, p, "КОМАНДЫ ПРИ ЗАПУСКЕ");
