@@ -320,6 +320,9 @@ pub struct App {
     /// Minimap texture and when it was last rebuilt.
     minimap: Option<egui::TextureHandle>,
     minimap_age: f32,
+    /// Seconds since the sky (stars, planets, clouds) was last rebuilt: 20 times a second is
+    /// plenty, it hardly moves.
+    sky_age: f32,
     /// Minimap pixels being rebuilt a few rows per frame, and the next row to do.
     minimap_px: Vec<egui::Color32>,
     minimap_row: usize,
@@ -461,6 +464,7 @@ impl App {
             last_health: 20.0,
             minimap: None,
             minimap_age: 10.0,
+            sky_age: 10.0,
             minimap_px: vec![egui::Color32::from_rgb(12, 14, 18); 64 * 64],
             minimap_row: 0,
             block_colors: Vec::new(),
@@ -2125,6 +2129,14 @@ impl App {
                             compact: cfg!(target_os = "android"),
                             crosshair: !(touch.seen && settings.tap_aim),
                             effects: p.effects.iter().map(|a| (format!("{} {}", a.effect.name(), wolfcraft_engine::magic::roman(a.level)), a.effect.color(), a.left)).collect(),
+                            goal: s.goal().map(|a| (wolfcraft_engine::items::ItemStack::new(a.icon, 1), a.desc.to_string())),
+                            tip: s.first_steps().then(|| {
+                                if touch.seen {
+                                    "Джойстик — идти · держите палец на блоке — ломать · тап — поставить".to_string()
+                                } else {
+                                    "WASD — идти · Пробел — прыжок · ЛКМ — ломать · ПКМ — поставить · E — инвентарь".to_string()
+                                }
+                            }),
                             achievement: s.ach_toasts.first().map(|(i, age)| {
                                 let a = &crate::achievements::ALL[*i];
                                 (wolfcraft_engine::items::ItemStack::new(a.icon, 1), a.name.to_string(), a.desc.to_string(), *age)
@@ -2679,8 +2691,12 @@ impl App {
                     model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&cubes, cam.eye));
                 }
                 gfx.world.set_model(&gfx.gpu.device, &gfx.gpu.queue, &model_verts);
-                let sky_verts = wolfcraft_engine::renderer::sky::build_sky(&wolfcraft_engine::renderer::sky::SkyParams { eye: cam.eye, sun_dir: sun.as_vec3(), day, planet_radius: s.planet.radius, sky, time: self.time.elapsed(), underwater, cube: s.planet.grid.cube });
-                gfx.world.set_sky(&gfx.gpu.device, &gfx.gpu.queue, &sky_verts);
+                self.sky_age += dt as f32;
+                if self.sky_age >= 0.05 {
+                    self.sky_age = 0.0;
+                    let sky_verts = wolfcraft_engine::renderer::sky::build_sky(&wolfcraft_engine::renderer::sky::SkyParams { eye: cam.eye, sun_dir: sun.as_vec3(), day, planet_radius: s.planet.radius, sky, time: self.time.elapsed(), underwater, cube: s.planet.grid.cube });
+                    gfx.world.set_sky(&gfx.gpu.device, &gfx.gpu.queue, &sky_verts);
+                }
                 // First-person arms (Bedrock-style): one swing per click, a held button keeps
                 // swinging, and a started swing always plays to the end.
                 let first_person = s.camera_mode == crate::session::CameraMode::First && !s.player.survival.dead;

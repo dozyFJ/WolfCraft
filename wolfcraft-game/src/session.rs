@@ -2165,6 +2165,24 @@ impl GameSession {
         }
     }
 
+    /// The next goal for a newcomer in survival: the first starter achievement not yet got
+    /// (wood → workbench → pickaxe → stone → iron → diamond → WolfTech), shown at the top.
+    pub fn goal(&self) -> Option<&'static crate::achievements::Achievement> {
+        if self.player.is_creative() || self.studio {
+            return None;
+        }
+        ["wood", "bench", "pick", "stone", "iron", "diamond", "circuit", "power"]
+            .iter()
+            .find(|id| !self.achieved.contains(**id))
+            .and_then(|id| crate::achievements::find(id))
+            .map(|(_, a)| a)
+    }
+
+    /// Controls for the first half minute in a brand-new world.
+    pub fn first_steps(&self) -> bool {
+        self.achieved.is_empty() && self.clock < 30.0
+    }
+
     /// Grants an achievement once per world: a golden toast pops on the left.
     pub fn grant(&mut self, id: &str) {
         if self.achieved.contains(id) {
