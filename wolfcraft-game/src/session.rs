@@ -131,6 +131,8 @@ pub struct GameSession {
     /// Camera feel: dip after a hard landing, last vertical speed (to spot the landing),
     /// third-person shoulder offset (smoothed, shrinks near walls).
     land_dip: f64,
+    /// Seconds to the next "am I stuck in blocks?" check.
+    stuck_check: f32,
     /// View bobbing: step phase, smoothed strength, time off the ground.
     bob_phase: f64,
     bob_amp: f64,
@@ -288,6 +290,7 @@ impl GameSession {
             rest_camera: None,
             cam_lag: 0.0,
             land_dip: 0.0,
+            stuck_check: 0.0,
             bob_phase: 0.0,
             bob_amp: 0.0,
             air_t: 0.0,
@@ -596,6 +599,23 @@ impl GameSession {
             }
             self.prev_vy = if self.player.body.on_ground { 0.0 } else { vy };
             self.land_dip *= (-7.0 * dt as f64).exp();
+        }
+        // Buried in blocks (a broken save, a block placed on top, a big edit around)? Climb out,
+        // like the game "pushing out of blocks" in Minecraft. Only once the area is loaded.
+        self.stuck_check -= dt;
+        if self.stuck_check <= 0.0 && self.riding.is_none() {
+            self.stuck_check = 0.5;
+            let feet = self.player.body.pos;
+            let cell = self.chunks.grid().world_to_cell(feet);
+            if self.chunks.get_block(cell).is_some() {
+                if let Some(free) = wolfcraft_engine::physics::free_spot_above(&self.chunks, feet, 64) {
+                    if free != feet {
+                        log::warn!("player was stuck in blocks at {feet:?}: lifted by {:.1}", (free - feet).length());
+                        self.player.body.pos = free;
+                        self.player.body.vel = DVec3::ZERO;
+                    }
+                }
+            }
         }
         // View bobbing that does not twitch: "on the ground" flickers on the cube planet, so
         // a short time in the air still counts as walking, and the strength eases in and out.
@@ -1958,7 +1978,7 @@ impl GameSession {
                 }
             }
         }
-        if let Err(e) = std::fs::write(self.containers_path(), out) {
+        if let Err(e) = wolfcraft_engine::storage::write_safe(&self.containers_path(), out.as_bytes()) {
             log::error!("saving containers.txt: {e}");
         }
     }
@@ -1970,12 +1990,12 @@ impl GameSession {
         self.save_containers();
         self.save_block_commands();
         if self.buttonsim.active {
-            if let Err(e) = std::fs::write(self.dir.join("buttonsim.txt"), self.buttonsim.to_text()) {
+            if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("buttonsim.txt"), self.buttonsim.to_text().as_bytes()) {
                 log::error!("buttonsim: {e}");
             }
         }
         if !self.petsim.owned.is_empty() || self.petsim.coins > 0 {
-            if let Err(e) = std::fs::write(self.dir.join("petsim.txt"), self.petsim.to_text()) {
+            if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("petsim.txt"), self.petsim.to_text().as_bytes()) {
                 log::error!("petsim: {e}");
             }
         }
@@ -1989,7 +2009,7 @@ impl GameSession {
             "overworld".to_string()
         };
         let _ = std::fs::write(self.dimension_path(), dim);
-        if let Err(e) = std::fs::write(self.dir.join("player.dat"), self.player.to_bytes()) {
+        if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("player.dat"), &self.player.to_bytes()) {
             log::error!("saving player.dat: {e}");
         }
         match self.chunks.save_all() {

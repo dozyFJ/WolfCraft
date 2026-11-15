@@ -62,6 +62,35 @@ pub fn rle_decode(data: &[u8], expected: usize) -> Option<Vec<u16>> {
     (out.len() == expected && i == data.len()).then_some(out)
 }
 
+/// Writes a file so that a crash or a power cut never leaves it half-written: a temporary
+/// file is written and synced, the old file is kept as `.bak`, then the new one takes its place.
+pub fn write_safe(path: &Path, data: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let tmp = path.with_extension("tmp");
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        f.write_all(data).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        let _ = f.sync_all();
+    }
+    if path.exists() {
+        let _ = std::fs::rename(path, path.with_extension("bak"));
+    }
+    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Reads a file written by `write_safe`; if it is missing or `parse` rejects it, the `.bak`
+/// copy is tried.
+pub fn read_with_backup<T>(path: &Path, parse: impl Fn(&[u8]) -> Option<T>) -> Option<T> {
+    if let Some(v) = std::fs::read(path).ok().and_then(|b| parse(&b)) {
+        return Some(v);
+    }
+    let v = std::fs::read(path.with_extension("bak")).ok().and_then(|b| parse(&b));
+    if v.is_some() {
+        log::warn!("{}: damaged or missing, restored from the backup", path.display());
+    }
+    v
+}
+
 /// CRC-32 (IEEE), to notice files damaged on the disk or cut by a power loss.
 pub fn crc32(data: &[u8]) -> u32 {
     let mut c = !0u32;
@@ -290,6 +319,22 @@ mod tests {
         let got = fresh.load_chunk(key).expect("restored from the backup");
         assert_eq!(got.get(1, 2, 3), Block::Stone);
         assert!(std::fs::read_dir(dir.join("regions").join("corrupt")).unwrap().count() >= 1, "the broken file is kept aside");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn safe_files_keep_the_previous_version() {
+        let dir = std::env::temp_dir().join(format!("wc_safe_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("player.dat");
+        write_safe(&p, b"WCP1 first").unwrap();
+        write_safe(&p, b"WCP1 second").unwrap();
+        let ok = |b: &[u8]| b.starts_with(b"WCP1").then(|| b.to_vec());
+        assert_eq!(read_with_backup(&p, ok).unwrap(), b"WCP1 second");
+        // Cut short by a power loss: the backup is used.
+        std::fs::write(&p, b"WC").unwrap();
+        assert_eq!(read_with_backup(&p, ok).unwrap(), b"WCP1 first");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -148,7 +148,20 @@ fn run(req: &LoadRequest, sh: &LoadShared) -> Result<Loaded, String> {
 
     // 4. Spawn point (or the saved player).
     sh.set(4, 0.32, "Поиск ровной суши".into());
-    let saved = std::fs::read(storage.player_path()).ok().and_then(|b| Player::from_bytes(&b));
+    // The player file falls back to its backup; a position that makes no sense (NaN, far out
+    // in space, inside the core) puts the player back on the spawn instead of a broken world.
+    let lim = planet.grid.n as f64;
+    let sane = |p: &Player| {
+        let r = p.body.pos.length();
+        p.body.pos.is_finite() && r > 1.0 && r < lim * 6.0
+    };
+    let saved = wolfcraft_engine::storage::read_with_backup(&storage.player_path(), Player::from_bytes).filter(|p| {
+        let ok = sane(p);
+        if !ok {
+            log::warn!("saved position {:?} is broken: back to the spawn", p.body.pos);
+        }
+        ok
+    });
     let restored = saved.is_some();
     let player = match saved {
         Some(mut p) => {
