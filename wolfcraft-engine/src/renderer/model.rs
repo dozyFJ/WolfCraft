@@ -1629,7 +1629,8 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool, cross
 /// Builds both first-person arms relative to the camera (camera at the origin).
 /// Vertices: right arm first (`ARM` when empty-handed), then the left arm (`ARM`).
 /// Vertices of one bare arm: sleeve, cuff and hand, 36 each (sharp boxes).
-pub const ARM: usize = 3 * 36;
+/// Sleeve, cuff, hand, four two-joint fingers and a two-joint thumb: 13 boxes.
+pub const ARM: usize = 13 * 36;
 
 pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
     if let Some(g) = pose.gun {
