@@ -11,7 +11,8 @@ use egui::{Align2, Color32, FontId, Frame, Id, Margin, Pos2, Rect, Rounding, Sen
 use wolfcraft_assets::gui as icon;
 
 const TOOLBAR_H: f32 = 56.0;
-const NAV_H: f32 = 56.0;
+const NAV_H: f32 = 50.0;
+const HEAD_H: f32 = 52.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -136,49 +137,69 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
         crate::main_menu::world_backdrop(&bg, full, ctx.input(|i| i.time) as f32);
         bg.rect_filled(full, 0.0, p.bg.gamma_multiply(if p.dark { 0.38 } else { 0.30 }));
         // Aero glass header with the page menu across the top (no bottom dock).
-        let top = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + NAV_H));
+        let top = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + HEAD_H + NAV_H));
         bg.rect_filled(top, 0.0, glass_tint(&p));
-        bg.add(grad_shape(Rect::from_min_max(Pos2::new(top.left(), screen.top()), Pos2::new(top.right(), screen.top() + NAV_H * 0.6)), 0.0, 0.0, glass_gloss(&p), Color32::TRANSPARENT));
+        bg.add(grad_shape(Rect::from_min_max(Pos2::new(top.left(), screen.top()), Pos2::new(top.right(), screen.top() + HEAD_H * 0.7)), 0.0, 0.0, glass_gloss(&p), Color32::TRANSPARENT));
+        bg.line_segment([Pos2::new(full.left(), screen.top() + HEAD_H), Pos2::new(full.right(), screen.top() + HEAD_H)], Stroke::new(1.0_f32, glass_rim(&p).gamma_multiply(0.4)));
         bg.line_segment([Pos2::new(full.left(), top.bottom()), Pos2::new(full.right(), top.bottom())], Stroke::new(1.0_f32, glass_rim(&p)));
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
-    // ---- Page menu: a row of glass pills along the top ----
+    // ---- Header: logo and title; theme and updates on the right ----
+    egui::TopBottomPanel::top("launcher-head")
+        .exact_height(HEAD_H)
+        .frame(Frame::none().inner_margin(Margin::symmetric(14.0, 8.0)))
+        .show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
+                icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(20.0)).color(p.text));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).on_hover_text(if dark { "Светлая тема" } else { "Тёмная тема" }).clicked() {
+                        action = MenuAction::ToggleTheme;
+                    }
+                    if round_icon(ui, icons, &p, icon::REFRESH).on_hover_text("Проверить обновления").clicked() {
+                        action = MenuAction::CheckUpdates;
+                    }
+                });
+            });
+        });
+
+    // ---- Page menu under the header: a sliding row of pills (icon + name) ----
     egui::TopBottomPanel::top("launcher-nav")
         .exact_height(NAV_H)
-        .frame(Frame::none().inner_margin(Margin::symmetric(10.0, 8.0)))
+        .frame(Frame::none().inner_margin(Margin::symmetric(10.0, 6.0)))
         .show(ctx, |ui| {
-            let rect = ui.max_rect();
-            let gap = 6.0;
-            let w = (rect.width() - gap * (tabs.len() as f32 - 1.0)) / tabs.len() as f32;
-            for (i, (t, label)) in tabs.iter().enumerate() {
-                let r = Rect::from_min_size(Pos2::new(rect.left() + (w + gap) * i as f32, rect.top()), Vec2::new(w, rect.height()));
-                let resp = ui.interact(r, Id::new(("launcher-nav", i)), Sense::click());
-                let on = tab == i;
-                if on {
-                    gloss_capsule(ui, r, p.accent);
-                } else if resp.hovered() || resp.is_pointer_button_down_on() {
-                    ui.painter().rect_filled(r, Rounding::same(r.height() / 2.0), glass_gloss(&p));
-                }
-                let col = if on { Color32::WHITE } else { p.text };
-                // Icon and label side by side; just the icon when the pill is narrow.
-                let galley = ui.painter().layout_no_wrap(label.to_string(), bold_font(13.5), col);
-                let with_text = w > galley.size().x + 40.0;
-                let total = 20.0 + if with_text { 6.0 + galley.size().x } else { 0.0 };
-                let x = r.center().x - total / 2.0;
-                nav_icon(ui, icons, *t, Rect::from_center_size(Pos2::new(x + 10.0, r.center().y), Vec2::splat(18.0)), col);
-                if with_text {
-                    let pos = Pos2::new(x + 26.0, r.center().y);
-                    if on {
-                        shadow_text(ui.painter(), pos, Align2::LEFT_CENTER, label, bold_font(13.5), col);
-                    } else {
-                        ui.painter().text(pos, Align2::LEFT_CENTER, *label, bold_font(13.5), col);
+            egui::ScrollArea::horizontal().id_salt("launcher-nav-strip").auto_shrink([false, true]).drag_to_scroll(true).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    for (i, (t, label)) in tabs.iter().enumerate() {
+                        let on = tab == i;
+                        let col = if on { Color32::WHITE } else { p.text };
+                        let galley = ui.painter().layout_no_wrap(label.to_string(), bold_font(14.0), col);
+                        let (r, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 50.0, 38.0), Sense::click());
+                        if on {
+                            gloss_capsule(ui, r, p.accent);
+                        } else {
+                            let hot = resp.hovered() || resp.is_pointer_button_down_on();
+                            ui.painter().rect_filled(r, Rounding::same(19.0), if hot { glass_gloss(&p).gamma_multiply(2.0) } else { Color32::from_black_alpha(if p.dark { 50 } else { 16 }) });
+                            ui.painter().rect_stroke(r, Rounding::same(19.0), Stroke::new(1.0, glass_rim(&p).gamma_multiply(0.6)));
+                        }
+                        nav_icon(ui, icons, *t, Rect::from_center_size(Pos2::new(r.left() + 22.0, r.center().y), Vec2::splat(18.0)), col);
+                        let pos = Pos2::new(r.left() + 38.0, r.center().y);
+                        if on {
+                            shadow_text(ui.painter(), pos, Align2::LEFT_CENTER, label, bold_font(14.0), col);
+                        } else {
+                            ui.painter().text(pos, Align2::LEFT_CENTER, *label, bold_font(14.0), col);
+                        }
+                        if resp.clicked() {
+                            tab = i;
+                        }
                     }
-                }
-                if resp.clicked() {
-                    tab = i;
-                }
-            }
+                });
+            });
         });
 
     // ---- Toolbar: each page has its own (title and its own buttons) ----
@@ -365,23 +386,9 @@ fn gradient(ui: &Ui, r: Rect, top: Color32, bottom: Color32) {
 
 fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandle>, version: &str, nickname: &str, dark: bool, action: &mut MenuAction) {
     ui.add_space(4.0);
-    let _ = planet;
+    let _ = (planet, dark);
     // Play right under the slider: the nickname, the version, «Играть».
     play_banner(ui, icons, p, version, nickname, action);
-    // Theme: dark or light.
-    glass_card(ui, p, 18.0, Margin::same(14.0), Stroke::new(1.0_f32, p.outline), |ui| {
-        ui.set_width(ui.available_width());
-        ui.label(egui::RichText::new("Тема").font(bold_font(16.0)).color(p.text));
-        ui.add_space(4.0);
-        ui.columns(2, |c| {
-            if aero_button(&mut c[0], p, icons, Some(icon::MOON), "Тёмная", dark).clicked() && !dark {
-                *action = MenuAction::ToggleTheme;
-            }
-            if aero_button(&mut c[1], p, icons, Some(icon::SUN), "Светлая", !dark).clicked() && dark {
-                *action = MenuAction::ToggleTheme;
-            }
-        });
-    });
     // Новости and Релизы: each its own section.
     section(ui, p, "Новости", "");
     for n in &NEWS {
@@ -398,22 +405,6 @@ fn home(ui: &mut Ui, icons: &GuiIcons, p: &Palette, planet: Option<&TextureHandl
         });
     });
     ui.add_space(6.0);
-    // Updates.
-    glass_card(ui, p, 18.0, Margin::same(14.0), Stroke::new(1.0_f32, p.outline), |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new("Обновления").font(bold_font(16.0)).color(p.text));
-                ui.label(egui::RichText::new(format!("Установлена v{version}")).size(12.5).color(p.text_muted));
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.set_max_width(170.0);
-                if aero_button(ui, p, icons, Some(icon::REFRESH), "Проверить", false).clicked() {
-                    *action = MenuAction::CheckUpdates;
-                }
-            });
-        });
-    });
     ui.add_space(8.0);
 }
 
@@ -463,6 +454,7 @@ fn gloss_capsule(ui: &Ui, r: Rect, c: Color32) {
 }
 
 /// A glossy Aero button: accent when `on`, clear glass otherwise.
+#[allow(dead_code)]
 fn aero_button(ui: &mut Ui, p: &Palette, icons: &GuiIcons, ic: Option<u16>, label: &str, on: bool) -> egui::Response {
     let w = ui.available_width();
     let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 42.0), Sense::click());
