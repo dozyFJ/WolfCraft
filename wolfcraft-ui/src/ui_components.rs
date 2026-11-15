@@ -470,6 +470,12 @@ pub fn to_body(ctx: &egui::Context, id: &str, pos: Pos2) -> Pos2 {
 /// in the middle of the dimmed world. A tap outside the card or the round ✕ on its corner
 /// closes it. Returns true when dismissed.
 pub fn block_screen(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(&mut Ui)) -> bool {
+    block_screen_ex(ctx, id, width, true, add)
+}
+
+/// `block_screen` with or without the round close button on the corner (windows with their
+/// own «Закрыть» in the header go without).
+pub fn block_screen_ex(ctx: &egui::Context, id: &str, width: f32, corner_close: bool, add: impl FnOnce(&mut Ui)) -> bool {
     let p: Palette = palette(ctx);
     let screen = ctx.screen_rect();
     let mut dismissed = false;
@@ -503,7 +509,7 @@ pub fn block_screen(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(
     let card = Rect::from_min_max(fit * body.response.rect.min, fit * body.response.rect.max);
     // Round close button riding on the card's top-right corner.
     let c = Pos2::new((card.right() + 4.0).min(screen.right() - 20.0), (card.top() - 4.0).max(screen.top() + 20.0));
-    egui::Area::new(Id::new(id).with("close")).order(egui::Order::Tooltip).fixed_pos(c - Vec2::splat(17.0)).fade_in(false).show(ctx, |ui| {
+    if corner_close { egui::Area::new(Id::new(id).with("close")).order(egui::Order::Tooltip).fixed_pos(c - Vec2::splat(17.0)).fade_in(false).show(ctx, |ui| {
         let (r, resp) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
         let fill = if resp.hovered() || resp.is_pointer_button_down_on() { Color32::from_rgb(200, 70, 60) } else { Color32::from_rgb(72, 72, 76) };
         ui.painter().circle_filled(r.center(), 16.0, fill);
@@ -514,7 +520,7 @@ pub fn block_screen(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(
         if resp.clicked() {
             dismissed = true;
         }
-    });
+    }); }
     // A tap on the dimmed world (not on the card) closes too.
     if scrim.inner && !ctx.input(|i| i.pointer.interact_pos()).is_some_and(|q| card.expand(8.0).contains(q)) {
         dismissed = true;
