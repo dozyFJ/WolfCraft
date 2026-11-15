@@ -32,6 +32,7 @@ pub enum Role {
 
 pub fn role(id: Option<ItemId>) -> Role {
     let Some(id) = id else { return Role::Other };
+    if id == ids::ENERGY_SWORD {return Role::Sword(3);}
     if id == ids::BOW {
         return Role::Bow;
     }
@@ -189,3 +190,4 @@ mod tests {
         assert!(describe(ids::APPLE).is_none());
     }
 }
+

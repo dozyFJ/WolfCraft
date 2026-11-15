@@ -3944,6 +3944,7 @@ version = "0.3.0"
 dependencies = [
  "android_logger",
  "egui",
+ "getrandom 0.3.4",
  "glam",
  "image",
  "jni 0.21.1",
@@ -3952,6 +3953,7 @@ dependencies = [
  "oboe",
  "rayon",
  "rodio",
+ "serde",
  "serde_json",
  "ureq",
  "wgpu",
@@ -3985,10 +3987,13 @@ dependencies = [
 name = "wolfcraft-net"
 version = "0.3.0"
 dependencies = [
+ "base64",
+ "flate2",
  "if-addrs",
  "log",
  "serde",
  "serde_json",
+ "wolfcraft-engine",
 ]
 
 [[package]]

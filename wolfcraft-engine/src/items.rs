@@ -375,7 +375,7 @@ pub fn is_valid(id: ItemId) -> bool {
     (id < ITEM_BASE || id >= 1024) && Block::from_id(id) as u16 == id || (ITEM_BASE..=ids::LAST).contains(&id)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ItemStack {
     pub id: ItemId,
     pub count: u8,
@@ -773,4 +773,5 @@ mod tests {
         assert_eq!(drops(Block::Grass, true, p, 1)[0].id, Block::Dirt as ItemId);
     }
 }
+
 

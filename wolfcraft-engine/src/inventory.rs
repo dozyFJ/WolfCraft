@@ -127,7 +127,7 @@ impl Inventory {
             if dur > 0 && (unb == 0 || tick.wrapping_mul(2654435761) % (unb + 1) == 0) {
                 s.damage += 1;
                 if s.damage >= dur {
-                    self.slots[self.selected] = None;
+                    if crate::items::rechargeable(s.id) {s.damage=dur;} else {self.slots[self.selected] = None;}
                 }
             }
         }
@@ -383,6 +383,10 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_INGOT, 4), (b(Block::Cobblestone), 4), (ids::CIRCUIT, 1)], (b(Block::Crusher), 1), true, "WolfTech"));
         v.push(r(&[(b(Block::ElectricFurnace), 1), (ids::COPPER_INGOT, 4), (ids::CIRCUIT, 1)], (b(Block::InductionFurnace), 1), true, "WolfTech"));
         v.push(r(&[(b(Block::Crusher), 1), (ids::GOLD_INGOT, 2), (ids::CIRCUIT, 2)], (b(Block::Enricher), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 5), (ids::CIRCUIT, 1), (b(Block::Wool), 3)], (b(Block::WindTurbine), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Obsidian), 2), (ids::COPPER_INGOT, 2)], (b(Block::GeoGenerator), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::OakPlanks), 4)], (b(Block::WaterMill), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 12), (ids::CIRCUIT, 4), (ids::URANIUM_INGOT, 2), (b(Block::EnergyCell), 1)], (b(Block::Reactor), 1), true, "WolfTech"));
         // WolfTech arsenal: energy weapons, the jetpack, nano armour and the mech.
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 2), (ids::DIAMOND, 1), (b(Block::Glass), 1)], (ids::PLASMA_RIFLE, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 6), (ids::COPPER_INGOT, 4), (ids::CIRCUIT, 3), (ids::DIAMOND, 2)], (ids::RAILGUN, 1), true, "WolfTech"));
@@ -393,11 +397,6 @@ pub fn recipes() -> &'static [Recipe] {
         }
         v.push(r(&[(ids::IRON_INGOT, 24), (ids::CIRCUIT, 6), (b(Block::EnergyCell), 2), (ids::DIAMOND, 4)], (ids::MECH, 1), true, "WolfTech"));
         v.push(r(&[(ids::COPPER_INGOT, 2), (ids::CIRCUIT, 1), (ids::GOLD_INGOT, 1)], (ids::OVERCLOCKER, 1), true, "WolfTech"));
-        // More generators: wind, lava heat, water, uranium.
-        v.push(r(&[(ids::IRON_INGOT, 5), (ids::CIRCUIT, 1), (b(Block::Wool), 3)], (b(Block::WindTurbine), 1), true, "WolfTech"));
-        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Obsidian), 2), (ids::COPPER_INGOT, 2)], (b(Block::GeoGenerator), 1), true, "WolfTech"));
-        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::OakPlanks), 4)], (b(Block::WaterMill), 1), true, "WolfTech"));
-        v.push(r(&[(ids::IRON_INGOT, 12), (ids::CIRCUIT, 4), (ids::URANIUM_INGOT, 2), (b(Block::EnergyCell), 1)], (b(Block::Reactor), 1), true, "WolfTech"));
         v.push(r(&[(ids::COPPER_INGOT, 3), (ids::CIRCUIT, 1), (b(Block::IskritBlock), 1)], (ids::STORAGE_UPGRADE, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));
@@ -835,4 +834,13 @@ mod tests {
         g.return_all(&mut inv);
         assert!(g.cells.iter().all(|c| c.is_none()));
     }
+
+    #[test]
+    fn energy_sword_discharges_but_does_not_disappear() {
+        let mut inv=Inventory::default();let mut s=ItemStack::new(ids::ENERGY_SWORD,1);s.damage=s.info().durability-1;inv.slots[0]=Some(s);
+        assert_eq!(crate::tools::wear_for_hit(Some(s.id)),1);inv.wear_selected();
+        let empty=inv.held().unwrap();assert_eq!(empty.damage,empty.info().durability);
+    }
+
 }
+

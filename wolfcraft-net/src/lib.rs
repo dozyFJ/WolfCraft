@@ -1,11 +1,11 @@
 //! WolfCraft network protocol: one JSON message per line over TCP.
 //!
-//! The server (WolfServer) does not simulate the world. Every client generates the same planet
-//! from the world settings it receives, and the server relays block edits, player states and chat
-//! and keeps the list of edits so that late joiners see the same world.
+//! Clients generate terrain and render it locally. The server relays block edits, players
+//! and chat, and owns the fixed-step WolfTech simulation and durable machine exchanges.
 
 pub mod lan;
 pub mod server;
+pub mod technology;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-pub const PROTOCOL: u32 = 3;
+pub const PROTOCOL: u32 = 4;
 pub const DEFAULT_PORT: u16 = 25570;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -50,6 +50,10 @@ pub enum C2S {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access_token: Option<String>,
     },
+    TechOpen {cell:[i32;4],hell:bool},
+    TechChange(technology::Change),
+    TechRecover(technology::Change),
+    TechConfirm(String),
     State(PlayerState),
     Edit { cell: [i32; 4], block: u16, hell: bool },
     Chat(String),
@@ -72,6 +76,9 @@ pub enum S2C {
     Edits { hell: bool, list: Vec<Edit> },
     /// All earlier edits have been sent.
     Ready,
+    TechSnapshot {hell:bool,reset:bool,time:f64,weather:(wolfcraft_engine::weather::Sky,f32,f32),machines:Vec<technology::Machine>},
+    TechResult(technology::Reply),
+    TechBroken {cell:[i32;4],hell:bool,block:u16},
     Players(Vec<PlayerState>),
     Edit { cell: [i32; 4], block: u16, hell: bool },
     Chat { from: String, text: String },
@@ -255,5 +262,6 @@ mod tests {
         assert_eq!(with_port(" 192.168.0.10:1234 "), "192.168.0.10:1234");
     }
 }
+
 
 

@@ -34,3 +34,6 @@ pub mod worldgen;
 pub mod construction;
 pub mod bosses;
 pub mod storage_bank;
+
+
+pub mod weather;

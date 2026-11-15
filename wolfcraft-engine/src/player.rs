@@ -210,12 +210,18 @@ impl Player {
 
     /// Total defence from the worn armor.
     pub fn armor_points(&self) -> u32 {
-        self.inventory.armor.iter().flatten().map(|s| crate::items::armor_points(s.id) as u32).sum()
+        self.inventory.armor.iter().flatten().filter(|s| !(crate::items::ids::NANO_BASE..=crate::items::ids::NANO_LAST).contains(&s.id) || s.damage<s.info().durability).map(|s| crate::items::armor_points(s.id) as u32).sum()
     }
 
     pub fn damage(&mut self, amount: f32, difficulty: Difficulty) {
         if self.is_creative() || self.revive_guard > 0.0 {
             return;
+        }
+        if amount>0.0 {
+            let cost=amount.ceil().clamp(1.0,2000.0) as u16;
+            for s in self.inventory.armor.iter_mut().flatten() {
+                if (crate::items::ids::NANO_BASE..=crate::items::ids::NANO_LAST).contains(&s.id) {s.damage=s.damage.saturating_add(cost).min(s.info().durability);}
+            }
         }
         // Стойкость: −20 % per level.
         let k = 1.0 - 0.2 * self.effect_level(crate::magic::Effect::Resistance) as f32;
@@ -986,4 +992,15 @@ mod rare_reward_tests {
         let q=Player::from_bytes(&p.to_bytes()).unwrap();assert_eq!(q.inventory,p.inventory);
         assert_eq!(crate::items::armor_slot(ids::WINGS),Some(1));assert_eq!(crate::items::armor_points(ids::WINGS),0);
     }
+
+    #[test]
+    fn nano_armor_spends_charge_and_empty_armor_gives_no_protection() {
+        use crate::items::{ItemStack,ids};
+        let mut p=Player::new(DVec3::Y*1000.0,GameMode::Survival);
+        let mut helmet=ItemStack::new(ids::NANO_BASE,1);helmet.damage=helmet.info().durability-1;p.inventory.armor[0]=Some(helmet);
+        assert_eq!(p.armor_points(),4);p.damage(2.0,Difficulty::Normal);
+        assert_eq!(p.armor_points(),0);assert!(p.inventory.armor[0].is_some());
+    }
+
 }
+

@@ -106,22 +106,7 @@ pub struct Camera {
 /// Seconds to smelt one item in an electric furnace.
 const FURNACE_TIME: f32 = 3.0;
 
-/// State of one WolfTech machine.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct TechState {
-    pub energy: f32,
-    pub progress: f32,
-    /// Generator: seconds of fuel left.
-    pub burn: f32,
-    /// ЭЕ/s made (generators) or wanted (machines) this frame.
-    pub flow: f32,
-    pub working: bool,
-    /// Solar panel: in the sun right now / it is day.
-    pub sunny: bool,
-    pub day: bool,
-    /// Wind / lava / water around a generator (its share of the full rate).
-    pub env: f32,
-}
+pub use wolfcraft_engine::wolftech::MachineState as TechState;
 
 pub struct GameSession {
     pub cfg: WorldConfig,
@@ -149,9 +134,18 @@ pub struct GameSession {
     /// third-person shoulder offset (smoothed, shrinks near walls).
     land_dip: f64,
     /// WolfTech machines: energy, progress, fuel left; the networks (rebuilt every second).
+    pub pending_tech: Option<wolfcraft_net::technology::Change>,
+    pub tech_pending_sent:bool,
+    pub tech_pending_error:Option<String>,
+    pub tech_retry:f32,
+    pub network_world:String,
+    pub remote_tech: bool,
+    pub tech_revisions: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell,u64>,
     pub tech: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, TechState>,
     tech_nets: Vec<Vec<wolfcraft_engine::cubesphere::Cell>>,
     tech_t: f32,
+    tech_clock:wolfcraft_engine::wolftech::Clock,
+    pub energy_elapsed:Option<f32>,
     /// Seconds to the next entity-culling pass.
     cull_t: f32,
     /// Seconds to the next fire step (spreading, burning out).
@@ -317,9 +311,12 @@ impl GameSession {
             rest_camera: None,
             cam_lag: 0.0,
             land_dip: 0.0,
+            pending_tech:None,tech_pending_sent:false,tech_pending_error:None,tech_retry:0.0,
+            network_world:String::new(),remote_tech:false,
+            tech_revisions:Default::default(),
             tech: std::collections::HashMap::new(),
             tech_nets: Vec::new(),
-            tech_t: 0.0,
+            tech_t: 0.0,tech_clock:Default::default(),energy_elapsed:None,
             cull_t: 0.0,
             fire_t: 0.0,
             weather: crate::weather::Weather::new(seed),
@@ -406,8 +403,17 @@ impl GameSession {
         s.mobs.spawning = s.cfg.world_type != wolfcraft_engine::config::WorldType::Baseplate;
         s.storage_bank=wolfcraft_engine::storage_bank::StorageBank::load(&s.dir.join("storage_bank.bin"));
         s.boss_book=wolfcraft_engine::bosses::BossBook::load(&s.dir.join("bosses.txt"));
+        if s.dir.join("wolftech-server.json").exists() && !s.dir.join("wolftech-offline.flag").exists() {
+            let edits=wolfcraft_net::server::load_edits(&s.dir);
+            match wolfcraft_net::technology::Runtime::new(&s.dir,&s.cfg.to_toml().unwrap_or_default(),&edits).and_then(|mut rt|rt.export_singleplayer()) {
+                Ok(())=>{},Err(e)=>log::error!("WolfTech handoff: {e}"),
+            }
+        }
+        let edits=wolfcraft_net::server::load_edits(&s.dir);
+        s.remote_edits=edits[s.hell as usize].iter().map(|(c,b)|(wolfcraft_net::technology::cell(*c),wolfcraft_engine::block::Block::from_id(*b))).collect();
         s.load_containers();
         s.load_tech();
+        s.load_pending_tech();
         s.petsim = wolfcraft_engine::petsim::PetSim::from_text(&std::fs::read_to_string(s.dir.join("petsim.txt")).unwrap_or_default());
         // Old saves kept the pets in petsim.txt: they move into the inventory once.
         for k in std::mem::take(&mut s.petsim.owned) {
@@ -438,6 +444,7 @@ impl GameSession {
     }
 
     pub fn update(&mut self, input: &InputFrame, dt: f32, view: i32, frozen: bool) -> Vec<InteractionEvent> {
+        let energy_dt=self.energy_elapsed.take().unwrap_or(dt);
         // Slow motion right after a big strike.
         let dt = if self.slowmo > 0.0 {
             self.slowmo -= dt;
@@ -706,7 +713,9 @@ impl GameSession {
             });
             // Firearms and launchers never dig: the screen is for aiming.
             let gun = self.player.inventory.held().and_then(|s| wolfcraft_engine::explosives::weapon(s.id).map(|_| s.id)).filter(|id| *id != wolfcraft_engine::items::ids::GRENADE);
-            events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held && !creature_first && gun.is_none(), dt, self.cfg.seed));
+            let filled_remote_machine=self.remote_tech&&hit.is_some_and(|h|wolfcraft_engine::wolftech::kind(h.block).is_some()&&self.containers.get(&h.cell).is_some_and(|v|v.iter().any(Option::is_some)));
+            if filled_remote_machine&&input.break_held {self.item_name=Some(("Перед разборкой заберите предметы из машины".into(),1.5));}
+            events.extend(self.interaction.update_break(&mut self.chunks, &mut self.player, hit, input.break_held && !filled_remote_machine && !creature_first && gun.is_none(), dt, self.cfg.seed));
             // Automatic weapons fire while the trigger (or the finger) is held.
             if let Some(id) = gun.filter(|id| wolfcraft_engine::explosives::firearm(*id).is_some_and(|f| f.auto)) {
                 if (input.use_held || input.break_held) && !input.use_pressed && self.explosives.ready() {
@@ -913,6 +922,11 @@ impl GameSession {
         self.tick_ritual(dt);
         self.tick_boss_film(dt);
         for mob in &self.mobs.mobs {if let Some(role)=&mob.boss {if let Some(record)=self.boss_book.records.get_mut(&(role.kind,role.home)){if !record.defeated{record.hp=mob.hp.max(1.0);}}}}
+        if self.remote_tech {
+            let cells:Vec<_>=events.iter().filter_map(|e|match e {InteractionEvent::Broken{pos,block} if wolfcraft_engine::wolftech::kind(*block).is_some()=>Some(*pos),_=>None}).collect();
+            // The server awards an empty machine block to exactly one successful breaker.
+            events.retain(|e|!matches!(e,InteractionEvent::Dropped{pos,..} if cells.contains(pos)));
+        }
         // Ore loot jumps out higher and sparkles.
         let ores: Vec<_> = events.iter().filter_map(|e| match e {
             InteractionEvent::Broken { pos, block } if wolfcraft_engine::items::ore_glow(*block).is_some() => Some(*pos),
@@ -927,7 +941,8 @@ impl GameSession {
                     self.drops.pop_from_block(*stack, c);
                 }
             }
-            if let InteractionEvent::Broken { pos, .. } = e {
+            if let InteractionEvent::Broken { pos, block } = e {
+                if self.remote_tech && wolfcraft_engine::wolftech::kind(*block).is_some() {self.containers.remove(pos);continue;}
                 if let Some(slots) = self.containers.remove(pos) {
                     let c = self.chunks.grid().cell_center(*pos);
                     for s in slots.into_iter().flatten() {
@@ -937,8 +952,9 @@ impl GameSession {
                 self.furnace_t.remove(pos);
             }
         }
+        if events.iter().any(|e|matches!(e,InteractionEvent::Placed{..}|InteractionEvent::Broken{..}|InteractionEvent::Blasted{..})){self.tech_t=0.0;}
         self.tick_furnaces(dt);
-        self.tick_tech(dt);
+        self.tick_tech(energy_dt);
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
             if let InteractionEvent::Broken { pos, block } = e {
@@ -1884,9 +1900,13 @@ impl GameSession {
     }
 
     /// WolfTech: generators burn and shine, machines work, energy flows through the cables.
-    fn tick_tech(&mut self, dt: f32) {
-        use wolfcraft_engine::items::ItemStack;
+    fn tick_tech(&mut self, dt:f32) {
+        if self.remote_tech{return;}
+        for _ in 0..self.tech_clock.advance(dt){self.tick_tech_step(wolfcraft_engine::wolftech::STEP);}
+    }
+    fn tick_tech_step(&mut self, dt: f32) {
         use wolfcraft_engine::wolftech::{self as wt, Kind};
+        if self.remote_tech {return;}
         if self.tech.is_empty() {
             return;
         }
@@ -1904,158 +1924,28 @@ impl GameSession {
                     }
                 }
             }
-            let mut seen = std::collections::HashSet::new();
-            self.tech_nets.clear();
-            for c in self.tech.keys().copied().collect::<Vec<_>>() {
-                if seen.contains(&c) {
-                    continue;
-                }
-                let mut net = Vec::new();
-                let mut queue = vec![c];
-                seen.insert(c);
-                while let Some(x) = queue.pop() {
-                    if self.tech.contains_key(&x) {
-                        net.push(x);
-                    }
-                    if seen.len() > 4096 {
-                        break;
-                    }
-                    for (a, b, k) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
-                        let Some(n) = g.offset(x, a, b, k) else { continue };
-                        if seen.contains(&n) {
-                            continue;
-                        }
-                        if let Some(nb) = self.chunks.get_block(n).filter(|b| wt::conducts(*b)) {
-                            // A machine nobody registered yet (placed by a script, an older
-                            // version, another player): it joins the network now.
-                            if wt::kind(nb).is_some() {
-                                self.tech.entry(n).or_default();
-                            }
-                            seen.insert(n);
-                            queue.push(n);
-                        }
-                    }
-                }
-                self.tech_nets.push(net);
-            }
+            self.tech_nets = wt::networks(self.tech.keys().copied(),g,|c|self.chunks.get_block(c));
+            for c in self.tech_nets.iter().flatten() {self.tech.entry(*c).or_default();}
             // Solar panels: daylight and open sky, checked once a second.
-            let day = self.daylight() > 0.45 && self.weather.rain < 0.5;
+            let time=self.player.world_time;let rain=self.weather.rain;
+            let sea=self.planet.radius-1.0;
             for (c, st) in self.tech.iter_mut() {
+                if let Some(kind)=self.chunks.get_block(*c).and_then(wt::kind){st.env=wt::environment(kind,*c,g,sea,rain,|n|self.chunks.get_block(n));}
                 if self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::SolarPanel) {
+                    let up=g.up(g.cell_center(*c));
+                    let day=!self.hell&&smoothstep(-0.10,0.14,up.dot(local_sun(time,up)))>0.45&&rain<0.5;
                     st.day = day;
                     st.sunny = day && (1..40).all(|k| g.offset(*c, 0, 0, k).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
                 }
             }
-            // Wind, lava heat and water: what is around them, checked once a second.
-            let rain = self.weather.rain;
-            let sea = self.planet.radius - 1.0;
-            for (c, st) in self.tech.iter_mut() {
-                let Some(k) = self.chunks.get_block(*c).and_then(wt::kind) else { continue };
-                let around = |f: fn(wolfcraft_engine::block::Block) -> bool| {
-                    [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)].iter().filter(|(a, b, kk)| g.offset(*c, *a, *b, *kk).and_then(|n| self.chunks.get_block(n)).is_some_and(f)).count() as f32
-                };
-                st.env = match k {
-                    Kind::Wind => {
-                        let open = (1..20).all(|kk| g.offset(*c, 0, 0, kk).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
-                        let alt = (wolfcraft_engine::cubesphere::radial(g.cell_center(*c)) - sea).max(0.0) as f32;
-                        if open { (0.25 + (alt / 40.0).min(1.0) * 0.75) * (1.0 + 1.5 * rain) } else { 0.1 }
-                    }
-                    Kind::Geo => around(|b| b.is_lava()),
-                    Kind::Water => around(|b| b.is_water()),
-                    _ => 0.0,
-                };
-            }
         }
-        // Each machine on its own: fuel, recipes, progress.
-        let creative = self.player.is_creative();
-        let cells: Vec<_> = self.tech.keys().copied().collect();
-        for c in cells {
-            let Some(b) = self.chunks.get_block(c) else { continue };
-            let Some(k) = wt::kind(b) else { continue };
-            let sp = wt::spec(k);
-            let mut st = self.tech[&c];
-            st.working = false;
-            match k {
-                Kind::Wind | Kind::Geo | Kind::Water => {
-                    st.flow = sp.rate * st.env;
-                    st.working = st.flow > 0.0;
-                }
-                Kind::Generator | Kind::Reactor => {
-                    if st.burn <= 0.0 && st.energy < sp.capacity * 0.95 {
-                        let v = self.container_slots(c, b);
-                        if let Some(f) = v.get(1).copied().flatten().filter(|f| wt::fuel_for(k, f.id) > 0.0) {
-                            st.burn = wt::fuel_for(k, f.id);
-                            v[1] = if f.count > 1 { Some(ItemStack { count: f.count - 1, ..f }) } else { None };
-                        }
-                    }
-                    // Creative: the generator runs without fuel.
-                    if creative && st.burn <= 0.0 {
-                        st.burn = 1.0;
-                    }
-                    if st.burn > 0.0 {
-                        st.burn -= dt;
-                        st.flow = sp.rate;
-                        st.working = true;
-                    } else {
-                        st.flow = 0.0;
-                    }
-                }
-                Kind::Solar => {
-                    // Full power in the open sun, a quarter in the shade by day, nothing at night.
-                    st.flow = if st.sunny { sp.rate } else if st.day { sp.rate * 0.25 } else { 0.0 };
-                    st.working = st.flow > 0.0;
-                }
-                Kind::Cell => {
-                    st.flow = 0.0;
-                    // Charges WolfTech gear lying in its first slot: 5 ЭЕ per point of charge.
-                    let v = self.container_slots(c, b);
-                    if let Some(g) = v.first_mut().and_then(|g| g.as_mut()).filter(|g| wolfcraft_engine::items::rechargeable(g.id) && g.damage > 0) {
-                        let pts = ((st.energy / 5.0).floor() as u16).min(g.damage).min((40.0 * dt).ceil() as u16);
-                        g.damage -= pts;
-                        st.energy -= pts as f32 * 5.0;
-                        st.working = pts > 0;
-                    }
-                }
-                _ => {
-                    let v = self.container_slots(c, b).clone();
-                    // Upgrades: faster and hungrier with «Ускорители».
-                    let (tm, em, _) = wt::upgrades(v.get(3..).unwrap_or(&[]));
-                    let sp = wt::Spec { time: sp.time * tm, rate: sp.rate * em, ..sp };
-                    let out = v.first().copied().flatten().and_then(|i| wt::recipe(k, i.id));
-                    let room = out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
-                        None => true,
-                        Some(s) => s.id == o && s.count as u32 + n as u32 <= 64,
-                    });
-                    let need = sp.rate * dt;
-                    if room && st.energy >= need {
-                        st.energy -= need;
-                        st.progress += dt;
-                        st.flow = sp.rate;
-                        st.working = true;
-                        if st.progress >= sp.time {
-                            st.progress = 0.0;
-                            let (o, n) = out.unwrap();
-                            let v = self.container_slots(c, b);
-                            if let Some(i) = v[0].as_mut() {
-                                i.count -= 1;
-                                if i.count == 0 {
-                                    v[0] = None;
-                                }
-                            }
-                            match v[2].as_mut() {
-                                Some(s) => s.count += n,
-                                None => v[2] = Some(ItemStack::new(o, n)),
-                            }
-                        }
-                    } else {
-                        st.flow = if room { sp.rate } else { 0.0 };
-                        if !room {
-                            st.progress = 0.0;
-                        }
-                    }
-                }
-            }
-            self.tech.insert(c, st);
+        let creative=self.player.is_creative();
+        for c in self.tech.keys().copied().collect::<Vec<_>>() {
+            let Some(b)=self.chunks.get_block(c) else {continue;};
+            let Some(k)=wt::kind(b) else {continue;};
+            let mut state=self.tech[&c];
+            wt::advance(k,&mut state,self.container_slots(c,b),dt,creative);
+            self.tech.insert(c,state);
         }
         // Energy flows inside each network.
         for net in &self.tech_nets {
@@ -2084,7 +1974,7 @@ impl GameSession {
     fn save_tech(&self) {
         let mut out = String::new();
         for (c, st) in &self.tech {
-            out += &format!("{} {} {} {} {} {} {}\n", c.f, c.i, c.j, c.k, st.energy, st.progress, st.burn);
+            out += &format!("{} {} {} {} {} {} {} {}\n", c.f, c.i, c.j, c.k, st.energy, st.progress, st.burn, st.charge_fraction);
         }
         if let Err(e) = wolfcraft_engine::storage::write_safe(&self.tech_path(), out.as_bytes()) {
             log::error!("saving tech: {e}");
@@ -2095,9 +1985,9 @@ impl GameSession {
         let Some(text) = wolfcraft_engine::storage::read_with_backup(&self.tech_path(), |b| String::from_utf8(b.to_vec()).ok()) else { return };
         for line in text.lines() {
             let n: Vec<f64> = line.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-            if n.len() == 7 {
+            if n.len() == 7 || n.len() == 8 {
                 let c = wolfcraft_engine::cubesphere::Cell::new(n[0] as u8, n[1] as i32, n[2] as i32, n[3] as i32);
-                self.tech.insert(c, TechState { energy: n[4] as f32, progress: n[5] as f32, burn: n[6] as f32, ..Default::default() });
+                self.tech.insert(c, TechState { energy: n[4] as f32, progress: n[5] as f32, burn: n[6] as f32, charge_fraction:n.get(7).copied().unwrap_or(0.0) as f32, ..Default::default() });
             }
         }
     }
@@ -2322,6 +2212,10 @@ impl GameSession {
         if let Err(e)=self.storage_bank.save(&self.dir.join("storage_bank.bin")){log::error!("storage bank: {e}");}
         if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}
         self.save_containers();
+        if !self.remote_tech {
+            self.save_tech();
+            if self.dir.join("wolftech-server.json").exists(){let _=wolfcraft_engine::storage::write_safe(&self.dir.join("wolftech-offline.flag"),b"offline");}
+        }
         self.save_block_commands();
         if self.buttonsim.active {
             if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("buttonsim.txt"), self.buttonsim.to_text().as_bytes()) {
@@ -3957,6 +3851,9 @@ impl GameSession {
             return true;
         }
         let held = self.player.inventory.held();
+        if held.is_some_and(|s|s.id==wolfcraft_engine::items::ids::ENERGY_SWORD && s.damage>=s.info().durability) {
+            self.item_name=Some(("Энергомеч разряжен — зарядите его в энергоячейке".into(),1.5));return true;
+        }
         // Weapon, «Острота» (+1.5 per level) and the Сила potion (+3 per level).
         let sharp = held.map(|s| s.ench_level(wolfcraft_engine::magic::Ench::Sharpness)).unwrap_or(0);
         let steal = held.map(|s| s.ench_level(wolfcraft_engine::magic::Ench::Lifesteal)).unwrap_or(0);
@@ -5244,6 +5141,30 @@ mod tests {
     }
 
     #[test]
+    fn wolftech_state_survives_the_normal_world_save_path() {
+        let mut s=load("tech_normal_save",812,false);let c=wolfcraft_engine::cubesphere::Cell::new(0,10,10,500);
+        let expected=TechState{energy:123.0,progress:1.25,burn:7.0,charge_fraction:0.5,..Default::default()};
+        s.tech.insert(c,expected);s.save();s.tech.clear();s.load_tech();
+        let actual=s.tech[&c];assert_eq!(actual.energy,expected.energy);assert_eq!(actual.progress,expected.progress);assert_eq!(actual.burn,expected.burn);assert_eq!(actual.charge_fraction,expected.charge_fraction);
+    }
+
+
+    #[test]
+    fn wolftech_pending_exchange_reloads_and_applies_its_receipt_once() {
+        use wolfcraft_engine::items::ids;
+        let mut s=load("tech_outbox",813,false);let c=wolfcraft_engine::cubesphere::Cell::new(0,10,10,500);
+        s.remote_tech=true;s.network_world="test".into();s.tech_revisions.insert(c,0);
+        let gear=Some(ItemStack::new(ids::JETPACK,1));let before=vec![None;36];let mut after=before.clone();after[0]=gear;
+        s.player.inventory.slots=after.clone().try_into().unwrap();
+        let change=s.begin_tech_change(c,vec![gear,None,None],vec![None;3],before,after.clone()).unwrap();
+        s.pending_tech=None;s.load_pending_tech();assert_eq!(s.pending_tech.as_ref().unwrap().id,change.id);
+        let reply=wolfcraft_net::technology::Reply{id:change.id.clone(),settled:true,accepted:true,error:String::new(),inventory:after};
+        assert_eq!(s.apply_tech_reply(reply.clone()).unwrap(),Some(change.id));assert!(s.pending_tech.is_none());
+        assert_eq!(s.apply_tech_reply(reply).unwrap(),None);assert_eq!(s.player.inventory.slots[0],gear);
+        s.load_pending_tech();assert!(s.pending_tech.is_none());
+    }
+
+    #[test]
     fn day_cycle_changes_daylight() {
         let mut s = load("day", 19, true);
         s.player.world_time = 600.0; // noon
@@ -5270,5 +5191,9 @@ pub fn tipped_effect(id: wolfcraft_engine::items::ItemId) -> Option<wolfcraft_en
     use wolfcraft_engine::items::ids;
     use wolfcraft_engine::magic::Effect;
     (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id).then(|| [Effect::Poison, Effect::Slowness, Effect::Harm][(id - ids::TIPPED_BASE) as usize])
+
+
+
 }
+
 

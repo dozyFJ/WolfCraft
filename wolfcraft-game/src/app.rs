@@ -618,6 +618,7 @@ impl App {
 
     /// Starts a server on this device (its own world under `hosted/`) and joins it.
     fn host_server(&mut self, world: Option<String>) {
+        if let Some(s)=&mut self.session {s.save();}
         self.host = None;
         // A private world: one of the player's own worlds; otherwise the shared network world.
         let dir = match &world {
@@ -671,6 +672,12 @@ impl App {
     /// Network step while a session exists: receive edits/players/chat, send our state.
     fn net_tick(&mut self, dt: f32) {
         let (Some(net), Some(s)) = (&mut self.net, &mut self.session) else { return };
+        s.remote_tech=true;
+        if s.network_world.is_empty(){s.network_world=wolfcraft_net::technology::world_key(&net.world_toml);}
+        s.tech_retry=(s.tech_retry-dt).max(0.0);
+        if !s.tech_pending_sent && s.tech_retry<=0.0 {
+            if let Some(change)=s.pending_tech.clone(){net.send(&wolfcraft_net::C2S::TechRecover(change));s.tech_pending_sent=true;s.tech_retry=2.0;}
+        }
         use wolfcraft_engine::block::Block;
         use wolfcraft_engine::cubesphere::Cell;
         let now = self.time.elapsed() as f64;
@@ -678,6 +685,13 @@ impl App {
         let mut kicked = None;
         for m in net.poll() {
             match m {
+                wolfcraft_net::S2C::TechBroken{cell,hell,block}=>{if s.hell==hell&&!s.is_creative(){let at=s.chunks.grid().cell_center(to_cell(cell));s.drops.pop_from_block(wolfcraft_engine::items::ItemStack::of_block(Block::from_id(block).base_item(),1),at);}}
+                wolfcraft_net::S2C::TechSnapshot{hell,reset,time,weather,machines}=>s.apply_tech_snapshot(hell,reset,time,weather,machines),
+                wolfcraft_net::S2C::TechResult(reply)=>match s.apply_tech_reply(reply) {
+                    Ok(Some(id))=>net.send(&wolfcraft_net::C2S::TechConfirm(id)),
+                    Ok(None)=>{},
+                    Err(e)=>{s.item_name=Some((e,3.0));s.tech_pending_sent=false;s.tech_retry=2.0;}
+                },
                 wolfcraft_net::S2C::Edits { hell, list } => {
                     for (c, b) in list {
                         self.net_edits[hell as usize].insert(c, b);
@@ -744,6 +758,12 @@ impl App {
                 swim: (p.body.in_water || p.body.in_lava) && !p.body.on_ground && !p.body.flying,
                 hell: s.hell,
             }));
+        }
+        if (kicked.is_some() || !net.is_alive()) && s.remote_tech {
+            s.save();
+            self.net=None;self.session=None;self.container=None;self.screen=Screen::GameMenu;
+            self.world_select.net_error=Some("Соединение с сервером прервано. Подключитесь снова; незавершённая операция машины восстановится.".into());
+            return;
         }
         if let Some(reason) = kicked {
             self.chat.push(ChatKind::Error, format!("Отключено от сервера: {reason}"), now);
@@ -1237,7 +1257,7 @@ impl App {
             (Screen::Playing, KeyCode::KeyQ) => {
                 let all = self.input.keys.contains(&KeyCode::ControlLeft);
                 if let Some(s) = &mut self.session {
-                    s.throw_held(all);
+                    if s.pending_tech.is_none(){s.throw_held(all);}
                 }
             }
             (Screen::Playing, c) => {
@@ -1309,7 +1329,7 @@ impl App {
         if throws > 0 {
             if let Some(s) = &mut self.session {
                 for _ in 0..throws {
-                    s.throw_held(false);
+                    if s.pending_tech.is_none(){s.throw_held(false);}
                 }
             }
         }
@@ -1596,7 +1616,9 @@ impl App {
                 self.input.mouse_dx = 0.0;
                 self.input.mouse_dy = 0.0;
                 if let Some(s) = &mut self.session {
-                    let frozen = self.screen != Screen::Playing;
+                    let frozen = matches!(self.screen,Screen::Paused|Screen::Dead|Screen::Map) || s.pending_tech.is_some() || s.tech_pending_error.is_some();
+                    s.remote_tech=self.net.is_some();
+                    s.energy_elapsed=Some(self.time.wall_delta());
                     let t = ScopeTimer::start();
                     s.fx_amount = self.settings.particles;
                     // Mini-games only on a server (online) or in the studio.
@@ -1675,6 +1697,12 @@ impl App {
                         }
                     }
                     // Changes the game made by itself (buttons springing back) go to the server too.
+                    if self.net.is_none() && s.dir.join("edits.log").exists() {
+                        use std::io::Write;
+                        if let Ok(mut f)=std::fs::OpenOptions::new().append(true).open(s.dir.join("edits.log")) {
+                            for e in &events {let change=match e {InteractionEvent::Placed{pos,block}=>Some((*pos,*block)),InteractionEvent::Broken{pos,..}|InteractionEvent::Blasted{pos,..}=>Some((*pos,wolfcraft_engine::block::Block::Air)),_=>None};if let Some((p,b))=change{let _=writeln!(f,"{} {} {} {} {} {}",s.hell as u8,p.f,p.i,p.j,p.k,b as u16);}}
+                        }
+                    }
                     for (pos, block) in s.net_out.drain(..) {
                         if let Some(net) = &mut self.net {
                             net.send(&wolfcraft_net::C2S::Edit { cell: [pos.f as i32, pos.i, pos.j, pos.k], block: block as u16, hell: s.hell });
@@ -1718,6 +1746,7 @@ impl App {
                                 self.chat.open("/");
                             }
                             InteractionEvent::OpenContainer { pos, block } => {
+                                if wolfcraft_engine::wolftech::kind(block).is_some(){if let Some(net)=&mut self.net{net.send(&wolfcraft_net::C2S::TechOpen{cell:wolfcraft_net::technology::pos(pos),hell:s.hell});}}
                                 self.container = Some((pos, block));
                                 self.inv_ui = InventoryUiState::default();
                                 self.screen = Screen::Inventory;
@@ -2215,7 +2244,13 @@ impl App {
                             }
                         }
                         Screen::Inventory => {
+
+
                             if let Some(s) = session {
+                                if s.pending_tech.is_some()||s.tech_pending_error.is_some() {
+                                    egui::Window::new("Синхронизация машины").collapsible(false).show(ctx,|ui|{ui.spinner();ui.label(s.tech_pending_error.as_deref().unwrap_or("Ожидаем подтверждение сервера…"));});return;
+                                }
+
                                 if let Some((pos, wolfcraft_engine::block::Block::Sign | wolfcraft_engine::block::Block::SignB)) = *container {
                                     // Sign text, kept with the command-block texts of the world.
                                     let mut text = s.block_commands.get(&pos).cloned().unwrap_or_default();
@@ -2253,6 +2288,13 @@ impl App {
                                     }
                                     close_inventory |= dismissed || run;
                                 } else if let Some((pos, block)) = *container {
+                                    if s.pending_tech.is_some() || s.tech_pending_error.is_some() {
+                                        egui::Window::new("Синхронизация машины").collapsible(false).show(ctx,|ui|{ui.spinner();ui.label(s.tech_pending_error.as_deref().unwrap_or("Ожидаем подтверждение сервера…"));});
+                                        return;
+                                    }
+                                    if net.is_some() && wolfcraft_engine::wolftech::kind(block).is_some() && !s.tech_revisions.contains_key(&pos) {
+                                        egui::Window::new("Загрузка машины").collapsible(false).show(ctx,|ui|{ui.spinner();ui.label("Получаем состояние с сервера…");});return;
+                                    }
                                     use wolfcraft_engine::block::Block as B;
                                     let furnace = block.base_kind() == B::ElectricFurnace;
                                     let forge = block == B::MachineCasing;
@@ -2267,8 +2309,8 @@ impl App {
                                             let sp = wolfcraft_engine::wolftech::spec(k);
                                             let what = if w {
                                                 match k {
-                                                    k if wolfcraft_engine::wolftech::is_source(k) => format!("даёт {:.0} ЭЕ/с", s.tech.get(&pos).map(|t| t.flow).unwrap_or(sp.rate)),
-                                                    _ => format!("работает · {:.0} ЭЕ/с", sp.rate),
+                                                    k if wolfcraft_engine::wolftech::is_source(k) => format!("даёт {:.0} ЭЕ/с", s.tech.get(&pos).map_or(0.0,|t|t.flow)),
+                                                    _ => format!("работает · {:.0} ЭЕ/с", s.tech.get(&pos).map_or(0.0,|t|t.consumption)),
                                                 }
                                             } else {
                                                 sp.hint.to_string()
@@ -2290,7 +2332,7 @@ impl App {
                                         if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
-                                                Kind::Generator | Kind::Reactor => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k, st.id) > 0.0,
+                                                Kind::Generator | Kind::Reactor => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k,st.id) > 0.0,
                                                 Kind::Crusher | Kind::Induction | Kind::Enricher => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
                                                 Kind::Cell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
                                                 _ => false,
@@ -2332,6 +2374,7 @@ impl App {
                                         },
                                     };
                                     let mut slots = std::mem::take(s.container_slots(pos, block));
+                                    let old_slots=slots.clone();let old_inventory=s.player.inventory.clone();
                                     let creative = s.is_creative();
                                     let seed = &mut s.ench_seed;
                                     let surv = &mut s.player.survival;
@@ -2342,9 +2385,22 @@ impl App {
                                         enchant_offers(ui, &icons, slots, surv, seed, creative);
                                     };
                                     let (closed, thrown) = wolfcraft_ui::container_ui::show_with(ctx, &icons, &view, &mut slots, &mut s.player.inventory, &mut extra);
-                                    *s.container_slots(pos, block) = slots;
-                                    for st in thrown {
-                                        s.throw(st);
+                                    if tech.is_some() && net.is_some() {
+                                        let after_inventory=s.player.inventory.slots.to_vec();
+                                        let changed=slots!=old_slots || after_inventory!=old_inventory.slots.to_vec();
+                                        if !thrown.is_empty() {
+                                            s.player.inventory=old_inventory;*s.container_slots(pos,block)=old_slots;
+                                            s.item_name=Some(("Сначала перенесите предметы машины в инвентарь".into(),2.0));
+                                        } else if changed {
+                                            *s.container_slots(pos,block)=old_slots.clone();
+                                            match s.begin_tech_change(pos,old_slots,slots,old_inventory.slots.to_vec(),after_inventory) {
+                                                Ok(change)=>{if let Some(n)=net.as_mut(){n.send(&wolfcraft_net::C2S::TechChange(change));s.tech_pending_sent=true;}}
+                                                Err(e)=>{s.player.inventory=old_inventory;s.item_name=Some((e,3.0));}
+                                            }
+                                        } else {*s.container_slots(pos,block)=slots;}
+                                    } else {
+                                        *s.container_slots(pos,block)=slots;
+                                        for st in thrown {s.throw(st);}
                                     }
                                     close_inventory |= closed;
                                 } else {
@@ -2460,6 +2516,7 @@ impl App {
             }
             if let Some(s) = &mut self.session {
                 s.nickname = if self.settings.nickname.trim().is_empty() { "Игрок".to_string() } else { self.settings.nickname.trim().to_string() };
+                if s.pending_tech.is_some(){s.item_name=Some(("Дождитесь подтверждения операции машины".into(),2.0));continue;}
                 for (kind, text) in crate::commands::run(s, &line) {
                     self.chat.push(kind, text, now);
                 }
@@ -4201,5 +4258,6 @@ fn nearest_block(c: [u8; 4]) -> wolfcraft_engine::block::Block {
     let d = |q: [i32; 3]| 3 * (px[0] - q[0]).pow(2) + 4 * (px[1] - q[1]).pow(2) + 2 * (px[2] - q[2]).pow(2);
     PAL.iter().min_by_key(|(_, q)| d(*q)).map(|(b, _)| *b).unwrap_or(Wool)
 }
+
 
 

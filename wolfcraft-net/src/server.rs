@@ -63,6 +63,7 @@ pub struct State {
     pub port: u16,
     /// Print log lines to stdout (the standalone server does, the game does not).
     pub echo: bool,
+    pub tech:crate::technology::Runtime,
 }
 
 pub type Shared = Arc<Mutex<State>>;
@@ -223,9 +224,19 @@ fn handle_client(shared: Shared, stream: TcpStream) {
                     let _=write_msg(&mut out,&S2C::Edit{cell,block:previous,hell});
                     continue;
                 }
+                let old_tech={let State{tech,edits,..}=&mut *s;tech.ensure(cell,hell,edits);tech.snapshot(hell).into_iter().find(|m|m.pos==cell)};
+                if let Some(m)=&old_tech {
+                    if m.block!=block && m.slots.iter().any(Option::is_some) {
+                        let _=write_msg(&mut out,&S2C::Edit{cell,hell,block:m.block});
+                        let _=write_msg(&mut out,&S2C::Chat{from:String::new(),text:"Перед разборкой машины заберите из неё все предметы".into()});
+                        continue;
+                    }
+                }
                 s.edits[hell as usize].insert(cell, block);
+                {let State{tech,edits,..}=&mut *s;tech.invalidate();tech.ensure(cell,hell,edits);}
                 s.append_edit(hell, cell, block);
                 s.broadcast(&S2C::Edit { cell, block, hell }, Some(id));
+                if block==0 {if let Some(m)=old_tech {let _=write_msg(&mut out,&S2C::TechBroken{cell,hell,block:m.block});}}
             }
             Ok(Some(C2S::Chat(text))) => {
                 let text: String = text.chars().filter(|c| !c.is_control()).take(200).collect();
@@ -251,6 +262,31 @@ fn handle_client(shared: Shared, stream: TcpStream) {
                 }
                 s.voice_relay(id, &S2C::Voice { id, data });
             }
+            Ok(Some(C2S::TechOpen{cell,hell}))=>{
+                let mut s=shared.lock().unwrap();
+                let State{tech,edits,..}=&mut *s;
+                if tech.ensure(cell,hell,edits) {
+                    let m=tech.snapshot(hell).into_iter().filter(|m|m.pos==cell).collect();
+                    let _=write_msg(&mut out,&S2C::TechSnapshot{hell,reset:false,time:tech.time(),weather:tech.climate(),machines:m});
+                }
+            }
+            Ok(Some(C2S::TechChange(change)))=>{
+                let mut s=shared.lock().unwrap();
+                let valid_position=change.pos[0]>=0&&change.pos[0]<6&&change.pos[1]>=0&&change.pos[2]>=0&&change.pos[3]>=0;
+                let near=valid_position&&s.players.get(&id).is_some_and(|p|p.state.hell==change.hell&&{
+                    let grid=s.tech.grid(change.hell);let at=grid.cell_center(crate::technology::cell(change.pos));
+                    (at.x-p.state.pos[0]).powi(2)+(at.y-p.state.pos[1]).powi(2)+(at.z-p.state.pos[2]).powi(2)<32.0*32.0
+                });
+                let permitted=near && s.options.hooks.clone().is_none_or(|h|h.event("machine_change",serde_json::json!({"id":id,"cell":change.pos,"hell":change.hell}),&mut s));
+                let at=change.pos;let hell=change.hell;
+                let State{tech,edits,..}=&mut *s;
+                let reply=if permitted {tech.change(change,edits)}else{tech.recover(&change)};
+                let _=write_msg(&mut out,&S2C::TechResult(reply));
+                let machines=tech.snapshot(hell).into_iter().filter(|m|m.pos==at).collect();
+                let _=write_msg(&mut out,&S2C::TechSnapshot{hell,reset:false,time:tech.time(),weather:tech.climate(),machines});
+            }
+            Ok(Some(C2S::TechRecover(change)))=>{let mut s=shared.lock().unwrap();let reply=s.tech.recover(&change);let _=write_msg(&mut out,&S2C::TechResult(reply));}
+            Ok(Some(C2S::TechConfirm(id)))=>{shared.lock().unwrap().tech.confirm(&id);}
             Ok(Some(C2S::Hello { .. })) => {}
             _ => break,
         }
@@ -289,6 +325,7 @@ impl ServerHandle {
         if self.running.swap(false, Ordering::SeqCst) {
             let mut s = self.shared.lock().unwrap();
             if let Some(hooks)=s.options.hooks.clone(){hooks.event("stop",serde_json::json!({}),&mut s);}
+            if let Err(e)=s.tech.save().and_then(|_|s.tech.export_singleplayer()){s.log(format!("WolfTech: {e}"));}
             s.log("Сервер остановлен");
             s.broadcast(&S2C::Kick("сервер остановлен".into()), None);
             // Close every connection so clients notice at once.
@@ -321,7 +358,9 @@ pub fn start_with_options(name: &str, world_toml: String, dir: &Path, port: u16,
     let port=listener.local_addr().map_err(|e|e.to_string())?.port();
     let _ = listener.set_nonblocking(true);
     let edits = load_edits(dir);
+    let tech=crate::technology::Runtime::new(dir,&world_toml,&edits)?;
     let shared: Shared = Arc::new(Mutex::new(State {
+        tech,
         name: name.to_string(),
         options,
         world_toml,
@@ -342,10 +381,24 @@ pub fn start_with_options(name: &str, world_toml: String, dir: &Path, port: u16,
         std::thread::Builder::new()
             .name("server-tick".into())
             .spawn(move || {
+                let mut tech_send=0.0f32;
+                let mut previous=Instant::now();
                 while running.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(50));
                     let mut s = shared.lock().unwrap();
                     if let Some(hooks)=s.options.hooks.clone(){hooks.event("tick",serde_json::json!({"dt":0.05}),&mut s);}
+                    let dt=previous.elapsed().as_secs_f32();previous=Instant::now();
+                    {let State{tech,edits,..}=&mut *s;tech.tick(dt,edits);}
+                    tech_send+=dt;
+                    if tech_send>=0.25 {
+                        tech_send=0.0;
+                        let energy_time=s.tech.time();let climate=s.tech.climate();
+                        for hell in [false,true] {
+                            let machines=s.tech.snapshot(hell);
+                            if machines.is_empty(){s.broadcast(&S2C::TechSnapshot{hell,reset:true,time:energy_time,weather:climate,machines:vec![]},None);}
+                            else {for (i,part) in machines.chunks(64).enumerate(){s.broadcast(&S2C::TechSnapshot{hell,reset:i==0,time:energy_time,weather:climate,machines:part.to_vec()},None);}}
+                        }
+                    }
                     if s.players.len() > 1 {
                         let list: Vec<PlayerState> = s.players.values().map(|p| p.state.clone()).collect();
                         s.broadcast(&S2C::Players(list), None);
@@ -462,6 +515,36 @@ mod tests {
         wait_for(|| (!a.is_alive()).then_some(()));
         assert_eq!(load_edits(&dir)[0].get(&[2, 10, 11, 1030]), Some(&7));
     }
+
+    #[test]
+    fn two_clients_exchange_one_shared_machine_item_without_a_double_withdrawal() {
+        use crate::technology::{Change,pos};
+        use wolfcraft_engine::{config::{WorldConfig,PlanetSize},items::{ItemStack,ids},block::Block,cubesphere::Cell};
+        let dir=std::env::temp_dir().join(format!("wolftech_two_clients_{}",std::process::id()));let _=std::fs::remove_dir_all(&dir);
+        let mut cfg=WorldConfig::new("Энергосеть",1);cfg.size=PlanetSize::Small;
+        let server=start("Энергосеть",cfg.to_toml().unwrap(),&dir,0,false).unwrap();
+        let address=format!("127.0.0.1:{}",server.port);let mut a=Client::connect(&address,"Аня",0).unwrap();let mut b=Client::connect(&address,"Боря",0).unwrap();
+        let at=Cell::new(0,10,10,700);let cell=pos(at);
+        let point=server.shared.lock().unwrap().tech.grid(false).cell_center(at);
+        for c in [&mut a,&mut b] {c.send(&C2S::State(PlayerState{id:c.id,nick:String::new(),skin:0,pos:[point.x,point.y,point.z],heading:[1.0,0.0,0.0],pitch:0.0,phase:0.0,amount:0.0,sneak:false,swim:false,hell:false}));}
+        a.send(&C2S::Edit{cell,block:Block::EnergyCell as u16,hell:false});
+        let first=wait_for(||a.poll().into_iter().find_map(|m|match m {S2C::TechSnapshot{machines,..}=>machines.into_iter().find(|m|m.pos==cell),_=>None}));
+        let gear=Some(ItemStack::new(ids::JETPACK,1));let mut bag=vec![None;36];bag[0]=gear;
+        let put=Change{world:crate::technology::world_key(&cfg.to_toml().unwrap()),id:format!("{}:1","a".repeat(32)),hell:false,pos:cell,revision:first.revision,before:first.slots.clone(),after:vec![gear,None,None],inventory_before:bag.clone(),inventory_after:vec![None;36]};
+        a.send(&C2S::TechChange(put.clone()));
+        let reply=wait_for(||a.poll().into_iter().find_map(|m|match m {S2C::TechResult(r) if r.id==put.id=>Some(r),_=>None}));assert!(reply.accepted);
+        let shared=wait_for(||b.poll().into_iter().find_map(|m|match m {S2C::TechSnapshot{machines,..}=>machines.into_iter().find(|m|m.pos==cell&&m.slots[0]==gear),_=>None}));
+        let take=Change{world:put.world.clone(),id:format!("{}:2","a".repeat(32)),hell:false,pos:cell,revision:shared.revision,before:shared.slots,after:vec![None;3],inventory_before:vec![None;36],inventory_after:bag};
+        let other=Change{id:format!("{}:1","b".repeat(32)),..take.clone()};
+        a.send(&C2S::TechChange(take.clone()));b.send(&C2S::TechChange(other.clone()));
+        let ar=wait_for(||a.poll().into_iter().find_map(|m|match m {S2C::TechResult(r) if r.id==take.id=>Some(r),_=>None}));
+        let br=wait_for(||b.poll().into_iter().find_map(|m|match m {S2C::TechResult(r) if r.id==other.id=>Some(r),_=>None}));
+        assert_ne!(ar.accepted,br.accepted,"only one player receives the same item");
+        server.stop();
+        let edits=load_edits(&dir);let mut rt=crate::technology::Runtime::new(&dir,&cfg.to_toml().unwrap(),&edits).unwrap();
+        assert_eq!(rt.recover(&take),ar);assert_eq!(rt.recover(&other),br);assert!(rt.snapshot(false)[0].slots[0].is_none());
+    }
 }
+
 
 

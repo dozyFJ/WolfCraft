@@ -15,6 +15,8 @@ path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+serde.workspace = true
+getrandom = "0.3.4"
 wolfcraft-common.workspace = true
 wolfcraft-assets.workspace = true
 wolfcraft-engine.workspace = true
@@ -73,4 +75,5 @@ config_changes = "orientation|keyboardHidden|screenSize|smallestScreenSize|scree
 [package.metadata.android.signing.release]
 path = "C:/Users/ADMIN/.android/debug.keystore"
 keystore_password = "android"
+
 

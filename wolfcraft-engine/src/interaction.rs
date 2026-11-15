@@ -96,6 +96,7 @@ impl Interaction {
     /// Call every frame. `holding` = left mouse held. Returns events that happened.
     pub fn update_break(&mut self, world: &mut impl WorldEdit, player: &mut Player, hit: Option<Hit>, holding: bool, dt: f32, seed: u64) -> Vec<InteractionEvent> {
         let mut events = Vec::new();
+        if !player.is_creative() && player.inventory.held().is_some_and(|s|items::rechargeable(s.id)&&s.damage>=s.info().durability) {self.target=None;self.progress=0.0;return events;}
         self.cooldown = (self.cooldown - dt).max(0.0);
         let pressed = holding && !self.was_holding;
         self.was_holding = holding;
@@ -868,4 +869,5 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
         _ => return None,
     })
 }
+
 

@@ -42,6 +42,7 @@ pub struct Time {
     start: Instant,
     last_frame: Instant,
     delta: f32,
+    wall_delta:f32,
     /// Frame pacing: the smoothed frame time and the real time not yet given to the game.
     pacer: Pacer,
     frame_count: u64,
@@ -65,7 +66,7 @@ impl Time {
         Self {
             start: now,
             last_frame: now,
-            delta: 0.0,
+            delta: 0.0,wall_delta:0.0,
             pacer: Pacer::default(),
             frame_count: 0,
             fps_window_start: now,
@@ -81,7 +82,8 @@ impl Time {
     pub fn tick(&mut self) {
         let now = Instant::now();
         // Clamp huge deltas (window drag, breakpoints) so simulation does not explode.
-        let raw = (now - self.last_frame).as_secs_f32().min(0.25);
+        self.wall_delta=(now-self.last_frame).as_secs_f32();
+        let raw = self.wall_delta.min(0.25);
         // The game moves by a smoothed frame time (like Minecraft's frame pacing): timer noise
         // and vsync jitter no longer shake the camera, and no real time is ever lost.
         self.delta = self.pacer.step(raw);
@@ -100,6 +102,8 @@ impl Time {
         }
     }
 
+    /// Unsmoothed elapsed time for independent fixed-step subsystems.
+    pub fn wall_delta(&self)->f32 {self.wall_delta}
     pub fn delta(&self) -> f32 {
         self.delta
     }
@@ -279,3 +283,4 @@ mod pacing_tests {
         assert!((p.step(0.2) - 0.2).abs() < 1e-6);
     }
 }
+

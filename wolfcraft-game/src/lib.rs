@@ -8,6 +8,7 @@ mod loader;
 mod lua;
 mod preview;
 mod session;
+mod tech_client;
 mod signs;
 mod touch;
 mod voice;
@@ -372,4 +373,5 @@ pub mod orientation {
         let _ = portrait;
     }
 }
+
 
