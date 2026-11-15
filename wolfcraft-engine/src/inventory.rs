@@ -414,6 +414,13 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Glass), 2)], (b(Block::Extractor), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (ids::DIAMOND, 1), (ids::CIRCUIT, 1), (b(Block::EnergyCell), 1)], (ids::DRILL, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 6), (ids::CIRCUIT, 1), (b(Block::EnergyCell), 1)], (ids::CHAINSAW, 1), true, "WolfTech"));
+        // «Механика» (like Create): shafts, cogs, a water wheel, a crank, the press, the millstone.
+        v.push(r(&[(ids::IRON_INGOT, 1)], (b(Block::Shaft), 4), true, "Механика"));
+        v.push(r(&[(b(Block::Shaft), 1), (b(Block::OakPlanks), 2)], (b(Block::Cogwheel), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Shaft), 1), (b(Block::OakPlanks), 6)], (b(Block::WaterWheel), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Shaft), 1), (b(Block::OakPlanks), 3)], (b(Block::HandCrank), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Shaft), 1), (ids::IRON_INGOT, 4), (b(Block::Cobblestone), 2)], (b(Block::MechPress), 1), true, "Механика"));
+        v.push(r(&[(b(Block::Cogwheel), 1), (b(Block::Stone), 4)], (b(Block::Millstone), 1), true, "Механика"));
         v.push(r(&[(ids::COPPER_INGOT, 3), (ids::CIRCUIT, 1), (b(Block::IskritBlock), 1)], (ids::STORAGE_UPGRADE, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));

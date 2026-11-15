@@ -1857,6 +1857,7 @@ impl App {
                                 let look = s.player.look_dir();
                                 s.mobs.chips(eye + look * 0.45 - s.player.up() * 0.15, &[[0.85, 0.62, 0.32], [0.95, 0.85, 0.6], [0.7, 0.45, 0.25]], (6.0 * self.settings.particles) as usize, 1.0);
                             }
+                            InteractionEvent::Crank { .. } => self.audio.play(crate::audio::Sfx::Place(crate::audio::Mat::Wood), 0.6),
                             InteractionEvent::Equipped => {
                                 self.audio.play(crate::audio::Sfx::Equip, 1.0);
                                 self.equip_anim = 1.0;
@@ -2322,9 +2323,22 @@ impl App {
                                     let forge = block == B::MachineCasing;
                                     let magic = block == B::EnchantTable;
                                     let tech = wolfcraft_engine::wolftech::kind(block);
-                                    let (prog, working) = match s.tech_status(pos, block) {
-                                        Some((p, w, _, _)) => (p, w),
-                                        None => s.furnace_status(pos),
+                                    // «Механика» machines (press, millstone): they run while turning.
+                                    let kin = wolfcraft_engine::kinetic::part(block).filter(|p| wolfcraft_engine::kinetic::is_machine(*p));
+                                    let kin_node = s.kin.get(&pos).copied().unwrap_or_default();
+                                    let (prog, working) = match (kin, s.tech_status(pos, block)) {
+                                        (Some(_), _) => (kin_node.progress / 2.0, kin_node.speed > 0.0),
+                                        (None, Some((p, w, _, _))) => (p, w),
+                                        _ => s.furnace_status(pos),
+                                    };
+                                    let kin_text = if kin.is_none() {
+                                        String::new()
+                                    } else if kin_node.speed > 0.0 {
+                                        format!("⚙ {:.0} об/мин · нагрузка {:.0} / {:.0} SU", kin_node.speed, kin_node.load, kin_node.cap)
+                                    } else if kin_node.cap > 0.0 && kin_node.load > kin_node.cap {
+                                        format!("⚠ Перегрузка: {:.0} / {:.0} SU — добавьте водяных колёс", kin_node.load, kin_node.cap)
+                                    } else {
+                                        "Не крутится: подведите вал от водяного колеса или кривошипа".to_string()
                                     };
                                     let tech_text = match (tech, s.tech_status(pos, block)) {
                                         (Some(k), Some((_, w, e, cap))) => {
@@ -2354,9 +2368,12 @@ impl App {
                                         }
                                         _ => String::new(),
                                     };
-                                    let status_text = if tech.is_some() { tech_text.as_str() } else if working { "Плавится…" } else { "Положите руду и топливо (уголь, дрова)" };
+                                    let status_text = if kin.is_some() { kin_text.as_str() } else if tech.is_some() { tech_text.as_str() } else if working { "Плавится…" } else { "Положите руду и топливо (уголь, дрова)" };
                                     let accepts = |slot: usize, st: &wolfcraft_engine::items::ItemStack| {
                                         if wolfcraft_engine::construction::is_portable(block)&&st.info().place.is_some_and(wolfcraft_engine::construction::is_portable){return false;}
+                                        if let Some(p) = kin {
+                                            return slot == 0 && wolfcraft_engine::kinetic::recipe(p, st.id).is_some();
+                                        }
                                         if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
@@ -2378,10 +2395,12 @@ impl App {
                                     };
                                     let view = wolfcraft_ui::container_ui::ContainerView {
                                         skin:wolfcraft_ui::gui_renderer::block_panel(block),
-                                        title: if let Some(k) = tech { wolfcraft_engine::wolftech::spec(k).name } else if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else if wolfcraft_engine::construction::entry(block as u16).is_some() { block.info().name } else { "Сундук" },
-                                        columns: if furnace || forge || tech.is_some() { 3 } else if magic { 2 } else { 9 },
+                                        title: if let Some(p) = kin { wolfcraft_engine::kinetic::name(p) } else if let Some(k) = tech { wolfcraft_engine::wolftech::spec(k).name } else if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else if wolfcraft_engine::construction::entry(block as u16).is_some() { block.info().name } else { "Сундук" },
+                                        columns: if furnace || forge || tech.is_some() || kin.is_some() { 3 } else if magic { 2 } else { 9 },
                                         accepts: &accepts,
-                                        layout: if let Some(k) = tech {
+                                        layout: if kin.is_some() {
+                                            wolfcraft_ui::container_ui::Layout::Machine
+                                        } else if let Some(k) = tech {
                                             use wolfcraft_engine::wolftech::Kind;
                                             match k {
                                                 Kind::Generator => wolfcraft_ui::container_ui::Layout::Generator,
@@ -2391,13 +2410,13 @@ impl App {
                                                 _ => wolfcraft_ui::container_ui::Layout::Machine,
                                             }
                                         } else if furnace { wolfcraft_ui::container_ui::Layout::Furnace } else if forge { wolfcraft_ui::container_ui::Layout::Forge } else if magic { wolfcraft_ui::container_ui::Layout::Enchant } else { wolfcraft_ui::container_ui::Layout::Grid },
-                                        working: (furnace || tech.is_some()) && working,
+                                        working: (furnace || tech.is_some() || kin.is_some()) && working,
                                         energy: s.tech_status(pos, block).map(|(_, _, e, cap)| e / cap.max(1.0)),
                                         heat: (tech == Some(wolfcraft_engine::wolftech::Kind::Reactor)).then(|| {
                                             let (h, m) = s.reactor_heat(pos);
                                             h / m.max(1.0)
                                         }),
-                                        status: if furnace || tech.is_some() {
+                                        status: if furnace || tech.is_some() || kin.is_some() {
                                             Some((status_text, prog))
                                         } else if forge {
                                             Some(("Предмет + его материал — ремонт · два одинаковых — склеить · +3 материала уровнем выше — улучшить · + книга чар — зачаровать", 0.0))
@@ -2694,6 +2713,7 @@ impl App {
                     let pose = PlayerPose { feet: pos, heading: glam::DVec3::from_array(rp.heading), up: wolfcraft_engine::physics::up_at(pos), pitch: rp.pitch, phase: rp.phase, amount: rp.amount, sneaking: rp.sneak, swimming: rp.swim, rest: 0, skin: rp.skin, attack: 0.0, held: Default::default(), armor: [None; 4], shield: false };
                     model_verts.extend(build_player_model(&pose, cam.eye));
                 }
+                model_verts.extend(wolfcraft_engine::renderer::model::build_kinetic(&s.kinetic_models(), cam.eye));
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.explosives.debris(self.time.elapsed()), cam.eye));
                 // Falling and thrown blocks: cubes in their block's colours, tumbling.
@@ -4380,6 +4400,18 @@ fn look_info(s: &crate::session::GameSession) -> Option<wolfcraft_ui::hud::LookI
             lines.push((format!("Даёт {:.0} ЭЕ/с", flow), if flow > 0.0 { green } else { grey }));
         }
         bar = Some((e / cap.max(1.0), Color32::from_rgb(60, 190, 230), format!("⚡ {:.0} / {:.0} ЭЕ", e, cap)));
+    } else if let Some(n) = wolfcraft_engine::kinetic::part(block).map(|_| s.kin.get(&h.cell).copied().unwrap_or_default()) {
+        let line = if n.speed > 0.0 {
+            (format!("⚙ {:.0} об/мин", n.speed), green)
+        } else if n.cap > 0.0 && n.load > n.cap {
+            ("⚠ Перегрузка — сеть стоит".to_string(), red)
+        } else {
+            ("Не крутится".to_string(), grey)
+        };
+        lines.push(line);
+        if n.cap > 0.0 {
+            bar = Some(((n.load / n.cap).min(1.0), if n.load > n.cap { Color32::from_rgb(230, 80, 60) } else { Color32::from_rgb(240, 180, 60) }, format!("Нагрузка {:.0} / {:.0} SU", n.load, n.cap)));
+        }
     } else if let Some(v) = s.containers.get(&h.cell) {
         let n: u32 = v.iter().flatten().map(|x| x.count as u32).sum();
         lines.push((if n == 0 { "Пусто".to_string() } else { format!("Внутри: {n} предм.") }, grey));

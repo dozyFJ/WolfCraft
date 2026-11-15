@@ -105,7 +105,10 @@ pub mod items {
     pub const REACTOR_PLATING: u16 = 152;
     pub const DRILL: u16 = 153;
     pub const CHAINSAW: u16 = 154;
-    pub const COUNT: u16 = 155;
+    pub const IRON_PLATE: u16 = 155;
+    pub const COPPER_PLATE: u16 = 156;
+    pub const GOLD_PLATE: u16 = 157;
+    pub const COUNT: u16 = 158;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1220,6 +1223,18 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(REACTOR_PLATING, "reactor_plating", art(&["", "", "..GGGGGGGGGGGG", "..GWDDDDDDDDWG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GWDDDDDDDDWG", "..GGGGGGGGGGGG"]));
     l.add(DRILL, "drill", art(&["", "", "", "....GGGGGGG", "...GDDDDDDGW", "...GDcDDDDGWWW", "...GDDDDDDGWWWWW", "...GDDDDDDGWWW", "...GGGGGGGGW", ".....DDD", ".....DDD", "....DDDD", "....DDD"]));
     l.add(CHAINSAW, "chainsaw", art(&["", "", "", "", ".GGGGGWDWDWDWDW", "GDDDDGG.......D", "GDcDDGGWDWDWDWDW", "GDDDDGG", ".GGGGG", "..DDD", "..DD"]));
+    // Plates: a flat square sheet with a light edge, in the metal's colour.
+    for (id, name, c) in [(IRON_PLATE, "iron_plate", Rgb(0.78, 0.78, 0.80)), (COPPER_PLATE, "copper_plate", Rgb(0.85, 0.52, 0.32)), (GOLD_PLATE, "gold_plate", Rgb(0.98, 0.82, 0.30))] {
+        l.add(id, name, p(move |q| {
+            for y in 3..13u32 {
+                for x in 2..14u32 {
+                    let edge = y == 3 || x == 2;
+                    let dark = y == 12 || x == 13;
+                    q.put(x, y, if edge { c.scale(1.15) } else if dark { c.scale(0.7) } else { c.add((rnd(x, y, id as u32) - 0.5) * 0.05) }, 1.0);
+                }
+            }
+        }));
+    }
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);
