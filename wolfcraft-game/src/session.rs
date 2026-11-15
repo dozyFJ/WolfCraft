@@ -2110,7 +2110,8 @@ impl GameSession {
                     // Upgrades: faster and hungrier with «Ускорители».
                     let (tm, em, _) = wt::upgrades(v.get(3..).unwrap_or(&[]));
                     let sp = wt::Spec { time: sp.time * tm, rate: sp.rate * em, ..sp };
-                    let out = v.first().copied().flatten().and_then(|i| wt::recipe(k, i.id));
+                    let out = v.first().copied().flatten().filter(|i| i.count >= wt::need(k, i.id)).and_then(|i| wt::recipe(k, i.id));
+                    let take = v.first().copied().flatten().map(|i| wt::need(k, i.id)).unwrap_or(1);
                     let room = out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
                         None => true,
                         Some(s) => s.id == o && s.count as u32 + n as u32 <= 64,
@@ -2126,7 +2127,7 @@ impl GameSession {
                             let (o, n) = out.unwrap();
                             let v = self.container_slots(c, b);
                             if let Some(i) = v[0].as_mut() {
-                                i.count -= 1;
+                                i.count = i.count.saturating_sub(take);
                                 if i.count == 0 {
                                     v[0] = None;
                                 }

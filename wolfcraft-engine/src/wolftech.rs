@@ -27,6 +27,12 @@ pub enum Kind {
     Water,
     /// Splits uranium: a lot of energy for a long time.
     Reactor,
+    /// Squeezes: sand → sandstone, snow → ice → packed ice, 32 coal → a diamond.
+    Compressor,
+    /// Saws: log → 6 planks, planks → 4 sticks.
+    Sawmill,
+    /// Extracts: bone → 4 bone meal, gravel → flint, leaves → sapling-free mulch (bone meal).
+    Extractor,
 }
 
 pub struct Spec {
@@ -53,6 +59,9 @@ pub fn kind(b: Block) -> Option<Kind> {
         Block::GeoGenerator => Kind::Geo,
         Block::WaterMill => Kind::Water,
         Block::Reactor => Kind::Reactor,
+        Block::Compressor => Kind::Compressor,
+        Block::Sawmill => Kind::Sawmill,
+        Block::Extractor => Kind::Extractor,
         _ => return None,
     })
 }
@@ -68,6 +77,9 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Geo => Spec { name: "Геотермальный генератор", capacity: 2_000.0, rate: 8.0, time: 0.0, hint: "Поставьте рядом с лавой: каждая сторона с лавой — +8 ЭЕ/с" },
         Kind::Water => Spec { name: "Гидрогенератор", capacity: 1_000.0, rate: 3.0, time: 0.0, hint: "Поставьте в воду: каждая сторона с водой — +3 ЭЕ/с" },
         Kind::Reactor => Spec { name: "Ядерный реактор", capacity: 10_000.0, rate: 0.0, time: 0.0, hint: "Урановые стержни дают энергию и жар; теплоотводы и капсулы охлаждают. Перегрев — взрыв!" },
+        Kind::Compressor => Spec { name: "Компрессор", capacity: 240.0, rate: 12.0, time: 4.0, hint: "Песок → песчаник, снег → лёд → плотный лёд, 32 угля → алмаз" },
+        Kind::Sawmill => Spec { name: "Пилорама", capacity: 160.0, rate: 6.0, time: 1.5, hint: "Бревно → 6 досок, доски → 4 палки" },
+        Kind::Extractor => Spec { name: "Экстрактор", capacity: 200.0, rate: 8.0, time: 3.0, hint: "Кость → 4 костной муки, гравий → кремень, листва → костная мука" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
     }
 }
@@ -172,7 +184,15 @@ pub fn fuel_for(k: Kind, id: ItemId) -> f32 {
 }
 
 pub fn is_machine(k: Kind) -> bool {
-    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher)
+    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor)
+}
+
+/// How many of `input` one operation takes (most take one).
+pub fn need(k: Kind, input: ItemId) -> u8 {
+    match (k, input) {
+        (Kind::Compressor, ids::COAL) => 32,
+        _ => 1,
+    }
 }
 
 /// Blocks that carry energy between machines: cables and the machines themselves.
@@ -213,6 +233,36 @@ pub fn recipe(k: Kind, input: ItemId) -> Option<(ItemId, u8)> {
             })
         }
         Kind::Enricher => raw_dust(input).map(|d| (d, 3)),
+        Kind::Compressor => {
+            let b = |x: Block| x as ItemId;
+            Some(match input {
+                x if x == b(Block::Sand) => (b(Block::Sandstone), 1),
+                x if x == b(Block::Snow) => (b(Block::Ice), 1),
+                x if x == b(Block::Ice) => (b(Block::PackedIce), 1),
+                ids::COAL => (ids::DIAMOND, 1),
+                _ => return None,
+            })
+        }
+        Kind::Sawmill => {
+            let b = |x: Block| x as ItemId;
+            Some(match input {
+                x if x == b(Block::OakLog) => (b(Block::OakPlanks), 6),
+                x if x == b(Block::BirchLog) => (b(Block::BirchPlanks), 6),
+                x if x == b(Block::SpruceLog) => (b(Block::SprucePlanks), 6),
+                x if x == b(Block::AcaciaLog) => (b(Block::AcaciaPlanks), 6),
+                x if [Block::OakPlanks, Block::BirchPlanks, Block::SprucePlanks, Block::AcaciaPlanks].iter().any(|p| b(*p) == x) => (ids::STICK, 4),
+                _ => return None,
+            })
+        }
+        Kind::Extractor => {
+            let b = |x: Block| x as ItemId;
+            Some(match input {
+                ids::BONE => (ids::BONE_MEAL, 4),
+                x if x == b(Block::Gravel) => (ids::FLINT, 1),
+                x if [Block::OakLeaves, Block::BirchLeaves, Block::SpruceLeaves, Block::AcaciaLeaves].iter().any(|l| b(*l) == x) => (ids::BONE_MEAL, 1),
+                _ => return None,
+            })
+        }
         Kind::Induction => crate::interaction::smelt_result(input).map(|o| (o, 1)),
         _ => None,
     }
@@ -361,6 +411,8 @@ mod tests {
     fn machines_have_recipes() {
         assert_eq!(recipe(Kind::Crusher, ids::RAW_IRON), Some((ids::IRON_DUST, 2)));
         assert_eq!(recipe(Kind::Enricher, ids::RAW_GOLD), Some((ids::GOLD_DUST, 3)));
+        assert_eq!(recipe(Kind::Sawmill, Block::OakLog as ItemId), Some((Block::OakPlanks as ItemId, 6)));
+        assert_eq!((recipe(Kind::Compressor, ids::COAL), need(Kind::Compressor, ids::COAL)), (Some((ids::DIAMOND, 1)), 32));
         assert_eq!(recipe(Kind::Induction, ids::IRON_DUST), Some((ids::IRON_INGOT, 1)));
         assert_eq!(recipe(Kind::Crusher, Block::Cobblestone as ItemId), Some((Block::Gravel as ItemId, 1)));
     }

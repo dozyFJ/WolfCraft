@@ -131,7 +131,10 @@ pub mod ids {
     pub const HEAT_VENT: ItemId = 406;
     pub const COOLANT_CELL: ItemId = 407;
     pub const REACTOR_PLATING: ItemId = 408;
-    pub const LAST: ItemId = 408;
+    /// Electric tools: a drill (pickaxe + shovel) and a chainsaw (axe + leaves), fast, on charge.
+    pub const DRILL: ItemId = 409;
+    pub const CHAINSAW: ItemId = 410;
+    pub const LAST: ItemId = 410;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -216,7 +219,7 @@ pub fn armor_material(id: ItemId) -> Option<u8> {
 
 /// WolfTech gear that runs on charge (durability) and is recharged in an energy cell.
 pub fn rechargeable(id: ItemId) -> bool {
-    matches!(id, ids::PLASMA_RIFLE | ids::RAILGUN | ids::ENERGY_SWORD | ids::JETPACK) || (ids::NANO_BASE..=ids::NANO_LAST).contains(&id)
+    matches!(id, ids::PLASMA_RIFLE | ids::RAILGUN | ids::ENERGY_SWORD | ids::JETPACK | ids::DRILL | ids::CHAINSAW) || (ids::NANO_BASE..=ids::NANO_LAST).contains(&id)
 }
 
 fn plain(name: &'static str, icon: u16) -> ItemInfo {
@@ -272,6 +275,8 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::HEAT_VENT => ItemInfo { max_stack: 1, ..plain("Теплоотвод", sp::HEAT_VENT) },
         ids::COOLANT_CELL => ItemInfo { max_stack: 1, durability: 2000, ..plain("Охлаждающая капсула", sp::COOLANT_CELL) },
         ids::REACTOR_PLATING => ItemInfo { max_stack: 1, ..plain("Обшивка реактора", sp::REACTOR_PLATING) },
+        ids::DRILL => ItemInfo { max_stack: 1, durability: 600, attack: 4.0, tool: Some((ToolKind::Pickaxe, 3)), ..plain("Электробур", sp::DRILL) },
+        ids::CHAINSAW => ItemInfo { max_stack: 1, durability: 600, attack: 7.0, tool: Some((ToolKind::Axe, 3)), ..plain("Электропила", sp::CHAINSAW) },
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
         ids::BRONZE_INGOT => plain("Бронзовый слиток", sp::BRONZE_INGOT),
         ids::SILVER_INGOT => plain("Серебряный слиток", sp::SILVER_INGOT),
@@ -590,6 +595,8 @@ pub fn break_time(held: Option<ItemInfo>, block: Block, creative: bool) -> Optio
 /// tool's own blocks are fast, others take a bare hand's time, too low a material 3.3×
 /// slower; a sword breaks nothing in creative. `None` = cannot be broken.
 pub fn break_time_for(held: Option<ItemStack>, block: Block, creative: bool) -> Option<f32> {
+    // A WolfTech tool that ran flat is a bare hand until recharged.
+    let held = held.filter(|s| !(rechargeable(s.id) && s.info().durability > 0 && s.damage >= s.info().durability));
     let bi = block.info();
     let id = held.map(|s| s.id);
     if bi.hardness < 0.0 || block.is_fluid() || !crate::tools::may_break(id, block, creative) {
@@ -663,7 +670,7 @@ pub fn find_item(query: &str) -> Option<ItemId> {
 /// Category used by the inventory UI tabs.
 pub fn category(id: ItemId) -> &'static str {
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
-    if (ids::IRON_DUST..=ids::REACTOR_PLATING).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
+    if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId)) {
         return "WolfTech";
     }
     if (ITEM_BASE..1024).contains(&id) {

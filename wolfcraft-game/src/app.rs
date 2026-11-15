@@ -2361,7 +2361,7 @@ impl App {
                                             match k {
                                                 Kind::Generator => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k, st.id) > 0.0,
                                                 Kind::Reactor => wolfcraft_engine::wolftech::is_reactor_part(st.id),
-                                                Kind::Crusher | Kind::Induction | Kind::Enricher => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
+                                                k if wolfcraft_engine::wolftech::is_machine(k) => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
                                                 Kind::Cell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
                                                 _ => false,
                                             }
@@ -2940,6 +2940,9 @@ impl App {
                                 ids::STAR_HAMMER => 8,
                                 ids::PLASMA_RIFLE => 9,
                                 ids::RAILGUN => 10,
+                                ids::DRILL => 11,
+                                ids::CHAINSAW => 12,
+                                ids::ENERGY_SWORD => 13,
                                 _ => return None,
                             };
                             let ammo = wolfcraft_engine::explosives::weapon(st.id).map(|w| w.0).unwrap_or(0);
@@ -3952,6 +3955,9 @@ fn held_visual(inv: &wolfcraft_engine::inventory::Inventory, tile_colors: &[[[f3
             ids::STAR_HAMMER => Some(8),
             ids::PLASMA_RIFLE => Some(9),
             ids::RAILGUN => Some(10),
+            ids::DRILL => Some(11),
+            ids::CHAINSAW => Some(12),
+            ids::ENERGY_SWORD => Some(13),
             _ => None,
         };
         if let Some(k) = gun {

@@ -103,7 +103,9 @@ pub mod items {
     pub const HEAT_VENT: u16 = 150;
     pub const COOLANT_CELL: u16 = 151;
     pub const REACTOR_PLATING: u16 = 152;
-    pub const COUNT: u16 = 153;
+    pub const DRILL: u16 = 153;
+    pub const CHAINSAW: u16 = 154;
+    pub const COUNT: u16 = 155;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1216,6 +1218,8 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(HEAT_VENT, "heat_vent", art(&["", "", "..GGGGGGGGGGGG", "..GDGDGDGDGDGG", "..GGGGGGGGGGGG", "..GDGDGDGDGDGG", "..GGGGGGGGGGGG", "..GDGDGDGDGDGG", "..GGGGGGGGGGGG", "..GDGDGDGDGDGG", "..GGGGGGGGGGGG"]));
     l.add(COOLANT_CELL, "coolant_cell", art(&["", ".....GGGGG", "....GbbbbbG", "....GbcccbG", "....GbcWcbG", "....GbcccbG", "....GbcccbG", "....GbcccbG", "....GbcccbG", "....GbbbbbG", ".....GGGGG"]));
     l.add(REACTOR_PLATING, "reactor_plating", art(&["", "", "..GGGGGGGGGGGG", "..GWDDDDDDDDWG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GDGGGGGGGGDG", "..GWDDDDDDDDWG", "..GGGGGGGGGGGG"]));
+    l.add(DRILL, "drill", art(&["", "", "", "....GGGGGGG", "...GDDDDDDGW", "...GDcDDDDGWWW", "...GDDDDDDGWWWWW", "...GDDDDDDGWWW", "...GGGGGGGGW", ".....DDD", ".....DDD", "....DDDD", "....DDD"]));
+    l.add(CHAINSAW, "chainsaw", art(&["", "", "", "", ".GGGGGWDWDWDWDW", "GDDDDGG.......D", "GDcDDGGWDWDWDWDW", "GDDDDGG", ".GGGGG", "..DDD", "..DD"]));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

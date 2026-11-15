@@ -207,6 +207,9 @@ pub mod tiles {
     pub const GEO_FRONT: u16 = 209;
     pub const WATER_FRONT: u16 = 210;
     pub const REACTOR_SIDE: u16 = 211;
+    pub const COMPRESSOR_FRONT: u16 = 212;
+    pub const SAWMILL_FRONT: u16 = 213;
+    pub const EXTRACTOR_FRONT: u16 = 214;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2162,6 +2165,45 @@ pub(crate) fn build() -> Vec<(String, Image)> {
                     }
                 }
             }
+            // Compressor: a press plate coming down on a block.
+            7 => {
+                for x in 4..12 {
+                    q.put(x, 4, c, 1.0);
+                    q.put(x, 5, c, 1.0);
+                }
+                for y in 6..8 {
+                    q.put(7, y, c, 1.0);
+                    q.put(8, y, c, 1.0);
+                }
+                for y in 9..12 {
+                    for x in 5..11 {
+                        q.put(x, y, Rgb(0.55, 0.55, 0.60), 1.0);
+                    }
+                }
+            }
+            // Sawmill: a round saw blade with teeth.
+            8 => {
+                for y in 4..12u32 {
+                    for x in 4..12u32 {
+                        let (dx, dy) = (x as i32 * 2 - 15, y as i32 * 2 - 15);
+                        let r2 = dx * dx + dy * dy;
+                        if r2 <= 36 || (r2 <= 64 && (x + y) % 2 == 0) {
+                            q.put(x, y, if r2 <= 4 { Rgb(0.2, 0.2, 0.22) } else { c }, 1.0);
+                        }
+                    }
+                }
+            }
+            // Extractor: a funnel with a drop under it.
+            9 => {
+                for y in 4..9u32 {
+                    for x in (3 + (y - 4))..(13 - (y - 4)) {
+                        q.put(x, y, c, 1.0);
+                    }
+                }
+                q.put(7, 10, Rgb(0.4, 0.85, 0.4), 1.0);
+                q.put(8, 10, Rgb(0.4, 0.85, 0.4), 1.0);
+                q.put(7, 11, Rgb(0.3, 0.7, 0.3), 1.0);
+            }
             // Enricher: a vessel with a bubbling liquid.
             _ => {
                 for y in 6..12 {
@@ -2273,6 +2315,9 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(GEO_FRONT, "geothermal_generator", p(|q| front(q, 313, Rgb(1.0, 0.42, 0.08), 4)));
     l.add(WATER_FRONT, "water_mill", p(|q| front(q, 314, Rgb(0.30, 0.60, 1.0), 5)));
     l.add(REACTOR_SIDE, "reactor", p(|q| front(q, 315, Rgb(0.25, 0.75, 0.30), 6)));
+    l.add(COMPRESSOR_FRONT, "compressor", p(|q| front(q, 316, Rgb(0.85, 0.85, 0.90), 7)));
+    l.add(SAWMILL_FRONT, "sawmill", p(|q| front(q, 317, Rgb(0.80, 0.80, 0.84), 8)));
+    l.add(EXTRACTOR_FRONT, "extractor", p(|q| front(q, 318, Rgb(0.45, 0.70, 0.95), 9)));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);
