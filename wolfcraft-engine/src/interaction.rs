@@ -28,6 +28,8 @@ pub enum InteractionEvent {
     Placed { pos: Cell, block: Block },
     Ate { hunger: f32 },
     OpenCrafting,
+    /// Armour (or a shield) was put on from the hand.
+    Equipped,
     /// The «Конструктор» block: building pieces (forms × materials).
     OpenBuilder,
     FrameUse {pos:Cell},
@@ -314,6 +316,7 @@ impl Interaction {
         }
         // Armor in hand: put it on.
         if player.inventory.equip_selected() {
+            events.push(InteractionEvent::Equipped);
             return events;
         }
         let info = stack.info();

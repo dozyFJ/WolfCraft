@@ -1292,6 +1292,10 @@ pub struct HandsPose {
     pub arrow_tip: Option<[f32; 3]>,
     /// Grenade launcher or bazooka in the hands: a full 3D weapon held with both hands.
     pub gun: Option<GunPose>,
+    /// Eating (1 just started → 0 done): the food goes up to the mouth and bobs with bites.
+    pub eat: f32,
+    /// Putting armour on (1 → 0): the hand sweeps down to the chest and back.
+    pub equip: f32,
 }
 
 /// State of a held grenade launcher (`kind` 0) or bazooka (`kind` 1) for the view model.
@@ -1309,7 +1313,7 @@ pub struct GunPose {
 impl HandsPose {
     /// Resting pose looking along `forward` (handy for tests and previews).
     pub fn rest(forward: Vec3, up: Vec3) -> Self {
-        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None, bow: None, glint: false, arrow_tip: None, gun: None }
+        HandsPose { forward, up, punch_cycle: 0.0, guard: 1.0, bob_phase: 0.0, bob_amount: 0.0, holding: false, tool: None, icon: None, shield: false, blocking: 0.0, place: 0.0, skin: 0, sprint: 0.0, sneak: 0.0, lift: 0.0, sway: [0.0; 2], time: 0.0, sleeve: None, bow: None, glint: false, arrow_tip: None, gun: None, eat: 0.0, equip: 0.0 }
     }
 }
 
@@ -1508,6 +1512,24 @@ fn arm_place(pose: &HandsPose, side: f32) -> ArmPlace {
             let recoil = (t * std::f32::consts::PI).sin() * (1.0 - t) * 0.03;
             p += Vec3::new(-0.03 * e, -0.08 * e + recoil, 0.17 * e - recoil) * k.max(0.4);
             a.tilt -= 0.5 * e * k.max(0.4);
+        }
+        // Eating, like Minecraft: the food comes in front of the mouth and bobs with every
+        // bite, then the hand goes back.
+        if pose.eat > 0.0 {
+            let e = pose.eat.clamp(0.0, 1.0);
+            let w = (e * std::f32::consts::PI).sin().powf(0.4);
+            let bite = (e * 30.0).sin() * 0.025 * w;
+            p = p.lerp(Vec3::new(0.06, -0.20 + bite, 0.30), w);
+            a.tilt -= 0.55 * w;
+            a.yaw += 0.35 * w;
+        }
+        // Putting armour on: a quick sweep down to the chest and back.
+        if pose.equip > 0.0 {
+            let e = pose.equip.clamp(0.0, 1.0);
+            let w = (e * std::f32::consts::PI).sin();
+            p += Vec3::new(-0.12 * w, -0.22 * w, -0.06 * w);
+            a.tilt += 0.6 * w;
+            a.roll -= 0.4 * w;
         }
         a.pos = p;
         return a;
