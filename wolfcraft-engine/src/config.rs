@@ -361,6 +361,9 @@ pub struct Settings {
     pub render_scale: f32,
     /// Cartoon look: soft bright light, light shadows, juicy colours, rim light on mobs.
     pub fx_toon: bool,
+    /// Leaves drawn solid (no see-through holes): much faster on weak phones.
+    #[serde(default)]
+    pub fast_leaves: bool,
     /// Look the settings were last moved to (1: the cartoon style became the default).
     /// Missing in old files, so they read 0 and get moved once.
     #[serde(default)]
@@ -443,6 +446,7 @@ impl Default for Settings {
             fx_water: true,
             fx_grading: true,
             fx_toon: true,
+            fast_leaves: false,
             // Phones are fill-rate bound: three quarters of the screen looks the same and is
             // close to twice as fast.
             render_scale: if cfg!(target_os = "android") { 0.75 } else { 1.0 },

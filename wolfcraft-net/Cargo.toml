@@ -9,3 +9,5 @@ serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
 if-addrs = "0.13"
+flate2 = "1.1"
+base64 = "0.22"

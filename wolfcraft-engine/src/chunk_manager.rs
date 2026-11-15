@@ -120,9 +120,13 @@ impl ChunkManager {
         // stops it near a source, changes the light up to 15 blocks away.
         let light_changed = old.light_emission() > 0 || b.light_emission() > 0 || (old.is_opaque() != b.is_opaque() && self.light_nearby(c));
         if light_changed {
-            for dk in [-15, 0, 15] {
-                for dj in [-15, 0, 15] {
-                    for di in [-15, 0, 15] {
+            // Like Starlight: only as far as the light really reaches (a dim lamp touches fewer
+            // chunks than a torch); a wall changing next to a light still checks the full 15.
+            let reach = if old.light_emission() > 0 || b.light_emission() > 0 { old.light_emission().max(b.light_emission()) as i32 } else { 15 };
+            let r = reach.clamp(1, 15);
+            for dk in [-r, 0, r] {
+                for dj in [-r, 0, r] {
+                    for di in [-r, 0, r] {
                         if let Some(n) = g.offset(c, di, dj, dk) {
                             let nk = ChunkKey::of(n);
                             if self.chunks.contains_key(&nk) && !self.urgent.contains(&nk) {
@@ -470,6 +474,20 @@ impl ChunkManager {
         let ready: Vec<ChunkKey> = want.iter().filter(|(d, k)| *d <= view as f64 && self.chunks.contains_key(k)).map(|(_, k)| *k).collect();
         for key in ready {
             self.mesh_ready_check(key, center, view);
+        }
+    }
+
+    /// Builds every loaded chunk's mesh again (a graphics setting changed how blocks look).
+    pub fn remesh_all(&mut self) {
+        let keys: Vec<ChunkKey> = self.chunks.keys().copied().collect();
+        for k in keys {
+            if let Some(st) = self.mesh_state.get_mut(&k) {
+                st.built = 0;
+                st.pending = false;
+            }
+            if !self.mesh_ready.contains(&k) {
+                self.mesh_ready.push_back(k);
+            }
         }
     }
 
