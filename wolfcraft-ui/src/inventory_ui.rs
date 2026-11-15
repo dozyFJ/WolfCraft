@@ -730,7 +730,10 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
             });
         });
         // ---- The tab's content in the middle, the hotbar along the bottom ----
-        let rest = ui.available_width();
+        // «Инвентарь» gets a second panel on the right: Персонаж / Крафт / Рюкзак.
+        let right = state.tab == BACKPACK_TAB && !state.search_open;
+        let rest = ui.available_width() - if right { side_w + 10.0 } else { 0.0 };
+        let grid_w = if right { (grid_w - side_w - 10.0).min(rest) } else { grid_w };
         ui.allocate_ui_with_layout(Vec2::new(rest, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
             ui.set_width(rest);
             ui.allocate_ui_with_layout(Vec2::new(grid_w, content_h - cell - 12.0), egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -744,6 +747,32 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 hotbar_row(ui, icons, p, state, inv, cell, slot_rects, trash_rect);
             }
         });
+        if right {
+            ui.allocate_ui_with_layout(Vec2::new(side_w, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.set_width(side_w);
+                let panel = Rect::from_min_size(ui.cursor().min, Vec2::new(side_w, content_h));
+                icons.paint_panel(ui.painter(), panel, wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                ui.add_space(6.0);
+                for k in 0..3u8 {
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
+                    let on = state.inv_page == k;
+                    let hot = resp.hovered() || resp.is_pointer_button_down_on();
+                    ui.painter().rect_filled(rect, Rounding::same(4.0), if on { p.accent.gamma_multiply(0.30) } else if hot { p.surface_hover } else { p.surface_hi });
+                    ui.painter().rect_stroke(rect, Rounding::same(4.0), Stroke::new(2.0_f32, if on || hot { p.accent } else { p.outline }));
+                    let inner = rect.shrink(tab * 0.2);
+                    match k {
+                        0 => paint_character(ui.painter(), inner, false, inv.armor.map(|s| s.and_then(|s| items::armor_material(s.id)))),
+                        1 => icons.paint_item(ui.painter(), inner, wolfcraft_engine::block::Block::CraftingTable as ItemId),
+                        _ => icons.paint(ui.painter(), inner, icon::BACKPACK, if on { p.accent } else { p.text }),
+                    }
+                    if resp.clicked() {
+                        state.inv_page = k;
+                    }
+                    resp.on_hover_text(["Персонаж", "Крафт", "Рюкзак"][k as usize]);
+                }
+            });
+        }
     });
 }
 
@@ -841,29 +870,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         // A recessed metal panel behind the slots, like in the block windows.
         icons.paint_panel(ui.painter(), area.expand(3.0), wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
         let area = area.shrink(4.0);
-        // Right sidebar: Персонаж, Крафт, Рюкзак — one page at a time.
-        let bw = 44.0f32;
-        let side = Rect::from_min_max(egui::pos2(area.right() - bw - 4.0, area.top()), area.max);
-        let content = Rect::from_min_max(area.min, egui::pos2(side.left() - 8.0, area.bottom()));
-        ui.painter().line_segment([egui::pos2(side.left() - 4.0, area.top() + 6.0), egui::pos2(side.left() - 4.0, area.bottom() - 6.0)], Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
-        for k in 0..3u8 {
-            let r = Rect::from_min_size(egui::pos2(side.left(), side.top() + 4.0 + k as f32 * (bw + 6.0)), Vec2::splat(bw));
-            let resp = ui.interact(r, Id::new(("inv-page", k)), Sense::click());
-            let on = state.inv_page == k;
-            let hot = resp.hovered() || resp.is_pointer_button_down_on();
-            ui.painter().rect_filled(r, Rounding::same(4.0), if on { p.accent.gamma_multiply(0.30) } else if hot { p.surface_hover } else { p.surface_hi });
-            ui.painter().rect_stroke(r, Rounding::same(4.0), Stroke::new(2.0_f32, if on || hot { p.accent } else { p.outline }));
-            let inner = r.shrink(bw * 0.2);
-            match k {
-                0 => paint_character(ui.painter(), inner, false, inv.armor.map(|s| s.and_then(|s| items::armor_material(s.id)))),
-                1 => icons.paint_item(ui.painter(), inner, wolfcraft_engine::block::Block::CraftingTable as ItemId),
-                _ => icons.paint(ui.painter(), inner, icon::BACKPACK, if on { p.accent } else { p.text }),
-            }
-            if resp.clicked() {
-                state.inv_page = k;
-            }
-            resp.on_hover_text(["Персонаж", "Крафт", "Рюкзак"][k as usize]);
-        }
+        let content = area;
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(content));
         egui::ScrollArea::vertical().id_salt(("creative-survival-inv", state.inv_page)).auto_shrink([false, false]).show(&mut ui2, |ui| {
             ui.set_width(content.width() - 8.0);
