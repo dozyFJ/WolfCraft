@@ -2304,8 +2304,17 @@ impl App {
                                         title: if let Some(k) = tech { wolfcraft_engine::wolftech::spec(k).name } else if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else if wolfcraft_engine::construction::entry(block as u16).is_some() { block.info().name } else { "Сундук" },
                                         columns: if furnace || forge || tech.is_some() { 3 } else if magic { 2 } else { 9 },
                                         accepts: &accepts,
-                                        layout: if furnace || tech.is_some() { wolfcraft_ui::container_ui::Layout::Furnace } else if forge { wolfcraft_ui::container_ui::Layout::Forge } else if magic { wolfcraft_ui::container_ui::Layout::Enchant } else { wolfcraft_ui::container_ui::Layout::Grid },
+                                        layout: if let Some(k) = tech {
+                                            use wolfcraft_engine::wolftech::Kind;
+                                            match k {
+                                                Kind::Generator => wolfcraft_ui::container_ui::Layout::Generator,
+                                                Kind::Solar => wolfcraft_ui::container_ui::Layout::Panel,
+                                                Kind::Cell => wolfcraft_ui::container_ui::Layout::Charger,
+                                                _ => wolfcraft_ui::container_ui::Layout::Machine,
+                                            }
+                                        } else if furnace { wolfcraft_ui::container_ui::Layout::Furnace } else if forge { wolfcraft_ui::container_ui::Layout::Forge } else if magic { wolfcraft_ui::container_ui::Layout::Enchant } else { wolfcraft_ui::container_ui::Layout::Grid },
                                         working: (furnace || tech.is_some()) && working,
+                                        energy: s.tech_status(pos, block).map(|(_, _, e, cap)| e / cap.max(1.0)),
                                         status: if furnace || tech.is_some() {
                                             Some((status_text, prog))
                                         } else if forge {
