@@ -127,7 +127,12 @@ impl Inventory {
             if dur > 0 && (unb == 0 || tick.wrapping_mul(2654435761) % (unb + 1) == 0) {
                 s.damage += 1;
                 if s.damage >= dur {
-                    self.slots[self.selected] = None;
+                    // WolfTech gear runs flat instead of breaking (recharge it in a cell).
+                    if crate::items::rechargeable(s.id) {
+                        s.damage = dur;
+                    } else {
+                        self.slots[self.selected] = None;
+                    }
                 }
             }
         }
@@ -403,6 +408,12 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_INGOT, 5), (ids::COPPER_INGOT, 2)], (ids::HEAT_VENT, 1), true, "WolfTech"));
         v.push(r(&[(ids::TIN_INGOT, 4), (b(Block::Ice), 2), (ids::COPPER_INGOT, 1)], (ids::COOLANT_CELL, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 4), (ids::BRONZE_INGOT, 2), (b(Block::Obsidian), 1)], (ids::REACTOR_PLATING, 1), true, "WolfTech"));
+        // More machines and electric tools.
+        v.push(r(&[(ids::IRON_INGOT, 6), (ids::CIRCUIT, 1), (b(Block::Obsidian), 1)], (b(Block::Compressor), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::OakPlanks), 4)], (b(Block::Sawmill), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 1), (b(Block::Glass), 2)], (b(Block::Extractor), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 5), (ids::DIAMOND, 1), (ids::CIRCUIT, 1), (b(Block::EnergyCell), 1)], (ids::DRILL, 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 6), (ids::CIRCUIT, 1), (b(Block::EnergyCell), 1)], (ids::CHAINSAW, 1), true, "WolfTech"));
         v.push(r(&[(ids::COPPER_INGOT, 3), (ids::CIRCUIT, 1), (b(Block::IskritBlock), 1)], (ids::STORAGE_UPGRADE, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));

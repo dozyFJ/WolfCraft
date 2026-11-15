@@ -114,6 +114,7 @@ fn gun_arms(kind: u8, pitch: f32) -> (f32, Option<f32>) {
         // The remote is held out in one hand, the hammer rests on the shoulder.
         7 => (-1.1, None),
         8 => (-0.5, None),
+        13 => (-0.9, None),
         _ => (aim, Some(aim + 0.25)),
     }
 }
@@ -196,6 +197,21 @@ fn add_gun_3p(v: &mut Vec<ModelVertex>, frame: &Frame, hand: Vec3, pivot: Vec3, 
             }
             b([-0.03, -0.17, -0.02], [0.03, -0.05, 0.05], DARK);
             b([-0.04, -0.10, -0.38], [0.04, 0.04, -0.06], [0.20, 0.23, 0.30]);
+        }
+        11 => {
+            b([-0.045, -0.04, -0.06], [0.045, 0.06, 0.24], [0.20, 0.23, 0.30]);
+            b([-0.03, -0.17, -0.02], [0.03, -0.04, 0.06], DARK);
+            b([-0.02, -0.01, 0.24], [0.02, 0.03, 0.50], STEEL);
+        }
+        12 => {
+            b([-0.055, -0.06, -0.10], [0.055, 0.07, 0.20], [0.95, 0.55, 0.15]);
+            b([-0.012, -0.02, 0.20], [0.012, 0.05, 0.60], STEEL);
+            b([-0.03, -0.17, -0.08], [0.03, -0.06, 0.0], DARK);
+        }
+        13 => {
+            b([-0.02, -0.02, -0.12], [0.02, 0.02, 0.02], DARK);
+            b([-0.06, -0.025, 0.02], [0.06, 0.025, 0.05], [1.0, 0.8, 0.25]);
+            b([-0.016, -0.008, 0.05], [0.016, 0.008, 0.62], CYAN);
         }
         10 => {
             b([-0.05, -0.07, -0.08], [0.05, 0.07, 0.34], [0.20, 0.23, 0.30]);
@@ -1884,7 +1900,13 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
     };
     let heavy = matches!(g.kind, 4 | 5);
     let base = anchor + off + Vec3::new(0.0, 0.02 * kick, -(if heavy { 0.12 } else { 0.07 }) * kick);
-    let angle = if g.kind == 8 {
+    // Electric tools buzz while they work.
+    let buzz = if matches!(g.kind, 11 | 12) && pose.punch_cycle > 0.0 { Vec3::new((pose.time * 97.0).sin(), (pose.time * 113.0).cos(), 0.0) * 0.004 } else { Vec3::ZERO };
+    let base = base + buzz;
+    let angle = if g.kind == 13 {
+        // The energy sword swings down and across like any blade.
+        1.3 * (pose.punch_cycle.clamp(0.0, 1.0) * std::f32::consts::PI).sin() + btilt * 0.5
+    } else if g.kind == 8 {
         // The hammer comes down: the head swings forward over the grip.
         1.4 * (shot * std::f32::consts::PI).sin() + btilt * 0.5
     } else {
@@ -2073,6 +2095,67 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             bx(&mut v, [-0.065, -0.15, 0.46], [0.065, -0.04, 0.60], skin_c);
             bx(&mut v, [-0.30, -0.56, 0.36], [-0.04, -0.12, 0.54], sleeve_c);
         }
+        11 => {
+            // WolfTech drill: a graphite body with a pistol grip, a battery pack, a steel
+            // chuck and a long spiral bit that spins while it digs.
+            const GRAPH: [f32; 3] = [0.20, 0.23, 0.30];
+            const CYAN: [f32; 3] = [0.35, 0.92, 1.0];
+            bx(&mut v, [-0.045, -0.040, -0.06], [0.045, 0.060, 0.24], GRAPH);
+            bx(&mut v, [-0.035, -0.17, -0.02], [0.035, -0.04, 0.06], DARK);
+            bx(&mut v, [-0.042, -0.21, -0.06], [0.042, -0.16, 0.10], GRAPH);
+            bx(&mut v, [-0.030, -0.025, 0.24], [0.030, 0.045, 0.31], STEEL);
+            let spin = if pose.punch_cycle > 0.0 { pose.time * 40.0 } else { 0.0 };
+            for k in 0..6 {
+                let z = 0.31 + k as f32 * 0.045;
+                let a = spin + k as f32 * 1.1;
+                let r = 0.022 - k as f32 * 0.002;
+                let (sx, sy) = (a.cos() * 0.008, a.sin() * 0.008);
+                bx(&mut v, [-r + sx, -r + 0.01 + sy, z], [r + sx, r + 0.01 + sy, z + 0.04], if k % 2 == 0 { STEEL } else { [0.62, 0.64, 0.68] });
+            }
+            let glow_from = v.len();
+            bx(&mut v, [0.045, 0.0, 0.04], [0.050, 0.04, 0.18], CYAN);
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            muzzle_z = 0.6;
+            bx(&mut v, [-0.055, -0.17, -0.05], [0.055, -0.06, 0.07], skin_c);
+            bx(&mut v, [-0.065, -0.52, -0.22], [0.065, -0.16, 0.02], sleeve_c);
+        }
+        12 => {
+            // WolfTech chainsaw: a motor housing with a top handle, a long bar and a chain
+            // whose teeth run while it cuts.
+            const GRAPH: [f32; 3] = [0.20, 0.23, 0.30];
+            const ORANGE: [f32; 3] = [0.95, 0.55, 0.15];
+            bx(&mut v, [-0.055, -0.060, -0.10], [0.055, 0.070, 0.20], ORANGE);
+            bx(&mut v, [-0.020, 0.070, -0.06], [0.020, 0.12, 0.14], DARK);
+            bx(&mut v, [-0.012, -0.020, 0.20], [0.012, 0.050, 0.62], STEEL);
+            let run = if pose.punch_cycle > 0.0 { (pose.time * 30.0).fract() * 0.04 } else { 0.0 };
+            for k in 0..10 {
+                let z = 0.21 + ((k as f32 * 0.04 + run) % 0.40);
+                bx(&mut v, [-0.014, 0.050, z], [0.014, 0.062, z + 0.02], DARK);
+                bx(&mut v, [-0.014, -0.032, z], [0.014, -0.020, z + 0.02], DARK);
+            }
+            bx(&mut v, [-0.040, -0.17, -0.10], [0.040, -0.06, 0.0], GRAPH);
+            muzzle_z = 0.6;
+            bx(&mut v, [-0.055, -0.17, -0.10], [0.055, -0.06, 0.02], skin_c);
+            bx(&mut v, [-0.065, -0.52, -0.28], [0.065, -0.16, -0.04], sleeve_c);
+            bx(&mut v, [-0.05, 0.10, -0.04], [0.05, 0.16, 0.08], skin_c);
+        }
+        13 => {
+            // WolfTech energy sword: a dark hilt with a gold guard and a long glowing blade.
+            const GOLD: [f32; 3] = [1.0, 0.80, 0.25];
+            bx(&mut v, [-0.020, -0.12, -0.02], [0.020, 0.02, 0.02], DARK);
+            bx(&mut v, [-0.065, 0.02, -0.025], [0.065, 0.05, 0.025], GOLD);
+            let glow_from = v.len();
+            bx(&mut v, [-0.018, 0.05, -0.008], [0.018, 0.62, 0.008], [0.35, 0.95, 1.0]);
+            bx(&mut v, [-0.008, 0.05, -0.010], [0.008, 0.64, 0.010], [0.90, 1.0, 1.0]);
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            muzzle_z = 0.0;
+            bx(&mut v, [-0.045, -0.10, -0.045], [0.045, 0.0, 0.045], skin_c);
+            bx(&mut v, [-0.06, -0.48, -0.18], [0.06, -0.10, 0.02], sleeve_c);
+        }
         10 => {
             // WolfTech railgun: two long blue rails with a charge glowing between them, a
             // heavy breech with capacitors, a stock.
@@ -2142,7 +2225,7 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             bx(&mut v, [-0.30, -0.56, 0.40], [-0.04, -0.11, 0.58], sleeve_c);
         }
     }
-    if shot > 0.45 && !matches!(g.kind, 7 | 8) {
+    if shot > 0.45 && !matches!(g.kind, 7 | 8 | 11 | 12 | 13) {
         // Muzzle flash: a bright star for the first moments, unlit.
         let start = v.len();
         let k = (shot - 0.45) / 0.55;
@@ -2325,7 +2408,7 @@ fn add_shield(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, ang
 /// Thickness in pixels of a held or dropped icon: WolfTech items are chunky (3 px), the rest
 /// one pixel like in Minecraft.
 pub fn icon_depth(sprite: usize) -> f32 {
-    if (wolfcraft_assets::items::IRON_DUST as usize..wolfcraft_assets::items::COUNT as usize).contains(&sprite) { 3.0 } else { 1.0 }
+    if (wolfcraft_assets::items::IRON_DUST as usize..wolfcraft_assets::items::COUNT as usize).contains(&sprite) { 2.0 } else { 1.0 }
 }
 
 #[allow(clippy::too_many_arguments)]
