@@ -14,5 +14,6 @@ pub mod main_menu;
 pub mod osk;
 pub mod theme_manager;
 pub mod ui_components;
+pub mod webgui;
 
 pub use gui_renderer::{GuiIcons, GuiRenderer};
