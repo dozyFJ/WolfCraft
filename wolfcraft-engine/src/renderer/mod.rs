@@ -28,6 +28,8 @@ struct Globals {
     /// x: relief mode (0 off, 1 lit relief, 2 parallax depth), y: relief strength, z: effect
     /// flags (1 wind, 2 water, 4 colour grading), w: unused.
     fx: [f32; 4],
+    /// Camera-relative position → sun shadow map clip space (RTX-like sun shadows).
+    shadow: [[f32; 4]; 4],
     tiles: [[f32; 4]; MAX_TILES],
 }
 
@@ -387,6 +389,15 @@ pub struct WorldRenderer {
     render_scale: f32,
     offscreen: Option<(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup)>,
     blit_pipeline: wgpu::RenderPipeline,
+    /// Sun shadows («RTX»): the map, its comparison sampler, the depth-only pipeline and the
+    /// chunk offsets for that pass.
+    shadow_view: wgpu::TextureView,
+    shadow_sampler: wgpu::Sampler,
+    shadow_pipeline: wgpu::RenderPipeline,
+    shadow_bg: wgpu::BindGroup,
+    shadow_inst: wgpu::Buffer,
+    shadow_inst_cap: usize,
+    shadow_size: u32,
     /// Post effects (bloom, light shafts): their uniform, and whether they are on (then the
     /// world is drawn off screen even at full resolution).
     post_buf: wgpu::Buffer,
@@ -495,7 +506,31 @@ impl WorldRenderer {
                     ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry { binding: 6, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Depth, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 7, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison), count: None },
             ],
+        });
+        // Sun shadow map (the «RTX» preset): depth seen from the sun around the camera.
+        let shadow_size = if cfg!(target_os = "android") { 1024 } else { 2048 };
+        let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("sun-shadow"),
+            size: wgpu::Extent3d { width: shadow_size, height: shadow_size, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let shadow_view = shadow_tex.create_view(&Default::default());
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow-sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
         });
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
@@ -512,9 +547,9 @@ impl WorldRenderer {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        let bind_group = Self::make_bind_group(device, &layout, &globals, [&blocks_atlas.view, &entities_atlas.view, &items_atlas.view, &relief_atlas.view], &sampler);
+        let bind_group = Self::make_bind_group(device, &layout, &globals, [&blocks_atlas.view, &entities_atlas.view, &items_atlas.view, &relief_atlas.view], &sampler, &shadow_view, &shadow_sampler);
         let globals_hands = device.create_buffer(&wgpu::BufferDescriptor { label: Some("globals-hands"), size: std::mem::size_of::<Globals>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let bind_group_hands = Self::make_bind_group(device, &layout, &globals_hands, [&blocks_atlas.view, &entities_atlas.view, &items_atlas.view, &relief_atlas.view], &sampler);
+        let bind_group_hands = Self::make_bind_group(device, &layout, &globals_hands, [&blocks_atlas.view, &entities_atlas.view, &items_atlas.view, &relief_atlas.view], &sampler, &shadow_view, &shadow_sampler);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("world-shader"), source: wgpu::ShaderSource::Wgsl(include_str!("world.wgsl").into()) });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("world-pl"), bind_group_layouts: &[&layout], push_constant_ranges: &[] });
@@ -548,6 +583,31 @@ impl WorldRenderer {
             })
         };
         let opaque_pipeline = make("opaque", "fs_opaque", Some(wgpu::Face::Back), None, true);
+        // Shadow pass: depth only, from the sun; its own layout (just the globals), since the
+        // shadow map cannot be read while it is drawn into.
+        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow-bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None }],
+        });
+        let shadow_bg = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("shadow-bg"), layout: &shadow_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() }] });
+        let shadow_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("shadow-pl"), bind_group_layouts: &[&shadow_layout], push_constant_ranges: &[] });
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sun-shadow"),
+            layout: Some(&shadow_pl),
+            vertex: wgpu::VertexState { module: &shader, entry_point: "vs_shadow", compilation_options: Default::default(), buffers: &vbuffers },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
+            }),
+            multisample: Default::default(),
+            fragment: None,
+            multiview: None,
+            cache: None,
+        });
         let water_pipeline = make("water", "fs_water", None, Some(KEEP_ALPHA_BLEND), false);
 
         let line_attrs = wgpu::vertex_attr_array![0 => Float32x3];
@@ -716,6 +776,13 @@ impl WorldRenderer {
             render_scale: 1.0,
             offscreen: None,
             blit_pipeline,
+            shadow_view,
+            shadow_sampler,
+            shadow_pipeline,
+            shadow_bg,
+            shadow_inst: device.create_buffer(&wgpu::BufferDescriptor { label: Some("shadow-inst"), size: 16 * 256, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }),
+            shadow_inst_cap: 256,
+            shadow_size,
             post_buf,
             post_on: false,
             blit_layout,
@@ -736,7 +803,8 @@ impl WorldRenderer {
         }
     }
 
-    fn make_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, views: [&wgpu::TextureView; 4], sampler: &wgpu::Sampler) -> wgpu::BindGroup {
+    #[allow(clippy::too_many_arguments)]
+    fn make_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, views: [&wgpu::TextureView; 4], sampler: &wgpu::Sampler, shadow: &wgpu::TextureView, shadow_sampler: &wgpu::Sampler) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("world-bg"),
             layout,
@@ -747,6 +815,8 @@ impl WorldRenderer {
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(views[1]) },
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(views[2]) },
                 wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(views[3]) },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(shadow) },
+                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(shadow_sampler) },
             ],
         })
     }
@@ -834,8 +904,8 @@ impl WorldRenderer {
             let uv = blocks.uv(i);
             *rect = [uv.min[0], uv.min[1], uv.max[0] - uv.min[0], uv.max[1] - uv.min[1]];
         }
-        self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
-        self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
+        self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler, &self.shadow_view, &self.shadow_sampler);
+        self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler, &self.shadow_view, &self.shadow_sampler);
     }
 
     /// Builds and uploads the relief height maps the first time relief is on.
@@ -845,8 +915,8 @@ impl WorldRenderer {
         }
         self.relief_real = true;
         self.relief_atlas = GpuAtlas::new_height(device, queue, atlases.relief());
-        self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
-        self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
+        self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler, &self.shadow_view, &self.shadow_sampler);
+        self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler, &self.shadow_view, &self.shadow_sampler);
     }
 
     pub fn sync_atlas(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, atlases: &mut AtlasManager) {
@@ -856,8 +926,8 @@ impl WorldRenderer {
                 let uv = atlas.uv(i);
                 *rect = [uv.min[0], uv.min[1], uv.max[0] - uv.min[0], uv.max[1] - uv.min[1]];
             }
-            self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
-            self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler);
+            self.bind_group = Self::make_bind_group(device, &self.layout, &self.globals, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler, &self.shadow_view, &self.shadow_sampler);
+            self.bind_group_hands = Self::make_bind_group(device, &self.layout, &self.globals_hands, [&self.blocks_atlas.view, &self.entities_atlas.view, &self.items_atlas.view, &self.relief_atlas.view], &self.sampler, &self.shadow_view, &self.shadow_sampler);
         }
     }
 
@@ -1001,8 +1071,28 @@ impl WorldRenderer {
             misc: [p.time, p.underwater as u32 as f32, p.crack, p.shaders as f32],
             env: [p.season, p.snow, p.humidity, p.rain],
             fx: [p.relief_mode as f32, p.relief_strength, p.fx_flags as f32, 0.0],
+            shadow: Mat4::IDENTITY.to_cols_array_2d(),
             tiles: self.tile_rects,
         };
+        // Sun shadows: an orthographic view from the sun over the area round the camera,
+        // snapped to whole shadow texels in the world so the edges do not crawl as we walk.
+        let shadows = p.fx_flags & 128 != 0 && !p.underwater && p.day > 0.05 && p.sun_dir.length_squared() > 0.5;
+        let reach: f32 = if cfg!(target_os = "android") { 32.0 } else { 48.0 };
+        if shadows {
+            let sun = p.sun_dir.normalize();
+            let hint = if sun.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+            let right = (-sun).cross(hint).normalize();
+            let up = right.cross(-sun).normalize();
+            let texel = 2.0 * reach as f64 / self.shadow_size as f64;
+            let fx = p.eye.dot(right.as_dvec3()).rem_euclid(texel) as f32;
+            let fy = p.eye.dot(up.as_dvec3()).rem_euclid(texel) as f32;
+            let c = -(right * fx + up * fy);
+            let view = Mat4::look_to_rh(c + sun * 160.0, -sun, up);
+            let proj = Mat4::orthographic_rh(-reach, reach, -reach, reach, 1.0, 320.0);
+            g.shadow = (proj * view).to_cols_array_2d();
+        } else {
+            g.fx[2] = (p.fx_flags & 127) as f32;
+        }
         if p.underwater {
             g.fog[3] = 1.0 / 60.0;
         }
@@ -1121,6 +1211,42 @@ impl WorldRenderer {
             }
         }
 
+        // Shadow pass: every chunk near the camera (casters off screen count too), depth only.
+        if shadows {
+            let max_d = reach as f64 * 1.6 + 24.0;
+            let casters: Vec<ChunkKey> = self.chunks.iter().filter(|(_, c)| c.opaque.is_some() && (c.center - p.eye).length() < max_d + c.radius).map(|(k, _)| *k).collect();
+            let offs: Vec<[f32; 4]> = casters.iter().map(|k| {
+                let o = (self.chunks[k].origin - p.eye).as_vec3();
+                [o.x, o.y, o.z, 0.0]
+            }).collect();
+            if offs.len() > self.shadow_inst_cap {
+                self.shadow_inst_cap = offs.len().next_power_of_two();
+                self.shadow_inst = device.create_buffer(&wgpu::BufferDescriptor { label: Some("shadow-inst"), size: (self.shadow_inst_cap * 16) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            }
+            if !offs.is_empty() {
+                queue.write_buffer(&self.shadow_inst, 0, bytemuck::cast_slice(&offs));
+            }
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("sun-shadow-pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &self.shadow_view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.shadow_pipeline);
+            pass.set_bind_group(0, &self.shadow_bg, &[]);
+            pass.set_vertex_buffer(1, self.shadow_inst.slice(..));
+            for (i, k) in casters.iter().enumerate() {
+                if let Some(m) = self.chunks[k].opaque.as_ref() {
+                    if m.index_count == 0 {
+                        continue;
+                    }
+                    pass.set_vertex_buffer(0, m.vb.slice(..));
+                    pass.set_index_buffer(m.ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..m.index_count, 0, i as u32..i as u32 + 1);
+                }
+            }
+        }
         let mut stats = RenderStats { chunks_total: self.chunks.len(), chunks_visible: visible.len(), chunks_hidden: hidden, ..Default::default() };
         let detail_d2 = DETAIL_DIST * DETAIL_DIST;
         {
