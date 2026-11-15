@@ -224,6 +224,16 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     if (emit == 1u) {
         rgb = color.rgb * (0.85 + 0.15 * in.light.x);
     }
+    // Rain (like BSL on PC): what stands under the open sky gets darker and wet, the tops
+    // most, with a glossy glint of the sun and a sheen of the sky at low angles.
+    if (fx_on(64u) && g.env.w > 0.01 && emit == 0u && g.misc.y < 0.5) {
+        let top = smoothstep(0.3, 0.9, dot(n, up));
+        let wet = g.env.w * smoothstep(0.75, 0.95, in.light.y) * (0.35 + 0.65 * top);
+        let v = normalize(-in.rel);
+        let gloss = pow(max(dot(reflect(-sun, n), v), 0.0), 48.0) * day;
+        let fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
+        rgb = rgb * (1.0 - 0.28 * wet) + (vec3<f32>(1.0, 0.95, 0.85) * gloss * 0.6 + g.fog.rgb * fres * 0.25) * wet;
+    }
     // Distance fog (the cartoon look adds a light aerial haze that starts sooner).
     let d = length(in.rel);
     // Clear air nearby, the fog closes in only towards the edge of the view distance (it
