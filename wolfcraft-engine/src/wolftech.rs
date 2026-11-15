@@ -33,6 +33,7 @@ pub struct Spec {
 }
 
 pub fn kind(b: Block) -> Option<Kind> {
+    let b = b.machine_dir().map_or(b, |(base, _)| base);
     Some(match b {
         Block::TechGenerator => Kind::Generator,
         Block::SolarPanel => Kind::Solar,

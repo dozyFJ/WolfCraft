@@ -104,6 +104,15 @@ const fn ptiles(front: u16, back: u16, side: u16, d: usize) -> [u16; 6] {
     t
 }
 
+/// WolfTech machine casing with its `front` facing `d` (0 +i, 1 -i, 2 +j, 3 -j).
+const fn mtiles(front: u16, d: usize) -> [u16; 6] {
+    const SLOT: [usize; 4] = [4, 5, 0, 1];
+    let mut r = [t::TECH_SIDE; 6];
+    r[2] = t::TECH_TOP;
+    r[SLOT[d]] = front;
+    r
+}
+
 macro_rules! blocks {
     ($( $id:literal $var:ident => $info:expr ),* $(,)?) => {
         #[repr(u16)]
@@ -1845,6 +1854,18 @@ blocks! {
     2460 InductionFurnace => needs_pick(info("Индукционная печь", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::INDUCTION_FRONT, t::TECH_SIDE])),
     2461 Enricher => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, [t::TECH_SIDE, t::TECH_SIDE, t::TECH_TOP, t::TECH_SIDE, t::ENRICHER_FRONT, t::TECH_SIDE])),
     2462 BuilderTable => info("Конструктор", Opaque, 3.75, Axe, column(t::BUILDER_SIDE, t::BUILDER_TOP, t::PLANKS)),
+    2463 TechGeneratorD1 => needs_pick(info("Генератор", Opaque, 4.0, Pickaxe, mtiles(t::TECH_GEN_FRONT, 1))),
+    2464 TechGeneratorD2 => needs_pick(info("Генератор", Opaque, 4.0, Pickaxe, mtiles(t::TECH_GEN_FRONT, 2))),
+    2465 TechGeneratorD3 => needs_pick(info("Генератор", Opaque, 4.0, Pickaxe, mtiles(t::TECH_GEN_FRONT, 3))),
+    2466 CrusherD1 => needs_pick(info("Дробитель", Opaque, 4.0, Pickaxe, mtiles(t::CRUSHER_FRONT, 1))),
+    2467 CrusherD2 => needs_pick(info("Дробитель", Opaque, 4.0, Pickaxe, mtiles(t::CRUSHER_FRONT, 2))),
+    2468 CrusherD3 => needs_pick(info("Дробитель", Opaque, 4.0, Pickaxe, mtiles(t::CRUSHER_FRONT, 3))),
+    2469 InductionFurnaceD1 => needs_pick(info("Индукционная печь", Opaque, 4.0, Pickaxe, mtiles(t::INDUCTION_FRONT, 1))),
+    2470 InductionFurnaceD2 => needs_pick(info("Индукционная печь", Opaque, 4.0, Pickaxe, mtiles(t::INDUCTION_FRONT, 2))),
+    2471 InductionFurnaceD3 => needs_pick(info("Индукционная печь", Opaque, 4.0, Pickaxe, mtiles(t::INDUCTION_FRONT, 3))),
+    2472 EnricherD1 => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, mtiles(t::ENRICHER_FRONT, 1))),
+    2473 EnricherD2 => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, mtiles(t::ENRICHER_FRONT, 2))),
+    2474 EnricherD3 => needs_pick(info("Обогатитель", Opaque, 4.0, Pickaxe, mtiles(t::ENRICHER_FRONT, 3))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2117,8 +2138,53 @@ impl Block {
             StoneSlabVerticalA => ab(StoneSlabVerticalA, StoneSlabVerticalB),
             PlankSlabVerticalA => ab(PlankSlabVerticalA, PlankSlabVerticalB),
             BrickSlabVerticalA => ab(BrickSlabVerticalA, BrickSlabVerticalB),
+            // WolfTech machines turn their front to the player (like a furnace).
+            TechGenerator | Crusher | InductionFurnace | Enricher => {
+                let d = if along_i { if dir_i > 0.0 { 1 } else { 0 } } else if dir_j > 0.0 { 3 } else { 2 };
+                self.machine_facing(d)
+            }
             b => b,
         }
+    }
+
+    /// WolfTech machine turned to face `d` (0 +i, 1 -i, 2 +j, 3 -j); `self` is the base block.
+    pub fn machine_facing(self, d: usize) -> Block {
+        if d == 0 {
+            return self;
+        }
+        use Block::*;
+        let v = match self {
+            TechGenerator => [TechGeneratorD1, TechGeneratorD2, TechGeneratorD3],
+            Crusher => [CrusherD1, CrusherD2, CrusherD3],
+            InductionFurnace => [InductionFurnaceD1, InductionFurnaceD2, InductionFurnaceD3],
+            Enricher => [EnricherD1, EnricherD2, EnricherD3],
+            b => return b,
+        };
+        v[(d - 1).min(2)]
+    }
+
+    /// (base machine, facing) of a WolfTech machine with a front.
+    pub fn machine_dir(self) -> Option<(Block, usize)> {
+        use Block::*;
+        Some(match self {
+            TechGenerator => (TechGenerator, 0),
+            TechGeneratorD1 => (TechGenerator, 1),
+            TechGeneratorD2 => (TechGenerator, 2),
+            TechGeneratorD3 => (TechGenerator, 3),
+            Crusher => (Crusher, 0),
+            CrusherD1 => (Crusher, 1),
+            CrusherD2 => (Crusher, 2),
+            CrusherD3 => (Crusher, 3),
+            InductionFurnace => (InductionFurnace, 0),
+            InductionFurnaceD1 => (InductionFurnace, 1),
+            InductionFurnaceD2 => (InductionFurnace, 2),
+            InductionFurnaceD3 => (InductionFurnace, 3),
+            Enricher => (Enricher, 0),
+            EnricherD1 => (Enricher, 1),
+            EnricherD2 => (Enricher, 2),
+            EnricherD3 => (Enricher, 3),
+            _ => return None,
+        })
     }
 
     /// The item a placed variant comes from (open doors, turned stairs and panes, ...).
@@ -2156,6 +2222,7 @@ impl Block {
             IskritLampOn => IskritLamp,
             ButtonOn => Button,
             PressurePlateOn => PressurePlate,
+            b if b.machine_dir().is_some() => b.machine_dir().unwrap().0,
             b => b,
         }
     }
