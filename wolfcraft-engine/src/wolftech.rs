@@ -49,7 +49,7 @@ pub fn spec(k: Kind) -> Spec {
     match k {
         Kind::Generator => Spec { name: "Генератор", capacity: 2_000.0, rate: 20.0, time: 0.0, hint: "Положите уголь или дрова" },
         Kind::Solar => Spec { name: "Солнечная панель", capacity: 500.0, rate: 8.0, time: 0.0, hint: "Работает днём под открытым небом" },
-        Kind::Cell => Spec { name: "Энергоячейка", capacity: 40_000.0, rate: 0.0, time: 0.0, hint: "Хранит энергию сети" },
+        Kind::Cell => Spec { name: "Энергоячейка", capacity: 40_000.0, rate: 0.0, time: 0.0, hint: "Хранит энергию, заряжает снаряжение (положите его слева)" },
         Kind::Crusher => Spec { name: "Дробитель", capacity: 1_000.0, rate: 10.0, time: 4.0, hint: "Руда → 2 пыли, камень → булыжник → гравий → песок" },
         Kind::Induction => Spec { name: "Индукционная печь", capacity: 1_000.0, rate: 8.0, time: 2.0, hint: "Плавит быстро, на энергии" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 2_000.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },

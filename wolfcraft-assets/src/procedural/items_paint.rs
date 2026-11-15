@@ -91,7 +91,13 @@ pub mod items {
     pub const TIN_DUST: u16 = 135;
     pub const SILVER_DUST: u16 = 136;
     pub const CIRCUIT: u16 = 137;
-    pub const COUNT: u16 = 138;
+    pub const PLASMA_RIFLE: u16 = 138;
+    pub const RAILGUN: u16 = 139;
+    pub const ENERGY_SWORD: u16 = 140;
+    pub const JETPACK: u16 = 141;
+    pub const NANO_BASE: u16 = 142;
+    pub const MECH: u16 = 146;
+    pub const COUNT: u16 = 147;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1159,6 +1165,42 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             q.put(x + 1, y + 1, Rgb(0.12, 0.12, 0.14), 1.0);
         }
     }));
+    // WolfTech arsenal, drawn as pixel art: D dark metal, G grey, c cyan glow, W white,
+    // Y gold, K handle, O/R flame, N nano plating, b blue rails.
+    let art = |rows: &[&str]| {
+        let rows: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
+        p(move |q| {
+            for (y, row) in rows.iter().enumerate() {
+                for (x, ch) in row.chars().enumerate() {
+                    let c = match ch {
+                        'D' => Rgb(0.22, 0.24, 0.28),
+                        'G' => Rgb(0.55, 0.58, 0.63),
+                        'c' => Rgb(0.20, 0.85, 0.95),
+                        'W' => Rgb(0.92, 1.0, 1.0),
+                        'Y' => Rgb(0.95, 0.75, 0.25),
+                        'K' => Rgb(0.30, 0.20, 0.14),
+                        'O' => Rgb(1.0, 0.60, 0.15),
+                        'R' => Rgb(0.95, 0.25, 0.10),
+                        'N' => Rgb(0.20, 0.23, 0.30),
+                        'b' => Rgb(0.30, 0.50, 1.0),
+                        _ => continue,
+                    };
+                    if x < 16 && y < 16 {
+                        q.put(x as u32, y as u32, c, 1.0);
+                    }
+                }
+            }
+        })
+    };
+    l.add(PLASMA_RIFLE, "plasma_rifle", art(&["", "", "", "", "...........cc", ".DDDDDDDDDDDDDD", ".DGGGcccGGGGDDc", ".DDDDDDDDDDDD", "...DDD..DD", "...DD...DD", "..DDD", "..DD"]));
+    l.add(RAILGUN, "railgun", art(&["", "", "", ".....bbbbbbbbbbb", "DDDDDDDDDDDDDDDD", ".....bbbbbbbbbbb", "...DDD.DD", "...DD", "..DDD", "..DD"]));
+    l.add(ENERGY_SWORD, "energy_sword", art(&["..............cW", ".............cWc", "............cWc", "...........cWc", "..........cWc", ".........cWc", "........cWc", ".......cWc", "......cWc", "..Y..cWc", "...YcWc", "....YY", "...KYY", "..KK..Y", ".KK", "KK"]));
+    l.add(JETPACK, "jetpack", art(&["", "....GGG..GGG", "...GDDDGGDDDG", "...GDDDGGDDDG", "...GDcDGGDcDG", "...GDDDGGDDDG", "...GDcDGGDcDG", "...GDDDGGDDDG", "...GDDDGGDDDG", "....GGG..GGG", "....OYO..OYO", "....YRY..YRY", ".....O....O", ".....R....R"]));
+    l.add(NANO_BASE, "nano_helmet", art(&["", "", "", "....NNNNNNNN", "...NNNNNNNNNN", "...NNccccccNN", "...NNcWWWWcNN", "...NNccccccNN", "...NNN....NNN", "...NNN....NNN"]));
+    l.add(NANO_BASE + 1, "nano_chestplate", art(&["", "", "..NNNN....NNNN", "..NNNNNNNNNNNN", "..NNNNNccNNNNN", "...NNNcWWcNNN", "...NNNNccNNNN", "...NNcNNNNcNN", "...NNNNNNNNNN", "...NNcNNNNcNN", "...NNNNNNNNNN", "....NNNNNNNN"]));
+    l.add(NANO_BASE + 2, "nano_leggings", art(&["", "", "...NNNNNNNNNN", "...NccccccccN", "...NNNN..NNNN", "...NNcN..NcNN", "...NNNN..NNNN", "...NNNN..NNNN", "...NNcN..NcNN", "...NNNN..NNNN", "...NNNN..NNNN", "...NNNN..NNNN"]));
+    l.add(NANO_BASE + 3, "nano_boots", art(&["", "", "", "", "", "", "...NNN....NNN", "...NcN....NcN", "...NNN....NNN", "..NNNN...NNNN", ".NNNcN..NNNcN", ".NNNNN..NNNNN"]));
+    l.add(MECH, "mech", art(&["", ".....GGGGGG", ".....GccccG", ".....GGGGGG", "..DDGGGGGGGGDD", "..DDGGGYYGGGDD", "..DD.GGGGGG.DD", "..cc.GGGGGG.cc", ".....DD..DD", ".....DD..DD", ".....DD..DD", "....DDD..DDD"]));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

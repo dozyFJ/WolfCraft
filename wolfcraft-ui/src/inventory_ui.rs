@@ -471,7 +471,7 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
                 let (r, _) = ui.allocate_exact_size(Vec2::new(h * 0.62, h), Sense::hover());
                 ui.painter().rect_filled(r, Rounding::same(10.0), p.surface_hi);
                 ui.painter().rect_stroke(r, Rounding::same(10.0), Stroke::new(1.0_f32, p.outline));
-                let armor = inv.armor.map(|s| s.map(|s| (s.id.saturating_sub(items::ids::ARMOR_BASE) / 4) as u8));
+                let armor = inv.armor.map(|s| s.and_then(|s| items::armor_material(s.id)));
                 paint_character(ui.painter(), r.shrink(10.0), inv.offhand.is_some_and(|s| s.id == items::ids::SHIELD), armor);
                 ui.add_space(GAP);
                 ui.vertical(|ui| {

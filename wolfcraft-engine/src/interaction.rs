@@ -816,7 +816,7 @@ pub fn forge_result(item: items::ItemStack, with: items::ItemStack) -> Option<(i
         let m = m as usize;
         let up = (m < 3).then(|| if kind == 4 { ids::HOE_BASE + m as u16 + 1 } else { ids::tool(m as u16 + 1, kind as u16) });
         (m, up)
-    } else if let Some(slot) = items::armor_slot(item.id) {
+    } else if let Some(slot) = items::armor_slot(item.id).filter(|_| (ids::ARMOR_BASE..=ids::ARMOR_LAST).contains(&item.id)) {
         let m = ((item.id - ids::ARMOR_BASE) / 4) as usize;
         (m, (m < 3).then(|| ids::ARMOR_BASE + (m as u16 + 1) * 4 + slot as u16))
     } else {

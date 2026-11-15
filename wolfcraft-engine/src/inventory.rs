@@ -383,6 +383,15 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_INGOT, 4), (b(Block::Cobblestone), 4), (ids::CIRCUIT, 1)], (b(Block::Crusher), 1), true, "WolfTech"));
         v.push(r(&[(b(Block::ElectricFurnace), 1), (ids::COPPER_INGOT, 4), (ids::CIRCUIT, 1)], (b(Block::InductionFurnace), 1), true, "WolfTech"));
         v.push(r(&[(b(Block::Crusher), 1), (ids::GOLD_INGOT, 2), (ids::CIRCUIT, 2)], (b(Block::Enricher), 1), true, "WolfTech"));
+        // WolfTech arsenal: energy weapons, the jetpack, nano armour and the mech.
+        v.push(r(&[(ids::IRON_INGOT, 4), (ids::CIRCUIT, 2), (ids::DIAMOND, 1), (b(Block::Glass), 1)], (ids::PLASMA_RIFLE, 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 6), (ids::COPPER_INGOT, 4), (ids::CIRCUIT, 3), (ids::DIAMOND, 2)], (ids::RAILGUN, 1), true, "WolfTech"));
+        v.push(r(&[(ids::DIAMOND, 2), (ids::CIRCUIT, 1), (ids::GOLD_INGOT, 1), (b(Block::Glass), 1)], (ids::ENERGY_SWORD, 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_INGOT, 6), (ids::CIRCUIT, 2), (b(Block::EnergyCell), 1)], (ids::JETPACK, 1), true, "WolfTech"));
+        for (k, n) in [5u8, 8, 7, 4].iter().enumerate() {
+            v.push(r(&[(ids::IRON_INGOT, *n), (ids::DIAMOND, 1), (ids::CIRCUIT, 1)], (ids::NANO_BASE + k as u16, 1), true, "WolfTech"));
+        }
+        v.push(r(&[(ids::IRON_INGOT, 24), (ids::CIRCUIT, 6), (b(Block::EnergyCell), 2), (ids::DIAMOND, 4)], (ids::MECH, 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_INGOT, 5), (b(Block::Stone), 3)], (b(Block::MachineCasing), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (b(Block::Battery), 1), true, "Строительство"));
         v.push(r(&[(b(Block::OakPlanks), 6), (ids::IRON_INGOT, 1)], (ids::SHIELD, 1), true, "Вооружение"));

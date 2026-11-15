@@ -105,6 +105,8 @@ pub fn firearm(id: ItemId) -> Option<Firearm> {
         ids::RIFLE => f(ids::BULLETS, 4.5, 1, 0.022, 170.0, 0.11, true),
         ids::SHOTGUN => f(ids::SHELLS, 3.0, 8, 0.075, 110.0, 0.85, false),
         ids::SNIPER => f(ids::BULLETS, 22.0, 1, 0.0, 260.0, 1.3, false),
+        // WolfTech railgun: runs on its own charge (the ammo is the gun itself).
+        ids::RAILGUN => f(ids::RAILGUN, 40.0, 1, 0.0, 420.0, 1.6, false),
         _ => None,
     }
 }
@@ -131,6 +133,7 @@ pub fn weapon(id: ItemId) -> Option<(ItemId, ShotKind, f64, f32)> {
         ids::GRENADE => Some((ids::GRENADE, ShotKind::Grenade, 15.0, 0.6)),
         // Needs no ammo (the session does not take any for it).
         ids::STAR_BLASTER => Some((ids::STAR_BLASTER, ShotKind::Plasma, 90.0, 0.2)),
+        ids::PLASMA_RIFLE => Some((ids::PLASMA_RIFLE, ShotKind::Plasma, 80.0, 0.16)),
         _ => firearm(id).map(|f| (f.ammo, ShotKind::Bullet, f.speed, f.cooldown)),
     }
 }

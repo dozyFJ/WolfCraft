@@ -102,6 +102,9 @@ pub struct Player {
     pub gliding: bool,
     revive_guard: f32,
     glide_wear: f64,
+    /// WolfTech jetpack: thrusting now (for the flame), and wear building up to one charge.
+    pub jetting: bool,
+    jet_wear: f64,
     pub survival: Survival,
     pub spawn: DVec3,
     pub sneaking: bool,
@@ -141,6 +144,8 @@ impl Player {
             gliding: false,
             revive_guard: 0.0,
             glide_wear: 0.0,
+            jetting: false,
+            jet_wear: 0.0,
             survival: Survival::default(),
             spawn,
             sneaking: false,
@@ -324,6 +329,25 @@ impl Player {
         self.gliding=!self.is_creative()&&!self.body.on_ground&&!self.body.in_water&&c.jump
             && self.inventory.armor[1].is_some_and(|s|s.id==crate::items::ids::WINGS&&s.damage<512);
         let speed=if self.gliding {12.0}else{speed};
+        // WolfTech jetpack (chest slot): «Прыжок» held pushes up while it has charge.
+        self.jetting = !self.body.flying && !self.body.in_water && c.jump
+            && self.inventory.armor[1].is_some_and(|s| s.id == crate::items::ids::JETPACK && s.damage < s.info().durability);
+        if self.jetting {
+            let up = self.up();
+            let rise = self.body.vel.dot(up);
+            if rise < 7.0 {
+                self.body.vel += up * ((26.0 * dt).min(7.0 - rise));
+            }
+            if !self.is_creative() {
+                self.jet_wear += dt;
+                if self.jet_wear >= 0.5 {
+                    self.jet_wear -= 0.5;
+                    if let Some(j) = &mut self.inventory.armor[1] {
+                        j.damage = j.damage.saturating_add(1);
+                    }
+                }
+            }
+        }
         if self.gliding {
             wish=self.heading;
             let up=self.up();let down=self.body.vel.dot(up);if down < -2.0 {self.body.vel+=up*(-2.0-down);}
