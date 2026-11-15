@@ -54,6 +54,11 @@ pub struct InventoryUiState {
     /// Creative «Инвентарь» tab: which page the right sidebar shows (0 персонаж, 1 крафт,
     /// 2 рюкзак with the hotbar).
     inv_page: u8,
+    /// Creative: the category to come back to from Крафт / Персонаж / Рюкзак.
+    last_tab: usize,
+    /// Creative: horizontal scroll of the category pills (arrows move it).
+    cat_scroll: f32,
+    cat_scroll_set: bool,
 }
 
 /// Shows the item's name over its slot while it is pressed (and a moment after), as on
@@ -202,13 +207,9 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         let cell = 46.0f32;
         let (rows, cols) = (5usize, 9usize);
         let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;
-        let width = 56.0 + 12.0 + grid_w + 8.0;
-        let esc = crate::ui_components::block_screen(ctx, "inventory", width, |ui| {
-            let (banner, _) = ui.allocate_exact_size(Vec2::new(width, 30.0), Sense::hover());
-            icons.paint_panel(ui.painter(), banner, wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
-            let title = if state.search_open { "Творческий · Поиск".to_string() } else { format!("Творческий · {}", CREATIVE_TABS[state.tab]) };
-            ui.painter().text(banner.center(), Align2::CENTER_CENTER, title, FontId::proportional(16.0), Color32::WHITE);
-            ui.add_space(8.0);
+        let width = grid_w + 10.0 * (cell + GAP) - 9.0 * (cell + GAP) + 24.0;
+        let width = width.max(grid_w + 8.0);
+        let esc = crate::ui_components::block_screen_ex(ctx, "inventory", width, false, |ui| {
             creative_layout(ui, icons, &p, state, inv, cell, rows, cols, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
         let dismissed = esc || result.close;
@@ -661,118 +662,158 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool, armor: [Optio
 #[allow(clippy::too_many_arguments)]
 fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, cols: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let palette_all = items::creative_palette();
-    // ---- Categories: one panel on the left in the style of the top bars, icons inside ----
-    let tab = 44.0f32;
-    let side_w = tab + 12.0;
-    let content_h = 30.0 + 6.0 + rows as f32 * (cell + GAP) - GAP + cell + 34.0;
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
-        ui.allocate_ui_with_layout(Vec2::new(side_w, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
-            ui.set_width(side_w);
-            let panel = Rect::from_min_size(ui.cursor().min, Vec2::new(side_w, content_h));
-            icons.paint_panel(ui.painter(), panel, wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
-            egui::ScrollArea::vertical().id_salt("creative-tabs").max_height(content_h).auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
-                ui.set_width(side_w);
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
-                ui.add_space(6.0);
-                let tab_button = |ui: &mut Ui, on: bool| -> (Rect, egui::Response) {
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
-                    let hot = resp.hovered() || resp.is_pointer_button_down_on();
-                    // Tabs are slots like in the block windows; the chosen one is lit.
-                    ui.painter().rect_filled(rect, Rounding::same(4.0), if on { p.accent.gamma_multiply(0.30) } else if hot { p.surface_hover } else { p.surface_hi });
-                    ui.painter().rect_stroke(rect, Rounding::same(4.0), Stroke::new(2.0_f32, if on || hot { p.accent } else { p.outline }));
-                    (rect, resp)
-                };
-                // Back and search at the top of the panel, a thin line, then the categories.
-                for (k, ic) in [(0usize, icon::ARROW_LEFT), (1, icon::SEARCH)] {
-                    let on = k == 1 && state.search_open;
-                    let (rect, resp) = tab_button(ui, on);
-                    icons.paint(ui.painter(), rect.shrink(tab * 0.24), ic, if on { p.accent } else { Color32::from_white_alpha(225) });
-                    if resp.clicked() {
-                        if k == 0 {
-                            result.close = true;
-                        } else {
-                            state.search_open = !state.search_open;
-                            if state.search_open {
-                                // Focus the field (and bring up the keyboard) right away.
-                                ui.ctx().data_mut(|d| d.insert_temp(Id::new("inv-search-fresh"), true));
-                            } else {
-                                state.search.clear();
-                            }
-                        }
-                    }
+    let full_w = ui.available_width();
+    // Mode: 0 Творчество (the item grid), 1 Крафт, 2 Персонаж, 3 Рюкзак.
+    let mode = if state.tab == BACKPACK_TAB { match state.inv_page { 1 => 1, 0 => 2, _ => 3 } } else { 0 };
+    // ---- Header: icon + title on the left, modes and «Закрыть» on the right ----
+    ui.horizontal(|ui| {
+        ui.set_width(full_w);
+        ui.set_height(38.0);
+        let (ir, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+        match mode {
+            0 => icons.paint(ui.painter(), ir, icon::STAR, p.accent),
+            1 => icons.paint_item(ui.painter(), ir, wolfcraft_engine::block::Block::CraftingTable as ItemId),
+            2 => paint_character(ui.painter(), ir, false, inv.armor.map(|s| s.and_then(|s| items::armor_material(s.id)))),
+            _ => icons.paint(ui.painter(), ir, icon::BACKPACK, p.accent),
+        }
+        let title = ["Творчество", "Крафт", "Персонаж", "Рюкзак"][mode];
+        ui.label(egui::RichText::new(title).font(bold_font(19.0)).color(p.text));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            // «Закрыть»: a red pill, always visible.
+            let (cr, cresp) = ui.allocate_exact_size(Vec2::new(104.0, 34.0), Sense::click());
+            let hot = cresp.hovered() || cresp.is_pointer_button_down_on();
+            ui.painter().rect_filled(cr, Rounding::same(17.0), if hot { Color32::from_rgb(210, 70, 60) } else { Color32::from_rgb(180, 55, 50) });
+            ui.painter().rect_stroke(cr, Rounding::same(17.0), Stroke::new(1.0_f32, Color32::from_white_alpha(70)));
+            icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(cr.left() + 20.0, cr.center().y), Vec2::splat(14.0)), icon::CLOSE, Color32::WHITE);
+            ui.painter().text(Pos2::new(cr.left() + 32.0, cr.center().y), Align2::LEFT_CENTER, "Закрыть", bold_font(14.0), Color32::WHITE);
+            if cresp.clicked() {
+                result.close = true;
+            }
+            ui.add_space(6.0);
+            // Modes, right to left: Рюкзак, Персонаж, Крафт, Творчество.
+            for m in [3usize, 2, 1, 0] {
+                let (r, resp) = ui.allocate_exact_size(Vec2::new(40.0, 34.0), Sense::click());
+                let on = m == mode;
+                let hot = resp.hovered() || resp.is_pointer_button_down_on();
+                ui.painter().rect_filled(r, Rounding::same(17.0), if on { p.accent } else if hot { p.surface_hover } else { p.surface_hi });
+                ui.painter().rect_stroke(r, Rounding::same(17.0), Stroke::new(1.0_f32, if on { p.accent } else { p.outline }));
+                let inner = Rect::from_center_size(r.center(), Vec2::splat(22.0));
+                match m {
+                    0 => icons.paint(ui.painter(), inner, icon::STAR, if on { Color32::WHITE } else { p.text }),
+                    1 => icons.paint_item(ui.painter(), inner, wolfcraft_engine::block::Block::CraftingTable as ItemId),
+                    2 => paint_character(ui.painter(), inner.shrink(1.0), false, inv.armor.map(|s| s.and_then(|s| items::armor_material(s.id)))),
+                    _ => icons.paint(ui.painter(), inner, icon::BACKPACK, if on { Color32::WHITE } else { p.text }),
                 }
-                let (line, _) = ui.allocate_exact_size(Vec2::new(tab * 0.7, 6.0), Sense::hover());
-                ui.painter().line_segment([line.left_center(), line.right_center()], Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
-                for (i, name) in CREATIVE_TABS.iter().enumerate() {
-                    let sel = state.tab == i && !state.search_open;
-                    let (rect, resp) = tab_button(ui, sel);
-                    let inner = rect.shrink(tab * 0.2);
-                    match i {
-                        0 => icons.paint(ui.painter(), inner, icon::STAR, if sel { p.accent } else { p.text }),
-                        _ if *name == "Конструктор" => icons.paint(ui.painter(), inner, icon::HAMMER, if sel { p.accent } else { p.text }),
-                        BACKPACK_TAB => icons.paint(ui.painter(), inner, icon::BACKPACK, if sel { p.accent } else { p.text }),
-                        _ => {
-                            if let Some(id) = palette_all.iter().copied().find(|id| items::category(*id) == *name) {
-                                icons.paint_item(ui.painter(), inner, id);
-                            }
+                if resp.clicked() && !on {
+                    if m == 0 {
+                        state.tab = state.last_tab.min(BACKPACK_TAB - 1);
+                    } else {
+                        if state.tab != BACKPACK_TAB {
+                            state.last_tab = state.tab;
                         }
-                    }
-                    if resp.clicked() {
-                        state.tab = i;
-                        // A category closes the search tab.
+                        state.tab = BACKPACK_TAB;
+                        state.inv_page = match m {
+                            1 => 1,
+                            2 => 0,
+                            _ => 2,
+                        };
                         state.search_open = false;
                         state.search.clear();
                     }
-                    resp.on_hover_text(*name);
                 }
-                ui.add_space(6.0);
-            });
-        });
-        // ---- The tab's content in the middle, the hotbar along the bottom ----
-        // «Инвентарь» gets a second panel on the right: Персонаж / Крафт / Рюкзак.
-        let right = state.tab == BACKPACK_TAB && !state.search_open;
-        let rest = ui.available_width() - if right { side_w + 10.0 } else { 0.0 };
-        let grid_w = if right { (grid_w - side_w - 10.0).min(rest) } else { grid_w };
-        ui.allocate_ui_with_layout(Vec2::new(rest, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
-            ui.set_width(rest);
-            ui.allocate_ui_with_layout(Vec2::new(grid_w, content_h - cell - 12.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.set_width(grid_w);
-                creative_main(ui, icons, p, state, inv, cell, rows, cols, grid_w, palette_all, slot_rects, trash_rect, result);
-            });
-            // On «Инвентарь → Рюкзак» the hotbar sits inside the page.
-            if !(state.tab == BACKPACK_TAB && state.inv_page == 2 && !state.search_open) {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new("Панель быстрого доступа").size(13.0).color(p.text_muted));
-                hotbar_row(ui, icons, p, state, inv, cell, slot_rects, trash_rect);
+                resp.on_hover_text(["Творчество", "Крафт", "Персонаж", "Рюкзак"][m]);
             }
         });
-        if right {
-            ui.allocate_ui_with_layout(Vec2::new(side_w, content_h), egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.set_width(side_w);
-                let panel = Rect::from_min_size(ui.cursor().min, Vec2::new(side_w, content_h));
-                icons.paint_panel(ui.painter(), panel, wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
-                ui.add_space(6.0);
-                for k in 0..3u8 {
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(tab), Sense::click());
-                    let on = state.inv_page == k;
-                    let hot = resp.hovered() || resp.is_pointer_button_down_on();
-                    ui.painter().rect_filled(rect, Rounding::same(4.0), if on { p.accent.gamma_multiply(0.30) } else if hot { p.surface_hover } else { p.surface_hi });
-                    ui.painter().rect_stroke(rect, Rounding::same(4.0), Stroke::new(2.0_f32, if on || hot { p.accent } else { p.outline }));
-                    let inner = rect.shrink(tab * 0.2);
-                    match k {
-                        0 => paint_character(ui.painter(), inner, false, inv.armor.map(|s| s.and_then(|s| items::armor_material(s.id)))),
-                        1 => icons.paint_item(ui.painter(), inner, wolfcraft_engine::block::Block::CraftingTable as ItemId),
-                        _ => icons.paint(ui.painter(), inner, icon::BACKPACK, if on { p.accent } else { p.text }),
+    });
+    ui.add_space(4.0);
+    let grid_h = rows as f32 * (cell + GAP) - GAP + 12.0;
+    // ---- Category menu: pills in one row with arrows (Творчество only) ----
+    if mode == 0 {
+        ui.horizontal(|ui| {
+            ui.set_width(full_w);
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let arrow = |ui: &mut Ui, left: bool| -> bool {
+                let (r, resp) = ui.allocate_exact_size(Vec2::new(30.0, 34.0), Sense::click());
+                let hot = resp.hovered() || resp.is_pointer_button_down_on();
+                ui.painter().rect_filled(r, Rounding::same(15.0), if hot { p.surface_hover } else { p.surface_hi });
+                let c = r.center();
+                let d = if left { -1.0 } else { 1.0 };
+                ui.painter().line_segment([c + Vec2::new(-4.0 * d, -7.0), c + Vec2::new(4.0 * d, 0.0)], Stroke::new(2.5_f32, p.text));
+                ui.painter().line_segment([c + Vec2::new(4.0 * d, 0.0), c + Vec2::new(-4.0 * d, 7.0)], Stroke::new(2.5_f32, p.text));
+                resp.clicked()
+            };
+            if arrow(ui, true) {
+                state.cat_scroll = (state.cat_scroll - 220.0).max(0.0);
+                state.cat_scroll_set = true;
+            }
+            let strip_w = ui.available_width() - 36.0;
+            let mut sa = egui::ScrollArea::horizontal().id_salt("creative-cat-pills").max_width(strip_w).auto_shrink([false, true]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+            if state.cat_scroll_set {
+                sa = sa.horizontal_scroll_offset(state.cat_scroll);
+                state.cat_scroll_set = false;
+            }
+            let out = sa.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    // Search first: icon + «Поиск».
+                    let pill = |ui: &mut Ui, on: bool, label: &str, paint: &dyn Fn(&egui::Painter, Rect)| -> bool {
+                        let galley = ui.painter().layout_no_wrap(label.to_string(), bold_font(13.0), if on { Color32::WHITE } else { p.text });
+                        let (r, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 44.0, 34.0), Sense::click());
+                        let hot = resp.hovered() || resp.is_pointer_button_down_on();
+                        ui.painter().rect_filled(r, Rounding::same(17.0), if on { p.accent } else if hot { p.surface_hover } else { p.surface_hi });
+                        ui.painter().rect_stroke(r, Rounding::same(17.0), Stroke::new(1.0_f32, if on { p.accent } else { p.outline }));
+                        paint(ui.painter(), Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(20.0)));
+                        ui.painter().galley(Pos2::new(r.left() + 34.0, r.center().y - galley.size().y / 2.0), galley, Color32::WHITE);
+                        resp.clicked()
+                    };
+                    let so = state.search_open;
+                    if pill(ui, so, "Поиск", &|pt, r| icons.paint(pt, r, icon::SEARCH, if so { Color32::WHITE } else { p.text })) {
+                        state.search_open = !state.search_open;
+                        if state.search_open {
+                            ui.ctx().data_mut(|d| d.insert_temp(Id::new("inv-search-fresh"), true));
+                        } else {
+                            state.search.clear();
+                        }
                     }
-                    if resp.clicked() {
-                        state.inv_page = k;
+                    for (i, name) in CREATIVE_TABS.iter().enumerate().take(BACKPACK_TAB) {
+                        let sel = state.tab == i && !state.search_open;
+                        let first = palette_all.iter().copied().find(|id| items::category(*id) == *name);
+                        let clicked = pill(ui, sel, name, &|pt, r| match (i, first) {
+                            (0, _) => icons.paint(pt, r, icon::STAR, if sel { Color32::WHITE } else { p.accent }),
+                            (_, Some(id)) => icons.paint_item(pt, r, id),
+                            _ => icons.paint(pt, r, icon::CUBE, p.text),
+                        });
+                        if clicked {
+                            state.tab = i;
+                            state.search_open = false;
+                            state.search.clear();
+                        }
                     }
-                    resp.on_hover_text(["Персонаж", "Крафт", "Рюкзак"][k as usize]);
-                }
+                });
             });
-        }
+            state.cat_scroll = out.state.offset.x;
+            if arrow(ui, false) {
+                state.cat_scroll += 220.0;
+                state.cat_scroll_set = true;
+            }
+        });
+        ui.add_space(6.0);
+    }
+    // ---- The section: the item grid (or the page of Крафт / Персонаж / Рюкзак) ----
+    let section_h = grid_h + if mode == 0 { 0.0 } else { 40.0 + 6.0 };
+    ui.allocate_ui_with_layout(Vec2::new(full_w, section_h), egui::Layout::top_down(egui::Align::Center), |ui| {
+        ui.set_width(full_w);
+        ui.set_height(section_h);
+        ui.allocate_ui_with_layout(Vec2::new(grid_w, section_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_width(grid_w);
+            creative_main(ui, icons, p, state, inv, cell, rows, cols, grid_w, palette_all, slot_rects, trash_rect, result);
+        });
+    });
+    // ---- Hotbar and the bin (double tap: clear everything) ----
+    ui.add_space(6.0);
+    ui.vertical_centered(|ui| {
+        hotbar_row(ui, icons, p, state, inv, cell, slot_rects, trash_rect);
     });
 }
 
@@ -796,10 +837,16 @@ fn bin(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState,
     ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, p.danger.gamma_multiply(0.7)));
     icons.paint(ui.painter(), rect.shrink(s * 0.24), icon::TRASH, p.danger);
     // Tap: delete the item in the selected hotbar slot. Or drag any slot here.
-    if resp.clicked() {
+    if resp.double_clicked() {
+        // Double tap: everything goes (hotbar and backpack).
+        for s in inv.slots.iter_mut() {
+            *s = None;
+        }
+        state.toast = Some(("Инвентарь очищен".to_string(), 1.6));
+    } else if resp.clicked() {
         inv.slots[inv.selected] = None;
     }
-    resp.on_hover_text("Удалить: нажмите — предмет в выбранном слоте, или перетащите сюда");
+    resp.on_hover_text("Удалить: нажмите — предмет в выбранном слоте; двойное нажатие — всё; или перетащите сюда");
     *trash_rect = Some(rect);
 }
 
@@ -853,11 +900,11 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             if fresh {
                 r.request_focus();
             }
-        } else {
-            ui.label(egui::RichText::new(CREATIVE_TABS[state.tab]).font(bold_font(16.0)).color(p.text));
         }
     });
-    ui.add_space(6.0);
+    if state.search_open {
+        ui.add_space(6.0);
+    }
     // ---- Grid ----
     // The grid takes all the height left above the hotbar (a cut-off last row shows there
     // is more to scroll), so no empty band stays under the hotbar.
@@ -882,16 +929,8 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
                     }
                 }
                 _ => {
-                    // The backpack with the hotbar under it (the hotbar moves here from the bottom).
                     let c = ((content.width() - 16.0 - 8.0 * GAP) / 9.0).min(cell);
-                    section_label(ui, "Рюкзак");
-                    ui.add_space(4.0);
                     backpack_section(ui, icons, p, state, inv, c, slot_rects);
-                    ui.add_space(10.0);
-                    section_label(ui, "Панель быстрого доступа");
-                    ui.add_space(4.0);
-                    let c2 = ((content.width() - 24.0 - 9.0 * GAP) / 10.0).min(cell);
-                    hotbar_row(ui, icons, p, state, inv, c2, slot_rects, trash_rect);
                 }
             }
         });
