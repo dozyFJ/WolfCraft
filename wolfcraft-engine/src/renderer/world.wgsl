@@ -21,10 +21,11 @@ fn fx_on(bit: u32) -> bool {
 }
 
 struct VsIn {
-    @location(0) pos: vec3<f32>,
-    @location(1) uv: vec2<f32>,
+    // Compact vertex: position in 1/1024 block, uv in 1/512, light in bytes.
+    @location(0) pos: vec4<i32>,
+    @location(1) uv: vec2<i32>,
     @location(2) flags: u32,
-    @location(3) light: vec2<f32>,
+    @location(3) light: vec4<f32>,
     @location(4) inst: vec4<f32>,
 };
 
@@ -49,7 +50,9 @@ fn bayer4(p: vec2<f32>) -> f32 {
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
     var out: VsOut;
-    var rel = in.pos + in.inst.xyz;
+    let pos = vec3<f32>(in.pos.xyz) / 1024.0;
+    let uv = vec2<f32>(in.uv) / 512.0;
+    var rel = pos + in.inst.xyz;
     // Shaders: leaves and plants sway in the wind. The phase comes from the world position,
     // so corners shared by neighbouring blocks move together (no cracks).
     let sway_leaves = (in.flags >> 24u) & 1u;
@@ -60,15 +63,15 @@ fn vs_main(in: VsIn) -> VsOut {
         let phase = dot(w, vec3<f32>(0.37, 0.23, 0.31));
         var amp = 0.03;
         if (sway_plant == 1u) {
-            amp = 0.09 * clamp(1.0 - in.uv.y, 0.0, 1.0); // the top sways, the root stays
+            amp = 0.09 * clamp(1.0 - uv.y, 0.0, 1.0); // the top sways, the root stays
         }
         let gust = 0.6 + 0.4 * sin(t * 0.35 + phase * 0.05);
         rel = rel + vec3<f32>(sin(t * 1.7 + phase), sin(t * 1.3 + phase * 1.3) * 0.4, cos(t * 1.5 + phase * 0.8)) * amp * gust;
     }
     out.clip = g.view_proj * vec4<f32>(rel, 1.0);
-    out.uv = in.uv;
+    out.uv = uv;
     out.flags = in.flags;
-    out.light = in.light;
+    out.light = in.light.xy;
     out.rel = rel;
     out.fade = in.inst.w;
     out.world = g.cam.xyz + rel;
