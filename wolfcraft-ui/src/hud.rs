@@ -87,6 +87,54 @@ pub struct HudState<'a> {
     pub crosshair: bool,
     /// Running potion effects: name with level, colour, seconds left.
     pub effects: Vec<(String, [f32; 3], f32)>,
+    /// Pickup feed: the items (count = how many came) and seconds shown.
+    pub pickups: Vec<(ItemStack, f32)>,
+    /// Damage numbers on the screen: where, text, colour, age in seconds, heavy blow.
+    pub popups: Vec<(Pos2, String, [u8; 3], f32, bool)>,
+}
+
+/// Pop-ups: damage numbers that burst out and float up, and the pickup feed sliding in.
+fn draw_popups(painter: &Painter, icons: &GuiIcons, p: &Palette, screen: Rect, s: &HudState) {
+    for (at, text, c, age, big) in &s.popups {
+        let a = *age;
+        // Pops in bigger than it is (a springy overshoot), then rises and fades.
+        let pop = if a < 0.12 { 1.0 + 0.7 * (1.0 - a / 0.12) } else { 1.0 + 0.1 * (-(a - 0.12) * 14.0).exp() };
+        let rise = 46.0 * (1.0 - (-a * 3.0).exp());
+        let shake = if *big { (a * 70.0).sin() * 4.0 * (1.0 - a).max(0.0) } else { 0.0 };
+        let alpha = (1.0 - ((a - 0.6) / 0.5).clamp(0.0, 1.0)) * 255.0;
+        let size = if *big { 26.0 } else { 18.0 } * pop;
+        let pos = *at + Vec2::new(shake, -rise);
+        let font = FontId::proportional(size);
+        for d in [Vec2::new(-1.5, 0.0), Vec2::new(1.5, 0.0), Vec2::new(0.0, -1.5), Vec2::new(0.0, 1.5)] {
+            painter.text(pos + d, Align2::CENTER_CENTER, text, font.clone(), Color32::from_black_alpha((alpha * 0.8) as u8));
+        }
+        painter.text(pos, Align2::CENTER_CENTER, text, font, Color32::from_rgba_unmultiplied(c[0], c[1], c[2], alpha as u8));
+    }
+    let x0 = screen.left() + 18.0;
+    let y0 = screen.center().y - 60.0;
+    for (i, (st, age)) in s.pickups.iter().enumerate() {
+        let a = *age;
+        // Slides in from the left with a little overshoot, pops when the count goes up,
+        // fades out at the end.
+        let t = (a / 0.28).min(1.0);
+        let slide = 1.0 - (1.0 - t).powi(3) * (1.0 + 2.2 * t);
+        let alpha = 1.0 - ((a - 2.4) / 0.6).clamp(0.0, 1.0);
+        let pop = if a < 0.15 { 1.0 + 0.25 * (1.0 - a / 0.15) } else { 1.0 };
+        let name = format!("+{} {}", st.count, st.info().name);
+        let g = painter.layout_no_wrap(name.clone(), FontId::proportional(14.0 * pop), Color32::WHITE);
+        let h = 30.0 * pop;
+        let w = g.size().x + h + 18.0;
+        let r = Rect::from_min_size(Pos2::new(x0 - (1.0 - slide) * (w + 30.0), y0 + i as f32 * 36.0), Vec2::new(w, h));
+        let bg = Color32::from_rgba_unmultiplied(14, 16, 22, (190.0 * alpha) as u8);
+        painter.rect_filled(r, Rounding::same(h * 0.5), bg);
+        painter.rect_stroke(r, Rounding::same(h * 0.5), Stroke::new(1.5_f32, p.accent.gamma_multiply(alpha)));
+        let icon = Rect::from_center_size(Pos2::new(r.left() + h * 0.55, r.center().y), Vec2::splat(h * 0.8));
+        let one = ItemStack { count: 1, ..*st };
+        if alpha > 0.5 {
+            icons.paint_stack(painter, icon, &one);
+        }
+        painter.text(Pos2::new(r.left() + h + 6.0, r.center().y), Align2::LEFT_CENTER, name, FontId::proportional(14.0 * pop), Color32::from_white_alpha((240.0 * alpha) as u8));
+    }
 }
 
 fn pill(painter: &Painter, rect: Rect, p: &Palette) {
@@ -428,6 +476,7 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     if let (Some(b), false) = (s.compass, s.compact) {
         draw_compass(&painter, &p, Rect::from_center_size(Pos2::new(hotbar.center().x, compass_bottom - 12.0), Vec2::new(hb_w.min(420.0), 24.0)), b);
     }
+    draw_popups(&painter, icons, &p, screen, s);
     // Selected item name.
     if let Some((name, t)) = &s.item_name {
         let a = (t * 2.0).clamp(0.0, 1.0);
@@ -625,6 +674,8 @@ mod tests {
                     compact: false,
                     crosshair: true,
                     effects: Vec::new(),
+                    pickups: Vec::new(),
+                    popups: Vec::new(),
                 };
                 draw(ctx, &icons, &s);
             });

@@ -106,6 +106,17 @@ pub struct Camera {
 /// Seconds to smelt one item in an electric furnace.
 const FURNACE_TIME: f32 = 3.0;
 
+/// A number or word that pops out of the world and floats up (damage, healing).
+#[derive(Clone, Debug)]
+pub struct Popup {
+    pub at: DVec3,
+    pub text: String,
+    pub color: [u8; 3],
+    pub age: f32,
+    /// A heavy blow: bigger, with a shake.
+    pub big: bool,
+}
+
 /// State of one WolfTech machine.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TechState {
@@ -284,6 +295,10 @@ pub struct GameSession {
     pub mob_hits: u32,
     /// Items picked up from the ground since the game last looked (pop sound).
     pub picked_up: u32,
+    /// Pop-ups: damage numbers over creatures, and the pickup feed over the hotbar
+    /// (item, how many, seconds shown).
+    pub popups: Vec<Popup>,
+    pub pickups: Vec<(wolfcraft_engine::items::ItemId, u32, f32)>,
     /// Radiation dose from uranium (seconds of exposure); every 3 s of it costs half a heart.
     radiation: f32,
     /// Flowing water and lava around edits.
@@ -392,6 +407,8 @@ impl GameSession {
             radiation: 0.0,
             mob_hits: 0,
             picked_up: 0,
+            popups: Vec::new(),
+            pickups: Vec::new(),
             aim_dir: None,
             fx_amount: 1.0,
             fx_lights: Vec::new(),
@@ -781,6 +798,16 @@ impl GameSession {
                 self.mobs.fx_glow(pos + up * 0.2 + o, up * 0.6, col, 0.028 + 0.01 * k.min(1.0), 0.6, wolfcraft_engine::mobs::FxKind::Rise);
             }
         }
+        // Pop-ups age and float away.
+        for p in &mut self.popups {
+            p.age += dt;
+        }
+        self.popups.retain(|p| p.age < 1.1);
+        self.popups.truncate(24);
+        for p in &mut self.pickups {
+            p.2 += dt;
+        }
+        self.pickups.retain(|p| p.2 < 3.0);
         // Items in the world: fall, merge, fly to the player.
         if self.ground_ready() && !self.drops.list.is_empty() {
             let centre = self.player.body.pos + wolfcraft_engine::physics::up_at(self.player.body.pos) * 0.8;
@@ -793,9 +820,19 @@ impl GameSession {
                 None => got.push((id, k)),
             });
             self.picked_up += n;
-            // "+5 Земля" over the hotbar, like the item name when switching.
-            if let Some((id, k)) = got.last() {
-                self.item_name = Some((format!("+{k} {}", wolfcraft_engine::items::info(*id).name), 1.6));
+            // The pickup feed: each kind of item gets its line, new ones pop in, the same one
+            // counts up and pops again.
+            for (id, k) in got {
+                match self.pickups.iter_mut().find(|p| p.0 == id) {
+                    Some(p) => {
+                        p.1 += k;
+                        p.2 = 0.0;
+                    }
+                    None => {
+                        self.pickups.insert(0, (id, k, 0.0));
+                        self.pickups.truncate(5);
+                    }
+                }
             }
         }
         // Arrows: flight, hits, pickup.
@@ -956,6 +993,11 @@ impl GameSession {
                 }
             }
             if let InteractionEvent::Placed { pos, block } = e {
+                // A little puff of dust where a block lands.
+                if !block.is_fluid() && self.fx_amount > 0.0 {
+                    let c = self.chunks.grid().cell_center(*pos);
+                    self.mobs.chips(c, &[[0.92, 0.90, 0.85], [0.80, 0.78, 0.72]], (6.0 * self.fx_amount) as usize, 1.2);
+                }
                 if wolfcraft_engine::wolftech::kind(*block).is_some() {
                     self.tech.entry(*pos).or_default();
                     self.tech_t = 0.0;
@@ -1345,6 +1387,7 @@ impl GameSession {
                 Some(i) if i < self.mobs.mobs.len() && self.mobs.mobs[i].hp > 0.0 => {
                     let from = h.pos - (self.mobs.mobs[i].centre() - h.pos).normalize_or_zero();
                     events.push(InteractionEvent::BulletHit { at: h.pos, creature: true });
+                    self.damage_popup(h.pos, h.damage);
                     if let Some(kind) = self.mobs.hurt(i, h.damage, from) {
                         let at = self.mobs.mobs[i].body.pos;
                         for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64 ^ i as u64) {
@@ -1478,6 +1521,8 @@ impl GameSession {
                 if dmg <= 0.0 {
                     continue;
                 }
+                let pos = self.mobs.mobs[i].centre();
+                self.damage_popup(pos, dmg);
                 if let Some(kind) = self.mobs.hurt(i, dmg, b.pos) {
                     let at = self.mobs.mobs[i].body.pos;
                     for drop in wolfcraft_engine::items::mob_drops(kind, self.cfg.seed ^ self.clock.to_bits() as u64 ^ i as u64) {
@@ -3855,6 +3900,13 @@ impl GameSession {
         }
     }
 
+    /// A damage number pops out where the creature was hit (heavy blows bigger and golden).
+    fn damage_popup(&mut self, at: DVec3, dmg: f32) {
+        let big = dmg >= 10.0;
+        let jitter = DVec3::new(self.mobs.rand() - 0.5, self.mobs.rand() - 0.5, self.mobs.rand() - 0.5) * 0.4;
+        self.popups.push(Popup { at: at + jitter, text: format!("{:.0}", dmg.max(1.0)), color: if big { [255, 200, 60] } else { [255, 255, 255] }, age: 0.0, big });
+    }
+
     /// Saddles, mounts or leaves the dragon in the crosshair. True when the tap was used.
     fn try_mount(&mut self) -> bool {
         use wolfcraft_engine::items::ids;
@@ -3970,6 +4022,7 @@ impl GameSession {
         // Hit feedback: a burst of red and white sparks, more for strong weapons.
         let n = ((4.0 + dmg * 1.5) * self.fx_amount) as usize;
         self.mobs.chips(at - look * 0.3, &[[0.95, 0.15, 0.12], [1.0, 1.0, 1.0], [0.75, 0.05, 0.05]], n, 2.2 + dmg as f64 * 0.15);
+        self.damage_popup(at, dmg);
         if let Some(kind) = self.mobs.hurt(i, dmg, self.player.body.pos) {
             // Finishing blow: a puff of smoke and a ring of little stars.
             {
