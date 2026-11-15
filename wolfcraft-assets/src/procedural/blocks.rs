@@ -225,6 +225,12 @@ pub mod tiles {
     pub const MAGMA_GEN_FRONT: u16 = 227;
     pub const PIPE: u16 = 228;
     pub const PIPE_EXTRACT: u16 = 229;
+    pub const KIN_SAIL: u16 = 230;
+    pub const KIN_MOTOR: u16 = 231;
+    pub const KIN_DYNAMO: u16 = 232;
+    pub const KIN_SAW: u16 = 233;
+    pub const KIN_CRUSH: u16 = 234;
+    pub const KIN_GEARBOX: u16 = 235;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2532,6 +2538,81 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     };
     l.add(PIPE, "item_pipe", p(|q| pipe(q, 333, Rgb(0.55, 0.57, 0.62))));
     l.add(PIPE_EXTRACT, "pipe_extractor", p(|q| pipe(q, 334, Rgb(0.95, 0.55, 0.15))));
+    // «Механика», stage 2.
+    l.add(KIN_SAIL, "kin_sail", p(|q| {
+        // White canvas sails on a wooden cross.
+        for y in 0..S {
+            for x in 0..S {
+                let wood = x == 7 || x == 8 || y == 7 || y == 8;
+                let sail = (x < 7 && y < 7 && x + 1 >= y) || (x > 8 && y > 8 && x <= y + 1) || (x > 8 && y < 7 && (S - 1 - x) + 1 >= y) || (x < 7 && y > 8 && x + 1 >= S - 1 - y);
+                let c = if wood { Rgb(0.50, 0.36, 0.20) } else if sail { Rgb(0.92, 0.90, 0.84).add((rnd(x, y, 335) - 0.5) * 0.05) } else { Rgb(0.62, 0.46, 0.28) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(KIN_MOTOR, "kin_motor", p(|q| {
+        casing(q, 336);
+        // Copper windings and a cyan power light.
+        for y in 4..12 {
+            for x in 4..12 {
+                q.put(x, y, if y % 2 == 0 { Rgb(0.85, 0.50, 0.25) } else { Rgb(0.65, 0.36, 0.16) }, 1.0);
+            }
+        }
+        q.put(12, 3, Rgb(0.35, 0.92, 1.0), 1.0);
+    }));
+    l.add(KIN_DYNAMO, "kin_dynamo", p(|q| {
+        casing(q, 337);
+        for y in 4..12 {
+            for x in 4..12 {
+                q.put(x, y, if (x + y) % 3 == 0 { Rgb(0.95, 0.80, 0.25) } else { Rgb(0.30, 0.32, 0.36) }, 1.0);
+            }
+        }
+        // A lightning bolt.
+        for (x, y) in [(9u32, 4u32), (8, 5), (7, 6), (8, 7), (9, 7), (8, 8), (7, 9), (6, 10)] {
+            q.put(x, y, Rgb(1.0, 0.95, 0.40), 1.0);
+        }
+    }));
+    l.add(KIN_SAW, "kin_saw", p(|q| {
+        casing(q, 338);
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let r = (dx * dx + dy * dy).sqrt();
+                let tooth = r < 6.8 && r > 5.2 && (dy.atan2(dx) * 5.0).sin() > 0.0;
+                if r < 5.2 || tooth {
+                    q.put(x, y, if r < 1.5 { Rgb(0.30, 0.30, 0.32) } else { Rgb(0.78, 0.80, 0.84) }, 1.0);
+                }
+            }
+        }
+    }));
+    l.add(KIN_CRUSH, "kin_crush", p(|q| {
+        casing(q, 339);
+        for (cx, cy) in [(4.5f32, 7.5f32), (11.5, 7.5)] {
+            for y in 0..S {
+                for x in 0..S {
+                    let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+                    let r = (dx * dx + dy * dy).sqrt();
+                    if r < 3.6 {
+                        q.put(x, y, if (dy.atan2(dx) * 4.0).sin() > 0.3 { Rgb(0.38, 0.38, 0.40) } else { Rgb(0.55, 0.55, 0.57) }, 1.0);
+                    }
+                }
+            }
+        }
+    }));
+    l.add(KIN_GEARBOX, "kin_gearbox", p(|q| {
+        casing(q, 340);
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let r = (dx * dx + dy * dy).sqrt();
+                if r < 2.0 {
+                    q.put(x, y, Rgb(0.55, 0.57, 0.60), 1.0);
+                } else if r < 5.0 && (dy.atan2(dx) * 4.0 / std::f32::consts::PI).round() as i32 % 2 == 0 {
+                    q.put(x, y, Rgb(0.60, 0.44, 0.26), 1.0);
+                }
+            }
+        }
+    }));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

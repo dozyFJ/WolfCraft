@@ -2096,6 +2096,24 @@ impl GameSession {
                     st.flow = sp.rate * st.env;
                     st.working = st.flow > 0.0;
                 }
+                // «Механика»: the dynamo gives what the shaft turns into it (env, set by the
+                // kinetic tick); the motor spends energy and turns its shafts while it has it.
+                Kind::Dynamo => {
+                    st.flow = st.env;
+                    st.working = st.flow > 0.0;
+                }
+                Kind::Motor => {
+                    let need = sp.rate * dt;
+                    st.flow = sp.rate;
+                    if st.energy >= need {
+                        st.energy -= need;
+                        st.working = true;
+                        st.burn = 0.5;
+                    } else {
+                        st.burn = (st.burn - dt).max(0.0);
+                        st.working = st.burn > 0.0;
+                    }
+                }
                 Kind::Reactor => {
                     // Once a second: the rods pulse, the hull heats or cools (heat = progress).
                     st.burn += dt;
@@ -2326,11 +2344,32 @@ impl GameSession {
                                 cap += 96.0;
                             }
                         }
+                        Part::Sail => {
+                            // Open sky above: the sails catch the wind (a storm doubles it).
+                            let open = (1..12).all(|kk| g.offset(*c, 0, 0, kk).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
+                            if open {
+                                speed = speed.max(if self.weather.rain > 0.5 { 32.0 } else { 16.0 });
+                                cap += 384.0;
+                            }
+                        }
+                        Part::Motor => {
+                            if self.tech.get(c).is_some_and(|t| t.working) {
+                                speed = speed.max(64.0);
+                                cap += 512.0;
+                            }
+                        }
+                        Part::Gearbox => {}
                         p => load += kn::load(p),
                     }
                 }
                 let over = load > cap && speed > 0.0;
                 let run = if over { 0.0 } else { speed };
+                // Dynamos turn the rotation into WolfTech energy: RPM / 2 ЭЕ a second.
+                for (c, _) in &net {
+                    if self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::KineticDynamo) {
+                        self.tech.entry(*c).or_default().env = run / 2.0;
+                    }
+                }
                 for (c, sg) in &net {
                     let n = self.kin.entry(*c).or_default();
                     n.speed = run;

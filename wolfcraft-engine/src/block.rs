@@ -1890,6 +1890,12 @@ blocks! {
     2496 MagmaGenerator => needs_pick(info("Магматический генератор", Opaque, 4.0, Pickaxe, column(t::MAGMA_GEN_FRONT, t::TECH_TOP, t::TECH_TOP))),
     2497 ItemPipe => info("Труба для предметов", Shape, 0.8, Pickaxe, all(t::PIPE)),
     2498 PipeExtractor => info("Извлекающая труба", Shape, 0.8, Pickaxe, all(t::PIPE_EXTRACT)),
+    2499 WindSail => info("Ветряная мельница", Opaque, 2.0, Axe, column(t::KIN_SAIL, t::KIN_GEARBOX, t::KIN_GEARBOX)),
+    2500 ElectricMotor => needs_pick(info("Электромотор", Opaque, 3.5, Pickaxe, column(t::KIN_MOTOR, t::TECH_TOP, t::TECH_TOP))),
+    2501 KineticDynamo => needs_pick(info("Кинетическое динамо", Opaque, 3.5, Pickaxe, column(t::KIN_DYNAMO, t::TECH_TOP, t::TECH_TOP))),
+    2502 MechSaw => needs_pick(info("Механическая пила", Opaque, 3.0, Pickaxe, column(t::KIN_SAW, t::KIN_PRESS_TOP, t::KIN_PRESS_TOP))),
+    2503 CrushingWheel => needs_pick(info("Дробильные колёса", Opaque, 3.5, Pickaxe, column(t::KIN_CRUSH, t::KIN_PRESS_TOP, t::KIN_PRESS_TOP))),
+    2504 Gearbox => needs_pick(info("Редуктор", Opaque, 3.0, Pickaxe, all(t::KIN_GEARBOX))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
