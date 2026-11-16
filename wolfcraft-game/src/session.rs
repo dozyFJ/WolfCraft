@@ -2012,7 +2012,7 @@ impl GameSession {
     }
 
     /// Builds a PvP template ahead of the player and starts it.
-    pub fn build_arena(&mut self, mode: wolfcraft_engine::arenas::Mode) -> Result<String, String> {
+    pub fn build_pvp(&mut self, mode: wolfcraft_engine::arenas::Mode) -> Result<String, String> {
         use wolfcraft_engine::arenas::{Arena, Gen, Mode, Role, chest_loot};
         use wolfcraft_engine::block::Block as B;
         use wolfcraft_engine::items::{ItemStack, ids};
@@ -2065,7 +2065,7 @@ impl GameSession {
                         }
                     }
                     if n == 0 {
-                        if let Some(c) = at(a0 + 3, b0, lift) {
+                        if let Some(c) = at(*a0 + 3, *b0, lift) {
                             cells.push((c, B::Chest));
                         }
                         for (dx, item, every) in [(-2, ids::IRON_INGOT, 1.5f32), (2, ids::GOLD_INGOT, 6.0)] {
@@ -2074,7 +2074,7 @@ impl GameSession {
                                 arena.gens.push(Gen { pos: centre_of(c), item, every, t: 0.0 });
                             }
                         }
-                        if let Some(c) = at(a0, b0, lift) {
+                        if let Some(c) = at(*a0, *b0, lift) {
                             arena.base = centre_of(c);
                         }
                     }
@@ -2101,7 +2101,7 @@ impl GameSession {
                         chests.push((c, false));
                     }
                     if n == 0 {
-                        if let Some(c) = at(a0, b0, lift) {
+                        if let Some(c) = at(*a0, *b0, lift) {
                             arena.base = centre_of(c);
                         }
                     }
@@ -2116,7 +2116,7 @@ impl GameSession {
             }
             Mode::Murder => {
                 // A mansion: plank floor, brick walls with windows, rooms, a roof; gold spawns.
-                let (w, d) = (10, 7);
+                let (w, d) = (10i32, 7i32);
                 let b0 = 12;
                 for a in -w..=w {
                     for b in -d..=d {
