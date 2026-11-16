@@ -349,7 +349,9 @@ impl Planet {
             }
         }
 
-        let lat = d.y.abs();
+        // Climate belts: by latitude on a ball. A cube has whole faces at the "poles", so there
+        // the poles only cool things a little and each face gets its own mix of climates.
+        let lat = if self.grid.cube { d.y.abs() * 0.55 + (1.0 - d.y.abs()) * 0.15 * (Self::n3(&self.n_temp, d * 1.3 + DVec3::splat(5.0)) * 0.5 + 0.5) } else { d.y.abs() };
         // Fine noise on top of the climate: biome borders wander and interleave in fingers
         // and patches instead of running as straight walls.
         let ragged_t = Self::n3(&self.n_temp, wp * 0.035 + DVec3::splat(17.0)) * 0.05;

@@ -85,7 +85,7 @@ pub struct Grid {
 /// edges and corners). Block columns run along the surface normal, so on a cube face walls
 /// and trees stand exactly perpendicular to the flat ground. Below the depth `(1 - CUBE_FLAT)·R`
 /// the layers shrink towards the centre (only the deep core).
-pub const CUBE_FLAT: f64 = 0.7;
+pub const CUBE_FLAT: f64 = 0.86;
 
 static CUBE_WORLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CUBE_N: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(2048);
@@ -583,7 +583,7 @@ mod tests {
             for i in (0..g.n).step_by(3) {
                 for j in (0..g.n).step_by(5) {
                     // Layers above the core (below it, edge columns meet and cannot be told apart).
-                    for k in [26, 32, 60] {
+                    for k in [29, 32, 60] {
                         let c = Cell::new(f, i, j, k);
                         assert_eq!(g.world_to_cell(g.cell_center(c)), c);
                     }
