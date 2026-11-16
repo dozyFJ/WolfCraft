@@ -219,6 +219,8 @@ pub struct GameSession {
     pub petsim_home: Option<DVec3>,
     /// «Кнопки» mini-game: money, multiplier, rebirths.
     pub buttonsim: wolfcraft_engine::buttonsim::ButtonSim,
+    /// «Кликер-симулятор» (WolfStudio template).
+    pub clicker: wolfcraft_engine::clicker::Clicker,
     /// Bow draw 0..1 while the use button is held with a bow.
     /// The player is asleep in a bed or sits on a chair (drawn in third person, cannot walk).
     pub rest: Option<Rest>,
@@ -408,6 +410,7 @@ impl GameSession {
             coin_cells: Vec::new(),
             petsim_home: None,
             buttonsim: Default::default(),
+            clicker: Default::default(),
             rest: None,
             bow_charge: 0.0,
             bow_arrow: None,
@@ -485,6 +488,7 @@ impl GameSession {
             s.player.inventory.add(wolfcraft_engine::items::ItemStack::new(wolfcraft_engine::items::ids::PET_BASE + k as u16, 1));
         }
         s.buttonsim = wolfcraft_engine::buttonsim::ButtonSim::from_text(&std::fs::read_to_string(s.dir.join("buttonsim.txt")).unwrap_or_default());
+        s.clicker = wolfcraft_engine::clicker::Clicker::from_text(&std::fs::read_to_string(s.dir.join("clicker.txt")).unwrap_or_default());
         s.petsim_home = std::fs::read_to_string(s.dir.join("petsim_home.txt")).ok().and_then(|t| {
             let v: Vec<f64> = t.split_whitespace().filter_map(|x| x.parse().ok()).collect();
             (v.len() == 3).then(|| DVec3::new(v[0], v[1], v[2]))
@@ -954,6 +958,7 @@ impl GameSession {
         // «Кнопки»: income, and buying by standing on a floor button.
         if self.minigames || self.studio {
             self.buttonsim.tick(dt);
+            self.clicker.tick(dt);
         }
         if (self.minigames || self.studio) && !self.player.survival.dead && self.player.body.on_ground {
             let under = self.chunks.block_at_world(self.player.body.pos - self.player.up() * 0.3);
@@ -1857,6 +1862,83 @@ impl GameSession {
         }
         self.buttonsim.active = true;
         Ok(n)
+    }
+
+    /// Builds the «Кликер» lobby: a round start island ahead of the player and four floating
+    /// islands further on and higher up (forest, ice, volcano, sky), each in its own blocks.
+    pub fn build_clicker_lobby(&mut self) -> Result<usize, String> {
+        use wolfcraft_engine::block::Block as B;
+        use wolfcraft_engine::clicker::ISLANDS;
+        if self.hell {
+            return Err("Кликер строится только на родной планете".into());
+        }
+        let g = self.chunks.grid();
+        let feet = g.world_to_cell(self.player.body.pos);
+        let centre = g.cell_center(feet);
+        let ax = |di: i32, dj: i32| g.offset(feet, di, dj, 0).map(|c| (g.cell_center(c) - centre).normalize()).unwrap_or(DVec3::ZERO);
+        let (ei, ej) = (ax(1, 0), ax(0, 1));
+        let h = self.player.heading;
+        let fwd = if h.dot(ei).abs() >= h.dot(ej).abs() { (h.dot(ei).signum() as i32, 0) } else { (0, h.dot(ej).signum() as i32) };
+        let mut cells = Vec::new();
+        let mut tops = Vec::new();
+        for (k, isle) in ISLANDS.iter().enumerate() {
+            let k = k as i32;
+            let Some(mid) = g.offset(feet, fwd.0 * (8 + 16 * k), fwd.1 * (8 + 16 * k), 4 * k) else { continue };
+            const R: i32 = 6;
+            for di in -R..=R {
+                for dj in -R..=R {
+                    let d2 = di * di + dj * dj;
+                    if d2 > R * R + R {
+                        continue;
+                    }
+                    let Some(col) = g.offset(mid, di, dj, 0) else { continue };
+                    // A floating island: floor on top, a rocky cone under it; the start island
+                    // sits on the ground.
+                    let depth = if k == 0 { 2 } else { 1 + (R * R + R - d2) / 9 };
+                    for dk in -depth..=4 {
+                        let Some(cell) = g.offset(col, 0, 0, dk) else { continue };
+                        let b = if dk == -1 { isle.floor } else if dk < -1 { if k == 0 { B::StoneBricks } else { B::Stone } } else { B::Air };
+                        cells.push((cell, b));
+                    }
+                    // A ring of the island's accent at the edge.
+                    if d2 > (R - 1) * (R - 1) && (di + dj).rem_euclid(3) == 0 {
+                        if let Some(c) = g.offset(col, 0, 0, 0) {
+                            cells.push((c, isle.accent));
+                        }
+                    }
+                }
+            }
+            // A lantern in the middle of every island, the sell spot (gold) on the start one.
+            if let Some(c) = g.offset(mid, 0, 0, 0) {
+                cells.push((c, B::Lantern));
+            }
+            if k == 0 {
+                if let Some(c) = g.offset(mid, 2, 0, -1) {
+                    cells.push((c, B::GoldBlock));
+                }
+            }
+            if let Some(top) = g.offset(mid, fwd.1 * 2, fwd.0 * 2, 0) {
+                let c = g.cell_center(top);
+                tops.push([c.x, c.y, c.z]);
+            }
+        }
+        let (n, missed) = crate::worldedit::apply(self, cells);
+        if n == 0 {
+            return Err("Мир вокруг ещё не загрузился, подойдите ближе или попробуйте через пару секунд".into());
+        }
+        let _ = missed;
+        self.clicker.island_pos = tops;
+        self.clicker.active = true;
+        Ok(n)
+    }
+
+    /// «Кликер»: to an island (opens it for money the first time) — the player is taken there.
+    pub fn clicker_go(&mut self, i: usize) -> Result<(), String> {
+        self.clicker.go_to(i)?;
+        if let Some(p) = self.clicker.island_pos.get(i).copied() {
+            self.teleport(DVec3::new(p[0], p[1], p[2]));
+        }
+        Ok(())
     }
 
     fn handle_building_events(&mut self, events:&mut Vec<InteractionEvent>, used_stack:Option<wolfcraft_engine::items::ItemStack>) {
@@ -2912,6 +2994,11 @@ impl GameSession {
         if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}
         self.save_containers();
         self.save_block_commands();
+        if self.clicker.active {
+            if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("clicker.txt"), self.clicker.to_text().as_bytes()) {
+                log::error!("clicker: {e}");
+            }
+        }
         if self.buttonsim.active {
             if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("buttonsim.txt"), self.buttonsim.to_text().as_bytes()) {
                 log::error!("buttonsim: {e}");
