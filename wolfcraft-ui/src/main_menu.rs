@@ -436,8 +436,12 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
     let p = palette(ctx);
     let mut action = MenuAction::None;
     egui::CentralPanel::default().frame(Frame::none()).show(ctx, |ui| {
-        planet_backdrop(ui, planet, &p);
+        let _ = planet;
         let rect = ui.max_rect();
+        // The same living world as the loading screen behind the menu.
+        let t = ui.input(|i| i.time) as f32;
+        world_backdrop(ui.painter(), rect, t);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
         // One list of buttons (no dock): Играть first, then the rest in pairs, Выход, and a small
         // version badge at the end. Above it the logo: icon on the left, WOLFCRAFT in capitals,
         // a line under it. Lying phone: logo on the left half, buttons on the right.
@@ -466,8 +470,10 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
             let painter = ui.painter();
             let size = (logo_area.width() * 0.105).clamp(26.0, 40.0);
             let cy = logo_area.center().y + if wide { -10.0 } else { 0.0 };
-            crate::launcher::shadow_text(painter, Pos2::new(logo_area.center().x, cy - 6.0), Align2::CENTER_BOTTOM, "WOLFCRAFT", bold_font(size), Color32::WHITE);
-            painter.text(Pos2::new(logo_area.center().x, cy + 2.0), Align2::CENTER_TOP, "Целая планета из блоков", FontId::proportional((size * 0.38).max(12.0)), Color32::from_white_alpha(170));
+            // The loading screen's logo: «WolfCraft» with waving letters.
+            wave_title(painter, Pos2::new(logo_area.center().x, cy - 4.0), "WolfCraft", size * 1.15, t);
+            painter.text(Pos2::new(logo_area.center().x + 1.0, cy + 5.0), Align2::CENTER_TOP, "Целая планета из блоков", FontId::proportional((size * 0.40).max(13.0)), Color32::from_black_alpha(150));
+            painter.text(Pos2::new(logo_area.center().x, cy + 4.0), Align2::CENTER_TOP, "Целая планета из блоков", FontId::proportional((size * 0.40).max(13.0)), Color32::from_white_alpha(220));
         }
         let height = (list_area.height() - 16.0).max(150.0);
         let col = if wide { Rect::from_center_size(list_area.center(), Vec2::new(width, height)) } else { Rect::from_min_size(Pos2::new(list_area.center().x - width / 2.0, list_area.top()), Vec2::new(width, height)) };
@@ -2164,7 +2170,7 @@ mod tests {
             }, |ctx| { game_menu(ctx, &icons, "0.3.0", None); });
             render();
             let out = render();
-            for label in ["WOLFCRAFT", "Играть", "Настройки", "Выход"] {
+            for label in ["Играть", "Настройки", "Выход"] {
                 let r = out.shapes.iter().find_map(|s| match &s.shape {
                     egui::epaint::Shape::Text(t) if t.galley.job.text == label => Some(t.galley.rect.translate(t.pos.to_vec2())), _ => None
                 }).expect(label);
