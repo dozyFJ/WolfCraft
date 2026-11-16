@@ -478,8 +478,14 @@ pub fn door_top(b: Block) -> Option<Block> {
     block(form, e.material, r)
 }
 pub fn is_door_top(b: Block) -> bool { entry(b as u16).is_some_and(|(e,_)| matches!(e.form, Form::DoorTop|Form::DoorTopOpen|Form::SlidingDoorTop|Form::SlidingDoorTopOpen|Form::FoldingDoorTop|Form::FoldingDoorTopOpen)) }
+/// Retired pieces keep their save IDs and geometry, but are no longer offered or crafted.
+pub fn available(e: &Entry) -> bool {
+    !(MATERIALS[e.material].glass && matches!(e.form,Form::Arch|Form::HalfArch|Form::Arc15Small|Form::Arc30Small|Form::Arc45Small|Form::Arc90Small|Form::Arc15Medium|Form::Arc30Medium|Form::Arc45Medium|Form::Arc90Medium|Form::Arc15Large|Form::Arc30Large|Form::Arc45Large|Form::Arc90Large|Form::Dome|Form::DomeHalf|Form::DomeQuarter))
+}
+
 pub fn recipe(id: u16) -> Option<crate::inventory::Recipe> {
     let (e, _) = entry(id)?;
+    if !available(e) {return None;}
     if matches!(e.form,Form::SharedChest) { return Some(crate::inventory::Recipe {ingredients:vec![(Block::Obsidian as u16,8),(crate::items::ids::RESONANCE_RUNE,1)],output:(e.base,1),needs_table:true,category:e.category,shape:None}); }
     let mut ingredients = vec![(MATERIALS[e.material].ingredient, if e.category == "Мебель" || e.category == "Двери" { 4 } else { 2 })];
     if matches!(e.form, Form::GlassTable | Form::Mirror | Form::Sink) { ingredients.push((Block::Glass as u16, 1)); }
@@ -512,10 +518,22 @@ pub fn surface(e: &Entry, s: geometry::Surface) -> (u16, bool, bool) {
 mod tests {
     use super::*;
     #[test]
+    fn retired_curved_glass_is_not_offered_but_keeps_saved_ids() {
+        let palette=crate::items::creative_palette();let mut retired=0;
+        for e in ENTRIES.iter().filter(|e|!available(e)) {
+            retired+=1;
+            assert!(!palette.contains(&e.base));assert!(recipe(e.id).is_none());
+            for r in 0..4 {assert_eq!(Block::from_id(e.id+r) as u16,e.id+r);}
+        }
+        assert!(retired>0);
+        assert!(ENTRIES.iter().any(|e|MATERIALS[e.material].glass&&e.form==Form::Door&&available(e)));
+    }
+
+    #[test]
     fn catalogue_ids_items_material_costs_and_doors_roundtrip() {
         for e in ENTRIES {
             for r in 0..4 {let b=Block::from_id(e.id+r);assert_eq!(b as u16,e.id+r);assert_eq!(b.base_item() as u16,e.base);assert!(crate::items::is_valid(b as u16));assert_eq!(crate::items::info(b as u16).place,Some(b));}
-            let recipe=recipe(e.id).unwrap();assert!(recipe.ingredients.iter().all(|(id,_)|crate::items::is_valid(*id)));
+            if available(e) {let recipe=recipe(e.id).unwrap();assert!(recipe.ingredients.iter().all(|(id,_)|crate::items::is_valid(*id)));} else {assert!(recipe(e.id).is_none());}
             let b=Block::from_id(e.id);
             if let Some(open)=b.door_toggle() {assert_eq!(open.door_toggle(),Some(b));}
             assert_eq!(b.part(),None,"new IDs must not wrap into old mechanisms");
