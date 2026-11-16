@@ -172,7 +172,7 @@ pub mod ids {
     pub const FIRE_CRYSTAL: ItemId = 435;
     pub const FROST_CRYSTAL: ItemId = 436;
     pub const XENO_CRYSTAL: ItemId = 437;
-    pub const ROCKET: ItemId = 438;
+    pub const SPACE_ROCKET: ItemId = 438;
     pub const ROCKET_FUEL: ItemId = 439;
     pub const LAST: ItemId = 439;
 
@@ -343,7 +343,7 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::FIRE_CRYSTAL => plain("Огненный кристалл", sp::FIRE_CRYSTAL),
         ids::FROST_CRYSTAL => plain("Морозный кристалл", sp::FROST_CRYSTAL),
         ids::XENO_CRYSTAL => plain("Ксенокристалл", sp::XENO_CRYSTAL),
-        ids::ROCKET => ItemInfo { max_stack: 1, ..plain("Ракета", sp::ROCKET) },
+        ids::SPACE_ROCKET => ItemInfo { max_stack: 1, ..plain("Космическая ракета", sp::SPACE_ROCKET) },
         ids::ROCKET_FUEL => plain("Ракетное топливо", sp::ROCKET_FUEL),
         ids::CHAINSAW => ItemInfo { max_stack: 1, durability: 600, attack: 7.0, tool: Some((ToolKind::Axe, 3)), ..plain("Электропила", sp::CHAINSAW) },
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
