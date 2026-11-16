@@ -278,7 +278,7 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
                 "murder" | "мардер" => Mode::Murder,
                 _ => Mode::HideSeek,
             };
-            match s.build_arena(mode) {
+            match s.build_pvp(mode) {
                 Ok(m) => vec![sys(m)],
                 Err(e) => vec![err(e)],
             }
