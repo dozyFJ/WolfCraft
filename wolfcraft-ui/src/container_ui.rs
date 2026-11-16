@@ -30,6 +30,8 @@ pub struct ContainerView<'a> {
     pub energy: Option<f32>,
     /// Reactor hull heat (0..1 of its limit), a bar on the right.
     pub heat: Option<f32>,
+    /// WolfTech: short facts as chips under the slots (store, use, speed, network).
+    pub stats: &'a [String],
 }
 
 /// Layout of a block's slots.
@@ -331,6 +333,23 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
         // Slots are placed freely, so the layout cursor is wherever the last one ended:
         // put it back under the whole slot area (else the hint and the bag overlap it).
         ui.allocate_rect(Rect::from_min_max(egui::pos2(area.left(), area.bottom() - 1.0), area.right_bottom()), Sense::hover());
+        // WolfTech facts as little chips: «⚡ 1200/4000», «−6 ЭЕ/с», «×2 скорость»…
+        if !view.stats.is_empty() {
+            ui.add_space(6.0);
+            ui.allocate_ui(Vec2::new(width, 0.0), |ui| {
+                ui.set_width(width);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+                    for t in view.stats {
+                        let g = ui.painter().layout_no_wrap(t.clone(), FontId::proportional(12.0), p.text);
+                        let (r, _) = ui.allocate_exact_size(g.size() + Vec2::new(16.0, 8.0), Sense::hover());
+                        ui.painter().rect_filled(r, Rounding::same(r.height() / 2.0), Color32::from_black_alpha(80));
+                        ui.painter().rect_stroke(r, Rounding::same(r.height() / 2.0), Stroke::new(1.0_f32, p.accent.gamma_multiply(0.5)));
+                        ui.painter().galley(r.min + Vec2::new(8.0, 4.0), g, p.text);
+                    }
+                });
+            });
+        }
         if let Some((text, f)) = view.status {
             ui.add_space(8.0);
             if view.layout == Layout::Grid {
@@ -424,11 +443,11 @@ mod tests {
         let atlases = wolfcraft_assets::AtlasManager::new(None).unwrap();
         let icons = GuiIcons::new(&ctx, &atlases);
         let any = |_: usize, _: &ItemStack| true;
-        let view = ContainerView { title: "Сундук", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 9, accepts: &any, status: Some(("Статус", 0.3)), layout: Layout::Grid, working: false, energy: None, heat: None };
+        let view = ContainerView { title: "Сундук", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 9, accepts: &any, status: Some(("Статус", 0.3)), layout: Layout::Grid, working: false, energy: None, heat: None, stats: &[] };
         let mut inv = Inventory::default();
         for (w, h, scaled) in [(802.0f32, 360.0f32, true), (420.0, 800.0, true), (1400.0, 900.0, false)] {
             // A small window first: the big one after it must still be measured in full.
-            let small = ContainerView { title: "Кузница", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 3, accepts: &any, status: None, layout: Layout::Forge, working: false, energy: None, heat: None };
+            let small = ContainerView { title: "Кузница", skin: wolfcraft_assets::gui::PANEL_WOOD, columns: 3, accepts: &any, status: None, layout: Layout::Forge, working: false, energy: None, heat: None, stats: &[] };
             let mut three = vec![None; 3];
             for _ in 0..3 {
                 let mut raw = egui::RawInput::default();
@@ -494,7 +513,7 @@ mod tests {
         let mut inv = Inventory::default();
         let mut out = String::new();
         for (k, (layout, n)) in [(Layout::Forge, 3), (Layout::Furnace, 3), (Layout::Enchant, 2)].into_iter().enumerate() {
-            let view = ContainerView { title: "Блок", skin: wolfcraft_assets::gui::PANEL_STONE, columns: n, accepts: &any, status: Some(("Подсказка", 0.6)), layout, working: true, energy: None, heat: None };
+            let view = ContainerView { title: "Блок", skin: wolfcraft_assets::gui::PANEL_STONE, columns: n, accepts: &any, status: Some(("Подсказка", 0.6)), layout, working: true, energy: None, heat: None, stats: &[] };
             let mut slots = vec![None; n];
             let mut shapes = Vec::new();
             for _ in 0..8 {

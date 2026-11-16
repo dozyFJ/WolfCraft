@@ -208,6 +208,17 @@ fn add_gun_3p(v: &mut Vec<ModelVertex>, frame: &Frame, hand: Vec3, pivot: Vec3, 
             b([-0.012, -0.02, 0.20], [0.012, 0.05, 0.60], STEEL);
             b([-0.03, -0.17, -0.08], [0.03, -0.06, 0.0], DARK);
         }
+        14 => {
+            b([-0.05, -0.05, -0.08], [0.05, 0.07, 0.20], [0.20, 0.23, 0.30]);
+            b([-0.03, -0.17, -0.02], [0.03, -0.04, 0.06], DARK);
+            b([-0.07, 0.00, 0.20], [0.07, 0.04, 0.30], STEEL);
+            b([-0.015, -0.01, 0.30], [0.015, 0.03, 0.46], [1.0, 0.8, 0.25]);
+        }
+        15 => {
+            b([-0.045, -0.06, -0.10], [0.045, 0.06, 0.30], [0.20, 0.23, 0.30]);
+            b([-0.03, -0.03, 0.30], [0.03, 0.03, 0.50], [0.95, 0.25, 0.10]);
+            b([-0.03, -0.17, -0.02], [0.03, -0.05, 0.05], DARK);
+        }
         13 => {
             b([-0.02, -0.02, -0.12], [0.02, 0.02, 0.02], DARK);
             b([-0.06, -0.025, 0.02], [0.06, 0.025, 0.05], [1.0, 0.8, 0.25]);
@@ -1905,12 +1916,12 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
     let base = anchor + off + Vec3::new(0.0, 0.02 * kick, -(if heavy { 0.12 } else { 0.07 }) * kick);
     // Electric tools buzz while they work.
     let work = if g.loaded { g.work.clamp(0.0, 1.0) } else { 0.0 };
-    let electric = matches!(g.kind, 11 | 12);
+    let electric = matches!(g.kind, 11 | 12 | 14);
     // Idle hum when charged, a hard buzz while it works.
     let buzz = if electric && g.loaded { Vec3::new((pose.time * 97.0).sin(), (pose.time * 113.0).cos(), 0.0) * (0.0008 + 0.0045 * work) } else { Vec3::ZERO };
     // Drill: pushed into the block and pecking; chainsaw: sawing back and forth.
     let push = match g.kind {
-        11 => Vec3::new(0.0, 0.0, work * (0.05 + 0.015 * (pose.time * 14.0).sin())),
+        11 | 14 => Vec3::new(0.0, 0.0, work * (0.05 + 0.015 * (pose.time * 14.0).sin())),
         12 => Vec3::new(0.0, -0.02 * work, work * (0.03 + 0.03 * (pose.time * 9.0).sin())),
         _ => Vec3::ZERO,
     };
@@ -2187,6 +2198,68 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             bx(&mut v, [-0.055, -0.17, -0.10], [0.055, -0.06, 0.02], skin_c);
             bx(&mut v, [-0.065, -0.52, -0.28], [0.065, -0.16, -0.04], sleeve_c);
             bx(&mut v, [-0.05, 0.10, -0.04], [0.05, 0.16, 0.08], skin_c);
+        }
+        14 => {
+            // WolfTech omni-tool: a dark body, a steel head with pick, axe and shovel edges, a
+            // gold bit that spins while it digs, a pulsing charge light.
+            const GRAPH: [f32; 3] = [0.20, 0.23, 0.30];
+            const GOLD: [f32; 3] = [1.0, 0.80, 0.25];
+            bx(&mut v, [-0.050, -0.050, -0.08], [0.050, 0.070, 0.20], GRAPH);
+            bx(&mut v, [-0.075, 0.000, 0.20], [0.075, 0.045, 0.28], STEEL);
+            bx(&mut v, [-0.095, -0.020, 0.22], [-0.065, 0.060, 0.30], STEEL);
+            bx(&mut v, [0.065, -0.020, 0.22], [0.095, 0.060, 0.30], STEEL);
+            let spin = pose.time * 40.0 * work;
+            for k in 0..4 {
+                let a = spin + k as f32 * std::f32::consts::FRAC_PI_2;
+                let (sx, sy) = (a.cos() * 0.022, a.sin() * 0.022 + 0.02);
+                bx(&mut v, [sx - 0.010, sy - 0.010, 0.28], [sx + 0.010, sy + 0.010, 0.46], GOLD);
+            }
+            let glow_from = v.len();
+            let pulse = if g.loaded { 0.55 + 0.45 * work * (0.5 + 0.5 * (pose.time * 12.0).sin()) } else { 0.15 };
+            bx(&mut v, [0.050, 0.010, 0.00], [0.054, 0.050, 0.16], [CYAN[0] * pulse, CYAN[1] * pulse, CYAN[2] * pulse]);
+            if work > 0.4 {
+                for k in 0..4u32 {
+                    let t = (pose.time * 6.0 + k as f32 * 0.41).fract();
+                    let a = k as f32 * 2.1 + (pose.time * 2.0).floor();
+                    let (px, py, pz) = (a.cos() * 0.09 * t, a.sin() * 0.07 * t + 0.03, 0.47 - 0.10 * t);
+                    let f = 0.006 * (1.0 - t);
+                    bx(&mut v, [px - f, py - f, pz - f], [px + f, py + f, pz + f], [1.0, 0.85 - 0.4 * t, 0.35]);
+                }
+            }
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            muzzle_z = 0.48;
+            bx(&mut v, [-0.03, -0.17, -0.02], [0.03, -0.04, 0.06], DARK);
+            bx(&mut v, [-0.055, -0.17, -0.06], [0.055, -0.06, 0.06], skin_c);
+            bx(&mut v, [-0.065, -0.52, -0.28], [0.065, -0.16, -0.04], sleeve_c);
+        }
+        15 => {
+            // WolfTech mining laser: a long dark body, a red emitter with glowing rings, a
+            // charge strip; the emitter flares right after a shot (recoil).
+            const GRAPH: [f32; 3] = [0.20, 0.23, 0.30];
+            const RED: [f32; 3] = [0.95, 0.25, 0.10];
+            bx(&mut v, [-0.045, -0.060, -0.12], [0.045, 0.060, 0.32], GRAPH);
+            bx(&mut v, [-0.030, -0.030, 0.32], [0.030, 0.030, 0.52], RED);
+            let glow_from = v.len();
+            let flare = 0.5 + 1.5 * kick;
+            for k in 0..3 {
+                let z = 0.36 + k as f32 * 0.05;
+                bx(&mut v, [-0.034, -0.034, z], [0.034, 0.034, z + 0.012], [RED[0] * flare, (RED[1] + 0.3) * flare, RED[2] * flare]);
+            }
+            let charge = if g.loaded { 1.0 } else { 0.2 };
+            bx(&mut v, [0.045, 0.00, 0.00], [0.049, 0.040, 0.24], [CYAN[0] * charge, CYAN[1] * charge, CYAN[2] * charge]);
+            if kick > 0.2 {
+                bx(&mut v, [-0.012, -0.012, 0.52], [0.012, 0.012, 0.52 + 1.6 * kick], [1.0, 0.45, 0.30]);
+            }
+            for q in v[glow_from..].iter_mut() {
+                q.tex = 3.0;
+            }
+            muzzle_z = 0.55;
+            bx(&mut v, [-0.03, -0.17, -0.02], [0.03, -0.05, 0.05], DARK);
+            bx(&mut v, [-0.055, -0.17, -0.06], [0.055, -0.06, 0.04], skin_c);
+            bx(&mut v, [-0.065, -0.52, -0.28], [0.065, -0.16, -0.04], sleeve_c);
+            bx(&mut v, [-0.05, -0.04, 0.12], [0.05, 0.02, 0.22], skin_c);
         }
         13 => {
             // WolfTech energy sword: a dark hilt with a gold guard and a long glowing blade.

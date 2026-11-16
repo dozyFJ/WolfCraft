@@ -592,6 +592,10 @@ impl GameSession {
         if input.swap_hands && !self.player.survival.dead {
             self.player.inventory.swap_offhand();
         }
+        // WolfTech mining laser: a tap burns a tunnel of up to 8 blocks ahead.
+        if input.use_pressed && !self.player.survival.dead && self.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::MINING_LASER) {
+            self.fire_laser();
+        }
         // Shield up while RMB is held, unless the main hand has its own right-click use.
         let holding_bow = self.player.inventory.held().is_some_and(|s| s.id == wolfcraft_engine::items::ids::BOW);
         let main_use = holding_bow
@@ -1941,6 +1945,86 @@ impl GameSession {
         Ok(n)
     }
 
+    /// The next block the quarry at `c` digs: its 5×5 shaft from the layer under it down to
+    /// 64 deep (`cursor` counts cells already looked at). Air, water and bedrock are skipped.
+    fn quarry_next(&self, c: wolfcraft_engine::cubesphere::Cell, cursor: &mut f32) -> Option<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)> {
+        use wolfcraft_engine::block::Block;
+        let g = self.chunks.grid();
+        for _ in 0..80 {
+            let n = *cursor as i32;
+            let layer = n / 25;
+            if layer >= 64 {
+                return None;
+            }
+            let (di, dj) = (n % 25 % 5 - 2, n % 25 / 5 - 2);
+            let Some(cell) = g.offset(c, di, dj, -1 - layer) else {
+                *cursor += 1.0;
+                continue;
+            };
+            let Some(b) = self.chunks.get_block(cell) else { return None };
+            *cursor += 1.0;
+            if matches!(b, Block::Air | Block::Water | Block::Bedrock | Block::InnerCore) || b.info().hardness < 0.0 || b.is_water() {
+                continue;
+            }
+            return Some((cell, b));
+        }
+        None
+    }
+
+    /// The mining laser: up to 8 solid blocks along the look ray break with their loot; costs
+    /// charge.
+    fn fire_laser(&mut self) {
+        use wolfcraft_engine::block::Block;
+        let Some(h) = self.player.inventory.held() else { return };
+        if !self.player.is_creative() && h.damage + 20 > h.info().durability {
+            self.item_name = Some(("Горный лазер разряжен — зарядите в энергоячейке".into(), 2.0));
+            return;
+        }
+        let eye = self.player.eye_pos();
+        let dir = self.player.look_dir();
+        let g = self.chunks.grid();
+        let mut cells = Vec::new();
+        let mut last = None;
+        let mut t = 0.5;
+        while t < 24.0 && cells.len() < 8 {
+            let cell = g.world_to_cell(eye + dir * t);
+            t += 0.25;
+            if last == Some(cell) {
+                continue;
+            }
+            last = Some(cell);
+            let Some(b) = self.chunks.get_block(cell) else { break };
+            if b == Block::Air || b.is_water() {
+                continue;
+            }
+            if b.info().hardness < 0.0 || matches!(b, Block::Bedrock | Block::InnerCore) {
+                break;
+            }
+            cells.push((cell, b));
+        }
+        if cells.is_empty() {
+            return;
+        }
+        let creative = self.player.is_creative();
+        for (cell, b) in &cells {
+            if !creative {
+                let seed = (self.mobs.rand() * 1e9) as u64;
+                let centre = g.cell_center(*cell);
+                for d in wolfcraft_engine::items::drops(*b, true, glam::IVec3::new(cell.i, cell.j, cell.k), seed) {
+                    self.drops.pop_from_block(d, centre);
+                }
+            }
+        }
+        let n = cells.len();
+        crate::worldedit::apply(self, cells.into_iter().map(|(c, _)| (c, Block::Air)).collect());
+        if !creative {
+            if let Some(s) = self.player.inventory.slots[self.player.inventory.selected].as_mut() {
+                s.damage = (s.damage + 20).min(s.info().durability);
+            }
+        }
+        self.item_name = Some((format!("Лазер: {n} бл."), 0.8));
+    }
+
     /// PvP templates: generators, the bed / egg, death and the round.
     fn tick_arena(&mut self, dt: f32) {
         use wolfcraft_engine::{block::Block, items::{ItemStack, ids}};
@@ -2201,6 +2285,7 @@ impl GameSession {
             let rolls: Vec<f64> = (0..5).map(|_| self.mobs.rand()).collect();
             let loot = chest_loot(rich, &rolls);
             let slots = self.container_slots(c, B::Chest);
+            slots.iter_mut().for_each(|x| *x = None);
             let len = slots.len().max(1);
             for (i, (id, cnt)) in loot.into_iter().enumerate() {
                 slots[(i * 5 + 2) % len] = Some(ItemStack::new(id, cnt));
@@ -2466,6 +2551,74 @@ impl GameSession {
                 Kind::Wind | Kind::Geo | Kind::Water => {
                     st.flow = sp.rate * st.env;
                     st.working = st.flow > 0.0;
+                }
+                // Quarry: one block of its 5×5 shaft every `time` seconds, into its slots.
+                Kind::Quarry => {
+                    st.flow = sp.rate;
+                    st.burn += dt;
+                    let cost = 40.0;
+                    if st.burn >= sp.time && st.energy >= cost {
+                        st.burn = 0.0;
+                        let full = self.containers.get(&c).is_some_and(|v| v.iter().all(|s| s.is_some_and(|s| s.count >= s.info().max_stack)));
+                        if !full {
+                            if let Some((cell, block)) = self.quarry_next(c, &mut st.progress) {
+                                let seed = (self.mobs.rand() * 1e9) as u64;
+                                let loot = wolfcraft_engine::items::drops(block, true, glam::IVec3::new(cell.i, cell.j, cell.k), seed);
+                                crate::worldedit::apply(self, vec![(cell, wolfcraft_engine::block::Block::Air)]);
+                                let centre = self.chunks.grid().cell_center(c);
+                                for d in loot {
+                                    let v = self.container_slots(c, b);
+                                    let mut left = d.count;
+                                    for i in wolfcraft_engine::pipes::order(v, (0..v.len()).collect(), d.id) {
+                                        left -= wolfcraft_engine::pipes::insert(v, i, d, left);
+                                        if left == 0 {
+                                            break;
+                                        }
+                                    }
+                                    if left > 0 {
+                                        self.drops.pop_from_block(wolfcraft_engine::items::ItemStack { count: left, ..d }, centre);
+                                    }
+                                }
+                                st.energy -= cost;
+                                st.working = true;
+                            }
+                        }
+                    }
+                    st.burn = st.burn.min(sp.time);
+                }
+                // Magnet: twice a second, dropped items within 8 blocks fly into its slots.
+                Kind::Magnet => {
+                    st.flow = sp.rate;
+                    st.burn += dt;
+                    if st.burn >= sp.time {
+                        st.burn = 0.0;
+                        let centre = self.chunks.grid().cell_center(c);
+                        let mut i = 0;
+                        while i < self.drops.list.len() && st.energy >= 2.0 {
+                            let d = &self.drops.list[i];
+                            if d.delay > 0.0 || (d.pos - centre).length_squared() > 64.0 {
+                                i += 1;
+                                continue;
+                            }
+                            let stack = d.stack;
+                            let v = self.container_slots(c, b);
+                            let mut left = stack.count;
+                            for k in wolfcraft_engine::pipes::order(v, (0..v.len()).collect(), stack.id) {
+                                left -= wolfcraft_engine::pipes::insert(v, k, stack, left);
+                                if left == 0 {
+                                    break;
+                                }
+                            }
+                            st.energy -= 2.0;
+                            st.working = true;
+                            if left == 0 {
+                                self.drops.list.swap_remove(i);
+                            } else {
+                                self.drops.list[i].stack.count = left;
+                                i += 1;
+                            }
+                        }
+                    }
                 }
                 // «Механика»: the dynamo gives what the shaft turns into it (env, set by the
                 // kinetic tick); the motor spends energy and turns its shafts while it has it.

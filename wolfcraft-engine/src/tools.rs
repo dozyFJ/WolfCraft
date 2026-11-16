@@ -30,6 +30,8 @@ pub enum Role {
     Drill,
     /// WolfTech chainsaw: wood, leaves and plants, very fast.
     Chainsaw,
+    /// WolfTech omni-tool: everything a pickaxe, axe, shovel and sword take, fastest.
+    Omni,
     Bow,
     Other,
 }
@@ -44,6 +46,9 @@ pub fn role(id: Option<ItemId>) -> Role {
     }
     if id == ids::CHAINSAW {
         return Role::Chainsaw;
+    }
+    if id == ids::OMNI_TOOL {
+        return Role::Omni;
     }
     match items::tool_shape(id) {
         Some((0, m)) => Role::Pickaxe(m),
@@ -79,6 +84,7 @@ pub fn fits(role: Role, b: Block) -> bool {
         Role::Hoe(_) => hoe_cuts(b),
         Role::Drill => matches!(tool, ToolKind::Pickaxe | ToolKind::Shovel),
         Role::Chainsaw => tool == ToolKind::Axe || sword_cuts(b),
+        Role::Omni => matches!(tool, ToolKind::Pickaxe | ToolKind::Shovel | ToolKind::Axe) || sword_cuts(b),
         Role::Bow | Role::Other => false,
     }
 }
@@ -97,6 +103,7 @@ pub fn speed(id: Option<ItemId>, b: Block) -> f32 {
         Role::Sword(_) => 4.0,
         Role::Hoe(m) => tier(m).max(3.0),
         Role::Drill | Role::Chainsaw => 12.0,
+        Role::Omni => 16.0,
         _ => 1.0,
     }
 }
@@ -124,7 +131,7 @@ pub fn wear_for_block(id: Option<ItemId>, b: Block) -> u16 {
 pub fn wear_for_hit(id: Option<ItemId>) -> u16 {
     match role(id) {
         Role::Sword(_) => 1,
-        Role::Pickaxe(_) | Role::Axe(_) | Role::Shovel(_) | Role::Hoe(_) | Role::Drill | Role::Chainsaw => 2,
+        Role::Pickaxe(_) | Role::Axe(_) | Role::Shovel(_) | Role::Hoe(_) | Role::Drill | Role::Chainsaw | Role::Omni => 2,
         Role::Bow | Role::Other => 0,
     }
 }
@@ -148,6 +155,7 @@ pub fn describe(id: ItemId) -> Option<String> {
         Role::Bow => "Только стреляет: держите, чтобы натянуть".into(),
         Role::Drill => "WolfTech: камень, руды и землю — очень быстро, все руды · тратит заряд".into(),
         Role::Chainsaw => "WolfTech: дерево, листву и растения — очень быстро · тратит заряд".into(),
+        Role::Omni => "WolfTech: всё — камень, руды, землю, дерево, листву — быстрее всех · тратит заряд".into(),
         Role::Other => return None,
     })
 }

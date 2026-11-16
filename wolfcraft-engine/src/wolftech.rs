@@ -46,6 +46,14 @@ pub enum Kind {
     Dynamo,
     /// «Механика» link: spends energy to turn shafts.
     Motor,
+    /// Digs a 5×5 shaft down under itself, block by block, into its slots.
+    Quarry,
+    /// Any 4 items → 1 scrap.
+    Recycler,
+    /// 8 scrap → 1 UU-matter (slow, hungry).
+    MatterFab,
+    /// Pulls dropped items within 8 blocks into its slots.
+    Magnet,
 }
 
 pub struct Spec {
@@ -81,6 +89,10 @@ pub fn kind(b: Block) -> Option<Kind> {
         Block::MagmaGenerator => Kind::Magma,
         Block::KineticDynamo => Kind::Dynamo,
         Block::ElectricMotor => Kind::Motor,
+        Block::Quarry => Kind::Quarry,
+        Block::Recycler => Kind::Recycler,
+        Block::MatterFab => Kind::MatterFab,
+        Block::ItemMagnet => Kind::Magnet,
         _ => return None,
     })
 }
@@ -103,6 +115,10 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Insolator => Spec { name: "Теплица", capacity: 400.0, rate: 10.0, time: 8.0, hint: "Семена, морковь, картофель или цветок в слоте — растит ещё (сам образец не тратится)" },
         Kind::Glacier => Spec { name: "Ледогенератор", capacity: 200.0, rate: 8.0, time: 2.0, hint: "Нужна вода сбоку → снег. Лёд в слоте — делает лёд" },
         Kind::Magma => Spec { name: "Магматический генератор", capacity: 4_000.0, rate: 40.0, time: 0.0, hint: "Положите магму или адский камень" },
+        Kind::Quarry => Spec { name: "Буровая установка", capacity: 6_000.0, rate: 50.0, time: 0.8, hint: "Копает шахту 5×5 вниз под собой; добыча — в слоты (заберите или подведите трубу)" },
+        Kind::Recycler => Spec { name: "Утилизатор", capacity: 400.0, rate: 6.0, time: 2.0, hint: "Любые 4 предмета → 1 лом" },
+        Kind::MatterFab => Spec { name: "Фабрикатор материи", capacity: 20_000.0, rate: 80.0, time: 12.0, hint: "8 лома → 1 материя (из материи крафтятся алмазы и металлы)" },
+        Kind::Magnet => Spec { name: "Магнит предметов", capacity: 400.0, rate: 4.0, time: 0.5, hint: "Притягивает выпавшие предметы в радиусе 8 блоков в свои слоты" },
         Kind::Dynamo => Spec { name: "Кинетическое динамо", capacity: 1_000.0, rate: 0.0, time: 0.0, hint: "Подведите вал «Механики»: вращение → энергия (быстрее крутится — больше ЭЕ)" },
         Kind::Motor => Spec { name: "Электромотор", capacity: 400.0, rate: 16.0, time: 0.0, hint: "Подключите кабель: на энергии крутит валы «Механики» (64 об/мин)" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
@@ -214,7 +230,7 @@ pub fn fuel_for(k: Kind, id: ItemId) -> f32 {
 }
 
 pub fn is_machine(k: Kind) -> bool {
-    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor | Kind::Extruder | Kind::Insolator | Kind::Glacier)
+    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor | Kind::Extruder | Kind::Insolator | Kind::Glacier | Kind::Recycler | Kind::MatterFab)
 }
 
 /// Machines whose slot item is only a pattern: it stays, the output is made from nothing
@@ -254,6 +270,8 @@ pub fn slow(k: Kind, input: ItemId) -> f32 {
 pub fn need(k: Kind, input: ItemId) -> u8 {
     match (k, input) {
         (Kind::Compressor, ids::COAL) => 32,
+        (Kind::Recycler, _) => 4,
+        (Kind::MatterFab, _) => 8,
         _ => 1,
     }
 }
@@ -329,6 +347,8 @@ pub fn recipe(k: Kind, input: ItemId) -> Option<(ItemId, u8)> {
         Kind::Induction => crate::interaction::smelt_result(input).map(|o| (o, 1)),
         Kind::Extruder => [Block::Cobblestone, Block::Stone, Block::Obsidian].iter().find(|b| **b as ItemId == input).map(|b| (*b as ItemId, 1)),
         Kind::Glacier => [Block::Snow, Block::Ice].iter().find(|b| **b as ItemId == input).map(|b| (*b as ItemId, 1)),
+        Kind::Recycler => (input != ids::SCRAP && input != ids::UU_MATTER).then_some((ids::SCRAP, 1)),
+        Kind::MatterFab => (input == ids::SCRAP).then_some((ids::UU_MATTER, 1)),
         Kind::Insolator => match input {
             ids::WHEAT_SEEDS => Some((ids::WHEAT, 1)),
             ids::CARROT => Some((ids::CARROT, 2)),
@@ -369,7 +389,7 @@ pub fn share(nodes: &[Node], dt: f32) -> Vec<f32> {
         e[i] = 0.0;
     }
     // 3. Machines take what they need for this frame (filling their buffer up to a second's worth).
-    let is_machine = |k: Kind| is_machine(k) || k == Kind::Motor;
+    let is_machine = |k: Kind| is_machine(k) || matches!(k, Kind::Motor | Kind::Quarry | Kind::Magnet);
     for (i, n) in nodes.iter().enumerate() {
         if is_machine(n.kind) {
             // A machine keeps only a few seconds of work in its buffer: the rest of the
@@ -492,5 +512,8 @@ mod tests {
         assert_eq!(recipe(Kind::Insolator, ids::WHEAT_SEEDS), Some((ids::WHEAT, 1)));
         assert!(keeps(Kind::Insolator) && !keeps(Kind::Crusher) && !env_ok(Kind::Extruder, 0.0));
         assert!(fuel_for(Kind::Magma, Block::Magma as ItemId) > 0.0 && is_source(Kind::Magma));
+        assert_eq!((recipe(Kind::Recycler, ids::COAL), need(Kind::Recycler, ids::COAL)), (Some((ids::SCRAP, 1)), 4));
+        assert_eq!(recipe(Kind::MatterFab, ids::SCRAP), Some((ids::UU_MATTER, 1)));
+        assert!(recipe(Kind::Recycler, ids::SCRAP).is_none());
     }
 }
