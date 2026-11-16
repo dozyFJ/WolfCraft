@@ -1301,10 +1301,6 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     }));
     l.add(DRACONIUM_INGOT, "draconium_ingot", ingot(Rgb(0.60, 0.28, 0.92)));
     l.add(AWAKENED_DRACONIUM, "awakened_draconium", ingot(Rgb(1.0, 0.58, 0.15)));
-    l.add(COKE, "coke", blob(Rgb(0.22, 0.22, 0.25), 5.0, 360));
-    l.add(STEEL_INGOT, "steel_ingot", ingot(Rgb(0.52, 0.56, 0.62)));
-    l.add(COBALT_INGOT, "cobalt_ingot", ingot(Rgb(0.25, 0.45, 0.95)));
-    l.add(MANYULLYN_INGOT, "manyullyn_ingot", ingot(Rgb(0.58, 0.32, 0.78)));
     l.add(DRACONIC_CORE, "draconic_core", p(|q| {
         for y in 0..16u32 {
             for x in 0..16u32 {
@@ -1330,6 +1326,10 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     };
     l.add(DRACONIC_PICKAXE, "draconic_pickaxe", tool(&PICKAXE, Rgb(1.0, 0.55, 0.15), Rgb(0.45, 0.18, 0.70)));
     l.add(DRACONIC_SWORD, "draconic_sword", tool(&SWORD, Rgb(1.0, 0.60, 0.20), Rgb(0.45, 0.18, 0.70)));
+    l.add(COKE, "coke", blob(Rgb(0.22, 0.22, 0.25), 5.0, 360));
+    l.add(STEEL_INGOT, "steel_ingot", ingot(Rgb(0.52, 0.56, 0.62)));
+    l.add(COBALT_INGOT, "cobalt_ingot", ingot(Rgb(0.25, 0.45, 0.95)));
+    l.add(MANYULLYN_INGOT, "manyullyn_ingot", ingot(Rgb(0.58, 0.32, 0.78)));
     l.add(TINKER_HAMMER, "tinker_hammer", tool(&HAMMER_TPL, Rgb(0.58, 0.32, 0.78), Rgb(0.30, 0.45, 0.95)));
     l.add(TINKER_EXCAVATOR, "tinker_excavator", tool(&EXCAVATOR_TPL, Rgb(0.30, 0.45, 0.95), Rgb(0.45, 0.32, 0.18)));
     l.add(LUMBER_AXE, "lumber_axe", tool(&LUMBER_TPL, Rgb(0.58, 0.32, 0.78), Rgb(0.45, 0.32, 0.18)));

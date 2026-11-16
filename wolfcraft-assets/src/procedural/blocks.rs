@@ -2849,17 +2849,6 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
     }));
     // ---- Tinkers' Construct ----
-    l.add(SEARED_BRICKS, "seared_bricks", p(|q| {
-        q.noisy(Rgb(0.36, 0.34, 0.33), 0.08, 358);
-        for y in 0..S {
-            for x in 0..S {
-                let row = y / 4;
-                if y % 4 == 3 || (x + if row % 2 == 0 { 2 } else { 6 }) % 8 == 0 {
-                    q.put(x, y, Rgb(0.20, 0.19, 0.19), 1.0);
-                }
-            }
-        }
-    }));
     l.add(SMELTERY_FRONT, "smeltery", p(|q| {
         q.noisy(Rgb(0.36, 0.34, 0.33), 0.08, 359);
         for y in 0..S {
@@ -2875,6 +2864,17 @@ pub(crate) fn build() -> Vec<(String, Image)> {
                 let wave = ((x as f32 * 0.9).sin() * 1.2) as i32;
                 let c = if (y as i32) < 7 + wave { Rgb(0.18, 0.16, 0.15) } else if (x + y) % 4 == 0 { Rgb(1.0, 0.85, 0.40) } else { Rgb(1.0, 0.50, 0.12) };
                 q.put(x, y, c, 1.0);
+            }
+        }
+    }));
+    l.add(SEARED_BRICKS, "seared_bricks", p(|q| {
+        q.noisy(Rgb(0.36, 0.34, 0.33), 0.08, 358);
+        for y in 0..S {
+            for x in 0..S {
+                let row = y / 4;
+                if y % 4 == 3 || (x + if row % 2 == 0 { 2 } else { 6 }) % 8 == 0 {
+                    q.put(x, y, Rgb(0.20, 0.19, 0.19), 1.0);
+                }
             }
         }
     }));
