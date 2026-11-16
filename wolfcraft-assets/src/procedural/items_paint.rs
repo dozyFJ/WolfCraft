@@ -114,7 +114,22 @@ pub mod items {
     pub const MINING_LASER: u16 = 161;
     pub const BATTERY: u16 = 162;
     pub const ENERGY_CRYSTAL: u16 = 163;
-    pub const COUNT: u16 = 164;
+    // Mod packs: Draconic Evolution, Immersive Engineering, Tinkers' Construct.
+    pub const DRACONIUM_DUST: u16 = 164;
+    pub const DRACONIUM_INGOT: u16 = 165;
+    pub const AWAKENED_DRACONIUM: u16 = 166;
+    pub const DRACONIC_CORE: u16 = 167;
+    pub const DRACONIC_PICKAXE: u16 = 168;
+    pub const DRACONIC_SWORD: u16 = 169;
+    pub const COKE: u16 = 170;
+    pub const STEEL_INGOT: u16 = 171;
+    pub const COBALT_INGOT: u16 = 172;
+    pub const MANYULLYN_INGOT: u16 = 173;
+    pub const TINKER_HAMMER: u16 = 174;
+    pub const TINKER_EXCAVATOR: u16 = 175;
+    pub const LUMBER_AXE: u16 = 176;
+    pub const CLEAVER: u16 = 177;
+    pub const COUNT: u16 = 178;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -148,6 +163,30 @@ const SHOVEL: [&str; 16] = [
 const SWORD: [&str; 16] = [
     ".x..............", "xXx.............", ".xXx............", "..xXx...........", "...xXx..........", "....xXx.........",
     ".....xXx........", "......xXx....w..", ".......xXx..w...", "........xx.w....", "..........w.....", ".........w.hh...",
+    "........w..hh...", ".......w.....hw.", ".............ww.", "................",
+];
+// Tinkers' hammer: a heavy two-sided block head (digs 3×3).
+const HAMMER_TPL: [&str; 16] = [
+    "................", ".xxxxxxx........", ".xXXXXXXx.......", ".xXXXXXXx.......", ".xXXXXXXx.......", ".xxxxhhxx.......",
+    "......hh........", ".......hh.......", "........hh......", ".........hh.....", "..........hh....", "...........hh...",
+    "............hh..", ".............hh.", "..............h.", "................",
+];
+// Tinkers' excavator: a broad spade (digs 3×3).
+const EXCAVATOR_TPL: [&str; 16] = [
+    "xxxx............", "xXXXx...........", "xXXXXx..........", "xXXXXx..........", ".xXXXx..........", "..xxxhh.........",
+    "......hh........", ".......hh.......", "........hh......", ".........hh.....", "..........hh....", "...........hh...",
+    "............hh..", ".............hh.", "..............h.", "................",
+];
+// Lumber axe: a broad blade on a long handle (fells a whole tree).
+const LUMBER_TPL: [&str; 16] = [
+    "................", "..hh............", "xXhh............", "xXXhh...........", "xXXXhh..........", "xXXXXhh.........",
+    "xXXXXXhh........", "xXXXXxxhh.......", "xXXXx...hh......", "xxxx.....hh.....", "..........hh....", "...........hh...",
+    "............hh..", ".............hh.", "..............h.", "................",
+];
+// Cleaver: a wide heavy blade.
+const CLEAVER_TPL: [&str; 16] = [
+    "xx..............", "xXxx............", "xXXXx...........", ".xXXXx..........", "..xXXXx.........", "...xXXXx........",
+    "....xXXXx.......", ".....xXXXx..w...", "......xXXXx.w...", ".......xXXxw....", "........xxw.....", ".........w.hh...",
     "........w..hh...", ".......w.....hw.", ".............ww.", "................",
 ];
 // Hoe: a short blade bent off the top of the handle (same grip as the other tools).
@@ -1248,6 +1287,53 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(MINING_LASER, "mining_laser", art(&["", "", "", "", "..............R", ".DDDDDDDDDDDDRRR", ".DGGGbbbbbGGGDRW", ".DDDDDDDDDDDDRRR", "...DDD..DD....R", "...DD...DD", "..DDD", "..DD"]));
     l.add(BATTERY, "battery", art(&["", "", "......GG", ".....DDDD", ".....DccD", ".....DccD", ".....DbbD", ".....DbbD", ".....DbbD", ".....DbbD", ".....DbbD", ".....DDDD"]));
     l.add(ENERGY_CRYSTAL, "energy_crystal", art(&["", "", ".......b", "......bcb", ".....bcWcb", ".....bcWcb", "....bcWWWcb", "....bcWWWcb", ".....bcWcb", "......bcb", "......bcb", ".......b"]));
+    // ---- Mod packs ----
+    l.add(DRACONIUM_DUST, "draconium_dust", p(|q| {
+        let c = Rgb(0.62, 0.30, 0.95);
+        for y in 7..14u32 {
+            let half = (y - 6) as i32;
+            for x in (8 - half).max(2)..(8 + half).min(14) {
+                let x = x as u32;
+                let shade = if (x * 7 + y * 3) % 5 == 0 { 0.7 } else if (x + y) % 3 == 0 { 1.2 } else { 1.0 };
+                q.put(x, y, Rgb((c.0 * shade).min(1.0), (c.1 * shade).min(1.0), (c.2 * shade).min(1.0)), 1.0);
+            }
+        }
+    }));
+    l.add(DRACONIUM_INGOT, "draconium_ingot", ingot(Rgb(0.60, 0.28, 0.92)));
+    l.add(AWAKENED_DRACONIUM, "awakened_draconium", ingot(Rgb(1.0, 0.58, 0.15)));
+    l.add(COKE, "coke", blob(Rgb(0.22, 0.22, 0.25), 5.0, 360));
+    l.add(STEEL_INGOT, "steel_ingot", ingot(Rgb(0.52, 0.56, 0.62)));
+    l.add(COBALT_INGOT, "cobalt_ingot", ingot(Rgb(0.25, 0.45, 0.95)));
+    l.add(MANYULLYN_INGOT, "manyullyn_ingot", ingot(Rgb(0.58, 0.32, 0.78)));
+    l.add(DRACONIC_CORE, "draconic_core", p(|q| {
+        for y in 0..16u32 {
+            for x in 0..16u32 {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let d = dx.abs() + dy.abs();
+                if d < 7.0 {
+                    let c = if d < 2.5 { Rgb(1.0, 0.92, 0.70) } else if d < 4.5 { Rgb(1.0, 0.55, 0.12) } else { Rgb(0.55, 0.22, 0.85) };
+                    q.put(x, y, c, 1.0);
+                }
+            }
+        }
+    }));
+    // Tools from the vanilla templates, in mod colours; T: head, t: its dark edge, h: handle.
+    let tool = |tpl: &'static [&'static str; 16], head: Rgb, handle: Rgb| {
+        p(move |q| {
+            q.template(&tpl[..], &|ch| match ch {
+                'x' => Some(head.scale(0.7)),
+                'X' => Some(head),
+                'h' | 'w' => Some(handle),
+                _ => None,
+            })
+        })
+    };
+    l.add(DRACONIC_PICKAXE, "draconic_pickaxe", tool(&PICKAXE, Rgb(1.0, 0.55, 0.15), Rgb(0.45, 0.18, 0.70)));
+    l.add(DRACONIC_SWORD, "draconic_sword", tool(&SWORD, Rgb(1.0, 0.60, 0.20), Rgb(0.45, 0.18, 0.70)));
+    l.add(TINKER_HAMMER, "tinker_hammer", tool(&HAMMER_TPL, Rgb(0.58, 0.32, 0.78), Rgb(0.30, 0.45, 0.95)));
+    l.add(TINKER_EXCAVATOR, "tinker_excavator", tool(&EXCAVATOR_TPL, Rgb(0.30, 0.45, 0.95), Rgb(0.45, 0.32, 0.18)));
+    l.add(LUMBER_AXE, "lumber_axe", tool(&LUMBER_TPL, Rgb(0.58, 0.32, 0.78), Rgb(0.45, 0.32, 0.18)));
+    l.add(CLEAVER, "cleaver", tool(&CLEAVER_TPL, Rgb(0.52, 0.56, 0.62), Rgb(0.35, 0.25, 0.15)));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

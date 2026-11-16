@@ -241,6 +241,16 @@ pub mod tiles {
     pub const TESLA_TOP: u16 = 243;
     pub const PAD_TOP: u16 = 244;
     pub const CENTRIFUGE_FRONT: u16 = 245;
+    // Mod packs in WolfTech: Draconic Evolution, Immersive Engineering, Tinkers' Construct.
+    pub const DRACONIUM_ORE: u16 = 246;
+    pub const DRACONIUM_BLOCK: u16 = 247;
+    pub const DRACO_CORE: u16 = 248;
+    pub const FUSION_FRONT: u16 = 249;
+    pub const COKE_FRONT: u16 = 250;
+    pub const BLAST_FRONT: u16 = 251;
+    pub const ARC_FRONT: u16 = 252;
+    pub const SMELTERY_FRONT: u16 = 253;
+    pub const SEARED_BRICKS: u16 = 254;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2758,6 +2768,116 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
     }));
     l.add(CENTRIFUGE_FRONT, "centrifuge", p(|q| front(q, 350, Rgb(0.95, 0.60, 0.20), 20)));
+    // ---- Draconic Evolution ----
+    l.add(DRACONIUM_ORE, "draconium_ore", ore(Rgb(0.62, 0.25, 0.95), 351));
+    l.add(DRACONIUM_BLOCK, "draconium_block", p(|q| {
+        q.noisy(Rgb(0.42, 0.16, 0.66), 0.06, 352);
+        for i in 0..S {
+            for (a, b) in [(i, 0), (i, S - 1), (0, i), (S - 1, i)] {
+                q.put(a, b, Rgb(0.25, 0.08, 0.42), 1.0);
+            }
+        }
+        // A bright diagonal sheen.
+        for i in 2..S - 2 {
+            q.put(i, S - 1 - i, Rgb(0.82, 0.62, 1.0), 1.0);
+            if i + 1 < S - 2 {
+                q.put(i + 1, S - 1 - i, Rgb(0.66, 0.40, 0.95), 1.0);
+            }
+        }
+    }));
+    l.add(DRACO_CORE, "draconic_core", p(|q| {
+        q.noisy(Rgb(0.10, 0.06, 0.14), 0.04, 353);
+        // A glowing orange-and-purple sphere in a dark frame.
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let r = (dx * dx + dy * dy).sqrt();
+                if r < 5.5 {
+                    let t = r / 5.5;
+                    let c = if t < 0.35 { Rgb(1.0, 0.92, 0.70) } else if t < 0.7 { Rgb(1.0, 0.55, 0.12) } else { Rgb(0.62, 0.22, 0.90) };
+                    q.put(x, y, c, 1.0);
+                }
+                if x == 0 || y == 0 || x == S - 1 || y == S - 1 {
+                    q.put(x, y, Rgb(0.45, 0.20, 0.65), 1.0);
+                }
+            }
+        }
+    }));
+    l.add(FUSION_FRONT, "fusion_crafter", p(|q| front(q, 354, Rgb(1.0, 0.55, 0.15), 16)));
+    // ---- Immersive Engineering: brick ovens, the arc furnace ----
+    let brick_oven = |q: &mut Painter, seed: u32, glow: Rgb, wide: bool| {
+        q.noisy(Rgb(0.55, 0.28, 0.20), 0.06, seed);
+        for y in 0..S {
+            for x in 0..S {
+                let row = y / 4;
+                let joint = y % 4 == 0 || (x + if row % 2 == 0 { 0 } else { 4 }) % 8 == 0;
+                if joint {
+                    q.put(x, y, Rgb(0.72, 0.66, 0.58), 1.0);
+                }
+            }
+        }
+        // The opening: an arch with the fire inside.
+        let (x0, x1) = if wide { (3u32, 13u32) } else { (5, 11) };
+        for y in 6..14u32 {
+            for x in x0..x1 {
+                let edge = x == x0 || x == x1 - 1 || y == 6;
+                let fire = (x * 5 + y * 3) % 4 == 0;
+                q.put(x, y, if edge { Rgb(0.20, 0.16, 0.14) } else if fire { glow.scale(1.1) } else { glow.scale(0.7) }, 1.0);
+            }
+        }
+    };
+    l.add(COKE_FRONT, "coke_oven", p(move |q| brick_oven(q, 355, Rgb(0.80, 0.35, 0.10), false)));
+    l.add(BLAST_FRONT, "blast_furnace", p(move |q| brick_oven(q, 356, Rgb(1.0, 0.70, 0.20), true)));
+    l.add(ARC_FRONT, "arc_furnace", p(|q| {
+        casing(q, 357);
+        for y in 3..13u32 {
+            for x in 3..13u32 {
+                q.put(x, y, Rgb(0.13, 0.14, 0.16), 1.0);
+            }
+        }
+        // Three graphite electrodes and a blue arc under them.
+        for x in [5u32, 8, 11] {
+            for y in 3..9u32 {
+                q.put(x, y, Rgb(0.30, 0.30, 0.32), 1.0);
+            }
+        }
+        for (x, y) in [(5u32, 9u32), (6, 10), (7, 9), (8, 10), (9, 9), (10, 10), (11, 9)] {
+            q.put(x, y, Rgb(0.60, 0.85, 1.0), 1.0);
+        }
+        for x in 4..13u32 {
+            q.put(x, 11, Rgb(1.0, 0.55, 0.15), 1.0);
+        }
+    }));
+    // ---- Tinkers' Construct ----
+    l.add(SEARED_BRICKS, "seared_bricks", p(|q| {
+        q.noisy(Rgb(0.36, 0.34, 0.33), 0.08, 358);
+        for y in 0..S {
+            for x in 0..S {
+                let row = y / 4;
+                if y % 4 == 3 || (x + if row % 2 == 0 { 2 } else { 6 }) % 8 == 0 {
+                    q.put(x, y, Rgb(0.20, 0.19, 0.19), 1.0);
+                }
+            }
+        }
+    }));
+    l.add(SMELTERY_FRONT, "smeltery", p(|q| {
+        q.noisy(Rgb(0.36, 0.34, 0.33), 0.08, 359);
+        for y in 0..S {
+            for x in 0..S {
+                if x == 0 || y == 0 || x == S - 1 || y == S - 1 || y % 5 == 0 {
+                    q.put(x, y, Rgb(0.20, 0.19, 0.19), 1.0);
+                }
+            }
+        }
+        // The window onto molten metal.
+        for y in 4..12u32 {
+            for x in 3..13u32 {
+                let wave = ((x as f32 * 0.9).sin() * 1.2) as i32;
+                let c = if (y as i32) < 7 + wave { Rgb(0.18, 0.16, 0.15) } else if (x + y) % 4 == 0 { Rgb(1.0, 0.85, 0.40) } else { Rgb(1.0, 0.50, 0.12) };
+                q.put(x, y, c, 1.0);
+            }
+        }
+    }));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

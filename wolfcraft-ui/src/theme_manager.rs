@@ -29,7 +29,7 @@ pub const RADIUS_SM: f32 = 8.0;
 pub const RADIUS_MD: f32 = 12.0;
 pub const RADIUS_LG: f32 = 20.0;
 /// Animation duration (seconds); within the requested 120–200 ms.
-pub const ANIM_TIME: f32 = 0.15;
+pub const ANIM_TIME: f32 = 0.12;
 
 const fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)

@@ -632,6 +632,9 @@ impl Planet {
             Block::SilverOre
         } else if roll < 144 && depth_below_sea > 60.0 {
             Block::CobaltOre
+        } else if roll < 147 && depth_below_sea > 80.0 {
+            // Draconic Evolution: rare, very deep.
+            Block::DraconiumOre
         } else if roll < 160 && depth_below_sea > 3.0 {
             Block::Granite
         } else if roll < 176 && depth_below_sea > 3.0 {

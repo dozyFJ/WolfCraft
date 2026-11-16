@@ -431,6 +431,24 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::IRON_PLATE, 4), (ids::CIRCUIT, 1), (b(Block::Cable), 4)], (b(Block::ChargePad), 1), true, "WolfTech"));
         v.push(r(&[(ids::IRON_PLATE, 4), (ids::CIRCUIT, 1), (b(Block::Crusher), 1)], (b(Block::Centrifuge), 1), true, "WolfTech"));
         v.push(r(&[(ids::COPPER_PLATE, 2), (ids::CIRCUIT, 1), (ids::GOLD_DUST, 2)], (ids::BATTERY, 1), true, "WolfTech"));
+        // Draconic Evolution.
+        v.push(r(&[(ids::DRACONIUM_INGOT, 9)], (b(Block::DraconiumBlock), 1), true, "WolfTech"));
+        v.push(r(&[(b(Block::DraconiumBlock), 1)], (ids::DRACONIUM_INGOT, 9), false, "WolfTech"));
+        v.push(r(&[(ids::DRACONIUM_INGOT, 4), (ids::DIAMOND, 2), (ids::CIRCUIT, 2), (b(Block::IronBlock), 1)], (b(Block::FusionCrafter), 1), true, "WolfTech"));
+        v.push(r(&[(ids::AWAKENED_DRACONIUM, 4), (ids::DRACONIC_CORE, 1), (b(Block::BigCell), 1)], (b(Block::DraconicCore), 1), true, "WolfTech"));
+        v.push(r(&[(ids::AWAKENED_DRACONIUM, 3), (ids::DRACONIC_CORE, 1), (ids::DRILL, 1)], (ids::DRACONIC_PICKAXE, 1), true, "WolfTech"));
+        v.push(r(&[(ids::AWAKENED_DRACONIUM, 3), (ids::DRACONIC_CORE, 1), (ids::ENERGY_SWORD, 1)], (ids::DRACONIC_SWORD, 1), true, "WolfTech"));
+        // Immersive Engineering.
+        v.push(r(&[(b(Block::Bricks), 6), (b(Block::Sandstone), 3)], (b(Block::CokeOven), 1), true, "WolfTech"));
+        v.push(r(&[(b(Block::Bricks), 6), (ids::COKE, 3)], (b(Block::BlastFurnace), 1), true, "WolfTech"));
+        v.push(r(&[(ids::STEEL_INGOT, 6), (ids::CIRCUIT, 2), (b(Block::BlastFurnace), 1)], (b(Block::ArcFurnace), 1), true, "WolfTech"));
+        // Tinkers' Construct.
+        v.push(r(&[(b(Block::Gravel), 2), (b(Block::Sand), 2), (b(Block::Bricks), 1)], (b(Block::SearedBricks), 4), true, "WolfTech"));
+        v.push(r(&[(b(Block::SearedBricks), 8), (ids::IRON_INGOT, 2)], (b(Block::Smeltery), 1), true, "WolfTech"));
+        v.push(r(&[(ids::MANYULLYN_INGOT, 3), (ids::COBALT_INGOT, 2), (ids::STICK, 2)], (ids::TINKER_HAMMER, 1), true, "WolfTech"));
+        v.push(r(&[(ids::COBALT_INGOT, 3), (ids::MANYULLYN_INGOT, 1), (ids::STICK, 2)], (ids::TINKER_EXCAVATOR, 1), true, "WolfTech"));
+        v.push(r(&[(ids::MANYULLYN_INGOT, 3), (ids::COBALT_INGOT, 1), (ids::STICK, 2)], (ids::LUMBER_AXE, 1), true, "WolfTech"));
+        v.push(r(&[(ids::STEEL_INGOT, 4), (ids::MANYULLYN_INGOT, 1), (ids::STICK, 1)], (ids::CLEAVER, 1), true, "WolfTech"));
         // Item pipes (Thermal Dynamics / Ender IO).
         v.push(r(&[(ids::IRON_INGOT, 3), (b(Block::Glass), 2)], (b(Block::ItemPipe), 8), true, "WolfTech"));
         v.push(r(&[(b(Block::ItemPipe), 1), (ids::IRON_INGOT, 2), (ids::CIRCUIT, 1)], (b(Block::PipeExtractor), 1), true, "WolfTech"));

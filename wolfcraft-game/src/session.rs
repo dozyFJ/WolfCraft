@@ -2593,6 +2593,7 @@ impl GameSession {
                     Kind::Water => around(|b| b.is_water()),
                     Kind::Extruder => (around(|b| b.is_lava()) > 0.0 && around(|b| b.is_water()) > 0.0) as u8 as f32,
                     Kind::Glacier => around(|b| b.is_water()),
+                    Kind::Smeltery => around(|b| b.is_lava()),
                     _ => st.env,
                 };
             }
@@ -2788,7 +2789,7 @@ impl GameSession {
                         }
                     }
                 }
-                Kind::Cell | Kind::BigCell => {
+                Kind::Cell | Kind::BigCell | Kind::DracoCore => {
                     st.flow = 0.0;
                     // Charges WolfTech gear lying in its first slot: 5 ЭЕ per point of charge.
                     let v = self.container_slots(c, b);

@@ -64,11 +64,24 @@ pub enum Kind {
     ChargePad,
     /// Gravel → flint, netherrack → gunpowder, bones → bone meal, scrap → iron dust…
     Centrifuge,
+    /// Draconic Evolution: a huge energy store (50 million) that also charges gear.
+    DracoCore,
+    /// Draconic Evolution: fusion crafting — draconium → awakened, crystals → cores (hungry).
+    Fusion,
+    /// Immersive Engineering: coal → coke, logs → coal, with no energy (slow).
+    CokeOven,
+    /// Immersive Engineering: iron → steel, with no energy (slow).
+    BlastFurnace,
+    /// Immersive Engineering: ore → 2 ingots straight away, on energy.
+    ArcFurnace,
+    /// Tinkers' Construct: melts ore into 2 ingots on the heat of lava beside it (no energy);
+    /// cobalt → manyullyn with gold.
+    Smeltery,
 }
 
 /// Energy stores that give back to the net and charge gear in their first slot.
 pub fn is_store(k: Kind) -> bool {
-    matches!(k, Kind::Cell | Kind::BigCell)
+    matches!(k, Kind::Cell | Kind::BigCell | Kind::DracoCore)
 }
 
 pub struct Spec {
@@ -113,6 +126,12 @@ pub fn kind(b: Block) -> Option<Kind> {
         Block::TeslaCoil => Kind::Tesla,
         Block::ChargePad => Kind::ChargePad,
         Block::Centrifuge => Kind::Centrifuge,
+        Block::DraconicCore => Kind::DracoCore,
+        Block::FusionCrafter => Kind::Fusion,
+        Block::CokeOven => Kind::CokeOven,
+        Block::BlastFurnace => Kind::BlastFurnace,
+        Block::ArcFurnace => Kind::ArcFurnace,
+        Block::Smeltery => Kind::Smeltery,
         _ => return None,
     })
 }
@@ -146,6 +165,12 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Centrifuge => Spec { name: "Центрифуга", capacity: 600.0, rate: 10.0, time: 4.0, hint: "Гравий → кремень, адский камень → порох, кости → костная мука, лом → железная пыль" },
         Kind::Dynamo => Spec { name: "Кинетическое динамо", capacity: 1_000.0, rate: 0.0, time: 0.0, hint: "Подведите вал «Механики»: вращение → энергия (быстрее крутится — больше ЭЕ)" },
         Kind::Motor => Spec { name: "Электромотор", capacity: 400.0, rate: 16.0, time: 0.0, hint: "Подключите кабель: на энергии крутит валы «Механики» (64 об/мин)" },
+        Kind::DracoCore => Spec { name: "Драконье энергоядро", capacity: 50_000_000.0, rate: 0.0, time: 0.0, hint: "Draconic Evolution: хранит 50 миллионов ЭЕ и заряжает снаряжение (положите его слева)" },
+        Kind::Fusion => Spec { name: "Термоядерный крафтер", capacity: 40_000.0, rate: 400.0, time: 10.0, hint: "Draconic Evolution: драконий → пробуждённый, энергокристалл → драконье ядро, алмаз → дракониевая пыль. Очень голоден" },
+        Kind::CokeOven => Spec { name: "Коксовая печь", capacity: 0.0, rate: 0.0, time: 12.0, hint: "Immersive Engineering: уголь → кокс, бревно → уголь. Без энергии, медленно" },
+        Kind::BlastFurnace => Spec { name: "Доменная печь", capacity: 0.0, rate: 0.0, time: 16.0, hint: "Immersive Engineering: железный слиток → стальной. Без энергии" },
+        Kind::ArcFurnace => Spec { name: "Дуговая печь", capacity: 4_000.0, rate: 40.0, time: 2.0, hint: "Immersive Engineering: руда → 2 слитка сразу, лом → сталь" },
+        Kind::Smeltery => Spec { name: "Плавильня", capacity: 0.0, rate: 0.0, time: 3.0, hint: "Tinkers' Construct: лава рядом — руда → 2 слитка, кобальт → манюллин. Без энергии" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
     }
 }
@@ -255,7 +280,7 @@ pub fn fuel_for(k: Kind, id: ItemId) -> f32 {
 }
 
 pub fn is_machine(k: Kind) -> bool {
-    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor | Kind::Extruder | Kind::Insolator | Kind::Glacier | Kind::Recycler | Kind::MatterFab | Kind::Centrifuge)
+    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor | Kind::Extruder | Kind::Insolator | Kind::Glacier | Kind::Recycler | Kind::MatterFab | Kind::Centrifuge | Kind::Fusion | Kind::CokeOven | Kind::BlastFurnace | Kind::ArcFurnace | Kind::Smeltery)
 }
 
 /// Machines whose slot item is only a pattern: it stays, the output is made from nothing
@@ -277,7 +302,7 @@ pub fn idle_recipe(k: Kind) -> Option<(ItemId, u8)> {
 /// 1 when lava and water touch the extruder, the number of water sides for the ice maker).
 pub fn env_ok(k: Kind, env: f32) -> bool {
     match k {
-        Kind::Extruder | Kind::Glacier => env > 0.0,
+        Kind::Extruder | Kind::Glacier | Kind::Smeltery => env > 0.0,
         _ => true,
     }
 }
@@ -297,6 +322,8 @@ pub fn need(k: Kind, input: ItemId) -> u8 {
         (Kind::Compressor, ids::COAL) => 32,
         (Kind::Recycler, _) => 4,
         (Kind::MatterFab, _) => 8,
+        (Kind::Fusion, ids::DRACONIUM_INGOT) => 4,
+        (Kind::Smeltery, ids::COBALT_INGOT) => 2,
         _ => 1,
     }
 }
@@ -318,6 +345,7 @@ fn raw_dust(id: ItemId) -> Option<ItemId> {
         x if x == Block::CopperOre as ItemId => ids::COPPER_DUST,
         x if x == Block::TinOre as ItemId => ids::TIN_DUST,
         x if x == Block::SilverOre as ItemId => ids::SILVER_DUST,
+        x if x == Block::DraconiumOre as ItemId => ids::DRACONIUM_DUST,
         _ => return None,
     })
 }
@@ -380,6 +408,33 @@ pub fn recipe(k: Kind, input: ItemId) -> Option<(ItemId, u8)> {
             ids::SCRAP => Some((ids::IRON_DUST, 1)),
             _ => None,
         },
+        Kind::Fusion => match input {
+            ids::DRACONIUM_INGOT => Some((ids::AWAKENED_DRACONIUM, 1)),
+            ids::ENERGY_CRYSTAL => Some((ids::DRACONIC_CORE, 1)),
+            ids::DIAMOND => Some((ids::DRACONIUM_DUST, 2)),
+            _ => None,
+        },
+        Kind::CokeOven => match input {
+            ids::COAL => Some((ids::COKE, 1)),
+            x if [Block::OakLog, Block::BirchLog, Block::SpruceLog, Block::AcaciaLog].iter().any(|l| *l as ItemId == x) => Some((ids::COAL, 1)),
+            _ => None,
+        },
+        Kind::BlastFurnace => (input == ids::IRON_INGOT).then_some((ids::STEEL_INGOT, 1)),
+        Kind::ArcFurnace | Kind::Smeltery => {
+            if k == Kind::Smeltery && input == ids::COBALT_INGOT {
+                return Some((ids::MANYULLYN_INGOT, 1));
+            }
+            if k == Kind::ArcFurnace && input == ids::SCRAP {
+                return Some((ids::STEEL_INGOT, 1));
+            }
+            if input == Block::DraconiumOre as ItemId {
+                return Some((ids::DRACONIUM_INGOT, 2));
+            }
+            if input == Block::CobaltOre as ItemId {
+                return Some((ids::COBALT_INGOT, 2));
+            }
+            raw_dust(input).and_then(crate::interaction::smelt_result).map(|i| (i, 2))
+        }
         Kind::Recycler => (input != ids::SCRAP && input != ids::UU_MATTER).then_some((ids::SCRAP, 1)),
         Kind::MatterFab => (input == ids::SCRAP).then_some((ids::UU_MATTER, 1)),
         Kind::Insolator => match input {
@@ -549,6 +604,14 @@ mod tests {
         assert_eq!(recipe(Kind::MatterFab, ids::SCRAP), Some((ids::UU_MATTER, 1)));
         assert!(recipe(Kind::Recycler, ids::SCRAP).is_none());
         assert_eq!(recipe(Kind::Centrifuge, Block::Gravel as ItemId), Some((ids::FLINT, 2)));
+        // Mod packs: Tinkers' smeltery doubles ore, IE's arc furnace too, coke and steel, fusion.
+        assert_eq!(recipe(Kind::Smeltery, Block::CobaltOre as ItemId), Some((ids::COBALT_INGOT, 2)));
+        assert_eq!(recipe(Kind::ArcFurnace, ids::RAW_IRON), Some((ids::IRON_INGOT, 2)));
+        assert_eq!(recipe(Kind::CokeOven, ids::COAL), Some((ids::COKE, 1)));
+        assert_eq!(recipe(Kind::BlastFurnace, ids::IRON_INGOT), Some((ids::STEEL_INGOT, 1)));
+        assert_eq!(recipe(Kind::Fusion, ids::DRACONIUM_INGOT), Some((ids::AWAKENED_DRACONIUM, 1)));
+        assert_eq!(recipe(Kind::Crusher, Block::DraconiumOre as ItemId), Some((ids::DRACONIUM_DUST, 2)));
+        assert!(is_store(Kind::DracoCore) && is_machine(Kind::Smeltery) && !env_ok(Kind::Smeltery, 0.0));
         assert!(is_source(Kind::Lunar) && is_store(Kind::BigCell) && !is_store(Kind::Tesla));
     }
 }
