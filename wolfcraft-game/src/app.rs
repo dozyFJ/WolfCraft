@@ -1295,6 +1295,21 @@ impl App {
                 }
             }
             (Screen::Playing | Screen::Paused | Screen::Inventory, KeyCode::F3 | KeyCode::Tab) => self.debug = !self.debug,
+            // «Кликер» on the keyboard: C taps, V sells.
+            (Screen::Playing, KeyCode::KeyC | KeyCode::KeyV) if self.session.as_ref().is_some_and(|s| s.clicker.active && (s.minigames || s.studio)) => {
+                if let Some(s) = &mut self.session {
+                    if code == KeyCode::KeyC {
+                        if s.clicker.tap() <= 0.0 {
+                            s.item_name = Some(("Рюкзак полон — продайте клики (V)".into(), 1.5));
+                        }
+                    } else {
+                        let m = s.clicker.sell();
+                        if m > 0.0 {
+                            s.item_name = Some((format!("Продано: +{} денег", wolfcraft_engine::buttonsim::short(m)), 1.5));
+                        }
+                    }
+                }
+            }
             (Screen::Playing, KeyCode::Space) => self.input.jump_press = true,
             (Screen::Playing, KeyCode::KeyF) => self.input.swap_press = true,
             // Q throws the held item (one; with Ctrl the whole stack), like the classic game.
@@ -2020,7 +2035,10 @@ impl App {
         let upload_budget = if self.screen == Screen::Loading { 64 } else { 16 };
         self.pump_meshes(gfx, upload_budget);
 
-        let want_grab = self.screen == Screen::Playing && !self.chat.open && self.web_pages.is_empty();
+        // PC: hold Alt to free the cursor and click the panels over the world (clicker, arena
+        // shop, script GUIs); release it to look around again.
+        let alt = self.input.keys.contains(&KeyCode::AltLeft) || self.input.keys.contains(&KeyCode::AltRight);
+        let want_grab = self.screen == Screen::Playing && !self.chat.open && self.web_pages.is_empty() && !alt;
         if want_grab != self.grabbed {
             let w = gfx.window.clone();
             self.set_grab(&w, want_grab);
@@ -3661,7 +3679,9 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if self.screen == Screen::Playing && !resp.consumed || self.screen == Screen::Playing {
+                // A free cursor (Alt held) over a panel: the click is the panel's.
+                let on_panel = !self.grabbed && gfx.gui.wants_pointer();
+                if self.screen == Screen::Playing && !on_panel {
                     let down = state == ElementState::Pressed;
                     match button {
                         MouseButton::Left => self.input.left = down,
@@ -4718,6 +4738,10 @@ fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolf
             if resp.clicked() {
                 panel = if on { 0 } else { i + 1 };
             }
+        }
+        // PC hint (a mouse never set off a touch).
+        if !ctx.input(|i| i.any_touches()) && !cfg!(target_os = "android") {
+            pt.text(Pos2::new(bar.center().x, bar.bottom() + 52.0), Align2::CENTER_TOP, "ПК: C — клик · V — продать · держите Alt — курсор для меню", FontId::proportional(11.5), Color32::from_white_alpha(170));
         }
         // ---- The big tap button and «Продать» ----
         let rad = (screen.height() * 0.11).clamp(44.0, 70.0);
