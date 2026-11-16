@@ -71,13 +71,13 @@ pub fn role(id: Option<ItemId>) -> Role {
 fn sword_cuts(b: Block) -> bool {
     use Block::*;
     b.info().render == RenderKind::Cross
-        || matches!(b, OakLeaves | BirchLeaves | SpruceLeaves | AcaciaLeaves | Wool | RedWool | BlueWool | YellowWool | Pumpkin | Melon)
+        || matches!(b, OakLeaves | BirchLeaves | SpruceLeaves | AcaciaLeaves | CherryLeaves | Wool | RedWool | BlueWool | YellowWool | Pumpkin | Melon)
 }
 
 /// Blocks a hoe harvests.
 fn hoe_cuts(b: Block) -> bool {
     use Block::*;
-    b.crop().is_some() || matches!(b, OakLeaves | BirchLeaves | SpruceLeaves | AcaciaLeaves | MossBlock | Farmland)
+    b.crop().is_some() || matches!(b, OakLeaves | BirchLeaves | SpruceLeaves | AcaciaLeaves | CherryLeaves | MossBlock | Farmland)
 }
 
 /// Is `b` the tool's own kind of block (fast, no extra wear)?

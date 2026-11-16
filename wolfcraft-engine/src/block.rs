@@ -1942,6 +1942,7 @@ blocks! {
     2546 ArcFurnace => needs_pick(info("Дуговая печь", Opaque, 5.0, Pickaxe, column(t::ARC_FRONT, t::TECH_TOP, t::TECH_TOP))),
     2547 Smeltery => needs_pick(info("Плавильня", Opaque, 5.0, Pickaxe, column(t::SMELTERY_FRONT, t::SEARED_BRICKS, t::SEARED_BRICKS))),
     2548 SearedBricks => needs_pick(info("Обожжённый кирпич", Opaque, 4.0, Pickaxe, all(t::SEARED_BRICKS))),
+    2549 CherryLeaves => info("Вишнёвая листва", Cutout, 0.35, Hand, all(t::CHERRY_LEAVES)),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a

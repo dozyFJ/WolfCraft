@@ -498,7 +498,7 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         b if b.is_fluid() => vec![],
         Block::Stone => vec![ItemStack::of_block(Block::Cobblestone, 1)],
         Block::Grass | Block::SnowyGrass | Block::DryGrass | Block::SwampGrass => vec![ItemStack::of_block(Block::Dirt, 1)],
-        Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => {
+        Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves | Block::CherryLeaves => {
             if roll < 0.06 {
                 vec![ItemStack::new(ids::APPLE, 1)]
             } else if roll < 0.16 {
@@ -777,7 +777,7 @@ pub fn category(id: ItemId) -> &'static str {
             Block::EnchantTable => "Предметы",
             Block::Bones | Block::CoinBlock | Block::IncubatorCommon | Block::IncubatorRare | Block::IncubatorLegendary => "Мобы",
             Block::ButtonMult1 | Block::ButtonMult2 | Block::ButtonMult3 | Block::ButtonMult4 | Block::ButtonRebirth => "Мобы",
-            Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves => "Дерево",
+            Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::OakPlanks | Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves | Block::CherryLeaves => "Дерево",
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Battery | Block::ElectricFurnace => "Строительство",
             Block::ElectricLamp | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",

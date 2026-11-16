@@ -7,7 +7,7 @@ struct Globals {
     env: vec4<f32>,      // x: season 0..4 (spring, summer, autumn, winter), y: snow cover, z: humidity
     fx: vec4<f32>,       // x: relief mode (0 off, 1 lit, 2 parallax), y: relief strength, z: flags (1 wind, 2 water, 4 grading, 8 cartoon, 16 bloom, 32 rays, 64 wet, 128 sun shadows)
     shadow: mat4x4<f32>, // camera-relative position -> sun shadow map clip space
-    tiles: array<vec4<f32>, 256>, // xy: uv min, zw: uv size of every block sprite
+    tiles: array<vec4<f32>, 512>, // xy: uv min, zw: uv size of every block sprite
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -579,7 +579,7 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     }
     if (in.tex > 3.5) {
         // Dropped block: a block sprite from the world atlas (sprite id in colour.r).
-        let r = g.tiles[min(u32(in.color.r + 0.5), 255u)];
+        let r = g.tiles[min(u32(in.color.r + 0.5), 511u)];
         let bt = textureSampleLevel(atlas, samp, r.xy + clamp(in.uv, vec2<f32>(0.01), vec2<f32>(0.99)) * r.zw, 0.0);
         if (bt.a < 0.5) {
             discard;

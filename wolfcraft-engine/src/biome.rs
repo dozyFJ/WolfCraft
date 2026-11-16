@@ -26,6 +26,12 @@ pub enum Biome {
     Mountains,
     SnowyPeaks,
     Volcano,
+    /// Pink cherry trees on gentle hills.
+    CherryGrove,
+    /// Dense dark oaks with wide crowns, mushrooms under them.
+    DarkForest,
+    /// Open grass thick with flowers.
+    FlowerMeadow,
 }
 
 impl Biome {
@@ -51,6 +57,9 @@ impl Biome {
             Biome::Mountains => "Горы",
             Biome::SnowyPeaks => "Снежные пики",
             Biome::Volcano => "Вулкан",
+            Biome::CherryGrove => "Вишнёвая роща",
+            Biome::DarkForest => "Тёмный лес",
+            Biome::FlowerMeadow => "Цветочный луг",
         }
     }
 
@@ -61,7 +70,7 @@ impl Biome {
     /// (top block, filler block, deeper layer block) for land; the filler is 3 blocks thick.
     pub fn palette(self) -> (Block, Block, Block) {
         match self {
-            Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Jungle | Biome::Taiga => (Block::Grass, Block::Dirt, Block::Stone),
+            Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Jungle | Biome::Taiga | Biome::CherryGrove | Biome::DarkForest | Biome::FlowerMeadow => (Block::Grass, Block::Dirt, Block::Stone),
             Biome::Tundra => (Block::DryGrass, Block::Dirt, Block::Stone),
             Biome::SnowyPlains => (Block::Snow, Block::PackedIce, Block::Stone),
             Biome::Desert | Biome::Beach => (Block::Sand, Block::Sand, Block::Sandstone),
