@@ -134,7 +134,7 @@ pub mod items {
     pub const FIRE_CRYSTAL: u16 = 179;
     pub const FROST_CRYSTAL: u16 = 180;
     pub const XENO_CRYSTAL: u16 = 181;
-    pub const ROCKET: u16 = 182;
+    pub const SPACE_ROCKET: u16 = 182;
     pub const ROCKET_FUEL: u16 = 183;
     pub const COUNT: u16 = 184;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
@@ -1358,7 +1358,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(FIRE_CRYSTAL, "fire_crystal", crystal(Rgb(1.0, 0.40, 0.10), Rgb(1.0, 0.85, 0.40)));
     l.add(FROST_CRYSTAL, "frost_crystal", crystal(Rgb(0.65, 0.88, 1.0), Rgb(0.95, 0.98, 1.0)));
     l.add(XENO_CRYSTAL, "xeno_crystal", crystal(Rgb(0.78, 0.30, 1.0), Rgb(0.45, 1.0, 0.90)));
-    l.add(ROCKET, "rocket", art(&["......R", ".....RRR", ".....WWW", "....WWbWW", "....WbbbW", "....WWbWW", "....WWWWW", "....WWWWW", "....WGGGW", "...RWWWWWR", "..RRWWWWWRR", "..RR.GGG.RR", "......O", ".....OYO", "......O"]));
+    l.add(SPACE_ROCKET, "space_rocket", art(&["......R", ".....RRR", ".....WWW", "....WWbWW", "....WbbbW", "....WWbWW", "....WWWWW", "....WWWWW", "....WGGGW", "...RWWWWWR", "..RRWWWWWRR", "..RR.GGG.RR", "......O", ".....OYO", "......O"]));
     l.add(ROCKET_FUEL, "rocket_fuel", art(&["", "", ".....GGGG", ".....DDDD", "....DOOOOD", "....DOYYOD", "....DOYYOD", "....DOOOOD", "....DOOOOD", "....DROORD", "....DOOOOD", "....DDDDDD"]));
     for (_, img) in l.0.iter_mut() {
         outline(img);

@@ -619,7 +619,7 @@ impl GameSession {
             self.player.inventory.swap_offhand();
         }
         // The rocket: a tap with it in hand (and fuel in the bag) lifts off.
-        if input.use_pressed && self.rocket.is_none() && !self.player.survival.dead && self.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::ROCKET) {
+        if input.use_pressed && self.rocket.is_none() && !self.player.survival.dead && self.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::SPACE_ROCKET) {
             self.start_rocket();
         }
         // WolfTech mining laser: a tap burns a tunnel of up to 8 blocks ahead.
