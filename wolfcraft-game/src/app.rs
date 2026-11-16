@@ -2294,7 +2294,7 @@ impl App {
                         // Studio, the place's own GUI comes from its scripts; only the phone
                         // controls stay.
                         let studio_edit = studio.as_ref().is_some_and(|st| !st.playtest);
-                        if screen != Screen::Map && !studio_edit {
+                        if screen == Screen::Playing && !studio_edit {
                             // A place in play draws its own GUI: no hotbar, bars, minimap or
                             // crosshair from the game (its mini-game panels and voice stay).
                             if !touch.place_play {
