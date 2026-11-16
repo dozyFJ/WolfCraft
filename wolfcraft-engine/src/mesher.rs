@@ -668,6 +668,13 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
 /// the cell (a thin post shows the matching thin strip of the picture), seen from both sides.
 #[allow(clippy::too_many_arguments)]
 fn push_box(inp: &MeshInput, verts: &mut Vec<Vertex>, idx: &mut Vec<u32>, c: [i32; 3], lo: [f32; 3], hi: [f32; 3], tile: u32, light: [f32; 2]) {
+    push_box_mapped(inp, verts, idx, c, lo, hi, tile, light, &|g| g);
+}
+
+/// `push_box` with every corner moved by `map` (cell coordinates, padded axes): a leaning
+/// wall torch. Textures stay as on the straight box.
+#[allow(clippy::too_many_arguments)]
+fn push_box_mapped(inp: &MeshInput, verts: &mut Vec<Vertex>, idx: &mut Vec<u32>, c: [i32; 3], lo: [f32; 3], hi: [f32; 3], tile: u32, light: [f32; 2], map: &dyn Fn([f32; 3]) -> [f32; 3]) {
     for f in 0..6usize {
         let a = f / 2;
         let positive = f % 2 == 0;
@@ -678,7 +685,8 @@ fn push_box(inp: &MeshInput, verts: &mut Vec<Vertex>, idx: &mut Vec<u32>, c: [i3
             g[a] = if positive { hi[a] } else { lo[a] };
             g[ua] = if cu == 1 { hi[ua] } else { lo[ua] };
             g[va] = if cv == 1 { hi[va] } else { lo[va] };
-            let pos = inp.to_local(c[0] as f32 + g[0], c[1] as f32 + g[1], c[2] as f32 + g[2]);
+            let m = map(g);
+            let pos = inp.to_local(c[0] as f32 + m[0], c[1] as f32 + m[1], c[2] as f32 + m[2]);
             let (tu, tv) = if a == 1 { (g[ua], g[va]) } else if ua == 1 { (g[va], -g[ua]) } else { (g[ua], -g[va]) };
             verts.push(Vertex { pos, uv: [tu, tv], flags: tile | ((f as u32) << 17), light });
         }
@@ -701,9 +709,17 @@ fn mesh_cross(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32)
                 // middle of the picture, standing on the block below, not two flat planes.
                 if let Some(parts) = b.torch_boxes() {
                     let tile = b.info().tiles[0] as u32 | (bl([x, y, z]) << 20) | (1 << 16);
+                    let wall = b.wall_mount().map(|m| m.1);
                     for bx in parts {
                         // Padded axes are (x, y, z) = (j, k, i).
-                        push_box(inp, &mut out.opaque, &mut out.opaque_idx, [x, y, z], [bx[1], bx[2], bx[0]], [bx[4], bx[5], bx[3]], tile, [1.0, 1.0]);
+                        match wall {
+                            // On a wall: the same stick leaning out of it.
+                            Some(d) => push_box_mapped(inp, &mut out.opaque, &mut out.opaque_idx, [x, y, z], [bx[1], bx[2], bx[0]], [bx[4], bx[5], bx[3]], tile, [1.0, 1.0], &|g| {
+                                let q = Block::wall_torch_point(d, [g[2], g[0], g[1]]);
+                                [q[1], q[2], q[0]]
+                            }),
+                            None => push_box(inp, &mut out.opaque, &mut out.opaque_idx, [x, y, z], [bx[1], bx[2], bx[0]], [bx[4], bx[5], bx[3]], tile, [1.0, 1.0]),
+                        }
                     }
                     let _ = sky;
                     continue;

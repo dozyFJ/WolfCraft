@@ -112,10 +112,10 @@ fn build(form: Form, joined: u8) -> Geometry {
             else {g.cuboid([0.,0.5,0.5,1.,1.,1.],Main);if form==InnerStairs {g.cuboid([0.5,0.,0.5,1.,0.5,1.],Main);}}
         }
         Wedge => {g.wedge();for face in &mut g.faces {for p in &mut face.points {p.swap(0,1);}face.points.reverse();}for b in &mut g.boxes {b.swap(0,1);b.swap(3,4);}},
-        Beam => g.cuboid([0.35,0.,0.65,0.65,1.,0.95],Main),
+        Beam => g.cuboid([0.35,0.,0.7,0.65,1.,1.],Main),
         Post => g.cuboid([0.35,0.35,0.,0.65,0.65,1.],Main),
         Quarter => g.cuboid([0.,0.,0.,0.5,0.5,1.],Main),
-        Panel => g.cuboid([0.,0.,0.,1.,0.08,1.],Main),
+        Panel => g.cuboid([0.,0.92,0.,1.,1.,1.],Main),
         Grille => {for n in 0..4 {let x=0.05+n as f32*0.3;g.cuboid([x,0.44,0.,x+0.05,0.56,1.],Main);}for z in [0.2,0.7] {g.cuboid([0.,0.44,z,1.,0.56,z+0.05],Main);}},
         Arch|HalfArch => {
             // A doorway arch the player walks through: thin posts on both sides of the cell
@@ -207,6 +207,21 @@ fn build(form: Form, joined: u8) -> Geometry {
         Rug=>g.cuboid([0.,0.,0.,1.,1.,0.025],Surface::Fabric),
         Mirror=>{g.cuboid([0.05,0.04,0.05,0.95,0.12,0.95],Main);g.cuboid([0.11,0.01,0.11,0.89,0.04,0.89],Surface::Mirror);},
         FlowerPot=>{g.cuboid([0.28,0.28,0.,0.72,0.72,0.37],Surface::Ceramic);g.cuboid([0.23,0.23,0.3,0.77,0.77,0.40],Surface::Ceramic);g.cuboid([0.46,0.46,0.4,0.54,0.54,0.85],Surface::Plant);g.cuboid([0.3,0.3,0.7,0.7,0.7,0.95],Surface::Plant);},
+    }
+    // Hung on or standing against a wall: the back touches the far side of the cell (the
+    // wall the player looked at), not floating in the middle of the air.
+    if matches!(form, ItemFrame | PaintingForest | PaintingSky | PaintingAbstract | Mirror | Curtain | Shelf | Wardrobe | KitchenBase | Nightstand) {
+        let back = g.faces.iter().flat_map(|f| f.points.iter().map(|p| p[1])).fold(0.0f32, f32::max);
+        let d = 1.0 - back;
+        for f in &mut g.faces {
+            for p in &mut f.points {
+                p[1] += d;
+            }
+        }
+        for b in &mut g.boxes {
+            b[1] += d;
+            b[4] += d;
+        }
     }
     g
 }

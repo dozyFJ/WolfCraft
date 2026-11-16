@@ -259,17 +259,18 @@ impl Interaction {
                 return events;
             }
             // Switch: toggles; the caller re-evaluates the power network on `Placed`.
-            if matches!(h.block, Block::SwitchOff | Block::SwitchOn) && !player.sneaking {
-                let new = if h.block == Block::SwitchOff { Block::SwitchOn } else { Block::SwitchOff };
+            if matches!(h.block.unwall(), Block::SwitchOff | Block::SwitchOn) && !player.sneaking {
+                let new = h.block.same_mount(if h.block.unwall() == Block::SwitchOff { Block::SwitchOn } else { Block::SwitchOff });
                 if world.set_block(h.cell, new) {
                     events.push(InteractionEvent::Placed { pos: h.cell, block: new });
                 }
                 return events;
             }
             // Button: pressed for a moment (the session releases it).
-            if h.block == Block::Button && !player.sneaking {
-                if world.set_block(h.cell, Block::ButtonOn) {
-                    events.push(InteractionEvent::Placed { pos: h.cell, block: Block::ButtonOn });
+            if h.block.unwall() == Block::Button && !player.sneaking {
+                let on = h.block.same_mount(Block::ButtonOn);
+                if world.set_block(h.cell, on) {
+                    events.push(InteractionEvent::Placed { pos: h.cell, block: on });
                 }
                 return events;
             }
@@ -461,6 +462,21 @@ impl Interaction {
             } {
                 // Looking steeply up or down: a vertical shaft or a lying cogwheel.
                 crate::kinetic::with_axis(block, 2)
+            } else if h.normal.0 != 2 && (block.on_wall(0) != block || is_wall_decor(block)) {
+                // Clicked the side of a block: torches, buttons, levers, pictures and mirrors
+                // hang on that wall (it is on the opposite side of the new cell).
+                let dir = match (h.normal.0, h.normal.1) {
+                    (0, s) if s < 0 => 0,
+                    (0, _) => 1,
+                    (_, s) if s < 0 => 2,
+                    _ => 3,
+                };
+                if block.on_wall(0) != block {
+                    block.on_wall(dir)
+                } else {
+                    let (wi, wj) = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)][dir as usize];
+                    block.oriented(wi, wj)
+                }
             } else {
                 block.oriented(player.heading.dot(ei), player.heading.dot(ej))
             }
@@ -885,3 +901,9 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
     })
 }
 
+
+/// Construction pieces that hang on a wall (pictures, mirrors, frames, curtains, panels).
+fn is_wall_decor(b: Block) -> bool {
+    use crate::construction::Form::*;
+    crate::construction::entry(b as u16).is_some_and(|(e, _)| matches!(e.form, ItemFrame | PaintingForest | PaintingSky | PaintingAbstract | Mirror | Curtain | Panel | Shelf))
+}

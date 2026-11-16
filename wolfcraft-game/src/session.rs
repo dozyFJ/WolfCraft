@@ -571,7 +571,7 @@ impl GameSession {
                 self.fluids.changed(&self.chunks, c);
                 wolfcraft_engine::power::update_around(&mut self.chunks, c);
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
-                if b == wolfcraft_engine::block::Block::ButtonOn && !self.buttons.iter().any(|(p, _)| *p == c) {
+                if b.unwall() == wolfcraft_engine::block::Block::ButtonOn && !self.buttons.iter().any(|(p, _)| *p == c) {
                     self.buttons.push((c, 1.0));
                 }
             }
@@ -1110,7 +1110,9 @@ impl GameSession {
                     self.tech_t = 0.0;
                 }
             }
-            if let InteractionEvent::Placed { pos, block: wolfcraft_engine::block::Block::ButtonOn } = e {
+            if let InteractionEvent::Placed { pos, block } = e
+                && block.unwall() == wolfcraft_engine::block::Block::ButtonOn
+            {
                 self.buttons.retain(|(p, _)| p != pos);
                 self.buttons.push((*pos, 1.0));
             }
@@ -1201,10 +1203,13 @@ impl GameSession {
             }
         }
         for pos in released {
-            if self.chunks.get_block(pos) == Some(wolfcraft_engine::block::Block::ButtonOn) {
-                self.chunks.set_block(pos, wolfcraft_engine::block::Block::Button);
+            if let Some(b) = self.chunks.get_block(pos)
+                && b.unwall() == wolfcraft_engine::block::Block::ButtonOn
+            {
+                let up = b.same_mount(wolfcraft_engine::block::Block::Button);
+                self.chunks.set_block(pos, up);
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, pos);
-                self.net_out.push((pos, wolfcraft_engine::block::Block::Button));
+                self.net_out.push((pos, up));
             }
         }
         self.near_table = false;
@@ -3848,9 +3853,19 @@ impl GameSession {
                         for &(idx, _) in ch.emitters() {
                             let (li, lj, lk) = wolfcraft_engine::cubesphere::idx_to_local(idx as usize);
                             let c = wolfcraft_engine::cubesphere::Cell::new(key.f, o.x + li, o.y + lj, o.z + lk);
-                            let p = g.cell_center(c);
+                            let mut p = g.cell_center(c);
                             if (p - pos).length() < 16.0 {
-                                self.fx_lights.push((p, ch.get(li, lj, lk)));
+                                let mut b = ch.get(li, lj, lk);
+                                // A wall torch: its flame is near the wall and a bit lower.
+                                if let Some((base, d)) = b.wall_mount() {
+                                    let (axis, s) = [(0usize, 1i32), (0, -1), (1, 1), (1, -1)][d as usize];
+                                    if let Some(w) = g.neighbor(c, axis, s) {
+                                        let toward = (g.cell_center(w) - p).normalize_or_zero();
+                                        p += toward * 0.2 - wolfcraft_engine::physics::up_at(p) * 0.06;
+                                    }
+                                    b = base;
+                                }
+                                self.fx_lights.push((p, b));
                             }
                         }
                     }
@@ -5842,7 +5857,7 @@ impl GameSession {
         self.save_block_commands();
         // Work out every network once.
         for c in placed {
-            if matches!(self.chunks.get_block(c), Some(B::IskritWire | B::IskritTorch | B::IskritBlock | B::IskritLamp | B::SwitchOn)) || self.chunks.get_block(c).is_some_and(|b| b.part().is_some()) {
+            if matches!(self.chunks.get_block(c).map(|b| b.unwall()), Some(B::IskritWire | B::IskritTorch | B::IskritBlock | B::IskritLamp | B::SwitchOn)) || self.chunks.get_block(c).is_some_and(|b| b.part().is_some()) {
                 wolfcraft_engine::power::update_iskrit(&mut self.chunks, c);
             }
         }
