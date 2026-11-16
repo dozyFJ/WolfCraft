@@ -2533,6 +2533,7 @@ impl GameSession {
             }
             // Solar panels: daylight and open sky, checked once a second.
             let day = self.daylight() > 0.45 && self.weather.rain < 0.5;
+            let night = self.daylight() <= 0.45;
             for (c, st) in self.tech.iter_mut() {
                 let here = self.chunks.get_block(*c);
                 if here == Some(wolfcraft_engine::block::Block::SolarPanel) {
@@ -2540,7 +2541,7 @@ impl GameSession {
                     st.sunny = day && (1..40).all(|k| g.offset(*c, 0, 0, k).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
                 } else if here == Some(wolfcraft_engine::block::Block::LunarPanel) {
                     // The lunar panel: `sunny` means open sky here (it works at night).
-                    st.day = self.daylight() > 0.45;
+                    st.day = !night;
                     st.sunny = (1..40).all(|k| g.offset(*c, 0, 0, k).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
                 }
             }
