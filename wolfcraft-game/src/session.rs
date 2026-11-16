@@ -221,6 +221,9 @@ pub struct GameSession {
     pub buttonsim: wolfcraft_engine::buttonsim::ButtonSim,
     /// «Кликер-симулятор» (WolfStudio template).
     pub clicker: wolfcraft_engine::clicker::Clicker,
+    /// PvP templates (Бедварс, Скайварс, Эггварс, Мардер, Прятки): the running game.
+    pub arena: Option<wolfcraft_engine::arenas::Arena>,
+    arena_dead_seen: bool,
     /// Bow draw 0..1 while the use button is held with a bow.
     /// The player is asleep in a bed or sits on a chair (drawn in third person, cannot walk).
     pub rest: Option<Rest>,
@@ -411,6 +414,8 @@ impl GameSession {
             petsim_home: None,
             buttonsim: Default::default(),
             clicker: Default::default(),
+            arena: None,
+            arena_dead_seen: false,
             rest: None,
             bow_charge: 0.0,
             bow_arrow: None,
@@ -489,6 +494,7 @@ impl GameSession {
         }
         s.buttonsim = wolfcraft_engine::buttonsim::ButtonSim::from_text(&std::fs::read_to_string(s.dir.join("buttonsim.txt")).unwrap_or_default());
         s.clicker = wolfcraft_engine::clicker::Clicker::from_text(&std::fs::read_to_string(s.dir.join("clicker.txt")).unwrap_or_default());
+        s.arena = wolfcraft_engine::arenas::Arena::from_text(&std::fs::read_to_string(s.dir.join("arena.txt")).unwrap_or_default());
         s.petsim_home = std::fs::read_to_string(s.dir.join("petsim_home.txt")).ok().and_then(|t| {
             let v: Vec<f64> = t.split_whitespace().filter_map(|x| x.parse().ok()).collect();
             (v.len() == 3).then(|| DVec3::new(v[0], v[1], v[2]))
@@ -960,6 +966,9 @@ impl GameSession {
             self.buttonsim.tick(dt);
             self.clicker.tick(dt);
         }
+        // The clicker kit: a double jump.
+        self.player.double_jump = self.clicker.active && (self.minigames || self.studio);
+        self.tick_arena(dt);
         if (self.minigames || self.studio) && !self.player.survival.dead && self.player.body.on_ground {
             let under = self.chunks.block_at_world(self.player.body.pos - self.player.up() * 0.3);
             if let Some(pad) = wolfcraft_engine::buttonsim::pad(under) {
@@ -1930,6 +1939,286 @@ impl GameSession {
         self.clicker.island_pos = tops;
         self.clicker.active = true;
         Ok(n)
+    }
+
+    /// PvP templates: generators, the bed / egg, death and the round.
+    fn tick_arena(&mut self, dt: f32) {
+        use wolfcraft_engine::{block::Block, items::{ItemStack, ids}};
+        let Some(a) = &mut self.arena else { return };
+        for (id, p) in a.tick(dt) {
+            self.drops.spawn(ItemStack::new(id, 1), DVec3::new(p[0], p[1], p[2]), DVec3::ZERO, 0.0);
+        }
+        // The bed / egg: broken → no coming back.
+        if let (Some((f, i, j, k)), true) = (a.heart, a.heart_alive) {
+            let want = if a.mode == wolfcraft_engine::arenas::Mode::EggWars { Block::TeamEgg } else { Block::TeamBed };
+            if let Some(b) = self.chunks.get_block(wolfcraft_engine::cubesphere::Cell::new(f, i, j, k)) {
+                if b != want {
+                    a.heart_alive = false;
+                    self.title = Some((if want == Block::TeamEgg { "Ваше яйцо разбито!".into() } else { "Ваша кровать разрушена!".into() }, "Больше вы не возродитесь".into(), 3.0));
+                }
+            }
+        }
+        // Death: out of the game unless the bed / egg stands.
+        if self.player.survival.dead && !self.arena_dead_seen {
+            self.arena_dead_seen = true;
+            a.on_death();
+            if a.eliminated {
+                self.title = Some(("Вы выбыли".into(), "Наблюдайте за игрой".into(), 3.0));
+            }
+        } else if !self.player.survival.dead {
+            self.arena_dead_seen = false;
+        }
+        let a = self.arena.as_ref().unwrap();
+        self.player.spawn = DVec3::new(a.base[0], a.base[1], a.base[2]);
+        // Мардер: 10 gold → a bow.
+        if a.mode == wolfcraft_engine::arenas::Mode::Murder && a.role != wolfcraft_engine::arenas::Role::Murderer && self.player.inventory.count(ids::GOLD_INGOT) >= 10 {
+            self.player.inventory.take(ids::GOLD_INGOT, 10);
+            self.player.inventory.add(ItemStack::new(ids::BOW, 1));
+            self.player.inventory.add(ItemStack::new(ids::ARROW, 4));
+            self.item_name = Some(("10 золота → лук и стрелы!".into(), 2.5));
+        }
+    }
+
+    /// Shop of Бед/Эггварс: pay with iron, gold or diamonds.
+    pub fn arena_buy(&mut self, k: usize) -> Result<String, String> {
+        use wolfcraft_engine::{arenas::SHOP, items::ItemStack};
+        let (name, (gid, gn), (cid, cn)) = SHOP[k.min(SHOP.len() - 1)];
+        // Studio playtests (creative) get it free when they can't pay.
+        if !self.is_creative() && self.player.inventory.count(cid) < cn as u32 {
+            return Err(format!("{name}: нужно {} × {}", cn, ItemStack::new(cid, 1).info().name));
+        }
+        if self.player.inventory.count(cid) >= cn as u32 {
+            self.player.inventory.take(cid, cn as u32);
+        }
+        if let Some(rest) = self.player.inventory.add(ItemStack::new(gid, gn)) {
+            self.drops.spawn(rest, self.player.body.pos, DVec3::ZERO, 0.5);
+        }
+        Ok(format!("Куплено: {name}"))
+    }
+
+    /// The cell under the player, the forward and side grid directions (for the builders).
+    fn arena_axes(&self) -> Result<(wolfcraft_engine::cubesphere::Cell, (i32, i32), (i32, i32)), String> {
+        if self.hell {
+            return Err("Строится только на родной планете".into());
+        }
+        let g = self.chunks.grid();
+        let feet = g.world_to_cell(self.player.body.pos);
+        let centre = g.cell_center(feet);
+        let ax = |di: i32, dj: i32| g.offset(feet, di, dj, 0).map(|c| (g.cell_center(c) - centre).normalize()).unwrap_or(DVec3::ZERO);
+        let (ei, ej) = (ax(1, 0), ax(0, 1));
+        let h = self.player.heading;
+        let fwd = if h.dot(ei).abs() >= h.dot(ej).abs() { (h.dot(ei).signum() as i32, 0) } else { (0, h.dot(ej).signum() as i32) };
+        Ok((feet, fwd, (fwd.1, fwd.0)))
+    }
+
+    /// Builds a PvP template ahead of the player and starts it.
+    pub fn build_arena(&mut self, mode: wolfcraft_engine::arenas::Mode) -> Result<String, String> {
+        use wolfcraft_engine::arenas::{Arena, Gen, Mode, Role, chest_loot};
+        use wolfcraft_engine::block::Block as B;
+        use wolfcraft_engine::items::{ItemStack, ids};
+        let (feet, fwd, side) = self.arena_axes()?;
+        let g = self.chunks.grid();
+        // (a along the side, b forward, k up) → cell.
+        let at = |a: i32, b: i32, k: i32| g.offset(feet, side.0 * a + fwd.0 * b, side.1 * a + fwd.1 * b, k);
+        let mut cells: Vec<(wolfcraft_engine::cubesphere::Cell, B)> = Vec::new();
+        let mut chests: Vec<(wolfcraft_engine::cubesphere::Cell, bool)> = Vec::new();
+        let roll = self.mobs.rand();
+        let mut arena = Arena::new(mode, Role::roll(mode, roll));
+        let centre_of = |c: wolfcraft_engine::cubesphere::Cell| {
+            let p = g.cell_center(c);
+            [p.x, p.y, p.z]
+        };
+        // A square slab (floor block on top, a layer under it) with air above.
+        let slab = |cells: &mut Vec<_>, a0: i32, b0: i32, r: i32, k: i32, top: B, under: B, air: i32| {
+            for a in -r..=r {
+                for b in -r..=r {
+                    for dk in -1..=air {
+                        if let Some(c) = at(a0 + a, b0 + b, k + dk) {
+                            cells.push((c, if dk == -1 { top } else { B::Air }));
+                        }
+                    }
+                    if let Some(c) = at(a0 + a, b0 + b, k - 2) {
+                        cells.push((c, under));
+                    }
+                }
+            }
+        };
+        let lift = 8;
+        match mode {
+            Mode::BedWars | Mode::EggWars => {
+                let teams = [(0, 18, B::RedWool, "Красные"), (18, 30, B::BlueWool, "Синие"), (-18, 30, B::YellowWool, "Жёлтые"), (0, 42, B::Wool, "Белые")];
+                for (n, (a0, b0, wool, _)) in teams.iter().enumerate() {
+                    slab(&mut cells, *a0, *b0, 4, lift, *wool, B::Stone, 4);
+                    // Bed / egg at the back of the island, a shop chest and the generators.
+                    let back = if n == 0 { -3 } else if n == 3 { 3 } else { 0 };
+                    let sidew = if n == 1 { 3 } else if n == 2 { -3 } else { 0 };
+                    if let Some(c) = at(a0 + sidew, b0 + back, lift) {
+                        cells.push((c, if mode == Mode::EggWars { B::TeamEgg } else { B::TeamBed }));
+                        if n == 0 {
+                            arena.heart = Some((c.f, c.i, c.j, c.k));
+                        }
+                        // Protection ring.
+                        for (da, db) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                            if let Some(c) = at(a0 + sidew + da, b0 + back + db, lift) {
+                                cells.push((c, if mode == Mode::EggWars { B::Glass } else { B::Wool }));
+                            }
+                        }
+                    }
+                    if n == 0 {
+                        if let Some(c) = at(a0 + 3, b0, lift) {
+                            cells.push((c, B::Chest));
+                        }
+                        for (dx, item, every) in [(-2, ids::IRON_INGOT, 1.5f32), (2, ids::GOLD_INGOT, 6.0)] {
+                            if let Some(c) = at(a0 + dx, b0 + 2, lift) {
+                                cells.push((g.offset(c, 0, 0, -1).unwrap_or(c), if item == ids::IRON_INGOT { B::IronBlock } else { B::GoldBlock }));
+                                arena.gens.push(Gen { pos: centre_of(c), item, every, t: 0.0 });
+                            }
+                        }
+                        if let Some(c) = at(a0, b0, lift) {
+                            arena.base = centre_of(c);
+                        }
+                    }
+                }
+                // The middle island with diamonds.
+                slab(&mut cells, 0, 30, 5, lift + 2, B::Obsidian, B::Stone, 4);
+                for da in [-3, 3] {
+                    if let Some(c) = at(da, 30, lift + 2) {
+                        cells.push((g.offset(c, 0, 0, -1).unwrap_or(c), B::DiamondBlock));
+                        arena.gens.push(Gen { pos: centre_of(c), item: ids::DIAMOND, every: 20.0, t: 0.0 });
+                    }
+                }
+                self.player.inventory.add(ItemStack::new(B::RedWool as u16, 32));
+                self.player.inventory.add(ItemStack::new(ids::tool(0, 3), 1));
+            }
+            Mode::SkyWars => {
+                // Eight islands round the middle, each with a chest; two rich chests in the middle.
+                for n in 0..8 {
+                    let ang = n as f64 / 8.0 * std::f64::consts::TAU;
+                    let (a0, b0) = ((ang.sin() * 20.0).round() as i32, 28 + (-ang.cos() * 20.0).round() as i32);
+                    slab(&mut cells, a0, b0, 2, lift, B::Grass, B::Dirt, 4);
+                    if let Some(c) = at(a0 + 1, b0 + 1, lift) {
+                        cells.push((c, B::Chest));
+                        chests.push((c, false));
+                    }
+                    if n == 0 {
+                        if let Some(c) = at(a0, b0, lift) {
+                            arena.base = centre_of(c);
+                        }
+                    }
+                }
+                slab(&mut cells, 0, 28, 5, lift + 1, B::StoneBricks, B::Stone, 5);
+                for da in [-2, 2] {
+                    if let Some(c) = at(da, 28, lift + 1) {
+                        cells.push((c, B::Chest));
+                        chests.push((c, true));
+                    }
+                }
+            }
+            Mode::Murder => {
+                // A mansion: plank floor, brick walls with windows, rooms, a roof; gold spawns.
+                let (w, d) = (10, 7);
+                let b0 = 12;
+                for a in -w..=w {
+                    for b in -d..=d {
+                        let wall = a.abs() == w || b.abs() == d;
+                        let inner = (a == 0 && b.abs() != 2) || (b == 0 && a.abs() != 5 && a.abs() != 6);
+                        for k in -1..=5 {
+                            let bl = if k == -1 {
+                                if (a + b).rem_euclid(2) == 0 { B::OakPlanks } else { B::SprucePlanks }
+                            } else if k == 5 {
+                                B::AcaciaPlanks
+                            } else if wall {
+                                if k == 2 && (a + b).rem_euclid(4) == 0 && !(b == -d && a.abs() <= 1) { B::Glass } else if b == -d && a.abs() <= 1 && k < 2 { B::Air } else { B::Bricks }
+                            } else if inner && k <= 3 {
+                                B::OakPlanks
+                            } else {
+                                B::Air
+                            };
+                            if let Some(c) = at(a, b0 + b, k) {
+                                cells.push((c, bl));
+                            }
+                        }
+                    }
+                }
+                for (a, b) in [(-7, -4), (7, -4), (-7, 4), (7, 4), (-3, 2), (3, -2)] {
+                    if let Some(c) = at(a, b0 + b, 0) {
+                        arena.gens.push(Gen { pos: centre_of(c), item: ids::GOLD_INGOT, every: 10.0, t: 0.0 });
+                    }
+                    if let Some(c) = at(a, b0 + b, 3) {
+                        cells.push((c, B::Lantern));
+                    }
+                }
+                for (a, b) in [(-9, -6), (9, 6), (-9, 6), (9, -6)] {
+                    if let Some(c) = at(a, b0 + b, 0) {
+                        cells.push((c, B::Bookshelf));
+                    }
+                }
+                if let Some(c) = at(0, b0 - 4, 0) {
+                    arena.base = centre_of(c);
+                }
+            }
+            Mode::HideSeek => {
+                // A little village: grass, houses with doorways, bushes and barrels to hide behind.
+                slab(&mut cells, 0, 18, 14, 0, B::Grass, B::Dirt, 5);
+                for (a0, b0) in [(-8, 10), (8, 10), (-8, 26), (8, 26), (0, 18)] {
+                    for a in -2..=2 {
+                        for b in -2..=2 {
+                            if a.abs() < 2 && b.abs() < 2 {
+                                continue;
+                            }
+                            for k in 0..=3 {
+                                let door = b == -2 && a == 0 && k < 2;
+                                if let Some(c) = at(a0 + a, b0 + b, k) {
+                                    cells.push((c, if door { B::Air } else if k == 3 { B::SprucePlanks } else { B::OakPlanks }));
+                                }
+                            }
+                        }
+                    }
+                    for a in -1..=1 {
+                        for b in -1..=1 {
+                            if let Some(c) = at(a0 + a, b0 + b, 3) {
+                                cells.push((c, B::SprucePlanks));
+                            }
+                        }
+                    }
+                }
+                for (a, b, bl) in [(-12, 4, B::OakLeaves), (12, 6, B::OakLeaves), (-3, 30, B::OakLeaves), (5, 22, B::Pumpkin), (-5, 14, B::Pumpkin), (11, 30, B::Chest), (-11, 20, B::Chest)] {
+                    if let Some(c) = at(a, b, 0) {
+                        cells.push((c, bl));
+                    }
+                }
+                if let Some(c) = at(0, 6, 0) {
+                    arena.base = centre_of(c);
+                }
+            }
+        }
+        let (n, missed) = crate::worldedit::apply(self, cells);
+        if n == 0 {
+            return Err("Мир вокруг ещё не загрузился, подойдите ближе или попробуйте через пару секунд".into());
+        }
+        // Chest loot (Скайварс).
+        for (c, rich) in chests {
+            let rolls: Vec<f64> = (0..5).map(|_| self.mobs.rand()).collect();
+            let loot = chest_loot(rich, &rolls);
+            let slots = self.container_slots(c, B::Chest);
+            let len = slots.len().max(1);
+            for (i, (id, cnt)) in loot.into_iter().enumerate() {
+                slots[(i * 5 + 2) % len] = Some(ItemStack::new(id, cnt));
+            }
+        }
+        for (id, cnt) in arena.role.kit() {
+            self.player.inventory.add(ItemStack::new(id, cnt));
+        }
+        let base = DVec3::new(arena.base[0], arena.base[1], arena.base[2]);
+        let mut msg = format!("{} готов{}", mode.name(), if missed > 0 { " (часть мира ещё грузилась — подойдите и постройте ещё раз, если чего-то не хватает)" } else { "" });
+        if arena.role != Role::None {
+            msg = format!("{msg}. Ваша роль: {} — {}", arena.role.name(), arena.role.goal());
+            self.title = Some((arena.role.name().into(), arena.role.goal().into(), 4.0));
+        }
+        self.arena = Some(arena);
+        self.arena_dead_seen = false;
+        self.teleport(base);
+        Ok(msg)
     }
 
     /// «Кликер»: to an island (opens it for money the first time) — the player is taken there.
@@ -2994,6 +3283,14 @@ impl GameSession {
         if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}
         self.save_containers();
         self.save_block_commands();
+        match &self.arena {
+            Some(a) => {
+                let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("arena.txt"), a.to_text().as_bytes());
+            }
+            None => {
+                let _ = std::fs::remove_file(self.dir.join("arena.txt"));
+            }
+        }
         if self.clicker.active {
             if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("clicker.txt"), self.clicker.to_text().as_bytes()) {
                 log::error!("clicker: {e}");
