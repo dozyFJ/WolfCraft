@@ -1295,6 +1295,14 @@ impl App {
                 }
             }
             (Screen::Playing | Screen::Paused | Screen::Inventory, KeyCode::F3 | KeyCode::Tab) => self.debug = !self.debug,
+            // WolfTech drill: R changes the digging square (1×1, 3×3 … 13×13).
+            (Screen::Playing, KeyCode::KeyR) if self.session.as_ref().is_some_and(|s| s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::DRILL)) => {
+                if let Some(s) = &mut self.session {
+                    s.player.drill_area = wolfcraft_engine::tools::next_drill_mode(s.player.drill_area);
+                    let n = wolfcraft_engine::tools::drill_side(s.player.drill_area);
+                    s.item_name = Some((format!("Бур: копает {n}×{n}"), 1.4));
+                }
+            }
             // «Кликер» on the keyboard: C taps, V sells.
             (Screen::Playing, KeyCode::KeyC | KeyCode::KeyV) if self.session.as_ref().is_some_and(|s| s.clicker.active && (s.minigames || s.studio)) => {
                 if let Some(s) = &mut self.session {
@@ -2304,6 +2312,12 @@ impl App {
                                 if !studio_edit && matches!(screen, Screen::Playing | Screen::Dead) {
                                     arena_buys = arena_overlay(ctx, a, &s.player.inventory, &mut ui_cover);
                                 }
+                            }
+                            // WolfTech drill: a glass pill with the digging square; tap to change.
+                            if screen == Screen::Playing && !studio_edit && s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::DRILL) && drill_overlay(ctx, s.player.drill_area, &mut ui_cover) {
+                                s.player.drill_area = wolfcraft_engine::tools::next_drill_mode(s.player.drill_area);
+                                let n = wolfcraft_engine::tools::drill_side(s.player.drill_area);
+                                s.item_name = Some((format!("Бур: копает {n}×{n}"), 1.4));
                             }
                             // «Звёздный пульт»: its button and skill menu, cinema bars, flashes.
                             let holding = screen == Screen::Playing && s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::STAR_REMOTE);
@@ -5084,4 +5098,43 @@ fn look_info(s: &crate::session::GameSession) -> Option<wolfcraft_ui::hud::LookI
         lines.push((if n == 0 { "Пусто".to_string() } else { format!("Внутри: {n} предм.") }, grey));
     }
     Some(wolfcraft_ui::hud::LookInfo { icon: ItemStack::new(id, 1), name: base.info().name.to_string(), source, lines, bar })
+}
+
+/// The drill's mode pill on the right: the digging square drawn as a little grid and its
+/// size; true when tapped (the caller moves to the next mode).
+fn drill_overlay(ctx: &egui::Context, mode: u8, cover: &mut Vec<egui::Rect>) -> bool {
+    use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
+    let side = wolfcraft_engine::tools::drill_side(mode);
+    let mut tapped = false;
+    let screen = ctx.screen_rect();
+    let size = Vec2::new(132.0, 46.0);
+    let pos = Pos2::new(screen.right() - size.x - 14.0, screen.center().y - 110.0);
+    egui::Area::new(egui::Id::new("drill-mode")).fixed_pos(pos).order(egui::Order::Foreground).show(ctx, |ui| {
+        let (r, resp) = ui.allocate_exact_size(size, Sense::click());
+        let p = ui.painter();
+        let down = resp.is_pointer_button_down_on();
+        p.rect_filled(r.translate(Vec2::new(0.0, 3.0)), Rounding::same(23.0), Color32::from_black_alpha(60));
+        p.rect_filled(r, Rounding::same(23.0), if down { Color32::from_rgba_unmultiplied(40, 120, 200, 220) } else { Color32::from_rgba_unmultiplied(20, 40, 70, 170) });
+        // Glass gloss on the top half and a light rim.
+        p.rect_filled(Rect::from_min_max(r.min, Pos2::new(r.right(), r.center().y)).shrink2(Vec2::new(6.0, 2.0)), Rounding::same(18.0), Color32::from_white_alpha(28));
+        p.rect_stroke(r, Rounding::same(23.0), Stroke::new(1.0_f32, Color32::from_white_alpha(110)));
+        // The square: 1, 3, 5 … cells (at most 7 drawn, a wider one stays 7 small dots).
+        let g = Rect::from_center_size(Pos2::new(r.left() + 26.0, r.center().y), Vec2::splat(28.0));
+        let n = side.min(7) as usize;
+        let cell = g.width() / n as f32;
+        for y in 0..n {
+            for x in 0..n {
+                let c = Rect::from_min_size(Pos2::new(g.left() + x as f32 * cell, g.top() + y as f32 * cell), Vec2::splat(cell)).shrink((cell * 0.12).min(1.5));
+                let mid = x == n / 2 && y == n / 2;
+                p.rect_filled(c, Rounding::same(cell * 0.2), if mid { Color32::from_rgb(255, 196, 70) } else { Color32::from_rgb(120, 200, 255) });
+            }
+        }
+        p.text(Pos2::new(r.left() + 50.0, r.center().y - 7.0), Align2::LEFT_CENTER, format!("{side}×{side}"), FontId::proportional(17.0), Color32::WHITE);
+        p.text(Pos2::new(r.left() + 50.0, r.center().y + 10.0), Align2::LEFT_CENTER, "бур · режим", FontId::proportional(11.0), Color32::from_white_alpha(190));
+        cover.push(r);
+        if resp.clicked() {
+            tapped = true;
+        }
+    });
+    tapped
 }

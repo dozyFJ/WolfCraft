@@ -153,7 +153,7 @@ pub fn describe(id: ItemId) -> Option<String> {
         Role::Sword(_) => "Оружие: самый сильный удар · режет листву, растения, шерсть · другие блоки не ломает".into(),
         Role::Hoe(_) => "Вспахивает землю и траву · быстро собирает урожай, листву, мох".into(),
         Role::Bow => "Только стреляет: держите, чтобы натянуть".into(),
-        Role::Drill => "WolfTech: камень, руды и землю — очень быстро, все руды · тратит заряд".into(),
+        Role::Drill => "WolfTech: камень, руды и землю — очень быстро, все руды · режимы 1×1 … 13×13 (кнопка справа или R) · тратит заряд".into(),
         Role::Chainsaw => "WolfTech: дерево, листву и растения — очень быстро · тратит заряд".into(),
         Role::Omni => "WolfTech: всё — камень, руды, землю, дерево, листву — быстрее всех · тратит заряд".into(),
         Role::Other => return None,
@@ -211,4 +211,17 @@ mod tests {
         }
         assert!(describe(ids::APPLE).is_none());
     }
+}
+
+/// Electric drill digging modes: the side of the square dug at once (1×1, 3×3 … 13×13).
+pub const DRILL_AREAS: [i32; 6] = [1, 3, 5, 7, 9, 13];
+
+/// The drill's area side for a mode index.
+pub fn drill_side(mode: u8) -> i32 {
+    DRILL_AREAS[mode as usize % DRILL_AREAS.len()]
+}
+
+/// The next drill mode (taps cycle through them).
+pub fn next_drill_mode(mode: u8) -> u8 {
+    ((mode as usize + 1) % DRILL_AREAS.len()) as u8
 }

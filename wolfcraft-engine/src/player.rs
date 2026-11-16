@@ -106,6 +106,8 @@ pub struct Player {
     pub jetting: bool,
     /// Mini-game kits: one more jump in the air (reset on landing).
     pub double_jump: bool,
+    /// WolfTech drill: which digging area (index into `tools::DRILL_AREAS`).
+    pub drill_area: u8,
     air_jump_used: bool,
     jump_was: bool,
     jet_wear: f64,
@@ -150,6 +152,7 @@ impl Player {
             glide_wear: 0.0,
             jetting: false,
             double_jump: false,
+            drill_area: 0,
             air_jump_used: false,
             jump_was: false,
             jet_wear: 0.0,
