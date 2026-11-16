@@ -37,6 +37,9 @@ pub struct InventoryUiState {
     /// The builder in creative: pieces are taken for free.
     builder_free: bool,
     pub grid: CraftGrid,
+    recipes_open: bool,
+    recipe_search: String,
+    picked_slot: Option<usize>,
     /// Slot being dragged (inventory or grid id).
     drag_slot: Option<usize>,
     /// Item being dragged from the creative palette.
@@ -82,6 +85,8 @@ pub struct InventoryResult {
 /// Call when the inventory closes: items left in the crafting grid go back to the inventory.
 pub fn close(state: &mut InventoryUiState, inv: &mut Inventory) {
     state.grid.return_all(inv);
+    state.picked_slot = None;
+    state.recipes_open = false;
     state.drag_slot = None;
     state.drag_item = None;
 }
@@ -200,6 +205,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         }
     }
 
+    let recipes_were_open = state.recipes_open;
     if creative {
         // A block window like the machines' (WolfTech): a metal banner with the title, the
         // categories and the item grid in recessed panels, the hotbar under them; the window
@@ -216,6 +222,22 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         if dismissed {
             result.close = true;
         }
+    } else if near_table && !state.builder {
+        let width = 10.0 * CELL + 9.0 * GAP + 8.0;
+        let esc = crate::ui_components::block_screen_ex(ctx, "inventory", width, false, |ui| {
+            if recipes_were_open { ui.set_enabled(false); }
+            let (banner, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
+            icons.paint_panel(ui.painter(), banner, crate::gui_renderer::block_panel(wolfcraft_engine::block::Block::CraftingTable), Color32::WHITE);
+            ui.painter().text(banner.center(), Align2::CENTER_CENTER, "Верстак", bold_font(18.0), p.text);
+            ui.horizontal(|ui| {
+                if ui.button("Рецепты +").clicked() { state.recipes_open = true; state.drag_slot=None; state.picked_slot=None; }
+                if ui.button("Закрыть").clicked() { result.close=true; }
+            });
+            result.crafted=survival_layout(ui,icons,&p,state,inv,true,width,&mut slot_rects,false);
+            ui.add_space(8.0);
+            hotbar_row(ui,icons,&p,state,inv,CELL,&mut slot_rects,&mut trash_rect);
+        });
+        if !recipes_were_open && esc { result.close=true; }
     } else {
         // Full screen like the creative one: back on the left, the inventory in the middle
         // (scrolls on short screens), the hotbar and the bin along the bottom.
@@ -256,12 +278,42 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         }
     }
 
+    if state.recipes_open && near_table {
+        let mut dismiss=false;
+        let esc=crate::ui_components::block_screen_ex(ctx,"workbench-recipes",480.0,false,|ui| {
+            ui.horizontal(|ui| { ui.heading("Рецепты верстака"); if ui.button("Закрыть").clicked() {dismiss=true;} });
+            text_input(ui,icons,&mut state.recipe_search,"Поиск рецепта…",450.0,Some(icon::SEARCH));
+            let q=state.recipe_search.trim().to_lowercase();
+            egui::ScrollArea::vertical().id_salt("workbench-recipe-list").max_height(300.0).show(ui,|ui| {
+                for recipe in wolfcraft_engine::inventory::recipes().iter().filter(|r|q.is_empty()||r.name().to_lowercase().contains(&q)) {
+                    let can=can_quick_craft(inv,&state.grid,recipe);
+                    ui.group(|ui| { ui.set_width(450.0); ui.horizontal(|ui| {
+                        let (r,_)=ui.allocate_exact_size(Vec2::splat(32.0),Sense::hover());
+                        icons.paint_item(ui.painter(),r,recipe.output.0);
+                        ui.vertical(|ui| {
+                            ui.set_width(300.0);
+                            ui.label(format!("{} ×{}",recipe.name(),recipe.output.1));
+                            let needs=CraftGrid::needs(recipe).iter().map(|(id,n)|format!("{} ×{}",items::info(*id).name,n)).collect::<Vec<_>>().join(", ");
+                            ui.add(egui::Label::new(egui::RichText::new(needs).small().color(p.text_muted)).wrap());
+                        });
+                        if ui.add_enabled(can,egui::Button::new("Создать")).clicked() && quick_craft(inv,&mut state.grid,recipe) {
+                            let msg=format!("Создано: {} ×{}",recipe.name(),recipe.output.1);
+                            state.toast=Some((msg.clone(),2.0));result.crafted=Some(msg);
+                        }
+                    }); });
+                }
+            });
+        });
+        if esc||dismiss {state.recipes_open=false;}
+    }
+    #[cfg(test)]
+    ctx.data_mut(|d| d.insert_temp(Id::new("inventory-test-slots"),slot_rects.clone()));
     // ---- Drag & drop resolution ----
     if let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) {
         state.last_pos = Some(pos);
     }
     let pointer = ctx.pointer_hover_pos().or(state.last_pos);
-    if state.drag_slot.is_some() || state.drag_item.is_some() {
+    if !recipes_were_open && !state.recipes_open && (state.drag_slot.is_some() || state.drag_item.is_some()) {
         if let Some(pos) = pointer {
             let layer = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, Id::new("drag-ghost")));
             let ghost = Rect::from_center_size(pos, Vec2::splat(CELL));
@@ -274,15 +326,16 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         if ctx.input(|i| i.pointer.any_released()) {
             // Slots are recorded in the window's own coordinates (it may be scaled to fit).
             // Both inventories are full screen: slots are in screen coordinates.
-            let target = pointer.and_then(|pos| slot_rects.iter().find(|(_, r)| r.contains(pos)).map(|(s, _)| *s));
+            let local_pointer = pointer.map(|pos| if creative || (near_table && !state.builder) { crate::ui_components::to_body(ctx,"inventory",pos) } else {pos});
+            let target = local_pointer.and_then(|pos| slot_rects.iter().find(|(_, r)| r.contains(pos)).map(|(s, _)| *s));
             if let Some(src) = state.drag_slot.take() {
                 if let Some(dst) = target {
                     move_any(inv, &mut state.grid, src, dst);
-                } else if let (Some(tr), Some(pos)) = (trash_rect, pointer) {
+                } else if let (Some(tr), Some(pos)) = (trash_rect, local_pointer) {
                     if tr.contains(pos) {
                         set(inv, &mut state.grid, src, None);
                     }
-                } else if let Some(pos) = pointer {
+                } else if let Some(pos) = local_pointer {
                     // Released outside the window (well away from every slot): throw it out.
                     let area = slot_rects.iter().fold(Rect::NOTHING, |a, (_, r)| a.union(*r)).expand(36.0);
                     if !area.contains(pos) {
@@ -344,10 +397,15 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
 fn draw_slot(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, slot: usize, rect: Rect) {
     let stack = get(inv, &state.grid, slot);
     let shown = if state.drag_slot == Some(slot) { None } else { stack };
-    let selected = slot == inv.selected && slot < HOTBAR;
+    let selected = state.picked_slot==Some(slot) || (slot == inv.selected && slot < HOTBAR);
     let resp = slot_widget(ui, icons, p, rect, shown.as_ref(), selected, Id::new(("inv-slot", slot)), Sense::click_and_drag());
     if resp.drag_started() && stack.is_some() {
+        state.picked_slot=None;
         state.drag_slot = Some(slot);
+    }
+    if resp.clicked() && !state.recipes_open {
+        if let Some(src)=state.picked_slot.take() {move_any(inv,&mut state.grid,src,slot);}
+        else if stack.is_some() {state.picked_slot=Some(slot);}
     }
     if resp.clicked() && slot < HOTBAR {
         inv.selected = slot;
@@ -434,22 +492,7 @@ fn survival_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
         let free = state.builder_free;
         crafted = construction_panel(ui, icons, state, inv, free);
     } else if near_table {
-        {
-        // The crafting table has its own screen: a recipe book on the left (tap a recipe to
-        // lay it out), the big 3×3 grid on the right; no character panel.
-        ui.horizontal_top(|ui| {
-            let grid_w = 3.0 * (CELL + GAP) + 28.0 + 24.0 + CELL + 8.0 + 8.0;
-            let book_w = (width - grid_w - 24.0).max(CELL * 2.0);
-            ui.vertical(|ui| {
-                ui.set_width(book_w);
-                recipe_book(ui, icons, p, state, inv, book_w);
-            });
-            ui.add_space(24.0);
-            ui.vertical(|ui| {
-                crafted = crafting_grid(ui, icons, p, state, inv, near_table, slot_rects);
-            });
-        });
-        }
+        crafted = crafting_grid(ui, icons, p, state, inv, near_table, slot_rects);
     } else {
     ui.horizontal_top(|ui| {
         // ---- Character ----
@@ -546,43 +589,17 @@ fn backpack_section(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inve
 }
 
 /// Blocky front view of the player, in the skin's colours.
-/// Recipe book of the crafting table: every recipe as a tile, the ones the backpack can make
-/// first and bright, the rest dimmed. A tap lays the recipe out in the grid.
-fn recipe_book(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, width: f32) {
-    use wolfcraft_engine::inventory::recipes;
-    section_label(ui, "Рецепты");
-    ui.add_space(4.0);
-    let cell = CELL * 0.85;
-    let per_row = ((width + GAP) / (cell + GAP)).floor().max(1.0) as usize;
-    let mut list: Vec<(&'static wolfcraft_engine::inventory::Recipe, bool)> = recipes().iter().map(|r| (r, state.grid.can_fill(r, inv))).collect();
-    // Craftable first, then by category; stable within.
-    list.sort_by_key(|(r, ok)| (!ok, r.category));
-    let can = list.iter().filter(|x| x.1).count();
-    ui.label(egui::RichText::new(format!("Можно сделать: {can} из {}", list.len())).size(12.0).color(p.text_muted));
-    ui.add_space(4.0);
-    egui::ScrollArea::vertical().id_salt("recipe-book").max_height(3.0 * (CELL + GAP) + 6.0).auto_shrink([false, true]).show(ui, |ui| {
-        for (row_i, row) in list.chunks(per_row).enumerate() {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-                for (i, (r, ok)) in row.iter().enumerate() {
-                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
-                    let out = ItemStack::new(r.output.0, r.output.1);
-                    let picked = state.grid.prefer == Some(r.output) && state.grid.matched().is_some_and(|m| m.output == r.output);
-                    let resp = slot_widget(ui, icons, p, rect, Some(&out), picked, Id::new(("recipe", row_i, i)), Sense::click());
-                    if !ok {
-                        ui.painter().rect_filled(rect, Rounding::same(10.0), Color32::from_black_alpha(140));
-                    }
-                    let need: Vec<String> = CraftGrid::needs(r).iter().map(|(id, n)| format!("{} ×{n}", ItemStack::new(*id, 1).info().name)).collect();
-                    let tip = format!("{}{}\n{}", r.name(), if r.output.1 > 1 { format!(" ×{}", r.output.1) } else { String::new() }, need.join(", "));
-                    let full = if *ok { tip } else { format!("{tip}\nНе хватает предметов") };
-                    note(state, &resp, rect, full.replace('\n', " · "));
-                    if resp.clicked() && *ok {
-                        state.grid.fill_from(r, inv);
-                    }
-                }
-            });
-        }
-    });
+/// Try on copies first: a failed craft must neither consume resources nor rearrange slots.
+fn quick_craft(inv: &mut Inventory, grid: &mut CraftGrid, recipe: &wolfcraft_engine::inventory::Recipe) -> bool {
+    let mut bag=inv.clone(); let mut cells=grid.clone();
+    if !cells.fill_from(recipe,&mut bag) {return false;}
+    let Some(output)=cells.craft_once() else {return false;};
+    if !bag.can_hold(output) {return false;}
+    bag.add(output); *inv=bag; *grid=cells; true
+}
+
+fn can_quick_craft(inv: &Inventory, grid: &CraftGrid, recipe: &wolfcraft_engine::inventory::Recipe) -> bool {
+    quick_craft(&mut inv.clone(),&mut grid.clone(),recipe)
 }
 
 fn paint_character(painter: &egui::Painter, r: Rect, shield: bool, armor: [Option<u8>; 4]) {
@@ -1087,7 +1104,7 @@ fn crafting_grid(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         });
     });
     ui.add_space(8.0);
-    let hint = if near_table { "ПКМ — положить 1" } else { "Верстак — сетка 3×3" };
+    let hint = if near_table { "Нажмите предмет, затем нужный слот · ПКМ — положить 1" } else { "Верстак — сетка 3×3" };
     ui.label(egui::RichText::new(hint).size(12.5).color(p.text_muted));
     if let Some(msg) = &crafted {
         state.toast = Some((msg.clone(), 2.0));
@@ -1230,6 +1247,46 @@ mod tests {
         assert_eq!(st.grid.matched().unwrap().output.0, Block::OakPlanks as ItemId);
         close(&mut st, &mut inv);
         assert_eq!(inv.count(Block::OakLog as ItemId), 3);
+    }
+
+    #[test]
+    fn recipe_craft_is_atomic_and_accepts_resources_from_the_grid() {
+        let recipe=wolfcraft_engine::inventory::recipes().iter().find(|r|r.output.0==Block::OakPlanks as ItemId && CraftGrid::needs(r).iter().any(|(id,_)|*id==Block::OakLog as ItemId)).unwrap();
+        let mut inv=Inventory::default();let mut grid=CraftGrid::default();grid.size=3;
+        let before=grid.clone();
+        assert!(!quick_craft(&mut inv,&mut grid,recipe));assert_eq!(grid,before);
+        grid.cells[0]=Some(ItemStack::of_block(Block::OakLog,1));
+        assert!(quick_craft(&mut inv,&mut grid,recipe));
+        assert_eq!(inv.count(Block::OakPlanks as ItemId),recipe.output.1 as u32);
+        assert!(grid.cells.iter().all(Option::is_none));
+        // Full backpack: failure leaves both input and output counts unchanged.
+        for slot in &mut inv.slots {*slot=Some(ItemStack::of_block(Block::Stone,64));}
+        grid.cells[0]=Some(ItemStack::of_block(Block::OakLog,2));let before=grid.clone();
+        assert!(!quick_craft(&mut inv,&mut grid,recipe));assert_eq!(grid,before);
+        assert_eq!(inv.count(Block::Stone as ItemId),64*SLOTS as u32);
+    }
+
+    #[test]
+    fn scaled_workbench_drag_moves_between_backpack_and_grid_slots() {
+        for (w,h) in [(390.0,844.0),(900.0,420.0)] {
+            let (ctx,icons)=ctx_with_icons();let mut st=InventoryUiState::default();let mut inv=Inventory::default();
+            inv.slots[HOTBAR]=Some(ItemStack::of_block(Block::OakLog,3));
+            let render=|st:&mut InventoryUiState,inv:&mut Inventory,events| {
+                let _=ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(w,h))),events,..Default::default()},|ctx|{show(ctx,&icons,st,inv,false,true,0.016);});
+            };
+            for _ in 0..3 {render(&mut st,&mut inv,vec![]);}
+            for (src,dst) in [(HOTBAR,GRID),(GRID,GRID+1),(GRID+1,HOTBAR+1)] {
+                let rects:Vec<(usize,Rect)>=ctx.data(|d|d.get_temp(Id::new("inventory-test-slots"))).unwrap();
+                let (scale,t)=ctx.data(|d|d.get_temp::<(f32,Vec2)>(Id::new("inventory").with("fit"))).unwrap();
+                let pos=|slot| (rects.iter().find(|(s,_)|*s==slot).unwrap().1.center().to_vec2()*scale+t).to_pos2();
+                let a=pos(src);let b=pos(dst);
+                render(&mut st,&mut inv,vec![egui::Event::PointerMoved(a),egui::Event::PointerButton{pos:a,button:egui::PointerButton::Primary,pressed:true,modifiers:Default::default()}]);
+                render(&mut st,&mut inv,vec![egui::Event::PointerMoved(b)]);
+                render(&mut st,&mut inv,vec![egui::Event::PointerButton{pos:b,button:egui::PointerButton::Primary,pressed:false,modifiers:Default::default()}]);
+                assert!(get(&inv,&st.grid,src).is_none(),"source {src} at {w}×{h}");
+                assert_eq!(get(&inv,&st.grid,dst).unwrap().count,3);
+            }
+        }
     }
 
     #[test]
