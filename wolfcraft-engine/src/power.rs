@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const MAX_NODES: usize = 4096;
 
 fn conducts(b: Block) -> bool {
-    matches!(b, Block::SwitchOn)
+    matches!(b.unwall(), Block::SwitchOn)
 }
 
 fn is_lamp(b: Block) -> bool {
@@ -36,7 +36,7 @@ fn flood(world: &impl WorldEdit, start: Cell) -> (bool, Vec<Cell>) {
     seen.insert(start);
     queue.push_back(start);
     while let Some(c) = queue.pop_front() {
-        if world.cell_block(c) == Block::SwitchOn {
+        if world.cell_block(c).unwall() == Block::SwitchOn {
             powered = true;
         }
         if seen.len() >= MAX_NODES {
@@ -131,7 +131,7 @@ pub fn is_powered(world: &impl WorldEdit, c: Cell) -> bool {
 pub const ISKRIT_MAX: u8 = 15;
 
 fn is_iskrit_source(b: Block) -> bool {
-    matches!(b, Block::IskritBlock | Block::IskritTorch | Block::SwitchOn | Block::ButtonOn | Block::PressurePlateOn)
+    matches!(b.unwall(), Block::IskritBlock | Block::IskritTorch | Block::SwitchOn | Block::ButtonOn | Block::PressurePlateOn)
 }
 
 fn is_wire(b: Block) -> bool {
@@ -457,7 +457,7 @@ fn update_network(world: &mut impl WorldEdit, origin: Cell) -> (usize, HashSet<C
         }
         let wired = |c: Cell| neighbors(world, c).into_iter().any(|n| {
             let nb = world.cell_block(n);
-            is_iskrit_source(nb) || is_wire(nb) || nb.part().is_some() || matches!(nb, Block::SwitchOff | Block::Button | Block::PressurePlate)
+            is_iskrit_source(nb) || is_wire(nb) || nb.part().is_some() || matches!(nb.unwall(), Block::SwitchOff | Block::Button | Block::PressurePlate)
         });
         if !(wired(d) || top.is_some_and(|(t, _)| wired(t))) {
             continue;
@@ -477,7 +477,7 @@ fn update_network(world: &mut impl WorldEdit, origin: Cell) -> (usize, HashSet<C
             }
             // A button is a press, not a hold: the door turns on the press and keeps its new
             // position when the button pops back up.
-            let button = on && (probe.iter().any(|c| world.cell_block(*c) == Block::ButtonOn) || neighbors(world, d).into_iter().chain(top.map(|(t, _)| neighbors(world, t)).unwrap_or_default()).any(|n| world.cell_block(n) == Block::ButtonOn));
+            let button = on && (probe.iter().any(|c| world.cell_block(*c).unwall() == Block::ButtonOn) || neighbors(world, d).into_iter().chain(top.map(|(t, _)| neighbors(world, t)).unwrap_or_default()).any(|n| world.cell_block(n).unwall() == Block::ButtonOn));
             let swing = if on {
                 if button {
                     if let Ok(mut l) = LATCHED_DOORS.lock() {

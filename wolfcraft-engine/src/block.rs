@@ -1907,6 +1907,31 @@ blocks! {
     2513 TeslaCoil => needs_pick(info("Тесла-катушка", Opaque, 4.0, Pickaxe, column(t::TESLA_SIDE, t::TESLA_TOP, t::TECH_TOP))),
     2514 ChargePad => needs_pick(info("Зарядная платформа", Opaque, 3.5, Pickaxe, column(t::TECH_SIDE, t::PAD_TOP, t::TECH_TOP))),
     2515 Centrifuge => needs_pick(info("Центрифуга", Opaque, 4.0, Pickaxe, column(t::CENTRIFUGE_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    // Hung on a wall (wall at +i, -i, +j, -j): torches lean out of it, buttons and levers sit on it.
+    2516 WallTorch0 => emissive(info("Факел", Cross, 0.0, Hand, all(t::TORCH))),
+    2517 WallTorch1 => emissive(info("Факел", Cross, 0.0, Hand, all(t::TORCH))),
+    2518 WallTorch2 => emissive(info("Факел", Cross, 0.0, Hand, all(t::TORCH))),
+    2519 WallTorch3 => emissive(info("Факел", Cross, 0.0, Hand, all(t::TORCH))),
+    2520 IskritWallTorch0 => emissive(info("Искритовый факел", Cross, 0.0, Hand, all(t::ISKRIT_TORCH))),
+    2521 IskritWallTorch1 => emissive(info("Искритовый факел", Cross, 0.0, Hand, all(t::ISKRIT_TORCH))),
+    2522 IskritWallTorch2 => emissive(info("Искритовый факел", Cross, 0.0, Hand, all(t::ISKRIT_TORCH))),
+    2523 IskritWallTorch3 => emissive(info("Искритовый факел", Cross, 0.0, Hand, all(t::ISKRIT_TORCH))),
+    2524 WallButton0 => not_solid(info("Кнопка", Shape, 0.5, Hand, all(t::BUTTON))),
+    2525 WallButton1 => not_solid(info("Кнопка", Shape, 0.5, Hand, all(t::BUTTON))),
+    2526 WallButton2 => not_solid(info("Кнопка", Shape, 0.5, Hand, all(t::BUTTON))),
+    2527 WallButton3 => not_solid(info("Кнопка", Shape, 0.5, Hand, all(t::BUTTON))),
+    2528 WallButtonOn0 => not_solid(info("Кнопка (нажата)", Shape, 0.5, Hand, all(t::BUTTON))),
+    2529 WallButtonOn1 => not_solid(info("Кнопка (нажата)", Shape, 0.5, Hand, all(t::BUTTON))),
+    2530 WallButtonOn2 => not_solid(info("Кнопка (нажата)", Shape, 0.5, Hand, all(t::BUTTON))),
+    2531 WallButtonOn3 => not_solid(info("Кнопка (нажата)", Shape, 0.5, Hand, all(t::BUTTON))),
+    2532 WallSwitchOff0 => not_solid(info("Рычаг", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    2533 WallSwitchOff1 => not_solid(info("Рычаг", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    2534 WallSwitchOff2 => not_solid(info("Рычаг", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    2535 WallSwitchOff3 => not_solid(info("Рычаг", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    2536 WallSwitchOn0 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    2537 WallSwitchOn1 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    2538 WallSwitchOn2 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    2539 WallSwitchOn3 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -1999,11 +2024,73 @@ impl Block {
         self.boxes().first().copied()
     }
 
+    /// A block hung on a wall: its floor block and the wall side (0 +i, 1 -i, 2 +j, 3 -j).
+    pub fn wall_mount(self) -> Option<(Block, u8)> {
+        let id = self as u16;
+        let base = match id {
+            2516..=2519 => Block::Torch,
+            2520..=2523 => Block::IskritTorch,
+            2524..=2527 => Block::Button,
+            2528..=2531 => Block::ButtonOn,
+            2532..=2535 => Block::SwitchOff,
+            2536..=2539 => Block::SwitchOn,
+            _ => return None,
+        };
+        Some((base, ((id - 2516) % 4) as u8))
+    }
+
+    /// The floor block itself (a wall torch is a torch, a wall lever a lever).
+    pub fn unwall(self) -> Block {
+        self.wall_mount().map_or(self, |m| m.0)
+    }
+
+    /// This floor block hung on the wall at side `dir` (as in `wall_mount`); itself when it
+    /// can't hang.
+    pub fn on_wall(self, dir: u8) -> Block {
+        let start = match self {
+            Block::Torch => 2516,
+            Block::IskritTorch => 2520,
+            Block::Button => 2524,
+            Block::ButtonOn => 2528,
+            Block::SwitchOff => 2532,
+            Block::SwitchOn => 2536,
+            _ => return self,
+        };
+        Block::from_id(start + (dir % 4) as u16)
+    }
+
+    /// Same kind of mount (floor or wall side) for another floor block: a pressed wall button
+    /// stays on its wall.
+    pub fn same_mount(self, floor: Block) -> Block {
+        match self.wall_mount() {
+            Some((_, d)) => floor.on_wall(d),
+            None => floor,
+        }
+    }
+
+    /// A wall torch leans out of its wall: maps a point of the standing torch (i, j, k = up)
+    /// to where it is drawn. The foot touches the wall a little above the cell's bottom.
+    pub fn wall_torch_point(dir: u8, p: [f32; 3]) -> [f32; 3] {
+        let (axis, s) = match dir % 4 {
+            0 => (0, 1.0f32),
+            1 => (0, -1.0),
+            2 => (1, 1.0),
+            _ => (1, -1.0),
+        };
+        let mut q = p;
+        let h = p[2];
+        q[2] = h * 0.92 + 0.22;
+        // Toward the wall: the foot sits at the wall, the top 0.24 out of it.
+        let u = (p[axis] - 0.5) * s;
+        q[axis] = 0.5 + s * (u + 0.4375 - h * 0.38);
+        q
+    }
+
     /// 3D model of a torch, boxes as in `boxes` (i, j, k = up): the stick and, for the iskrit
     /// torch, its glowing head. They match the torch pictures (stick in columns 7–8).
     pub fn torch_boxes(self) -> Option<&'static [[f32; 6]]> {
         const P: f32 = 1.0 / 16.0;
-        match self {
+        match self.unwall() {
             Block::Torch => Some(&[[7.0 * P, 7.0 * P, 0.0, 9.0 * P, 9.0 * P, 10.0 * P]]),
             Block::IskritTorch => Some(&[[7.0 * P, 7.0 * P, 0.0, 9.0 * P, 9.0 * P, 7.0 * P], [5.0 * P, 5.0 * P, 6.0 * P, 11.0 * P, 11.0 * P, 12.0 * P]]),
             _ => None,
@@ -2026,7 +2113,24 @@ impl Block {
             }
             if o[0] <= o[3] { o } else { union(self.boxes()) }
         } else if let Some(t) = self.torch_boxes() {
-            union(t)
+            match self.wall_mount() {
+                // The leaning stick: around its moved corners.
+                Some((_, d)) => {
+                    let mut o = [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN];
+                    for b in t {
+                        for n in 0..8 {
+                            let p = [b[if n & 1 == 0 { 0 } else { 3 }], b[if n & 2 == 0 { 1 } else { 4 }], b[if n & 4 == 0 { 2 } else { 5 }]];
+                            let q = Self::wall_torch_point(d, p);
+                            for k in 0..3 {
+                                o[k] = o[k].min(q[k]);
+                                o[k + 3] = o[k + 3].max(q[k]);
+                            }
+                        }
+                    }
+                    o
+                }
+                None => union(t),
+            }
         } else if !self.boxes().is_empty() {
             union(self.boxes())
         } else if self.info().render == RenderKind::Cross {
@@ -2039,6 +2143,9 @@ impl Block {
     /// All boxes of a `Shape` block (empty for full cubes).
     pub fn boxes(self) -> &'static [[f32; 6]] {
         if let Some((e, r)) = crate::construction::entry(self as u16) { return &crate::construction::geometry::model(e.form, r, 0).boxes; }
+        if let Some((base, d)) = self.wall_mount() {
+            return wall_boxes(base, d);
+        }
         use Block::*;
         const SLAB: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.5];
         const VERT_A: [f32; 6] = [0.0, 0.0, 0.0, 0.5, 1.0, 1.0];
@@ -2247,6 +2354,13 @@ impl Block {
     /// The item a placed variant comes from (open doors, turned stairs and panes, ...).
     pub fn base_item(self) -> Block {
         if let Some((e, _)) = crate::construction::entry(self as u16) { return Block::from_id(e.base); }
+        if let Some((b, _)) = self.wall_mount() {
+            return match b {
+                Block::ButtonOn => Block::Button,
+                Block::SwitchOn => Block::SwitchOff,
+                b => b,
+            };
+        }
         use Block::*;
         match self {
             b if b.part().is_some() => match b.part() {
@@ -2436,6 +2550,9 @@ impl Block {
     /// Block light it gives off (0..15), like Minecraft: a torch lights 13 blocks around it.
     #[inline]
     pub fn light_emission(self) -> u8 {
+        if let Some((b, _)) = self.wall_mount() {
+            return b.light_emission();
+        }
         if crate::construction::entry(self as u16).is_some_and(|(e,_)| matches!(e.form, crate::construction::Form::FloorLamp|crate::construction::Form::SharedChest|crate::construction::Form::StoneAltar|crate::construction::Form::RootAltar|crate::construction::Form::EmberAltar)) { return 15; }
         use Block::*;
         match self {
@@ -2570,4 +2687,33 @@ mod tests {
    }
   }
  }
+}
+
+/// Boxes of a button or a lever on a wall: the floor boxes stood up against the wall at side
+/// `dir` (the height off the floor becomes the distance out of the wall; the lever leans up
+/// and down instead of sideways).
+fn wall_boxes(base: Block, dir: u8) -> &'static [[f32; 6]] {
+    use std::sync::OnceLock;
+    static T: [OnceLock<Vec<[f32; 6]>>; 24] = [const { OnceLock::new() }; 24];
+    let kind = match base {
+        Block::Button => 0,
+        Block::ButtonOn => 1,
+        Block::SwitchOff => 2,
+        Block::SwitchOn => 3,
+        _ => return &[],
+    };
+    T[kind * 4 + (dir % 4) as usize].get_or_init(|| {
+        base.boxes()
+            .iter()
+            .map(|b| {
+                let (o0, o1) = (b[2], b[5]);
+                match dir % 4 {
+                    0 => [1.0 - o1, b[0], b[1], 1.0 - o0, b[3], b[4]],
+                    1 => [o0, b[0], b[1], o1, b[3], b[4]],
+                    2 => [b[0], 1.0 - o1, b[1], b[3], 1.0 - o0, b[4]],
+                    _ => [b[0], o0, b[1], b[3], o1, b[4]],
+                }
+            })
+            .collect()
+    })
 }
