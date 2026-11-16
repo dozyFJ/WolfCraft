@@ -970,6 +970,30 @@ impl GameSession {
             self.buttonsim.tick(dt);
             self.clicker.tick(dt);
         }
+        // WolfTech battery: one in the inventory tops up the electric tool in the hand.
+        {
+            use wolfcraft_engine::items::{ids, rechargeable};
+            let inv = &mut self.player.inventory;
+            let sel = inv.selected;
+            let need = inv.slots[sel].filter(|h| h.id != ids::BATTERY && rechargeable(h.id)).map(|h| h.damage).unwrap_or(0);
+            if need > 0 {
+                let mut want = need.min((30.0 * dt).ceil() as u16);
+                for i in 0..inv.slots.len() {
+                    if want == 0 || i == sel {
+                        continue;
+                    }
+                    if let Some(b) = inv.slots[i].as_mut().filter(|b| b.id == ids::BATTERY) {
+                        let left = b.info().durability.saturating_sub(b.damage);
+                        let n = left.min(want);
+                        b.damage += n;
+                        want -= n;
+                        if let Some(h) = inv.slots[sel].as_mut() {
+                            h.damage -= n;
+                        }
+                    }
+                }
+            }
+        }
         // The clicker kit: a double jump.
         self.player.double_jump = self.clicker.active && (self.minigames || self.studio);
         self.tick_arena(dt);
@@ -2510,9 +2534,14 @@ impl GameSession {
             // Solar panels: daylight and open sky, checked once a second.
             let day = self.daylight() > 0.45 && self.weather.rain < 0.5;
             for (c, st) in self.tech.iter_mut() {
-                if self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::SolarPanel) {
+                let here = self.chunks.get_block(*c);
+                if here == Some(wolfcraft_engine::block::Block::SolarPanel) {
                     st.day = day;
                     st.sunny = day && (1..40).all(|k| g.offset(*c, 0, 0, k).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
+                } else if here == Some(wolfcraft_engine::block::Block::LunarPanel) {
+                    // The lunar panel: `sunny` means open sky here (it works at night).
+                    st.day = self.daylight() > 0.45;
+                    st.sunny = (1..40).all(|k| g.offset(*c, 0, 0, k).and_then(|n| self.chunks.get_block(n)).is_none_or(|b| !b.is_opaque()));
                 }
             }
             // Wind, lava heat and water: what is around them, checked once a second.
@@ -2679,7 +2708,56 @@ impl GameSession {
                     st.flow = if st.sunny { sp.rate } else if st.day { sp.rate * 0.25 } else { 0.0 };
                     st.working = st.flow > 0.0;
                 }
-                Kind::Cell => {
+                Kind::Lunar => {
+                    st.flow = if st.day { 0.0 } else if st.sunny { sp.rate } else { sp.rate * 0.25 };
+                    st.working = st.flow > 0.0;
+                }
+                // Tesla coil: once a second, a lightning bolt at the nearest hostile creature.
+                Kind::Tesla => {
+                    st.flow = sp.rate;
+                    st.burn += dt;
+                    if st.burn >= sp.time {
+                        st.burn = 0.0;
+                        let centre = self.chunks.grid().cell_center(c);
+                        let target = self.mobs.mobs.iter().enumerate().filter(|(_, m)| m.kind.hostile() && m.hp > 0.0 && (m.body.pos - centre).length_squared() < 49.0).min_by(|a, b| (a.1.body.pos - centre).length_squared().total_cmp(&(b.1.body.pos - centre).length_squared())).map(|(i, m)| (i, m.body.pos));
+                        if let (Some((i, at)), true) = (target, st.energy >= 60.0) {
+                            st.energy -= 60.0;
+                            st.working = true;
+                            self.mobs.hurt(i, 8.0, centre);
+                            // The bolt: bright sparks along the line from the coil to the target.
+                            for k in 0..6 {
+                                let p = centre + (at - centre) * (k as f64 / 5.0);
+                                self.mobs.burst(p, &[[0.55, 0.85, 1.0], [0.95, 0.98, 1.0]], 0.25);
+                            }
+                        }
+                    }
+                }
+                // Charging pad: the player standing on it gets the held tool and electric armour
+                // charged, 5 ЭЕ per point.
+                Kind::ChargePad => {
+                    st.flow = sp.rate;
+                    let g = self.chunks.grid();
+                    let on = g.offset(c, 0, 0, 1) == Some(g.world_to_cell(self.player.body.pos));
+                    if on && st.energy >= 5.0 {
+                        let mut budget = ((st.energy / 5.0).floor() as u16).min((60.0 * dt).ceil() as u16);
+                        let inv = &mut self.player.inventory;
+                        let sel = inv.selected;
+                        let gear = inv.slots.get_mut(sel).into_iter().flatten().chain(inv.armor.iter_mut().flatten());
+                        for s in gear {
+                            if budget == 0 {
+                                break;
+                            }
+                            if wolfcraft_engine::items::rechargeable(s.id) && s.damage > 0 {
+                                let pts = budget.min(s.damage);
+                                s.damage -= pts;
+                                budget -= pts;
+                                st.energy -= pts as f32 * 5.0;
+                                st.working = true;
+                            }
+                        }
+                    }
+                }
+                Kind::Cell | Kind::BigCell => {
                     st.flow = 0.0;
                     // Charges WolfTech gear lying in its first slot: 5 ЭЕ per point of charge.
                     let v = self.container_slots(c, b);
