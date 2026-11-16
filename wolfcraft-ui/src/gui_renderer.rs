@@ -69,6 +69,19 @@ impl GuiIcons {
         for y in 0..3 {for x in 0..3 {painter.image(self.gui.id(),Rect::from_min_max(egui::pos2(xs[x],ys[y]),egui::pos2(xs[x+1],ys[y+1])),Rect::from_min_max(egui::pos2(us[x],vs[y]),egui::pos2(us[x+1],vs[y+1])),tint);}}
     }
 
+    /// A block's illustrated header, using original sprites from the GUI atlas.
+    pub fn paint_block_header(&self,painter:&egui::Painter,rect:Rect,skin:u16,title:&str) {
+        use wolfcraft_assets::gui as g;
+        self.paint_panel(painter,rect,skin,Color32::WHITE);
+        let art=match skin {g::PANEL_WORKBENCH=>Some(g::ART_WORKBENCH),g::PANEL_FURNACE=>Some(g::ART_FURNACE),g::PANEL_CHEST=>Some(g::ART_CHEST),g::PANEL_FORGE=>Some(g::ART_FORGE),_=>None};
+        if let Some(art)=art {
+            let size=egui::vec2(rect.height()*1.65,rect.height()-8.0);
+            self.paint(painter,Rect::from_min_size(egui::pos2(rect.right()-size.x-8.0,rect.top()+4.0),size),art,Color32::WHITE);
+        }
+        let text_rect=Rect::from_min_max(rect.min+egui::vec2(14.0,4.0),egui::pos2(rect.right()-if art.is_some(){rect.height()*1.65+20.0}else{12.0},rect.bottom()-4.0));
+        painter.with_clip_rect(text_rect).text(egui::pos2(text_rect.left(),text_rect.center().y),egui::Align2::LEFT_CENTER,title,egui::FontId::proportional(18.0),Color32::WHITE);
+    }
+
     /// Draws only the left `fraction` (0..1) of an icon, e.g. a half heart.
     pub fn paint_partial(&self, painter: &egui::Painter, rect: Rect, icon: u16, tint: Color32, fraction: f32) {
         let f = fraction.clamp(0.0, 1.0);
@@ -414,10 +427,13 @@ pub fn centered_square(rect: Rect, size: f32) -> Rect {
 pub fn block_panel(block:Block)->u16 {
     use wolfcraft_assets::gui as g;use wolfcraft_engine::construction::{self,Form};
     if let Some((e,_))=construction::entry(block as u16){match e.form{
+        Form::Workbench=>return g::PANEL_WORKBENCH,
+        Form::Furnace=>return g::PANEL_FURNACE,
+        Form::StorageChest|Form::Barrel=>return if e.material<3 {g::PANEL_CHEST}else{g::PANEL_METAL},
         Form::SharedChest=>return g::PANEL_RESONANCE,Form::PortableCrate=>return g::PANEL_PORTABLE,
         Form::KitchenBase|Form::Counter|Form::Sink=>return g::PANEL_KITCHEN,
         _=>{}
     }if e.material<3{return g::PANEL_WOOD;}if e.material==6||e.material==7{return g::PANEL_METAL;}}
     if wolfcraft_engine::wolftech::kind(block).is_some() {return g::PANEL_METAL;}
-    match block.base_kind(){Block::ElectricFurnace|Block::MachineCasing|Block::Terminal|Block::CommandBlock=>g::PANEL_METAL,Block::EnchantTable=>g::PANEL_MAGIC,Block::Chest|Block::CraftingTable|Block::Battery=>g::PANEL_WOOD,_=>g::PANEL_STONE}
+    match block.base_kind(){Block::CraftingTable=>g::PANEL_WORKBENCH,Block::ElectricFurnace=>g::PANEL_FURNACE,Block::MachineCasing=>g::PANEL_FORGE,Block::Chest|Block::Battery=>g::PANEL_CHEST,Block::Terminal|Block::CommandBlock=>g::PANEL_METAL,Block::EnchantTable=>g::PANEL_MAGIC,_=>g::PANEL_STONE}
 }

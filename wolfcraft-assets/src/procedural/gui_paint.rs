@@ -55,6 +55,14 @@ pub mod gui {
     pub const PANEL_PORTABLE:u16=45;
     pub const PANEL_STONE:u16=46;
     pub const PANEL_DARK:u16=47;
+    pub const PANEL_WORKBENCH:u16=48;
+    pub const PANEL_FURNACE:u16=49;
+    pub const PANEL_CHEST:u16=50;
+    pub const PANEL_FORGE:u16=51;
+    pub const ART_WORKBENCH:u16=52;
+    pub const ART_FURNACE:u16=53;
+    pub const ART_CHEST:u16=54;
+    pub const ART_FORGE:u16=55;
     pub const COUNT: u16 = 48;
 }
 
@@ -394,13 +402,56 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         (PANEL_PORTABLE,"panel_portable",[49,39,72],[154,124,206]),
         (PANEL_STONE,"panel_stone",[52,56,61],[146,151,159]),
         (PANEL_DARK,"panel_dark",[23,28,35],[67,83,99]),
+        (PANEL_WORKBENCH,"panel_workbench",[103,66,38],[218,167,93]),
+        (PANEL_FURNACE,"panel_furnace",[61,56,53],[174,126,83]),
+        (PANEL_CHEST,"panel_chest",[83,52,31],[199,151,71]),
+        (PANEL_FORGE,"panel_forge",[43,53,68],[161,182,198]),
     ] {let mut img=Image::new(32,32);for y in 0..32 {for x in 0..32 {
         let border=x<3||y<3||x>=29||y>=29;
-        let seam=if id==PANEL_WOOD {(y%8)==0}else if id==PANEL_STONE {(y%12)==0||((x+if y<12{0}else{8})%16==0)}else{false};
+        let seam=if matches!(id,PANEL_WOOD|PANEL_WORKBENCH|PANEL_CHEST) {(y%8)==0}else if matches!(id,PANEL_STONE|PANEL_FURNACE) {(y%12)==0||((x+if y<12{0}else{8})%16==0)}else{false};
         let stud=(x==4||x==27)&&(y==4||y==27);
         let c=if border||stud {edge}else if seam{base.map(|v|v/2)}else{base};
         img.set(x,y,[c[0],c[1],c[2],255]);
     }}l.add(id,name,img);}
+    // Original tool illustrations live in the GUI atlas, independent of the UI layout.
+    for (id,name) in [(ART_WORKBENCH,"art_workbench"),(ART_FURNACE,"art_furnace"),(ART_CHEST,"art_chest"),(ART_FORGE,"art_forge")] {
+        let mut q=Painter::new(128,72);
+        let dark=Rgb(37.0/255.0,27.0/255.0,23.0/255.0);let brass=Rgb(232.0/255.0,184.0/255.0,91.0/255.0);let steel=Rgb(182.0/255.0,204.0/255.0,217.0/255.0);
+        match id {
+            ART_WORKBENCH=>{
+                q.shape(Rgb(178.0/255.0,121.0/255.0,64.0/255.0),&rrect(0.05,0.68,0.95,0.85,0.04));
+                q.shape(dark,&rrect(0.12,0.82,0.20,0.98,0.02));q.shape(dark,&rrect(0.80,0.82,0.88,0.98,0.02));
+                q.shape(Rgb(93.0/255.0,55.0/255.0,32.0/255.0),&segment(0.23,0.59,0.70,0.16,0.065));
+                q.shape(steel,&polygon(vec![(0.51,0.12),(0.69,0.05),(0.89,0.36),(0.79,0.48)]));
+                q.shape(brass,&rrect(0.15,0.12,0.31,0.44,0.03));
+                q.shape(Rgb(222.0/255.0,204.0/255.0,152.0/255.0),&polygon(vec![(0.42,0.48),(0.69,0.43),(0.77,0.61),(0.47,0.65)]));
+            },
+            ART_FURNACE=>{
+                q.shape(Rgb(122.0/255.0,127.0/255.0,132.0/255.0),&rrect(0.17,0.05,0.84,0.94,0.06));
+                q.shape(dark,&rrect(0.25,0.22,0.76,0.76,0.08));
+                q.shape(Rgb(224.0/255.0,83.0/255.0,35.0/255.0),&polygon(vec![(0.28,0.71),(0.35,0.40),(0.47,0.56),(0.58,0.27),(0.73,0.71)]));
+                q.shape(Rgb(255.0/255.0,199.0/255.0,75.0/255.0),&polygon(vec![(0.40,0.71),(0.51,0.44),(0.62,0.71)]));
+                for x in [0.30,0.43,0.56,0.69] {q.shape(steel,&segment(x,0.71,x,0.79,0.025));}
+                q.shape(brass,&rrect(0.26,0.83,0.74,0.88,0.01));
+            },
+            ART_CHEST=>{
+                q.shape(dark,&rrect(0.11,0.18,0.91,0.92,0.06));
+                q.shape(Rgb(177.0/255.0,111.0/255.0,49.0/255.0),&rrect(0.15,0.22,0.87,0.86,0.04));
+                q.shape(Rgb(111.0/255.0,65.0/255.0,34.0/255.0),&segment(0.16,0.48,0.86,0.48,0.035));
+                for x in [0.23,0.74] {q.shape(brass,&rrect(x,0.23,x+0.07,0.85,0.01));}
+                q.shape(brass,&rrect(0.43,0.40,0.59,0.66,0.03));
+                q.shape(dark,&circle(0.51,0.50,0.035));q.shape(dark,&segment(0.51,0.50,0.51,0.59,0.018));
+            },
+            _=>{
+                q.shape(Rgb(83.0/255.0,105.0/255.0,125.0/255.0),&polygon(vec![(0.10,0.36),(0.88,0.36),(0.79,0.51),(0.57,0.55),(0.57,0.74),(0.72,0.84),(0.27,0.84),(0.41,0.71),(0.41,0.54),(0.21,0.49)]));
+                q.shape(steel,&segment(0.14,0.37,0.86,0.37,0.045));
+                q.shape(Rgb(163.0/255.0,105.0/255.0,55.0/255.0),&segment(0.54,0.30,0.82,0.04,0.04));
+                q.shape(steel,&polygon(vec![(0.43,0.11),(0.50,0.02),(0.68,0.19),(0.61,0.28)]));
+                for (x,y) in [(0.26,0.17),(0.34,0.25),(0.17,0.29)] {q.shape(brass,&segment(x,y,x+0.04,y-0.07,0.014));}
+            }
+        }
+        l.add(id,name,q.finish());
+    }
     l.0
 }
 
