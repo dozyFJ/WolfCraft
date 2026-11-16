@@ -104,6 +104,10 @@ pub struct Player {
     glide_wear: f64,
     /// WolfTech jetpack: thrusting now (for the flame), and wear building up to one charge.
     pub jetting: bool,
+    /// Mini-game kits: one more jump in the air (reset on landing).
+    pub double_jump: bool,
+    air_jump_used: bool,
+    jump_was: bool,
     jet_wear: f64,
     pub survival: Survival,
     pub spawn: DVec3,
@@ -145,6 +149,9 @@ impl Player {
             revive_guard: 0.0,
             glide_wear: 0.0,
             jetting: false,
+            double_jump: false,
+            air_jump_used: false,
+            jump_was: false,
             jet_wear: 0.0,
             survival: Survival::default(),
             spawn,
@@ -381,6 +388,17 @@ impl Player {
             self.body.on_ground = false;
             self.anim_amount = 0.0;
             return;
+        }
+        // Double jump (mini-game kits): a fresh press in the air throws you up once more.
+        let pressed = c.jump && !self.jump_was;
+        self.jump_was = c.jump;
+        if self.body.on_ground || self.body.in_water || self.body.flying {
+            self.air_jump_used = false;
+        } else if self.double_jump && pressed && !self.air_jump_used {
+            let up = self.up();
+            let rise = self.body.vel.dot(up);
+            self.body.vel += up * (9.0 - rise.min(9.0));
+            self.air_jump_used = true;
         }
         let input = MoveInput { wish, speed, jump: c.jump&&!self.gliding, up: c.jump, down: c.sneak };
         let altitude_before = crate::cubesphere::radial(self.body.pos);

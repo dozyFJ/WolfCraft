@@ -2057,6 +2057,7 @@ impl App {
         let lua_gui: Vec<crate::lua::GuiElement> = self.lua.as_ref().map(|l| l.gui()).unwrap_or_default();
         let mut lua_clicks: Vec<String> = Vec::new();
         let mut clicker_acts: Vec<ClickAct> = Vec::new();
+        let mut arena_buys: Vec<usize> = Vec::new();
         let mut studio_actions: Vec<wolfcraft_ui::studio_ui::StudioAction> = Vec::new();
         let mut studio_cover: Vec<egui::Rect> = Vec::new();
         let mut stellar_cover: Vec<egui::Rect> = Vec::new();
@@ -2276,6 +2277,11 @@ impl App {
                             buttonsim_overlay(ctx, &s.buttonsim);
                             if s.clicker.active && (s.minigames || s.studio) && !studio_edit {
                                 clicker_acts = clicker_overlay(ctx, &icons, &s.clicker);
+                            }
+                            if let Some(a) = &s.arena {
+                                if !studio_edit {
+                                    arena_buys = arena_overlay(ctx, a, &s.player.inventory);
+                                }
                             }
                             // «Звёздный пульт»: its button and skill menu, cinema bars, flashes.
                             let holding = screen == Screen::Playing && s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::STAR_REMOTE);
@@ -2671,6 +2677,14 @@ impl App {
                 }
             }
         }
+        // Бед/Эггварс shop purchases.
+        if let Some(s) = &mut self.session {
+            for k in arena_buys {
+                match s.arena_buy(k) {
+                    Ok(t) | Err(t) => s.item_name = Some((t, 2.0)),
+                }
+            }
+        }
         // «Кликер»: what was pressed in its panels.
         if let Some(s) = &mut self.session {
             let now = self.time.elapsed() as f64;
@@ -2694,7 +2708,7 @@ impl App {
                         Ok(if m > 0.0 { format!("Продано: +{} денег", wolfcraft_engine::buttonsim::short(m)) } else { String::new() })
                     }
                     ClickAct::Upgrade(k) => s.clicker.buy_upgrade(k).map(|_| format!("{} — уровень {}", wolfcraft_engine::clicker::UPGRADES[k].0, s.clicker.upgrades[k])),
-                    ClickAct::Rebirth => s.clicker.rebirth().map(|_| format!("Перерождение {}! Множитель ×{:.1}", s.clicker.rebirths, s.clicker.rebirth_mult())),
+                    ClickAct::Rebirth(n) => s.clicker.buy_rebirths(n).map(|_| format!("+{n} перерожд. — всего {}! Множитель ×{:.1}", s.clicker.rebirths, s.clicker.rebirth_mult())),
                     ClickAct::Hatch(e) => {
                         let (r1, r2) = (s.mobs.rand(), s.mobs.rand());
                         s.clicker.hatch(e, r1, r2).map(|k| {
@@ -4408,13 +4422,109 @@ fn petsim_overlay(ctx: &egui::Context, p: &wolfcraft_engine::petsim::PetSim, lob
 }
 
 /// «Кнопки» on screen: money, income per second, multiplier and rebirths (top right).
+/// PvP templates on screen: the mode, team or role, the timer, the bed / egg, the seeker's
+/// count-down, the result; a «Магазин» button and window in Бед/Эггварс. Returns purchases.
+fn arena_overlay(ctx: &egui::Context, a: &wolfcraft_engine::arenas::Arena, inv: &wolfcraft_engine::inventory::Inventory) -> Vec<usize> {
+    use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
+    use wolfcraft_engine::arenas::SHOP;
+    let mut buys = Vec::new();
+    let screen = ctx.screen_rect();
+    let bold = |s: f32| egui::FontId::new(s, egui::FontFamily::Name("bold".into()));
+    let shop_id = egui::Id::new("arena-shop");
+    let mut shop: bool = ctx.data(|d| d.get_temp(shop_id)).unwrap_or(false);
+    egui::Area::new(egui::Id::new("arena-hud")).order(egui::Order::Foreground).fixed_pos(screen.min).interactable(true).show(ctx, |ui| {
+        let pt = ui.painter().clone();
+        // The seeker counts with eyes closed.
+        if a.counting() {
+            pt.rect_filled(screen, 0.0, Color32::from_black_alpha(245));
+            pt.text(screen.center() - Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, format!("{}", 20 - a.age as i32), bold(64.0), Color32::WHITE);
+            pt.text(screen.center() + Vec2::new(0.0, 30.0), Align2::CENTER_CENTER, "Считайте… прячущиеся прячутся", FontId::proportional(16.0), Color32::from_white_alpha(200));
+        }
+        let mut parts = vec![a.mode.name().to_string()];
+        if !a.team.is_empty() {
+            parts.push(a.team.to_string());
+        }
+        if a.role != wolfcraft_engine::arenas::Role::None {
+            parts.push(a.role.name().to_string());
+        }
+        if a.mode.round() > 0.0 {
+            parts.push(format!("{}:{:02}", a.timer as u32 / 60, a.timer as u32 % 60));
+        }
+        if a.mode.has_heart() {
+            let what = if a.mode == wolfcraft_engine::arenas::Mode::EggWars { "Яйцо" } else { "Кровать" };
+            parts.push(format!("{what} {}", if a.heart_alive { "✔" } else { "✖" }));
+        }
+        let text = parts.join("  ·  ");
+        let g = pt.layout_no_wrap(text.clone(), bold(14.0), Color32::WHITE);
+        let w = g.size().x + 28.0 + if a.mode.has_shop() { 100.0 } else { 0.0 };
+        let bar = Rect::from_min_size(Pos2::new(screen.center().x - w / 2.0, screen.top() + 8.0), Vec2::new(w, 36.0));
+        pt.rect_filled(bar.translate(Vec2::new(0.0, 3.0)), Rounding::same(18.0), Color32::from_black_alpha(60));
+        pt.rect_filled(bar, Rounding::same(18.0), Color32::from_rgba_unmultiplied(18, 30, 52, 215));
+        pt.rect_filled(Rect::from_min_max(bar.min + Vec2::new(10.0, 2.0), Pos2::new(bar.right() - 10.0, bar.center().y)), Rounding::same(9.0), Color32::from_white_alpha(18));
+        pt.rect_stroke(bar, Rounding::same(18.0), Stroke::new(1.0, Color32::from_white_alpha(90)));
+        pt.galley(Pos2::new(bar.left() + 14.0, bar.center().y - g.size().y / 2.0), g, Color32::WHITE);
+        if a.mode.has_shop() && !a.eliminated {
+            let r = Rect::from_min_max(Pos2::new(bar.right() - 96.0, bar.top() + 4.0), Pos2::new(bar.right() - 4.0, bar.bottom() - 4.0));
+            let resp = ui.interact(r, egui::Id::new("arena-shop-btn"), Sense::click());
+            pt.rect_filled(r, Rounding::same(14.0), if shop || resp.hovered() { Color32::from_rgb(70, 180, 80) } else { Color32::from_rgb(50, 150, 60) });
+            pt.text(r.center(), Align2::CENTER_CENTER, "Магазин", bold(13.0), Color32::WHITE);
+            if resp.clicked() {
+                shop = !shop;
+            }
+        }
+        if a.eliminated || a.over.is_some() {
+            let msg = a.over.clone().unwrap_or_else(|| "Вы выбыли — наблюдайте".into());
+            let r = Rect::from_center_size(Pos2::new(screen.center().x, screen.top() + 80.0), Vec2::new(360.0f32.min(screen.width() - 20.0), 40.0));
+            pt.rect_filled(r, Rounding::same(20.0), Color32::from_rgba_unmultiplied(120, 30, 40, 220));
+            pt.text(r.center(), Align2::CENTER_CENTER, msg, bold(14.0), Color32::WHITE);
+        }
+    });
+    if shop {
+        let mut open = true;
+        egui::Window::new(egui::RichText::new("Магазин").font(bold(17.0)))
+            .id(egui::Id::new("arena-shop-window"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .frame(egui::Frame::window(&ctx.style()).fill(Color32::from_rgba_unmultiplied(16, 26, 46, 240)).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0, Color32::from_white_alpha(90))))
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new(format!("У вас: железо {} · золото {} · алмазы {}", inv.count(wolfcraft_engine::items::ids::IRON_INGOT), inv.count(wolfcraft_engine::items::ids::GOLD_INGOT), inv.count(wolfcraft_engine::items::ids::DIAMOND))).color(Color32::from_white_alpha(210)));
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical().max_height(screen.height() * 0.6).show(ui, |ui| {
+                    egui::Grid::new("arena-shop-grid").num_columns(2).spacing(Vec2::new(10.0, 6.0)).show(ui, |ui| {
+                        for (k, (name, _, (cid, cn))) in SHOP.iter().enumerate() {
+                            let have = inv.count(*cid) >= *cn as u32;
+                            let cost = format!("{} {}", cn, match *cid {
+                                x if x == wolfcraft_engine::items::ids::IRON_INGOT => "жел.",
+                                x if x == wolfcraft_engine::items::ids::GOLD_INGOT => "зол.",
+                                _ => "алм.",
+                            });
+                            ui.label(egui::RichText::new(*name).color(Color32::WHITE));
+                            let b = egui::Button::new(egui::RichText::new(cost).font(bold(13.0)).color(Color32::WHITE)).fill(if have { Color32::from_rgb(60, 170, 70) } else { Color32::from_rgb(70, 75, 90) }).rounding(Rounding::same(12.0)).min_size(Vec2::new(80.0, 28.0));
+                            if ui.add(b).clicked() {
+                                buys.push(k);
+                            }
+                            ui.end_row();
+                        }
+                    });
+                });
+            });
+        if !open {
+            shop = false;
+        }
+    }
+    ctx.data_mut(|d| d.insert_temp(shop_id, shop));
+    buys
+}
+
 /// What the «Кликер» overlay asks the game to do.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ClickAct {
     Tap,
     Sell,
     Upgrade(usize),
-    Rebirth,
+    Rebirth(u32),
     Hatch(usize),
     Island(usize),
 }
@@ -4694,15 +4804,20 @@ fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolf
                     });
                 }
                 4 => {
-                    let price = c.rebirth_price();
+                    // The rebirth shop: one or a pack at once.
                     ui.label(egui::RichText::new(format!("Сейчас: перерождений {} · множитель ×{:.1}", c.rebirths, c.rebirth_mult())).color(Color32::WHITE));
-                    ui.label(egui::RichText::new(format!("После: ×{:.1} к кликам и рюкзак в {} раза больше. Деньги, клики и улучшения обнулятся; питомцы и острова останутся.", 1.0 + (c.rebirths + 1) as f64 * 0.5, c.rebirths + 2)).size(12.5).color(Color32::from_white_alpha(190)));
+                    ui.label(egui::RichText::new("Каждое перерождение: +×0.5 к кликам и рюкзак больше. Деньги, клики и улучшения обнулятся; питомцы и острова останутся.").size(12.5).color(Color32::from_white_alpha(190)));
                     ui.add_space(6.0);
-                    let paint = |p: &egui::Painter, r: Rect| {
-                        p.text(r.center(), Align2::CENTER_CENTER, "♻", FontId::proportional(28.0), Color32::from_rgb(200, 150, 255));
-                    };
-                    if row(ui, &paint, "Переродиться".into(), format!("стоимость ${}", short(price)), format!("${}", short(price)), c.money >= price) {
-                        acts.push(ClickAct::Rebirth);
+                    for n in wolfcraft_engine::clicker::Clicker::PACKS {
+                        let price = c.rebirths_price(n);
+                        let paint = move |p: &egui::Painter, r: Rect| {
+                            p.text(r.center() - Vec2::new(0.0, 6.0), Align2::CENTER_CENTER, "♻", FontId::proportional(22.0), Color32::from_rgb(200, 150, 255));
+                            p.text(r.center() + Vec2::new(0.0, 14.0), Align2::CENTER_CENTER, format!("+{n}"), FontId::proportional(12.0), Color32::WHITE);
+                        };
+                        let after = 1.0 + (c.rebirths + n) as f64 * 0.5;
+                        if row(ui, &paint, format!("{n} перерожд."), format!("станет ×{after:.1}"), format!("${}", short(price)), c.money >= price) {
+                            acts.push(ClickAct::Rebirth(n));
+                        }
                     }
                 }
                 _ => {

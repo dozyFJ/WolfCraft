@@ -1896,6 +1896,8 @@ blocks! {
     2502 MechSaw => needs_pick(info("Механическая пила", Opaque, 3.0, Pickaxe, column(t::KIN_SAW, t::KIN_PRESS_TOP, t::KIN_PRESS_TOP))),
     2503 CrushingWheel => needs_pick(info("Дробильные колёса", Opaque, 3.5, Pickaxe, column(t::KIN_CRUSH, t::KIN_PRESS_TOP, t::KIN_PRESS_TOP))),
     2504 Gearbox => needs_pick(info("Редуктор", Opaque, 3.0, Pickaxe, all(t::KIN_GEARBOX))),
+    2505 TeamBed => info("Кровать команды", Shape, 0.6, Hand, column(t::WOOL_RED, t::WOOL_RED, t::PLANKS)),
+    2506 TeamEgg => info("Яйцо команды", Shape, 2.5, Hand, all(t::DIAMOND_BLOCK)),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2114,6 +2116,8 @@ impl Block {
             Bones => &BONES,
             Cable => &[CABLE],
             ItemPipe | PipeExtractor => &[PIPE],
+            TeamBed => &[[0.0, 0.0, 0.0, 1.0, 0.56, 1.0]],
+            TeamEgg => &[[0.25, 0.0, 0.25, 0.75, 0.85, 0.75]],
             // «Механика»: thin shafts, cog and wheel discs, a crank on top of a block.
             Shaft => &[[0.0, 0.375, 0.375, 1.0, 0.625, 0.625]],
             ShaftJ => &[[0.375, 0.0, 0.375, 0.625, 1.0, 0.625]],

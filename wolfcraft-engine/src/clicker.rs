@@ -222,20 +222,38 @@ impl Clicker {
         Ok(())
     }
 
-    pub fn rebirth_price(&self) -> f64 {
-        10_000.0 * 4f64.powi(self.rebirths as i32)
+    /// The price of rebirth number `n` (0-based): each next one costs a bit more.
+    fn one_price(n: u32) -> f64 {
+        10_000.0 * (1.0 + n as f64 * 0.6)
     }
+
+    pub fn rebirth_price(&self) -> f64 {
+        Self::one_price(self.rebirths)
+    }
+
+    /// The rebirth shop: `n` rebirths at once cost the sum of their prices.
+    pub fn rebirths_price(&self, n: u32) -> f64 {
+        (0..n).map(|i| Self::one_price(self.rebirths + i)).sum()
+    }
+
+    /// Packs in the rebirth shop.
+    pub const PACKS: [u32; 5] = [1, 5, 25, 100, 500];
 
     /// Rebirth: money, clicks and upgrades go, the multiplier and the backpack grow for good.
     pub fn rebirth(&mut self) -> Result<(), String> {
-        let price = self.rebirth_price();
+        self.buy_rebirths(1)
+    }
+
+    /// Buys `n` rebirths at once.
+    pub fn buy_rebirths(&mut self, n: u32) -> Result<(), String> {
+        let price = self.rebirths_price(n);
         if self.money < price {
-            return Err(format!("Перерождение стоит {} денег", short(price)));
+            return Err(format!("{n} перерожд. стоят {} денег", short(price)));
         }
         self.money = 0.0;
         self.clicks = 0.0;
         self.upgrades = [0; 3];
-        self.rebirths += 1;
+        self.rebirths += n;
         Ok(())
     }
 
@@ -356,6 +374,11 @@ mod tests {
         assert_eq!(c.multiplier(), c.rebirth_mult() * c.pet_mult() * 2.0);
         c.rebirth().unwrap();
         assert_eq!((c.money, c.upgrades, c.rebirths), (0.0, [0; 3], 1));
+        assert!(c.rebirths_price(5) > c.rebirth_price() * 5.0);
+        c.money = c.rebirths_price(5);
+        c.buy_rebirths(5).unwrap();
+        assert_eq!(c.rebirths, 6);
+        c.rebirths = 1;
         let back = Clicker::from_text(&c.to_text());
         assert_eq!((back.rebirths, back.pets.clone(), back.unlocked, back.island), (1, c.pets.clone(), 1, 1));
     }
