@@ -43,6 +43,10 @@ pub fn pill_button(ui: &mut Ui, icons: &GuiIcons, icon_id: Option<u16>, text: &s
     // Material pill: fully rounded ends.
     let r = Rounding::same(rect.height() / 2.0);
     painter.rect_filled(rect, r, fill);
+    if enabled && !matches!(kind, ButtonKind::Ghost | ButtonKind::Danger) {
+        let shine = Rect::from_min_max(rect.min + Vec2::splat(1.0), Pos2::new(rect.right()-1.0, rect.center().y));
+        crate::launcher::grad_rect(painter, shine, rect.height()/2.0, 0.0, crate::launcher::glass_gloss(&p), Color32::TRANSPARENT);
+    }
     if stroke != Color32::TRANSPARENT {
         painter.rect_stroke(rect, r, Stroke::new(1.0_f32, stroke));
     }
@@ -213,7 +217,7 @@ pub fn text_input(ui: &mut Ui, icons: &GuiIcons, text: &mut String, hint: &str, 
 /// Rounded surface container.
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let p = palette(ui.ctx());
-    Frame::none().fill(p.surface).rounding(Rounding::same(10.0)).stroke(Stroke::new(1.0_f32, p.outline)).inner_margin(Margin::same(14.0)).show(ui, add).inner
+    Frame::none().fill(crate::launcher::glass_tint(&p)).rounding(Rounding::same(18.0)).stroke(Stroke::new(1.0_f32, crate::launcher::glass_rim(&p))).inner_margin(Margin::same(14.0)).show(ui, add).inner
 }
 
 /// Hoverable card (used for list rows). Returns the response of the whole row.
@@ -309,11 +313,9 @@ pub fn tab_bar(ui: &mut Ui, id: &str, tabs: &[&str], selected: &mut usize) -> bo
             let sel = *selected == i;
             let a = ui.ctx().animate_bool_with_time(Id::new(id).with(i), sel, ANIM_TIME);
             let hv = ui.ctx().animate_bool_with_time(Id::new(id).with(("h", i)), resp.hovered(), ANIM_TIME);
-            ui.painter().rect_filled(rect, Rounding::same(10.0), mix(Color32::TRANSPARENT, p.surface_hover, hv * (1.0 - a)));
-            let col = mix(p.text_muted, p.accent, a).lerp_to_gamma(p.text, hv * (1.0 - a));
+            ui.painter().rect_filled(rect, Rounding::same(10.0), mix(mix(Color32::TRANSPARENT, p.surface_hover, hv), p.accent, a));
+            let col = mix(p.text_muted, p.on_accent, a).lerp_to_gamma(p.text, hv * (1.0 - a));
             ui.painter().galley_with_override_text_color(Pos2::new(rect.center().x - galley.size().x / 2.0, rect.center().y - galley.size().y / 2.0), galley, col);
-            let w = (rect.width() - 16.0) * a;
-            ui.painter().rect_filled(Rect::from_center_size(Pos2::new(rect.center().x, rect.bottom() - 2.0), Vec2::new(w, 3.0)), Rounding::same(10.0), p.accent);
             if resp.clicked() && !sel {
                 *selected = i;
                 changed = true;
