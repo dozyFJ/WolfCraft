@@ -1,9 +1,20 @@
 //! Android OTA is owned by the signed APK shell; desktop retains the release-page link.
-const RELEASE_URL: &str = "https://github.com/dozyFJ/WolfCraft/releases/tag/latest";
+/// Where the PC build is published (the Windows exe lives in the «pc-test» release).
+const RELEASE_URL: &str = "https://github.com/dozyFJ/WolfCraft/releases/tag/pc-test";
 
 pub fn open_release() {
-    #[cfg(not(target_os = "android"))]
-    { let _ = std::process::Command::new("xdg-open").arg(RELEASE_URL).spawn(); }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd").args(["/C", "start", "", RELEASE_URL]).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(RELEASE_URL).spawn();
+    }
+    #[cfg(all(not(target_os = "android"), not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(RELEASE_URL).spawn();
+    }
     #[cfg(target_os = "android")]
     if let Err(e) = open_android() { log::warn!("Could not open updates: {e}"); }
 }
