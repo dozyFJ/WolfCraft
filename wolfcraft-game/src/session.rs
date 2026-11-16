@@ -504,6 +504,7 @@ impl GameSession {
         });
         s.load_block_commands();
         s.load_dimension();
+        s.refresh_globe();
         s.player.align_heading();
         s.prev_radius = radial(s.player.body.pos);
         s
@@ -3649,7 +3650,24 @@ impl GameSession {
         self.hell = hell;
         self.load_containers();
         self.load_tech();
+        self.refresh_globe();
         self.dimension_changed = true;
+    }
+
+    /// What the planet looks like from orbit: its real surface colours, 20 × 20 per face.
+    fn refresh_globe(&self) {
+        const N: i32 = 20;
+        let sampler = wolfcraft_engine::cubesphere::Grid { n: N, cube: self.planet.grid.cube };
+        let mut cols = Vec::with_capacity((6 * N * N) as usize);
+        for f in 0..6u8 {
+            for b in 0..N {
+                for a in 0..N {
+                    let col = self.planet.column(sampler.cell_dir(f, a, b));
+                    cols.push(crate::preview::biome_color(&col));
+                }
+            }
+        }
+        wolfcraft_engine::renderer::sky::set_globe(N as u32, cols);
     }
 
     /// Hell <-> Overworld through a portal (or `/hell`).

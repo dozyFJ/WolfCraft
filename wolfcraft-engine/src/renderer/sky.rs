@@ -22,6 +22,17 @@ pub struct SkyParams {
 
 const SKY_TEX: f32 = 3.0;
 
+/// The real planet seen from space: colours of its surface, `n × n` samples per cube face
+/// (face-major, then j, then i). Set by the game when a world (or dimension) is loaded.
+static GLOBE: std::sync::Mutex<Option<(u32, Vec<[f32; 3]>)>> = std::sync::Mutex::new(None);
+
+/// Gives the sky the planet's surface colours for the view from orbit (`n × n` per face).
+pub fn set_globe(n: u32, colors: Vec<[f32; 3]>) {
+    if let Ok(mut g) = GLOBE.lock() {
+        *g = (colors.len() == (6 * n * n) as usize && n > 0).then_some((n, colors));
+    }
+}
+
 fn hash(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(0x7feb352d);
@@ -343,7 +354,36 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
                 [0.09, 0.25, 0.62]
             }
         };
-        for la in 0..lat_n {
+        // The real surface, face by face (continents, deserts, ice where they really are).
+        let globe = GLOBE.lock().ok().and_then(|g| g.clone());
+        let fake_rows = if globe.is_some() { 0 } else { lat_n };
+        if let Some((gn, cols)) = globe {
+            let shape = crate::cubesphere::Grid { n: 2, cube };
+            let sampler = crate::cubesphere::Grid { n: gn as i32, cube };
+            let pt = |f: u8, a: u32, b: u32| shape.along(sampler.dir_at(f, a as f64, b as f64), 1.0).as_vec3();
+            for f in 0..6u8 {
+                for b in 0..gn {
+                    for a in 0..gn {
+                        let (p0, p1, p2, p3) = (pt(f, a, b), pt(f, a + 1, b), pt(f, a + 1, b + 1), pt(f, a, b + 1));
+                        let n = (p1 - p0).cross(p3 - p0).normalize_or_zero();
+                        let n = if n.dot(p0) < 0.0 { -n } else { n };
+                        // Back side of the planet: not seen.
+                        if n.dot(up) < -0.35 {
+                            continue;
+                        }
+                        let lit = n.dot(sun_n).clamp(-0.2, 1.0) * 0.85 + 0.18;
+                        let base = cols[(f as u32 * gn * gn + b * gn + a) as usize];
+                        let rim = (1.0 - n.dot(up).abs()).powi(3) * 0.35 * lit.max(0.1);
+                        let c = [(base[0] * lit.max(0.07) + rim * 0.3).min(1.0), (base[1] * lit.max(0.07) + rim * 0.5).min(1.0), (base[2] * lit.max(0.07) + rim).min(1.0)];
+                        o.tri(centre + p0 * rad, centre + p1 * rad, centre + p2 * rad, c);
+                        o.tri(centre + p0 * rad, centre + p2 * rad, centre + p3 * rad, c);
+                        o.tri(centre + p0 * rad, centre + p2 * rad, centre + p1 * rad, c);
+                        o.tri(centre + p0 * rad, centre + p3 * rad, centre + p2 * rad, c);
+                    }
+                }
+            }
+        }
+        for la in 0..fake_rows {
             for lo in 0..lon_n {
                 let (a, b, c, d) = (vert(la, lo), vert(la + 1, lo), vert(la + 1, lo + 1), vert(la, lo + 1));
                 let n = (a + b + c + d).normalize();
