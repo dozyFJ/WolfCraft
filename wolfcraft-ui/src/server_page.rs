@@ -94,10 +94,10 @@ pub fn tab_bar(ui: &mut Ui, p: &Palette) -> usize {
                     ui.painter().rect_filled(r, round, p.accent);
                     let shine = egui::Rect::from_min_max(r.min + Vec2::new(r.height() * 0.4, 2.5), egui::pos2(r.right() - r.height() * 0.4, r.center().y));
                     ui.painter().rect_filled(shine, Rounding::same(shine.height() / 2.0), Color32::from_white_alpha(45));
-                    ui.painter().rect_stroke(r, round, egui::Stroke::new(1.0, Color32::from_white_alpha(110)));
+                    ui.painter().rect_stroke(r, round, egui::Stroke::new(1.0_f32, Color32::from_white_alpha(110)));
                 } else {
                     ui.painter().rect_filled(r, round, if resp.hovered() { p.surface_hover } else { Color32::from_black_alpha(if p.dark { 70 } else { 20 }) });
-                    ui.painter().rect_stroke(r, round, egui::Stroke::new(1.0, Color32::from_white_alpha(if p.dark { 40 } else { 120 })));
+                    ui.painter().rect_stroke(r, round, egui::Stroke::new(1.0_f32, Color32::from_white_alpha(if p.dark { 40 } else { 120 })));
                 }
                 ui.painter().galley(egui::pos2(r.left() + 15.0, r.center().y - g.size().y / 2.0), g, p.text);
                 if resp.clicked() {

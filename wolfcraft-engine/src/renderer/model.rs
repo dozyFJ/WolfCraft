@@ -468,7 +468,7 @@ fn add_box_opts(out: &mut Vec<ModelVertex>, f: &Frame, min: Vec3, max: Vec3, piv
             for sa in [-1.0f32, 1.0] {
                 for sb in [-1.0f32, 1.0] {
                     let fa = a * 2 + (sa < 0.0) as usize;
-                    let fb = b * 2 + (sb < 0.0) as usize;
+                    let _fb = b * 2 + (sb < 0.0) as usize;
                     let corner = |sc: f32| { let mut s = Vec3::ZERO; s[a] = sa; s[b] = sb; s[c] = sc; s };
                     let (c0, c1) = (corner(-1.0), corner(1.0));
                     let (na, nb) = (face_n(a, sa), face_n(b, sb));

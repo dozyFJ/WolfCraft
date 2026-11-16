@@ -2,7 +2,7 @@
 //! cards, progress bars, modals. All animate over `ANIM_TIME` and use icons from the GUI atlas.
 
 use crate::gui_renderer::{GuiIcons, centered_square};
-use crate::theme_manager::{ANIM_TIME, Palette, RADIUS_LG, RADIUS_MD, RADIUS_SM, bold_font, palette};
+use crate::theme_manager::{ANIM_TIME, Palette, bold_font, palette};
 use egui::{Align2, Color32, CursorIcon, FontId, Frame, Id, Margin, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
 use wolfcraft_assets::gui as icon;
 

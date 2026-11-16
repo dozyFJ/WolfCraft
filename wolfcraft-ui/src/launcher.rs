@@ -186,7 +186,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                         } else {
                             let hot = resp.hovered() || resp.is_pointer_button_down_on();
                             ui.painter().rect_filled(r, Rounding::same(19.0), if hot { glass_gloss(&p).gamma_multiply(2.0) } else { Color32::from_black_alpha(if p.dark { 50 } else { 16 }) });
-                            ui.painter().rect_stroke(r, Rounding::same(19.0), Stroke::new(1.0, glass_rim(&p).gamma_multiply(0.6)));
+                            ui.painter().rect_stroke(r, Rounding::same(19.0), Stroke::new(1.0_f32, glass_rim(&p).gamma_multiply(0.6)));
                         }
                         nav_icon(ui, icons, *t, Rect::from_center_size(Pos2::new(r.left() + 22.0, r.center().y), Vec2::splat(18.0)), col);
                         let pos = Pos2::new(r.left() + 38.0, r.center().y);
@@ -420,7 +420,7 @@ fn aero_tabs(ui: &mut Ui, p: &Palette, names: &[&str], cur: usize) -> Option<usi
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 38.0), Sense::hover());
     let pt = ui.painter();
     pt.rect_filled(rect, Rounding::same(19.0), Color32::from_black_alpha(if p.dark { 70 } else { 28 }));
-    pt.rect_stroke(rect, Rounding::same(19.0), Stroke::new(1.0, glass_rim(p).gamma_multiply(0.7)));
+    pt.rect_stroke(rect, Rounding::same(19.0), Stroke::new(1.0_f32, glass_rim(p).gamma_multiply(0.7)));
     let tw = w / names.len() as f32;
     let mut out = None;
     for (i, n) in names.iter().enumerate() {
@@ -454,8 +454,8 @@ pub(crate) fn gloss_capsule(ui: &Ui, r: Rect, c: Color32) {
     // Shine: a soft reflection over the upper half that fades out before the middle.
     let shine = Rect::from_min_max(r.min + Vec2::new(rad * 0.6, 2.5), Pos2::new(r.right() - rad * 0.6, r.center().y));
     grad_rect(pt, shine, shine.height() * 0.7, shine.height() * 0.3, Color32::from_white_alpha(70), Color32::TRANSPARENT);
-    pt.rect_stroke(r, Rounding::same(rad), Stroke::new(1.0, mix(c, Color32::BLACK, 0.4)));
-    pt.rect_stroke(r.shrink(1.0), Rounding::same(rad - 1.0), Stroke::new(1.0, Color32::from_white_alpha(70)));
+    pt.rect_stroke(r, Rounding::same(rad), Stroke::new(1.0_f32, mix(c, Color32::BLACK, 0.4)));
+    pt.rect_stroke(r.shrink(1.0), Rounding::same(rad - 1.0), Stroke::new(1.0_f32, Color32::from_white_alpha(70)));
 }
 
 /// A glossy Aero button: accent when `on`, clear glass otherwise.
@@ -471,7 +471,7 @@ fn aero_button(ui: &mut Ui, p: &Palette, icons: &GuiIcons, ic: Option<u16>, labe
         pt.rect_filled(r, Rounding::same(21.0), Color32::from_black_alpha(if p.dark { 60 } else { 18 }));
         let shine = Rect::from_min_max(r.min + Vec2::new(14.0, 2.5), Pos2::new(r.right() - 14.0, r.center().y));
         grad_rect(pt, shine, shine.height() * 0.7, shine.height() * 0.3, glass_gloss(p).gamma_multiply(if resp.hovered() { 1.8 } else { 1.2 }), Color32::TRANSPARENT);
-        pt.rect_stroke(r, Rounding::same(21.0), Stroke::new(1.0, glass_rim(p).gamma_multiply(0.8)));
+        pt.rect_stroke(r, Rounding::same(21.0), Stroke::new(1.0_f32, glass_rim(p).gamma_multiply(0.8)));
     }
     let col = if on { Color32::WHITE } else { p.text };
     let galley = ui.painter().layout_no_wrap(label.to_string(), bold_font(15.0), col);
@@ -499,8 +499,8 @@ fn play_banner(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, nickna
     grad_rect(pt, rect, 20.0, 20.0, Color32::from_rgba_unmultiplied(48, 110, 190, 235), Color32::from_rgba_unmultiplied(16, 40, 86, 240));
     let shine = Rect::from_min_max(rect.min + Vec2::new(2.0, 2.0), Pos2::new(rect.right() - 2.0, rect.top() + 58.0));
     grad_rect(pt, shine, 18.0, 0.0, Color32::from_white_alpha(46), Color32::TRANSPARENT);
-    pt.rect_stroke(rect.shrink(1.0), Rounding::same(19.0), Stroke::new(1.0, Color32::from_white_alpha(80)));
-    pt.rect_stroke(rect, Rounding::same(20.0), Stroke::new(1.0, Color32::from_black_alpha(70)));
+    pt.rect_stroke(rect.shrink(1.0), Rounding::same(19.0), Stroke::new(1.0_f32, Color32::from_white_alpha(80)));
+    pt.rect_stroke(rect, Rounding::same(20.0), Stroke::new(1.0_f32, Color32::from_black_alpha(70)));
     let x = rect.left() + 18.0;
     pt.text(Pos2::new(x, rect.top() + 16.0), Align2::LEFT_TOP, "ГОТОВЫ?", FontId::proportional(11.0), Color32::from_rgb(170, 215, 255));
     shadow_text(pt, Pos2::new(x, rect.top() + 32.0), Align2::LEFT_TOP, &format!("Играть как {nickname}"), bold_font(20.0), Color32::WHITE);
@@ -514,7 +514,7 @@ fn play_banner(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, nickna
         for w in [&mut v.inactive, &mut v.hovered, &mut v.active, &mut v.open] {
             w.weak_bg_fill = Color32::from_black_alpha(80);
             w.bg_fill = Color32::from_black_alpha(80);
-            w.bg_stroke = Stroke::new(1.0, Color32::from_white_alpha(60));
+            w.bg_stroke = Stroke::new(1.0_f32, Color32::from_white_alpha(60));
             w.rounding = Rounding::same(10.0);
         }
     }
@@ -862,7 +862,7 @@ fn stats_slider(ui: &mut Ui, p: &Palette, st: &crate::server_page::Stats, place:
         };
         clip.add(grad_shape(r, 18.0, 18.0, top, bottom));
         clip.add(grad_shape(Rect::from_min_max(r.min + Vec2::splat(2.0), Pos2::new(r.right() - 2.0, r.top() + 60.0)), 16.0, 0.0, Color32::from_white_alpha(40), Color32::TRANSPARENT));
-        clip.rect_stroke(r, Rounding::same(18.0), Stroke::new(1.0, Color32::from_white_alpha(110)));
+        clip.rect_stroke(r, Rounding::same(18.0), Stroke::new(1.0_f32, Color32::from_white_alpha(110)));
         let x = r.left() + 16.0;
         let (label, big, note) = match k {
             0 => ("ИГРОКИ ОНЛАЙН", players.last().map(|v| format!("{v:.0}")).unwrap_or_else(|| "0".into()), format!("пик {peak}")),
@@ -875,7 +875,7 @@ fn stats_slider(ui: &mut Ui, p: &Palette, st: &crate::server_page::Stats, place:
         clip.text(Pos2::new(r.right() - 16.0, r.top() + 14.0), Align2::RIGHT_TOP, note, FontId::proportional(12.0), Color32::from_white_alpha(210));
         // The chart along the bottom of the card.
         let chart = Rect::from_min_max(Pos2::new(x, r.top() + 82.0), Pos2::new(r.right() - 16.0, r.bottom() - 26.0));
-        clip.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0, Color32::from_white_alpha(70)));
+        clip.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, Color32::from_white_alpha(70)));
         match k {
             0 => {
                 // Line chart of players (last 10 minutes of hosting).
@@ -897,7 +897,7 @@ fn stats_slider(ui: &mut Ui, p: &Palette, st: &crate::server_page::Stats, place:
                         }
                     }
                     clip.add(egui::Shape::mesh(m));
-                    clip.add(egui::Shape::line(pts, Stroke::new(2.5, Color32::WHITE)));
+                    clip.add(egui::Shape::line(pts, Stroke::new(2.5_f32, Color32::WHITE)));
                 } else {
                     clip.text(chart.center(), Align2::CENTER_CENTER, "Запустите — здесь появится график", FontId::proportional(12.5), Color32::from_white_alpha(190));
                 }
@@ -1294,7 +1294,7 @@ fn glass_card<R>(ui: &mut Ui, p: &Palette, r: f32, margin: Margin, edge: Stroke,
         egui::Shape::rect_filled(rect.translate(Vec2::new(0.0, 4.0)).expand(1.5), Rounding::same(r + 1.5), Color32::from_black_alpha(45)),
         egui::Shape::rect_filled(rect, Rounding::same(r), glass_tint(p)),
         grad_shape(gloss, (r - 1.0).max(0.0), 0.0, shine, Color32::TRANSPARENT),
-        egui::Shape::rect_stroke(rect.shrink(1.0), Rounding::same((r - 1.0).max(0.0)), Stroke::new(1.0, glass_rim(p).gamma_multiply(0.7))),
+        egui::Shape::rect_stroke(rect.shrink(1.0), Rounding::same((r - 1.0).max(0.0)), Stroke::new(1.0_f32, glass_rim(p).gamma_multiply(0.7))),
         egui::Shape::rect_stroke(rect, Rounding::same(r), Stroke::new(edge.width, if edge.color == p.outline { Color32::from_black_alpha(60) } else { edge.color })),
     ];
     ui.painter().set(back, egui::Shape::Vec(shapes));
