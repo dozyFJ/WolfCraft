@@ -732,11 +732,8 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
             creative_main(ui,icons,p,state,inv,cell,rows,cols,grid_w,palette_all,slot_rects,trash_rect,result);
         });
     });
-    // ---- Hotbar and the bin (double tap: clear everything) ----
-    ui.add_space(6.0);
-    ui.vertical_centered(|ui| {
-        hotbar_row(ui, icons, p, state, inv, cell, slot_rects, trash_rect);
-    });
+    // The creative window has no embedded quick-access bar.
+
 }
 
 /// The hotbar as one row along the bottom (slots 1–9) with the bin at the end, centred.
