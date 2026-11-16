@@ -76,6 +76,9 @@ pub enum ModelCmd {
 /// Names of the brush operations, in the order of the game's `BrushOp::ALL`.
 pub const BRUSH_OPS: [&str; 6] = ["Добавить", "Стереть", "Покрасить", "Поднять", "Сгладить", "Выровнять"];
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Selector { #[default] Off, Object, Region }
+
 pub struct StudioState {
     pub tab: Tab,
     pub center: Center,
@@ -98,6 +101,9 @@ pub struct StudioState {
     pub selected: Node,
     /// Brush mode: taps and holds on the world sculpt instead of placing and breaking.
     pub brush_on: bool,
+    pub selector: Selector,
+    pub selector_held: bool,
+    pub region_second: bool,
     pub brush_op: usize,
     pub brush_r: i32,
     pub brush_cube: bool,
@@ -141,6 +147,9 @@ impl Default for StudioState {
             split: 0.5,
             selected: Node::Workspace,
             brush_on: false,
+            selector: Selector::Off,
+            selector_held: false,
+            region_second: false,
             brush_op: 0,
             brush_r: 2,
             brush_cube: false,
@@ -219,6 +228,7 @@ pub enum StudioAction {
     Playtest(bool),
     /// The character appears here when «Играть» starts.
     SpawnHere,
+    GroupSelection,
     /// Move, turn, resize… a model.
     Model(usize, ModelCmd),
     /// From the texture editor: build it from blocks or save it.
@@ -487,20 +497,21 @@ fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, v
     let body_top = top.bottom() + 3.0;
     let left = Rect::from_min_max(Pos2::new(screen.left(), body_top), Pos2::new(screen.left()+st.left_w, bottom));
     let right = Rect::from_min_max(Pos2::new(screen.right()-st.right_w, body_top), Pos2::new(screen.right(), bottom));
-    let mid_l = left.right()+4.0;
-    let mid_r = right.left()-4.0;
+    let mid_l = if st.show_explorer||st.show_toolbox {left.right()+4.0}else{screen.left()+4.0};
+    let mid_r = if st.show_props {right.left()-4.0}else{screen.right()-4.0};
     let scene_bottom = if st.show_output { bottom - st.out_h.clamp(65.0, ((bottom-body_top)*0.45).max(65.0)) } else { bottom };
     st.view_left = Some(mid_l);
     st.view_right = Some(mid_r);
     st.view_bottom = Some(scene_bottom);
     // Scene tree and asset browser stay together; selecting a node updates the inspector.
-    let split = body_top + (bottom-body_top)*0.48;
+    let split = if st.show_explorer&&st.show_toolbox {body_top + (bottom-body_top)*0.48}else if st.show_explorer {bottom}else{body_top};
     let tree = Rect::from_min_max(left.min, Pos2::new(left.right(), split-2.0));
     let assets = Rect::from_min_max(Pos2::new(left.left(), split+2.0), left.max);
-    for r in [left, right] { covered.push(r); }
-    window(ctx,"workspace-tree",tree,p,icons,icon::TREE,"Сцена",|ui| explorer(ui,p,st,view));
-    window(ctx,"workspace-assets",assets,p,icons,icon::CUBE,"Ресурсы",|ui| toolbox(ui,icons,p,st,inv,&mut actions));
-    window(ctx,"workspace-inspector",right,p,icons,icon::PROPS,"Инспектор",|ui| properties(ui,icons,p,st,view,&mut actions));
+    if st.show_explorer||st.show_toolbox {covered.push(left);}
+    if st.show_props {covered.push(right);}
+    if st.show_explorer {window(ctx,"workspace-tree",tree,p,icons,icon::TREE,"Сцена",|ui| explorer(ui,p,st,view));}
+    if st.show_toolbox {window(ctx,"workspace-assets",assets,p,icons,icon::CUBE,"Ресурсы",|ui| toolbox(ui,icons,p,st,inv,&mut actions));}
+    if st.show_props {window(ctx,"workspace-inspector",right,p,icons,icon::PROPS,"Инспектор",|ui| properties(ui,icons,p,st,view,&mut actions));}
     if st.center == Center::Script {
         let r = Rect::from_min_max(Pos2::new(mid_l,body_top),Pos2::new(mid_r,scene_bottom));
         covered.push(r);
@@ -513,7 +524,7 @@ fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, v
         if let Some(dy) = splitter(ctx,"workspace-output-size",Rect::from_min_max(Pos2::new(mid_l,scene_bottom-3.0),Pos2::new(mid_r,scene_bottom+3.0)),false,p) { st.out_h -= dy; }
     }
     for (id,rect,left_side) in [("workspace-left-size",Rect::from_min_max(Pos2::new(left.right()-2.0,body_top),Pos2::new(mid_l+2.0,bottom)),true),("workspace-right-size",Rect::from_min_max(Pos2::new(mid_r-2.0,body_top),Pos2::new(right.left()+2.0,bottom)),false)] {
-        if let Some(dx) = splitter(ctx,id,rect,true,p) { if left_side { st.left_w += dx; } else { st.right_w -= dx; } }
+        if (left_side&&(st.show_explorer||st.show_toolbox))||(!left_side&&st.show_props) {if let Some(dx) = splitter(ctx,id,rect,true,p) { if left_side { st.left_w += dx; } else { st.right_w -= dx; } }}
     }
     let footer = Rect::from_min_max(Pos2::new(screen.left(),bottom),screen.max);
     covered.push(footer);
@@ -521,17 +532,20 @@ fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, v
         Frame::none().fill(p.surface).show(ui,|ui| {
             ui.set_width(footer.width());
             ui.set_clip_rect(footer);
-            ui.horizontal(|ui| {
+            egui::ScrollArea::horizontal().id_salt("workspace-footer-scroll").show(ui,|ui| {ui.horizontal(|ui| {
                 if ui.selectable_label(st.show_output,"Вывод").clicked() { st.show_output = !st.show_output; }
                 if ui.selectable_label(st.center == Center::Script,"Код").clicked() { st.center = if st.center == Center::Script { Center::World } else { Center::Script }; }
-                if ui.button("Ресурсы").clicked() { st.toolbox_cat=0; }
+                if ui.selectable_label(st.show_explorer,"Сцена").clicked(){st.show_explorer=!st.show_explorer;}
+                if ui.selectable_label(st.show_toolbox,"Ресурсы").clicked(){st.show_toolbox=!st.show_toolbox;}
+                if ui.selectable_label(st.show_props,"Инспектор").clicked(){st.show_props=!st.show_props;}
+                if ui.button("Свернуть панели").clicked(){st.show_explorer=false;st.show_toolbox=false;st.show_props=false;st.show_output=false;}
                 ui.label(egui::RichText::new(&view.project).color(p.text_muted));
                 if !st.status.is_empty() && view.now-st.status_t < 4.0 { ui.label(egui::RichText::new(&st.status).color(p.success)); }
-            });
+            });});
         });
     });
     // Existing ribbon shortcuts also open their corresponding workspace panels.
-    if st.dock_open { match st.dock_tab { 3 => st.show_output=true, 4 => st.center=Center::Script, _ => {} } st.dock_open=false; }
+    if st.dock_open { match st.dock_tab { 0=>st.show_toolbox=!st.show_toolbox,1=>st.show_explorer=!st.show_explorer,2=>st.show_props=!st.show_props,3 => st.show_output=!st.show_output, 4 => st.center=Center::Script, _ => {} } st.dock_open=false; }
     (actions,covered)
 }
 
@@ -789,13 +803,19 @@ fn ribbon(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, view
         Tab::Home => {
             if tool(ui, icons, p, icon::SELECT, "Выбор", !st.brush_on).clicked() {
                 st.brush_on = false;
+                st.selector=Selector::Off;
             }
+            for (selector,label) in [(Selector::Object,"Объект"),(Selector::Region,"Область")] {
+                if tool(ui,icons,p,icon::SELECT,label,st.selector==selector).clicked(){st.selector=if st.selector==selector {Selector::Off}else{selector};st.brush_on=false;st.region_second=false;}
+            }
+            if tool(ui,icons,p,icon::CUBE,"Группа",false).clicked(){actions.push(StudioAction::GroupSelection);}
             if tool(ui, icons, p, icon::EDIT, "Текстуры", st.paint.open).clicked() {
                 st.paint.open = true;
                 st.brush_on = false;
             }
             if tool(ui, icons, p, icon::BRUSH, "Кисть", st.brush_on).clicked() {
                 st.brush_on = !st.brush_on;
+                st.selector=Selector::Off;
                 if st.brush_on {
                     st.tab = Tab::Brush;
                 }
@@ -1200,7 +1220,8 @@ fn properties(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, 
         },
         Node::Target => match &view.target {
             Some((id, name, at)) => {
-                prop(ui, "Блок", name.clone());
+                if pill_button(ui,icons,Some(icon::CUBE),"Сгруппировать выделение",ButtonKind::Primary,w,true).clicked(){actions.push(StudioAction::GroupSelection);}
+            prop(ui, "Блок", name.clone());
                 prop(ui, "ID", id.to_string());
                 prop(ui, "Ячейка", format!("{} {} {}", at[0], at[1], at[2]));
                 ui.horizontal(|ui| {
@@ -1424,6 +1445,22 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn collapsed_panels_free_the_scene_and_can_be_restored() {
+        let ctx=egui::Context::default();crate::theme_manager::install(&ctx);
+        let atlas=wolfcraft_assets::AtlasManager::new(None).unwrap();let icons=GuiIcons::new(&ctx,&atlas);
+        let mut st=StudioState{show_toolbox:false,show_explorer:false,show_props:false,..Default::default()};let mut inv=Inventory::default();
+        let view=StudioView::default();
+        let render=|st:&mut StudioState,inv:&mut Inventory,events|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(900.0,420.0))),events,..Default::default()},|ctx|{draw(ctx,&icons,st,&view,inv);});
+        render(&mut st,&mut inv,vec![]);let out=render(&mut st,&mut inv,vec![]);
+        assert!(st.view_right.unwrap()-st.view_left.unwrap()>880.0);
+        let at=out.shapes.iter().find_map(|s|match &s.shape {egui::epaint::Shape::Text(t) if t.galley.job.text=="Сцена"=>Some(t.pos+t.galley.size()*0.5),_=>None}).unwrap();
+        render(&mut st,&mut inv,vec![egui::Event::PointerMoved(at),egui::Event::PointerButton{pos:at,button:egui::PointerButton::Primary,pressed:true,modifiers:Default::default()}]);
+        render(&mut st,&mut inv,vec![egui::Event::PointerButton{pos:at,button:egui::PointerButton::Primary,pressed:false,modifiers:Default::default()}]);
+        assert!(st.show_explorer);
+        render(&mut st,&mut inv,vec![]);assert!(st.view_left.unwrap()>120.0);
     }
 
     /// Writes the studio's layout (untextured triangles) for a look at it.
