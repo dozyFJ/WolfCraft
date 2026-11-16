@@ -54,6 +54,21 @@ pub enum Kind {
     MatterFab,
     /// Pulls dropped items within 8 blocks into its slots.
     Magnet,
+    /// Works at night under the open sky.
+    Lunar,
+    /// A huge store (and charges gear like the cell).
+    BigCell,
+    /// Zaps hostile creatures within 7 blocks.
+    Tesla,
+    /// Charges the player's electric gear while they stand on it.
+    ChargePad,
+    /// Gravel → flint, netherrack → gunpowder, bones → bone meal, scrap → iron dust…
+    Centrifuge,
+}
+
+/// Energy stores that give back to the net and charge gear in their first slot.
+pub fn is_store(k: Kind) -> bool {
+    matches!(k, Kind::Cell | Kind::BigCell)
 }
 
 pub struct Spec {
@@ -93,6 +108,11 @@ pub fn kind(b: Block) -> Option<Kind> {
         Block::Recycler => Kind::Recycler,
         Block::MatterFab => Kind::MatterFab,
         Block::ItemMagnet => Kind::Magnet,
+        Block::LunarPanel => Kind::Lunar,
+        Block::BigCell => Kind::BigCell,
+        Block::TeslaCoil => Kind::Tesla,
+        Block::ChargePad => Kind::ChargePad,
+        Block::Centrifuge => Kind::Centrifuge,
         _ => return None,
     })
 }
@@ -119,6 +139,11 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Recycler => Spec { name: "Утилизатор", capacity: 400.0, rate: 6.0, time: 2.0, hint: "Любые 4 предмета → 1 лом" },
         Kind::MatterFab => Spec { name: "Фабрикатор материи", capacity: 20_000.0, rate: 80.0, time: 12.0, hint: "8 лома → 1 материя (из материи крафтятся алмазы и металлы)" },
         Kind::Magnet => Spec { name: "Магнит предметов", capacity: 400.0, rate: 4.0, time: 0.5, hint: "Притягивает выпавшие предметы в радиусе 8 блоков в свои слоты" },
+        Kind::Lunar => Spec { name: "Лунная панель", capacity: 1_000.0, rate: 3.0, time: 0.0, hint: "Даёт энергию ночью под открытым небом (днём спит)" },
+        Kind::BigCell => Spec { name: "Энергохранилище", capacity: 1_000_000.0, rate: 0.0, time: 0.0, hint: "Хранит миллион ЭЕ и заряжает снаряжение (положите его слева)" },
+        Kind::Tesla => Spec { name: "Тесла-катушка", capacity: 2_000.0, rate: 12.0, time: 1.0, hint: "Бьёт молнией враждебных существ в радиусе 7 блоков (60 ЭЕ за разряд)" },
+        Kind::ChargePad => Spec { name: "Зарядная платформа", capacity: 4_000.0, rate: 20.0, time: 0.0, hint: "Встаньте сверху — заряжает электроинструменты и броню" },
+        Kind::Centrifuge => Spec { name: "Центрифуга", capacity: 600.0, rate: 10.0, time: 4.0, hint: "Гравий → кремень, адский камень → порох, кости → костная мука, лом → железная пыль" },
         Kind::Dynamo => Spec { name: "Кинетическое динамо", capacity: 1_000.0, rate: 0.0, time: 0.0, hint: "Подведите вал «Механики»: вращение → энергия (быстрее крутится — больше ЭЕ)" },
         Kind::Motor => Spec { name: "Электромотор", capacity: 400.0, rate: 16.0, time: 0.0, hint: "Подключите кабель: на энергии крутит валы «Механики» (64 об/мин)" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
@@ -127,7 +152,7 @@ pub fn spec(k: Kind) -> Spec {
 
 /// Makes energy (generators of every kind).
 pub fn is_source(k: Kind) -> bool {
-    matches!(k, Kind::Generator | Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Reactor | Kind::Magma | Kind::Dynamo)
+    matches!(k, Kind::Generator | Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Reactor | Kind::Magma | Kind::Dynamo | Kind::Lunar)
 }
 
 /// Burns fuel from its slot (the coal generator and the reactor).
@@ -230,7 +255,7 @@ pub fn fuel_for(k: Kind, id: ItemId) -> f32 {
 }
 
 pub fn is_machine(k: Kind) -> bool {
-    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor | Kind::Extruder | Kind::Insolator | Kind::Glacier | Kind::Recycler | Kind::MatterFab)
+    matches!(k, Kind::Crusher | Kind::Induction | Kind::Enricher | Kind::Compressor | Kind::Sawmill | Kind::Extractor | Kind::Extruder | Kind::Insolator | Kind::Glacier | Kind::Recycler | Kind::MatterFab | Kind::Centrifuge)
 }
 
 /// Machines whose slot item is only a pattern: it stays, the output is made from nothing
@@ -347,6 +372,14 @@ pub fn recipe(k: Kind, input: ItemId) -> Option<(ItemId, u8)> {
         Kind::Induction => crate::interaction::smelt_result(input).map(|o| (o, 1)),
         Kind::Extruder => [Block::Cobblestone, Block::Stone, Block::Obsidian].iter().find(|b| **b as ItemId == input).map(|b| (*b as ItemId, 1)),
         Kind::Glacier => [Block::Snow, Block::Ice].iter().find(|b| **b as ItemId == input).map(|b| (*b as ItemId, 1)),
+        Kind::Centrifuge => match input {
+            x if x == Block::Gravel as ItemId => Some((ids::FLINT, 2)),
+            x if x == Block::Netherrack as ItemId => Some((ids::GUNPOWDER, 1)),
+            x if x == Block::Sand as ItemId => Some((ids::GOLD_DUST, 1)),
+            ids::BONE => Some((ids::BONE_MEAL, 4)),
+            ids::SCRAP => Some((ids::IRON_DUST, 1)),
+            _ => None,
+        },
         Kind::Recycler => (input != ids::SCRAP && input != ids::UU_MATTER).then_some((ids::SCRAP, 1)),
         Kind::MatterFab => (input == ids::SCRAP).then_some((ids::UU_MATTER, 1)),
         Kind::Insolator => match input {
@@ -383,13 +416,13 @@ pub fn share(nodes: &[Node], dt: f32) -> Vec<f32> {
         }
     }
     // 2. Pool everything that can be given: generators and cells.
-    let givers: Vec<usize> = (0..nodes.len()).filter(|&i| is_source(nodes[i].kind) || nodes[i].kind == Kind::Cell).collect();
+    let givers: Vec<usize> = (0..nodes.len()).filter(|&i| is_source(nodes[i].kind) || is_store(nodes[i].kind)).collect();
     let mut pool: f32 = givers.iter().map(|&i| e[i]).sum();
     for &i in &givers {
         e[i] = 0.0;
     }
     // 3. Machines take what they need for this frame (filling their buffer up to a second's worth).
-    let is_machine = |k: Kind| is_machine(k) || matches!(k, Kind::Motor | Kind::Quarry | Kind::Magnet);
+    let is_machine = |k: Kind| is_machine(k) || matches!(k, Kind::Motor | Kind::Quarry | Kind::Magnet | Kind::Tesla | Kind::ChargePad);
     for (i, n) in nodes.iter().enumerate() {
         if is_machine(n.kind) {
             // A machine keeps only a few seconds of work in its buffer: the rest of the
@@ -409,7 +442,7 @@ pub fn share(nodes: &[Node], dt: f32) -> Vec<f32> {
             pool -= put;
         }
     }
-    for &i in givers.iter().filter(|&&i| nodes[i].kind == Kind::Cell).chain(givers.iter().filter(|&&i| nodes[i].kind != Kind::Cell)) {
+    for &i in givers.iter().filter(|&&i| is_store(nodes[i].kind)).chain(givers.iter().filter(|&&i| !is_store(nodes[i].kind))) {
         let room = nodes[i].cap - e[i];
         let put = room.min(pool);
         e[i] += put;
@@ -515,5 +548,7 @@ mod tests {
         assert_eq!((recipe(Kind::Recycler, ids::COAL), need(Kind::Recycler, ids::COAL)), (Some((ids::SCRAP, 1)), 4));
         assert_eq!(recipe(Kind::MatterFab, ids::SCRAP), Some((ids::UU_MATTER, 1)));
         assert!(recipe(Kind::Recycler, ids::SCRAP).is_none());
+        assert_eq!(recipe(Kind::Centrifuge, Block::Gravel as ItemId), Some((ids::FLINT, 2)));
+        assert!(is_source(Kind::Lunar) && is_store(Kind::BigCell) && !is_store(Kind::Tesla));
     }
 }

@@ -423,6 +423,14 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::UU_MATTER, 3)], (ids::DIAMOND, 1), true, "WolfTech"));
         v.push(r(&[(ids::UU_MATTER, 1)], (ids::IRON_INGOT, 6), true, "WolfTech"));
         v.push(r(&[(ids::UU_MATTER, 1)], (ids::GOLD_INGOT, 3), true, "WolfTech"));
+        // WolfTech, wave 4.
+        v.push(r(&[(b(Block::SolarPanel), 1), (b(Block::Obsidian), 2), (ids::CIRCUIT, 1)], (b(Block::LunarPanel), 1), true, "WolfTech"));
+        v.push(r(&[(ids::DIAMOND, 2), (ids::GOLD_DUST, 4), (ids::CIRCUIT, 1)], (ids::ENERGY_CRYSTAL, 1), true, "WolfTech"));
+        v.push(r(&[(b(Block::EnergyCell), 4), (ids::ENERGY_CRYSTAL, 2), (b(Block::IronBlock), 2)], (b(Block::BigCell), 1), true, "WolfTech"));
+        v.push(r(&[(ids::COPPER_PLATE, 6), (ids::IRON_INGOT, 2), (ids::CIRCUIT, 2), (ids::ENERGY_CRYSTAL, 1)], (b(Block::TeslaCoil), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_PLATE, 4), (ids::CIRCUIT, 1), (b(Block::Cable), 4)], (b(Block::ChargePad), 1), true, "WolfTech"));
+        v.push(r(&[(ids::IRON_PLATE, 4), (ids::CIRCUIT, 1), (b(Block::Crusher), 1)], (b(Block::Centrifuge), 1), true, "WolfTech"));
+        v.push(r(&[(ids::COPPER_PLATE, 2), (ids::CIRCUIT, 1), (ids::GOLD_DUST, 2)], (ids::BATTERY, 1), true, "WolfTech"));
         // Item pipes (Thermal Dynamics / Ender IO).
         v.push(r(&[(ids::IRON_INGOT, 3), (b(Block::Glass), 2)], (b(Block::ItemPipe), 8), true, "WolfTech"));
         v.push(r(&[(b(Block::ItemPipe), 1), (ids::IRON_INGOT, 2), (ids::CIRCUIT, 1)], (b(Block::PipeExtractor), 1), true, "WolfTech"));

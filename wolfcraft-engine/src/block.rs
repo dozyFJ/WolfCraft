@@ -1902,6 +1902,11 @@ blocks! {
     2508 Recycler => needs_pick(info("Утилизатор", Opaque, 4.0, Pickaxe, column(t::RECYCLER_FRONT, t::TECH_TOP, t::TECH_TOP))),
     2509 MatterFab => needs_pick(info("Фабрикатор материи", Opaque, 6.0, Pickaxe, column(t::FAB_FRONT, t::TECH_TOP, t::TECH_TOP))),
     2510 ItemMagnet => needs_pick(info("Магнит предметов", Opaque, 4.0, Pickaxe, column(t::MAGNET_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2511 LunarPanel => needs_pick(info("Лунная панель", Shape, 3.0, Pickaxe, column(t::TECH_SIDE, t::LUNAR_TOP, t::TECH_SIDE))),
+    2512 BigCell => needs_pick(info("Энергохранилище", Opaque, 6.0, Pickaxe, column(t::BIGCELL_SIDE, t::TECH_TOP, t::TECH_TOP))),
+    2513 TeslaCoil => needs_pick(info("Тесла-катушка", Opaque, 4.0, Pickaxe, column(t::TESLA_SIDE, t::TESLA_TOP, t::TECH_TOP))),
+    2514 ChargePad => needs_pick(info("Зарядная платформа", Opaque, 3.5, Pickaxe, column(t::TECH_SIDE, t::PAD_TOP, t::TECH_TOP))),
+    2515 Centrifuge => needs_pick(info("Центрифуга", Opaque, 4.0, Pickaxe, column(t::CENTRIFUGE_FRONT, t::TECH_TOP, t::TECH_TOP))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2132,7 +2137,7 @@ impl Block {
             WaterWheel => &[[0.25, 0.0, 0.0, 0.75, 1.0, 1.0]],
             WaterWheelJ => &[[0.0, 0.25, 0.0, 1.0, 0.75, 1.0]],
             HandCrank => &[[0.3, 0.3, 0.0, 0.7, 0.7, 0.6]],
-            SolarPanel => &[SOLAR],
+            SolarPanel | LunarPanel => &[SOLAR],
             ButtonOn => std::slice::from_ref(&BUTTON_ON),
             SwitchOff => &LEVER_OFF,
             SwitchOn => &LEVER_ON,

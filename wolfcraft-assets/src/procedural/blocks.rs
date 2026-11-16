@@ -235,6 +235,12 @@ pub mod tiles {
     pub const RECYCLER_FRONT: u16 = 237;
     pub const FAB_FRONT: u16 = 238;
     pub const MAGNET_FRONT: u16 = 239;
+    pub const LUNAR_TOP: u16 = 240;
+    pub const BIGCELL_SIDE: u16 = 241;
+    pub const TESLA_SIDE: u16 = 242;
+    pub const TESLA_TOP: u16 = 243;
+    pub const PAD_TOP: u16 = 244;
+    pub const CENTRIFUGE_FRONT: u16 = 245;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2337,6 +2343,40 @@ pub(crate) fn build() -> Vec<(String, Image)> {
                     }
                 }
             }
+            // Big storage: four tall charge columns.
+            18 => {
+                for col in 0..4u32 {
+                    for y in 3..13u32 {
+                        let lit = y >= 3 + col * 2;
+                        q.put(3 + col * 3, y, if lit { c } else { Rgb(0.18, 0.22, 0.30) }, 1.0);
+                        q.put(4 + col * 3, y, if lit { c.scale(0.8) } else { Rgb(0.15, 0.18, 0.25) }, 1.0);
+                    }
+                }
+            }
+            // Tesla coil: copper windings and a spark.
+            19 => {
+                for y in 3..13u32 {
+                    for x in 5..11u32 {
+                        q.put(x, y, if y % 2 == 0 { Rgb(0.85, 0.50, 0.25) } else { Rgb(0.60, 0.33, 0.15) }, 1.0);
+                    }
+                }
+                for (x, y) in [(12u32, 2u32), (13, 3), (12, 4), (13, 5)] {
+                    q.put(x, y, c, 1.0);
+                }
+            }
+            // Centrifuge: a drum with spinning blades.
+            20 => {
+                for y in 3..13u32 {
+                    for x in 3..13u32 {
+                        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                        let r = (dx * dx + dy * dy).sqrt();
+                        if r < 5.2 {
+                            let blade = ((dy.atan2(dx) * 3.0 / std::f32::consts::PI).round() as i32).rem_euclid(2) == 0;
+                            q.put(x, y, if r < 1.5 { Rgb(0.9, 0.9, 0.95) } else if blade { c } else { Rgb(0.25, 0.28, 0.34) }, 1.0);
+                        }
+                    }
+                }
+            }
             // Magnet: a red-and-silver horseshoe.
             17 => {
                 for y in 4..12u32 {
@@ -2667,6 +2707,57 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(RECYCLER_FRONT, "recycler", p(|q| front(q, 342, Rgb(0.40, 0.85, 0.40), 15)));
     l.add(FAB_FRONT, "matter_fab", p(|q| front(q, 343, Rgb(0.75, 0.35, 0.95), 16)));
     l.add(MAGNET_FRONT, "item_magnet", p(|q| front(q, 344, Rgb(0.90, 0.20, 0.20), 17)));
+    // WolfTech, wave 4.
+    l.add(LUNAR_TOP, "lunar_top", p(|q| {
+        q.noisy(Rgb(0.08, 0.06, 0.20), 0.05, 345);
+        for i in 0..S {
+            for (a, b) in [(i, 0), (i, S - 1), (0, i), (S - 1, i)] {
+                q.put(a, b, Rgb(0.55, 0.56, 0.62), 1.0);
+            }
+        }
+        // A crescent moon and a few stars.
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let (ex, ey) = (x as f32 - 9.5, y as f32 - 6.0);
+                if dx * dx + dy * dy < 16.0 && ex * ex + ey * ey > 12.0 {
+                    q.put(x, y, Rgb(0.95, 0.93, 0.75), 1.0);
+                }
+            }
+        }
+        for (x, y) in [(3u32, 3u32), (12, 11), (4, 12)] {
+            q.put(x, y, Rgb(0.85, 0.85, 1.0), 1.0);
+        }
+    }));
+    l.add(BIGCELL_SIDE, "big_cell", p(|q| front(q, 346, Rgb(0.35, 0.95, 0.55), 18)));
+    l.add(TESLA_SIDE, "tesla_side", p(|q| front(q, 347, Rgb(0.60, 0.85, 1.0), 19)));
+    l.add(TESLA_TOP, "tesla_top", p(|q| {
+        q.noisy(Rgb(0.45, 0.47, 0.52), 0.04, 348);
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                let r = (dx * dx + dy * dy).sqrt();
+                if r < 4.5 {
+                    q.put(x, y, if r < 2.0 { Rgb(0.75, 0.92, 1.0) } else { Rgb(0.80, 0.82, 0.88) }, 1.0);
+                }
+            }
+        }
+    }));
+    l.add(PAD_TOP, "charge_pad", p(|q| {
+        q.noisy(Rgb(0.18, 0.20, 0.26), 0.04, 349);
+        for y in 0..S {
+            for x in 0..S {
+                let edge = x == 0 || y == 0 || x == S - 1 || y == S - 1;
+                let ring = ((x as i32 - 7) * (x as i32 - 7) + (y as i32 - 7) * (y as i32 - 7)) / 4 % 4 == 0;
+                if edge {
+                    q.put(x, y, Rgb(0.55, 0.58, 0.64), 1.0);
+                } else if ring {
+                    q.put(x, y, Rgb(0.30, 0.90, 1.0), 1.0);
+                }
+            }
+        }
+    }));
+    l.add(CENTRIFUGE_FRONT, "centrifuge", p(|q| front(q, 350, Rgb(0.95, 0.60, 0.20), 20)));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

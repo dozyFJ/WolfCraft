@@ -112,7 +112,9 @@ pub mod items {
     pub const UU_MATTER: u16 = 159;
     pub const OMNI_TOOL: u16 = 160;
     pub const MINING_LASER: u16 = 161;
-    pub const COUNT: u16 = 162;
+    pub const BATTERY: u16 = 162;
+    pub const ENERGY_CRYSTAL: u16 = 163;
+    pub const COUNT: u16 = 164;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1244,6 +1246,8 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(UU_MATTER, "uu_matter", art(&["", "", ".......b", "......bcb", ".....bcWcb", "....bcWWWcb", "...bcWWWWWcb", "....bcWWWcb", ".....bcWcb", "......bcb", ".......b"]));
     l.add(OMNI_TOOL, "omni_tool", art(&["", "", "..GGGGGGGG", ".GWWWWWWWWG", "..GGGGGGGGcY", "......GGcY", ".....DDGGY", "....DDDDDGG", "...DcDDDDGG", "...DDDDDDG", "....DDDDD", ".....DDD", ".....DD"]));
     l.add(MINING_LASER, "mining_laser", art(&["", "", "", "", "..............R", ".DDDDDDDDDDDDRRR", ".DGGGbbbbbGGGDRW", ".DDDDDDDDDDDDRRR", "...DDD..DD....R", "...DD...DD", "..DDD", "..DD"]));
+    l.add(BATTERY, "battery", art(&["", "", "......GG", ".....DDDD", ".....DccD", ".....DccD", ".....DbbD", ".....DbbD", ".....DbbD", ".....DbbD", ".....DbbD", ".....DDDD"]));
+    l.add(ENERGY_CRYSTAL, "energy_crystal", art(&["", "", ".......b", "......bcb", ".....bcWcb", ".....bcWcb", "....bcWWWcb", "....bcWWWcb", ".....bcWcb", "......bcb", "......bcb", ".......b"]));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);
