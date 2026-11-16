@@ -27,6 +27,41 @@ pub enum MobKind {
 /// Every kind of creature (spawn souls, tests).
 pub const ALL_MOBS: [MobKind; 8] = [MobKind::Ghoul, MobKind::Crawler, MobKind::Boar, MobKind::Sheep, MobKind::Cow, MobKind::Chicken, MobKind::Wolf, MobKind::Slime];
 
+impl Mob {
+    /// Name with its planet: «Лунный слизень», «Ледяной волк»…
+    pub fn display_name(&self) -> String {
+        let base = self.kind.name();
+        match (self.variant, self.kind) {
+            (0, _) => base.to_string(),
+            (1, MobKind::Slime) => "Лунный слизень".into(),
+            (1, MobKind::Sheep) => "Лунный барашек".into(),
+            (1, MobKind::Chicken) => "Лунный прыгун".into(),
+            (2, MobKind::Crawler) => "Магмовый ползун".into(),
+            (2, MobKind::Slime) => "Магмовый куб".into(),
+            (2, MobKind::Boar) => "Огненный кабан".into(),
+            (3, MobKind::Wolf) => "Ледяной волк".into(),
+            (3, MobKind::Sheep) => "Снежный як".into(),
+            (3, MobKind::Cow) => "Мохнатый бык".into(),
+            (4, MobKind::Crawler) => "Ксеноморф".into(),
+            (4, MobKind::Ghoul) => "Ксеноупырь".into(),
+            (4, MobKind::Cow) => "Ксенобык".into(),
+            (4, MobKind::Chicken) => "Светокрыл".into(),
+            _ => base.to_string(),
+        }
+    }
+
+    /// Colour cast of its planet (multiplies the model's colours).
+    pub fn planet_tint(&self) -> [f32; 3] {
+        match self.variant {
+            1 => [0.82, 0.86, 1.0],
+            2 => [1.35, 0.62, 0.38],
+            3 => [0.80, 0.95, 1.30],
+            4 => [0.95, 0.55, 1.25],
+            _ => [1.0, 1.0, 1.0],
+        }
+    }
+}
+
 impl MobKind {
     pub fn hostile(self) -> bool {
         matches!(self, MobKind::Ghoul | MobKind::Crawler | MobKind::Wolf | MobKind::Slime | MobKind::Shark)
@@ -102,6 +137,8 @@ impl MobKind {
 #[derive(Clone, Debug)]
 pub struct Mob {
     pub kind: MobKind,
+    /// Which planet it lives on (0 home, 1 moon, 2 lava, 3 ice, 4 alien): colours and name.
+    pub variant: u8,
     pub boss: Option<crate::bosses::BossRole>,
     pub body: Body,
     pub hp: f32,
@@ -131,7 +168,7 @@ pub struct Mob {
 
 impl Mob {
     pub fn new(kind: MobKind, pos: DVec3, heading: DVec3) -> Self {
-        Self { kind, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0, saddled: false, ridden: false, burning: 0.0, hidden: false }
+        Self { kind, variant: 0, boss: None, body: Body::new(pos), hp: kind.max_hp(), heading, anim: 0.0, amount: 0.0, hurt: 0.0, attack_cd: 0.0, alert: 0.0, wander: 0.0, wander_dir: DVec3::ZERO, poison: 0.0, slow: 0.0, saddled: false, ridden: false, burning: 0.0, hidden: false }
     }
     /// Centre of the body, for aiming.
     pub fn centre(&self) -> DVec3 {
@@ -141,6 +178,8 @@ impl Mob {
 
 pub struct MobManager {
     pub mobs: Vec<Mob>,
+    /// The planet being played (0 home): what lives here.
+    pub planet: u8,
     pub boss_deaths: Vec<crate::bosses::BossDeath>,
     /// Effects the guardians' attacks put on the player (the game applies them).
     pub boss_effects: Vec<(crate::magic::Effect,f32)>,
@@ -172,7 +211,7 @@ fn tangent(v: DVec3, up: DVec3) -> DVec3 {
 
 impl MobManager {
     pub fn new(seed: u64) -> Self {
-        Self { mobs: Vec::new(), boss_deaths: Vec::new(), boss_effects: Vec::new(), boss_knock: DVec3::ZERO, spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5), sun_burns: true }
+        Self { mobs: Vec::new(), planet: 0, boss_deaths: Vec::new(), boss_effects: Vec::new(), boss_knock: DVec3::ZERO, spawning: true, debris: Vec::new(), spawn_timer: 3.0, rng: splitmix(seed ^ 0x40B5), sun_burns: true }
     }
 
     pub fn rand(&mut self) -> f64 {
@@ -398,6 +437,32 @@ impl MobManager {
         let ang = self.rand() * std::f64::consts::TAU;
         let dist = 22.0 + self.rand() * 22.0;
         let dir = world.grid().col_dir(player + (t1 * ang.cos() + t2 * ang.sin()) * dist);
+        // Other planets: their own creatures (day and night), nothing in their seas.
+        if self.planet != 0 {
+            let total = self.mobs.iter().filter(|m| m.boss.is_none()).count();
+            if total >= HOSTILE_CAP + PASSIVE_CAP / 2 {
+                return;
+            }
+            let Some(pos) = Self::ground(world, dir, world.grid().radial(player)) else { return };
+            let pick = self.rand();
+            let hostile_turn = pick < if day { 0.4 } else { 0.7 };
+            let pick = self.rand();
+            let kind = match (self.planet, hostile_turn) {
+                (1, true) => MobKind::Slime,
+                (1, false) => if pick < 0.5 { MobKind::Sheep } else { MobKind::Chicken },
+                (2, true) => if pick < 0.6 { MobKind::Crawler } else { MobKind::Slime },
+                (2, false) => MobKind::Boar,
+                (3, true) => MobKind::Wolf,
+                (3, false) => if pick < 0.6 { MobKind::Sheep } else { MobKind::Cow },
+                (_, true) => if pick < 0.7 { MobKind::Crawler } else { MobKind::Ghoul },
+                (_, false) => if pick < 0.5 { MobKind::Cow } else { MobKind::Chicken },
+            };
+            let h = tangent(t1, up_at(pos));
+            let mut m = Mob::new(kind, pos, h.normalize_or_zero());
+            m.variant = self.planet;
+            self.mobs.push(m);
+            return;
+        }
         // Water under the spot: fish in rivers and lakes; squid, dolphins and sharks in the sea.
         if let Some((pos, depth)) = Self::water_spot(world, dir, world.grid().radial(player)) {
             if aquatic >= AQUATIC_CAP {

@@ -926,6 +926,8 @@ pub fn fuel_time(id: items::ItemId) -> f32 {
     let b = |x: Block| x as items::ItemId;
     match id {
         ids::COAL => 80.0,
+        ids::COKE => 160.0,
+        ids::FIRE_CRYSTAL => 600.0,
         x if x == b(Block::CoalBlock) => 800.0,
         x if [Block::OakLog, Block::BirchLog, Block::SpruceLog, Block::AcaciaLog].iter().any(|l| b(*l) == x) => 15.0,
         x if [Block::OakPlanks, Block::BirchPlanks, Block::SprucePlanks, Block::AcaciaPlanks, Block::CraftingTable, Block::Chest, Block::Battery, Block::Bookshelf].iter().any(|l| b(*l) == x) => 15.0,
@@ -1025,5 +1027,5 @@ fn is_wall_decor(b: Block) -> bool {
 
 /// Tree trunks (the lumber axe fells what is joined).
 fn is_log(b: Block) -> bool {
-    matches!(b, Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog)
+    matches!(b, Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::AlienLog)
 }

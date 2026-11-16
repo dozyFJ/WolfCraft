@@ -129,7 +129,14 @@ pub mod items {
     pub const TINKER_EXCAVATOR: u16 = 175;
     pub const LUMBER_AXE: u16 = 176;
     pub const CLEAVER: u16 = 177;
-    pub const COUNT: u16 = 178;
+    // Space: crystals of the other planets, the rocket and its fuel.
+    pub const LUNAR_CRYSTAL: u16 = 178;
+    pub const FIRE_CRYSTAL: u16 = 179;
+    pub const FROST_CRYSTAL: u16 = 180;
+    pub const XENO_CRYSTAL: u16 = 181;
+    pub const ROCKET: u16 = 182;
+    pub const ROCKET_FUEL: u16 = 183;
+    pub const COUNT: u16 = 184;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1334,6 +1341,25 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(TINKER_EXCAVATOR, "tinker_excavator", tool(&EXCAVATOR_TPL, Rgb(0.30, 0.45, 0.95), Rgb(0.45, 0.32, 0.18)));
     l.add(LUMBER_AXE, "lumber_axe", tool(&LUMBER_TPL, Rgb(0.58, 0.32, 0.78), Rgb(0.45, 0.32, 0.18)));
     l.add(CLEAVER, "cleaver", tool(&CLEAVER_TPL, Rgb(0.52, 0.56, 0.62), Rgb(0.35, 0.25, 0.15)));
+    // ---- Space ----
+    let crystal = |c: Rgb, light: Rgb| {
+        p(move |q| {
+            for y in 2..15u32 {
+                let half = if y < 8 { (y - 1) as i32 / 2 + 1 } else { (15 - y) as i32 / 2 + 1 };
+                for x in (8 - half)..(8 + half) {
+                    let x = x as u32;
+                    let edge = x as i32 == 8 - half || x as i32 == 7 + half;
+                    q.put(x, y, if edge { c.scale(0.7) } else if x < 8 && y < 9 { light } else { c }, 1.0);
+                }
+            }
+        })
+    };
+    l.add(LUNAR_CRYSTAL, "lunar_crystal", crystal(Rgb(0.45, 0.85, 1.0), Rgb(0.85, 0.97, 1.0)));
+    l.add(FIRE_CRYSTAL, "fire_crystal", crystal(Rgb(1.0, 0.40, 0.10), Rgb(1.0, 0.85, 0.40)));
+    l.add(FROST_CRYSTAL, "frost_crystal", crystal(Rgb(0.65, 0.88, 1.0), Rgb(0.95, 0.98, 1.0)));
+    l.add(XENO_CRYSTAL, "xeno_crystal", crystal(Rgb(0.78, 0.30, 1.0), Rgb(0.45, 1.0, 0.90)));
+    l.add(ROCKET, "rocket", art(&["......R", ".....RRR", ".....WWW", "....WWbWW", "....WbbbW", "....WWbWW", "....WWWWW", "....WWWWW", "....WGGGW", "...RWWWWWR", "..RRWWWWWRR", "..RR.GGG.RR", "......O", ".....OYO", "......O"]));
+    l.add(ROCKET_FUEL, "rocket_fuel", art(&["", "", ".....GGGG", ".....DDDD", "....DOOOOD", "....DOYYOD", "....DOYYOD", "....DOOOOD", "....DOOOOD", "....DROORD", "....DOOOOD", "....DDDDDD"]));
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);

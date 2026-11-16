@@ -449,6 +449,13 @@ pub fn recipes() -> &'static [Recipe] {
         v.push(r(&[(ids::COBALT_INGOT, 3), (ids::MANYULLYN_INGOT, 1), (ids::STICK, 2)], (ids::TINKER_EXCAVATOR, 1), true, "WolfTech"));
         v.push(r(&[(ids::MANYULLYN_INGOT, 3), (ids::COBALT_INGOT, 1), (ids::STICK, 2)], (ids::LUMBER_AXE, 1), true, "WolfTech"));
         v.push(r(&[(ids::STEEL_INGOT, 4), (ids::MANYULLYN_INGOT, 1), (ids::STICK, 1)], (ids::CLEAVER, 1), true, "WolfTech"));
+        // Space: the rocket, its fuel, uses of the crystals from other planets.
+        v.push(r(&[(ids::STEEL_INGOT, 8), (ids::CIRCUIT, 3), (ids::ENERGY_CRYSTAL, 1), (b(Block::Glass), 2)], (ids::ROCKET, 1), true, "WolfTech"));
+        v.push(r(&[(ids::COKE, 2), (ids::GUNPOWDER, 1)], (ids::ROCKET_FUEL, 2), true, "WolfTech"));
+        v.push(r(&[(ids::FIRE_CRYSTAL, 1), (ids::COAL, 1)], (ids::ROCKET_FUEL, 4), true, "WolfTech"));
+        v.push(r(&[(ids::LUNAR_CRYSTAL, 2), (ids::DIAMOND, 1)], (ids::ENERGY_CRYSTAL, 2), true, "WolfTech"));
+        v.push(r(&[(ids::FROST_CRYSTAL, 1), (ids::COPPER_PLATE, 1)], (ids::COOLANT_CELL, 2), true, "WolfTech"));
+        v.push(r(&[(ids::XENO_CRYSTAL, 2)], (ids::UU_MATTER, 1), true, "WolfTech"));
         // Item pipes (Thermal Dynamics / Ender IO).
         v.push(r(&[(ids::IRON_INGOT, 3), (b(Block::Glass), 2)], (b(Block::ItemPipe), 8), true, "WolfTech"));
         v.push(r(&[(b(Block::ItemPipe), 1), (ids::IRON_INGOT, 2), (ids::CIRCUIT, 1)], (b(Block::PipeExtractor), 1), true, "WolfTech"));

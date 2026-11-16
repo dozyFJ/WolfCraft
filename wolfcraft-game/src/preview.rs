@@ -35,6 +35,14 @@ pub fn biome_color(c: &Column) -> [f32; 3] {
         Biome::CherryGrove => [0.80, 0.55, 0.65],
         Biome::DarkForest => [0.12, 0.30, 0.10],
         Biome::FlowerMeadow => [0.45, 0.70, 0.30],
+        Biome::MoonMare => [0.38, 0.38, 0.40],
+        Biome::MoonHighlands => [0.72, 0.72, 0.74],
+        Biome::AshWastes => [0.40, 0.38, 0.37],
+        Biome::LavaFields => [0.85, 0.30, 0.08],
+        Biome::FrozenPlains => [0.92, 0.95, 0.98],
+        Biome::CrystalPeaks => [0.50, 0.70, 0.98],
+        Biome::AlienJungle => [0.55, 0.28, 0.75],
+        Biome::GlowSwamp => [0.25, 0.65, 0.62],
     };
     // Subtle height shading on land, depth shading on water.
     let k = if e >= 0.0 { 1.0 + (e / 220.0).min(0.35) } else { 1.0 + (e / 120.0).max(-0.5) };

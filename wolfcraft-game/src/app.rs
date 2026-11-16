@@ -2313,6 +2313,12 @@ impl App {
                                     arena_buys = arena_overlay(ctx, a, &s.player.inventory, &mut ui_cover);
                                 }
                             }
+                            // Rocket in orbit: the planet menu (space travel is single-player for now).
+                            if s.rocket.is_some_and(|r| r.phase == 1) {
+                                if let Some(k) = rocket_menu(ctx, s.planet_kind, net.is_some(), &mut ui_cover) {
+                                    s.rocket_pick = Some(k);
+                                }
+                            }
                             // WolfTech drill: a glass pill with the digging square; tap to change.
                             if screen == Screen::Playing && !studio_edit && s.player.inventory.held().is_some_and(|h| wolfcraft_engine::tools::has_area_modes(h.id)) && drill_overlay(ctx, s.player.drill_area, &mut ui_cover) {
                                 s.player.drill_area = wolfcraft_engine::tools::next_drill_mode(s.player.drill_area);
@@ -2857,6 +2863,22 @@ impl App {
                     sky = [0.04, 0.18, 0.36];
                 } else if s.hell {
                     sky = [0.30, 0.05, 0.02];
+                } else {
+                    // Other planets have their own skies: black on the Moon, smoky red over the
+                    // lava world, pale over the ice, violet over the alien jungle.
+                    let planet_sky = match s.planet_kind {
+                        wolfcraft_engine::planet::PlanetKind::Moon => Some([0.01, 0.01, 0.03]),
+                        wolfcraft_engine::planet::PlanetKind::Lava => Some([0.42, 0.14, 0.06]),
+                        wolfcraft_engine::planet::PlanetKind::Ice => Some([0.70, 0.84, 0.96]),
+                        wolfcraft_engine::planet::PlanetKind::Alien => Some([0.48, 0.30, 0.62]),
+                        wolfcraft_engine::planet::PlanetKind::Home => None,
+                    };
+                    if let Some(ps) = planet_sky {
+                        let k = (day as f32).max(0.15);
+                        for i in 0..3 {
+                            sky[i] = ps[i] * k + sky[i] * altitude * (1.0 - k);
+                        }
+                    }
                 }
                 let cam = s.camera();
                 // Smooth FOV kick: wider while sprinting or flying fast, a touch narrower underwater.
@@ -2945,6 +2967,25 @@ impl App {
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_kinetic(&s.kinetic_models(), cam.eye));
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));
+                // The rocket under the player while flying: a white hull, red fins and nose
+                // ring, a glowing nozzle.
+                if s.rocket.is_some() {
+                    let up = s.player.up();
+                    let feet = s.player.body.pos;
+                    let helper = if up.y.abs() < 0.9 { glam::DVec3::Y } else { glam::DVec3::X };
+                    let side = up.cross(helper).normalize();
+                    let side2 = up.cross(side);
+                    let cube = |pos: glam::DVec3, color: [f32; 3], size: f32, glow: bool| wolfcraft_engine::mobs::Debris { pos, vel: glam::DVec3::ZERO, color, size, age: 0.0, spin: 0.0, kind: wolfcraft_engine::mobs::FxKind::Fall, glow, tile: 0, piece: 0 };
+                    let mut parts = Vec::new();
+                    for (k, h) in [0.55f64, 1.45, 2.35, 3.0].iter().enumerate() {
+                        parts.push(cube(feet - up * *h, if k == 1 { [0.85, 0.15, 0.12] } else { [0.94, 0.95, 0.97] }, 0.95, false));
+                    }
+                    for s2 in [side, -side, side2, -side2] {
+                        parts.push(cube(feet - up * 3.1 + s2 * 0.7, [0.85, 0.15, 0.12], 0.45, false));
+                    }
+                    parts.push(cube(feet - up * 3.6, [1.0, 0.65, 0.20], 0.6, true));
+                    model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&parts, cam.eye));
+                }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.explosives.debris(self.time.elapsed()), cam.eye));
                 // Falling and thrown blocks: cubes in their block's colours, tumbling.
                 if !s.collapse.falling.is_empty() {
@@ -5137,4 +5178,50 @@ fn drill_overlay(ctx: &egui::Context, mode: u8, cover: &mut Vec<egui::Rect>) -> 
         }
     });
     tapped
+}
+
+/// In orbit: the planets to fly to, as glass cards. Returns the one tapped.
+fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, online: bool, cover: &mut Vec<egui::Rect>) -> Option<wolfcraft_engine::planet::PlanetKind> {
+    use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
+    use wolfcraft_engine::planet::PlanetKind;
+    let mut pick = None;
+    let screen = ctx.screen_rect();
+    let w = (screen.width() - 24.0).min(460.0);
+    let card_h = 58.0;
+    let h = 56.0 + card_h * 5.0 + 8.0 * 4.0 + 20.0;
+    let rect = Rect::from_center_size(screen.center(), Vec2::new(w, h.min(screen.height() - 20.0)));
+    cover.push(rect);
+    egui::Area::new(egui::Id::new("rocket-menu")).fixed_pos(rect.min).order(egui::Order::Foreground).show(ctx, |ui| {
+        let p = ui.painter();
+        p.rect_filled(rect.translate(Vec2::new(0.0, 4.0)), Rounding::same(22.0), Color32::from_black_alpha(90));
+        p.rect_filled(rect, Rounding::same(22.0), Color32::from_rgba_unmultiplied(12, 20, 40, 225));
+        p.rect_stroke(rect, Rounding::same(22.0), Stroke::new(1.0_f32, Color32::from_white_alpha(90)));
+        p.text(Pos2::new(rect.center().x, rect.top() + 28.0), Align2::CENTER_CENTER, "🚀 Куда летим?", FontId::proportional(20.0), Color32::WHITE);
+        let swatch = |k: PlanetKind| match k {
+            PlanetKind::Home => Color32::from_rgb(70, 150, 90),
+            PlanetKind::Moon => Color32::from_rgb(170, 170, 178),
+            PlanetKind::Lava => Color32::from_rgb(230, 90, 30),
+            PlanetKind::Ice => Color32::from_rgb(150, 200, 250),
+            PlanetKind::Alien => Color32::from_rgb(150, 80, 200),
+        };
+        for (i, k) in PlanetKind::ALL.iter().enumerate() {
+            let r = Rect::from_min_size(Pos2::new(rect.left() + 14.0, rect.top() + 56.0 + i as f32 * (card_h + 8.0)), Vec2::new(rect.width() - 28.0, card_h));
+            let locked = online && *k != here;
+            let resp = ui.interact(r, egui::Id::new(("rocket-pick", i)), if locked { Sense::hover() } else { Sense::click() });
+            let p = ui.painter();
+            let bg = if *k == here { Color32::from_rgba_unmultiplied(60, 90, 140, 200) } else if resp.hovered() { Color32::from_rgba_unmultiplied(50, 70, 110, 210) } else { Color32::from_rgba_unmultiplied(30, 42, 70, 200) };
+            p.rect_filled(r, Rounding::same(16.0), bg);
+            p.rect_stroke(r, Rounding::same(16.0), Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
+            p.circle_filled(Pos2::new(r.left() + 30.0, r.center().y), 17.0, swatch(*k));
+            p.circle_filled(Pos2::new(r.left() + 24.0, r.center().y - 6.0), 5.0, Color32::from_white_alpha(70));
+            let name = if *k == here { format!("{} · вы здесь", k.name()) } else { k.name().to_string() };
+            p.text(Pos2::new(r.left() + 58.0, r.top() + 18.0), Align2::LEFT_CENTER, name, FontId::proportional(16.0), Color32::WHITE);
+            let about = if locked { "В сетевой игре — только родная планета" } else { k.about() };
+            p.text(Pos2::new(r.left() + 58.0, r.top() + 40.0), Align2::LEFT_CENTER, about, FontId::proportional(11.5), Color32::from_white_alpha(185));
+            if resp.clicked() {
+                pick = Some(*k);
+            }
+        }
+    });
+    pick
 }

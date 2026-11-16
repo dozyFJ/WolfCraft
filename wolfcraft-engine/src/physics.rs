@@ -22,6 +22,18 @@ pub const BODY_RADIUS: f64 = 0.3;
 pub const BODY_HEIGHT: f64 = 1.8;
 pub const EYE_HEIGHT: f64 = 1.62;
 pub const GRAVITY: f64 = 30.0;
+
+/// Gravity of the planet being played compared to home (the Moon pulls a third as hard).
+static GRAVITY_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F80_0000);
+
+pub fn set_gravity_scale(k: f32) {
+    GRAVITY_SCALE.store(k.clamp(0.05, 4.0).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Gravity pull here (blocks/s²).
+pub fn gravity() -> f64 {
+    GRAVITY * f32::from_bits(GRAVITY_SCALE.load(std::sync::atomic::Ordering::Relaxed)) as f64
+}
 pub const TERMINAL_VELOCITY: f64 = 60.0;
 pub const JUMP_SPEED: f64 = 8.7;
 const SPHERE_HEIGHTS: [f64; 3] = [0.3, 0.9, 1.5];
@@ -99,7 +111,7 @@ pub fn step(world: &impl Voxels, body: &mut Body, input: &MoveInput, dt: f64) ->
         let diff = target - v_h;
         let max_change = accel * dt;
         v_h += if diff.length() > max_change { diff.normalize() * max_change } else { diff };
-        v_up = (v_up - GRAVITY * dt).max(-TERMINAL_VELOCITY);
+        v_up = (v_up - gravity() * dt).max(-TERMINAL_VELOCITY);
         if input.jump && body.on_ground {
             v_up = JUMP_SPEED;
             body.on_ground = false;

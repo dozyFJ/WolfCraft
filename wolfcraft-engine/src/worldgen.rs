@@ -103,7 +103,7 @@ pub fn sky_hint(planet: &Planet, key: ChunkKey) -> bool {
 }
 
 fn is_grassy(b: Biome) -> bool {
-    matches!(b, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Jungle | Biome::Taiga | Biome::Savanna | Biome::Swamp | Biome::Tundra | Biome::CherryGrove | Biome::DarkForest | Biome::FlowerMeadow)
+    matches!(b, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Jungle | Biome::Taiga | Biome::Savanna | Biome::Swamp | Biome::Tundra | Biome::CherryGrove | Biome::DarkForest | Biome::FlowerMeadow | Biome::AlienJungle | Biome::GlowSwamp)
 }
 
 fn table(u: f64, t: &[(f64, Block)]) -> Option<Block> {
@@ -146,6 +146,13 @@ pub fn flora(planet: &Planet, f: u8, i: i32, j: i32, col: &Column) -> Vec<(i32, 
         return vec![];
     }
     let b = col.biome;
+    // Ash wastes: a few dead bushes; the moon, lava fields and ice: bare.
+    if b == Biome::AshWastes {
+        return if u < 0.008 { vec![(k_above, Block::DeadBush)] } else { vec![] };
+    }
+    if matches!(b, Biome::MoonMare | Biome::MoonHighlands | Biome::LavaFields | Biome::FrozenPlains | Biome::CrystalPeaks) {
+        return vec![];
+    }
     if matches!(b, Biome::Desert | Biome::Badlands) {
         let chance = if b == Biome::Desert { 0.012 } else { 0.003 };
         let h = splitmix(hash3(planet.seed ^ FLORA_SEED ^ 0xCAC, i, j, f as i32));
@@ -159,7 +166,7 @@ pub fn flora(planet: &Planet, f: u8, i: i32, j: i32, col: &Column) -> Vec<(i32, 
         return vec![];
     }
     // Sugar cane on low shores (1-3 high).
-    if col.elev < 2.5 && !matches!(b, Biome::Tundra) {
+    if col.elev < 2.5 && !matches!(b, Biome::Tundra | Biome::AlienJungle | Biome::GlowSwamp) {
         let h = splitmix(hash3(planet.seed ^ FLORA_SEED ^ 0x5C4, i, j, f as i32));
         if to01(h) < 0.05 {
             let height = 1 + (splitmix(h) % 3) as i32;
@@ -177,6 +184,8 @@ pub fn flora(planet: &Planet, f: u8, i: i32, j: i32, col: &Column) -> Vec<(i32, 
         Biome::FlowerMeadow => table(u, &[(0.16, Block::TallGrass), (0.24, Block::FlowerRed), (0.32, Block::FlowerYellow), (0.40, Block::FlowerBlue), (0.42, Block::Shrub)]),
         Biome::CherryGrove => table(u, &[(0.18, Block::TallGrass), (0.22, Block::FlowerRed), (0.25, Block::FlowerBlue)]),
         Biome::DarkForest => table(u, &[(0.06, Block::TallGrass), (0.11, Block::MushroomBrown), (0.15, Block::MushroomRed), (0.22, Block::Fern)]),
+        Biome::AlienJungle => table(u, &[(0.22, Block::AlienPlant), (0.25, Block::GlowShroom)]),
+        Biome::GlowSwamp => table(u, &[(0.12, Block::AlienPlant), (0.24, Block::GlowShroom)]),
         _ => None,
     };
     pick.map(|bl| vec![(k_above, bl)]).unwrap_or_default()
@@ -196,6 +205,8 @@ pub enum TreeKind {
     Cherry,
     /// A thick 2×2 trunk under a wide flat crown.
     DarkOak,
+    /// Alien world: a tall teal trunk with two glowing crowns.
+    Alien,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -222,6 +233,9 @@ fn tree_chance(b: Biome) -> (f64, &'static [(TreeKind, u32)]) {
         Biome::CherryGrove => (0.30, &[(TreeKind::Cherry, 90), (TreeKind::Birch, 10)]),
         Biome::DarkForest => (0.70, &[(TreeKind::DarkOak, 75), (TreeKind::Oak, 25)]),
         Biome::FlowerMeadow => (0.02, &[(TreeKind::Oak, 70), (TreeKind::Birch, 30)]),
+        Biome::AlienJungle => (0.55, &[(TreeKind::Alien, 100)]),
+        Biome::GlowSwamp => (0.12, &[(TreeKind::Alien, 100)]),
+        Biome::FrozenPlains => (0.03, &[(TreeKind::Spruce, 100)]),
         _ => (0.0, &[]),
     }
 }
@@ -276,7 +290,7 @@ pub fn trees_near(planet: &Planet, key: ChunkKey) -> Vec<Tree> {
             // The real ground (not the height map: cliffs bend it), else no tree.
             let Some(k_top) = planet.surface_k(a.f, a.i, a.j, &col) else { continue };
             let ground = planet.block_at(Cell::new(a.f, a.i, a.j, k_top));
-            if !matches!(ground, Block::Grass | Block::DryGrass | Block::SwampGrass | Block::Snow | Block::Dirt | Block::Mud) {
+            if !matches!(ground, Block::Grass | Block::DryGrass | Block::SwampGrass | Block::Snow | Block::Dirt | Block::Mud | Block::AlienGrass | Block::AlienSoil) {
                 continue;
             }
             let mut pick = (splitmix(h ^ 5) % 100) as u32;
@@ -297,6 +311,7 @@ pub fn trees_near(planet: &Planet, key: ChunkKey) -> Vec<Tree> {
                 TreeKind::Acacia => 4 + (r % 3) as i32,
                 TreeKind::Cherry => 4 + (r % 3) as i32,
                 TreeKind::DarkOak => 6 + (r % 3) as i32,
+                TreeKind::Alien => 9 + (r % 6) as i32,
             };
             // Vertical overlap with the chunk?
             if k_top + height + 5 < o.z || k_top - 1 >= o.z + CHUNK_SIZE {
@@ -312,6 +327,7 @@ fn leaves_of(kind: TreeKind) -> Block {
     match kind {
         TreeKind::Oak | TreeKind::Jungle | TreeKind::DarkOak => Block::OakLeaves,
         TreeKind::Cherry => Block::CherryLeaves,
+        TreeKind::Alien => Block::AlienLeaves,
         TreeKind::Birch => Block::BirchLeaves,
         TreeKind::Spruce => Block::SpruceLeaves,
         TreeKind::Acacia => Block::AcaciaLeaves,
@@ -322,6 +338,7 @@ fn log_of(kind: TreeKind) -> Block {
     match kind {
         TreeKind::Oak | TreeKind::Jungle | TreeKind::DarkOak => Block::OakLog,
         TreeKind::Cherry => Block::BirchLog,
+        TreeKind::Alien => Block::AlienLog,
         TreeKind::Birch => Block::BirchLog,
         TreeKind::Spruce => Block::SpruceLog,
         TreeKind::Acacia => Block::AcaciaLog,
@@ -369,6 +386,10 @@ pub fn tree_blocks(t: &Tree) -> Vec<((i32, i32, i32), Block)> {
         TreeKind::DarkOak => {
             ellipsoid(&mut out, h as f64 + 0.6, 4.2, 2.2);
             ellipsoid(&mut out, h as f64 + 2.0, 2.6, 1.4);
+        }
+        TreeKind::Alien => {
+            ellipsoid(&mut out, h as f64 + 0.5, 3.0, 2.0);
+            ellipsoid(&mut out, h as f64 * 0.62, 2.2, 1.3);
         }
         TreeKind::Spruce => {
             for dk in 2..=(h + 1) {
@@ -418,7 +439,7 @@ fn apply_trees(planet: &Planet, key: ChunkKey, chunk: &mut Chunk) {
             }
             let (li, lj, lk) = (c.i & 15, c.j & 15, c.k & 15);
             let cur = chunk.get(li, lj, lk);
-            let is_log = matches!(b, Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog);
+            let is_log = matches!(b, Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::AlienLog);
             let can = if is_log { cur.is_replaceable() || cur.info().render == RenderKind::Cutout } else { cur == Block::Air || cur.info().render == RenderKind::Cross };
             if can {
                 chunk.set(li, lj, lk, b);
