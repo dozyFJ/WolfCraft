@@ -331,6 +331,7 @@ pub struct App {
     thud_cd: f32,
     /// Studio: the block last tapped or aimed at (shown in «Выбранный блок»).
     studio_target: Option<wolfcraft_engine::cubesphere::Cell>,
+    script_console: Vec<(ChatKind,String)>,
     /// Studio: where the edit camera was when «Играть» started (position, heading, pitch).
     studio_cam: Option<(glam::DVec3, glam::DVec3, f64)>,
     /// Voice chat on servers, and its menu (the microphone in the top bar).
@@ -485,6 +486,7 @@ impl App {
             hit_marker: 0.0,
             thud_cd: 0.0,
             studio_target: None,
+            script_console: Vec::new(),
             studio_cam: None,
             lua_step: None,
             voice: crate::voice::Voice::default(),
@@ -819,6 +821,12 @@ impl App {
         }
     }
 
+    fn console_line(console:&mut Vec<(ChatKind,String)>,kind:ChatKind,text:String) {
+        if kind==ChatKind::Error {log::error!("script: {text}");}else{log::info!("script: {text}");}
+        console.push((kind,text));
+        if console.len()>256 {console.drain(..console.len()-256);}
+    }
+
     /// What the studio shows about the place this frame.
     fn studio_view(&self) -> Option<wolfcraft_ui::studio_ui::StudioView> {
         let s = self.session.as_ref()?;
@@ -841,7 +849,7 @@ impl App {
             players,
             mobs: s.mobs.mobs.iter().map(|mb| (mb.kind.name().to_string(), mb.hp, mb.kind.max_hp(), mb.body.pos.to_array())).collect(),
             drops: s.drops.list.len(),
-            output: self.chat.lines.iter().rev().take(80).rev().map(|l| (l.kind, l.text.clone())).collect(),
+            output: self.chat.lines.iter().rev().take(20).rev().map(|l| (l.kind, l.text.clone())).chain(self.script_console.iter().cloned()).collect(),
             held_block,
             selection: (cell(s.we.pos1), cell(s.we.pos2)),
             target: self.studio_target.and_then(|c| {
@@ -946,8 +954,17 @@ impl App {
                     s.player.body.vel = glam::DVec3::ZERO;
                 }
             }
+            StudioAction::GroupSelection => {
+                if let Some(s)=&mut self.session {
+                    match crate::worldedit::group_selection(s) {
+                        Ok(i)=>{if let Some(st)=&mut self.studio {st.selected=wolfcraft_ui::studio_ui::Node::Model(i);st.show_props=true;}status(self,"Выделение сгруппировано в модель");},
+                        Err(e)=>status(self,&e),
+                    }
+                }
+            }
             StudioAction::TargetCorner(n) => {
                 if let (Some(s), Some(c)) = (&mut self.session, self.studio_target) {
+                    s.we.selected_cells.clear();
                     if n == 1 {
                         s.we.pos1 = Some(c);
                     } else {
@@ -1036,6 +1053,7 @@ impl App {
                 if let Some(st) = &mut self.studio {
                     st.playtest = on;
                     st.brush_on = false;
+                    st.selector=wolfcraft_ui::studio_ui::Selector::Off;
                 }
                 if let Some(s) = &mut self.session {
                     if on {
@@ -1093,13 +1111,13 @@ impl App {
                 let out = l.take_output();
                 let errors = out.iter().any(|(k, _)| *k == wolfcraft_ui::chat_ui::ChatKind::Error);
                 for (k, t) in out {
-                    self.chat.push(k, t, now);
+                    Self::console_line(&mut self.script_console,k,t);
                 }
                 self.lua = Some(l);
                 errors
             }
             Err(e) => {
-                self.chat.push(wolfcraft_ui::chat_ui::ChatKind::Error, format!("Lua: {e}"), now);
+                Self::console_line(&mut self.script_console,ChatKind::Error,format!("Lua: {e}"));
                 true
             }
         }
@@ -1688,6 +1706,15 @@ impl App {
                 let mut input = if self.screen == Screen::Playing && !self.chat.open { self.take_input_frame() } else { InputFrame::default() };
                 self.tap_hit = (self.tap_hit - dt as f32).max(0.0);
                 // Studio brush: taps and holds on the world sculpt instead of placing/breaking.
+                let mut selector=wolfcraft_ui::studio_ui::Selector::Off;
+                let mut select_fire=false;
+                if let Some(st)=self.studio.as_mut().filter(|st|!st.playtest) {
+                    selector=st.selector;
+                    let held=input.break_held||input.use_held;
+                    select_fire=selector!=wolfcraft_ui::studio_ui::Selector::Off&&(input.use_pressed||(held&&!st.selector_held));
+                    st.selector_held=held;
+                }
+                if selector!=wolfcraft_ui::studio_ui::Selector::Off {input.use_pressed=false;input.use_held=false;input.break_held=false;}
                 let brush = self.studio.as_ref().filter(|st| st.brush_on && !st.playtest).map(|st| (st.brush_op, st.brush_r, st.brush_cube));
                 let brush_fire = brush.is_some() && (input.use_pressed || input.break_held || input.use_held);
                 if brush.is_some() {
@@ -1740,6 +1767,25 @@ impl App {
                             self.studio_target = Some(h.cell);
                         }
                     }
+                    if select_fire {
+                        if let (Some(st),Some(hit))=(&mut self.studio,s.hit) {
+                            let now=self.time.elapsed() as f64;
+                            match selector {
+                                wolfcraft_ui::studio_ui::Selector::Object=>match crate::worldedit::select_object(s,hit.cell) {
+                                    Ok(i)=>{st.selected=i.map(wolfcraft_ui::studio_ui::Node::Model).unwrap_or(wolfcraft_ui::studio_ui::Node::Target);st.status=format!("Выбрано блоков: {} · Группа — сгруппировать",s.we.selected_cells.len());st.show_props=true;},
+                                    Err(e)=>st.status=e,
+                                },
+                                wolfcraft_ui::studio_ui::Selector::Region=>{
+                                    s.we.selected_cells.clear();
+                                    if !st.region_second {s.we.pos1=Some(hit.cell);s.we.pos2=None;st.status="Первый угол. Коснитесь противоположного угла".into();}
+                                    else {s.we.pos2=Some(hit.cell);st.status="Область выбрана. Нажмите Группа".into();}
+                                    st.region_second=!st.region_second;st.selected=wolfcraft_ui::studio_ui::Node::Target;
+                                },
+                                _=>{},
+                            }
+                            st.status_t=now;
+                        }
+                    }
                     self.profile.chunks_ms = t.ms();
                     if let Some((op, r, cube)) = brush {
                         crate::worldedit::stroke(s, brush_fire);
@@ -1773,7 +1819,7 @@ impl App {
                         }
                         let now = self.time.elapsed() as f64;
                         for (k, t) in l.take_output() {
-                            self.chat.push(k, t, now);
+                            Self::console_line(&mut self.script_console,k,t);
                         }
                     }
                     // Changes the game made by itself (buttons springing back) go to the server too.
@@ -2348,7 +2394,7 @@ impl App {
                             }
                         }
                         // The world script's own GUI (Luau, like Roblox ScreenGui).
-                        if screen == Screen::Playing && !lua_gui.is_empty() {
+                        if screen == Screen::Playing && !studio_edit && !lua_gui.is_empty() {
                             lua_clicks.extend(draw_lua_gui(ctx, &icons, &lua_gui));
                         }
                         // Mod windows in HTML + CSS + JS.
@@ -2363,7 +2409,7 @@ impl App {
                             web_pages.retain(|p| p.open);
                         }
                         if screen == Screen::Playing {
-                            if let Some(line) = chat_ui::draw(ctx, &icons, chat, time.elapsed() as f64) {
+                            if let Some(line) = if studio_edit {None}else{chat_ui::draw(ctx, &icons, chat, time.elapsed() as f64)} {
                                 submitted.push(line);
                             }
                         }
@@ -2749,7 +2795,7 @@ impl App {
                 if let (Some(l), false) = (&mut self.lua, line.starts_with('/')) {
                     l.event(s, "chat", &line);
                     for (k, t) in l.take_output() {
-                        self.chat.push(k, t, now);
+                        Self::console_line(&mut self.script_console,k,t);
                     }
                 }
             }
@@ -2810,7 +2856,7 @@ impl App {
                 l.click(s, &id);
             }
             for (k, t) in l.take_output() {
-                self.chat.push(k, t, now);
+                Self::console_line(&mut self.script_console,k,t);
             }
         }
 
@@ -2906,7 +2952,7 @@ impl App {
                     view_distance_blocks: (self.settings.render_distance * 16) as f32,
                     time: self.time.elapsed(),
                     // The outline hugs the block's shape (torches, plants, slabs, doors…).
-                    outline: if self.screen == Screen::Playing { s.hit.map(|h| block_outline(&s.chunks, h.cell, h.block)) } else { None },
+                    outline: if self.screen == Screen::Playing { self.studio.as_ref().filter(|st|!st.playtest).and_then(|_|crate::worldedit::selection_outline(s)).or_else(||s.hit.map(|h| block_outline(&s.chunks, h.cell, h.block))) } else { None },
                     crack: if self.screen == Screen::Playing { s.interaction.mining_fraction() } else { 0.0 },
                     viewmodel_fov_y: self.settings.vm_fov.to_radians(),
                 };
