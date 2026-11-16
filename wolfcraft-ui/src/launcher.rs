@@ -445,7 +445,7 @@ fn aero_tabs(ui: &mut Ui, p: &Palette, names: &[&str], cur: usize) -> Option<usi
 
 /// A glossy Aero capsule in colour `c`: lighter at the top, a white shine over the upper half,
 /// a bright rim.
-fn gloss_capsule(ui: &Ui, r: Rect, c: Color32) {
+pub(crate) fn gloss_capsule(ui: &Ui, r: Rect, c: Color32) {
     let rad = r.height() / 2.0;
     let pt = ui.painter();
     pt.rect_filled(r.translate(Vec2::new(0.0, 2.0)), Rounding::same(rad), Color32::from_black_alpha(45));
@@ -1219,7 +1219,7 @@ mod tests {
 
 
 /// Linear mix of two colours (unmultiplied), `t` 0..1.
-fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+pub(crate) fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     let (a, b) = (a.to_srgba_unmultiplied(), b.to_srgba_unmultiplied());
     let l = |i: usize| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t.clamp(0.0, 1.0)).round() as u8;
     Color32::from_rgba_unmultiplied(l(0), l(1), l(2), l(3))
@@ -1227,11 +1227,11 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 
 /// A rounded rectangle filled with a vertical gradient (`r_top` rounds the upper corners,
 /// `r_bottom` the lower ones). Used for every Aero shine: no hard edges anywhere.
-fn grad_rect(pt: &egui::Painter, r: Rect, r_top: f32, r_bottom: f32, top: Color32, bottom: Color32) {
+pub(crate) fn grad_rect(pt: &egui::Painter, r: Rect, r_top: f32, r_bottom: f32, top: Color32, bottom: Color32) {
     pt.add(grad_shape(r, r_top, r_bottom, top, bottom));
 }
 
-fn grad_shape(r: Rect, r_top: f32, r_bottom: f32, top: Color32, bottom: Color32) -> egui::Shape {
+pub(crate) fn grad_shape(r: Rect, r_top: f32, r_bottom: f32, top: Color32, bottom: Color32) -> egui::Shape {
     let (rt, rb) = (r_top.min(r.width() / 2.0).min(r.height()), r_bottom.min(r.width() / 2.0).min(r.height()));
     let mut pts: Vec<Pos2> = Vec::new();
     let arc = |pts: &mut Vec<Pos2>, c: Pos2, rad: f32, from: f32| {
@@ -1262,23 +1262,23 @@ fn grad_shape(r: Rect, r_top: f32, r_bottom: f32, top: Color32, bottom: Color32)
 }
 
 /// Text with a soft dark shadow under it, so it reads on glossy and light surfaces.
-fn shadow_text(pt: &egui::Painter, pos: Pos2, align: Align2, text: &str, font: FontId, col: Color32) {
+pub(crate) fn shadow_text(pt: &egui::Painter, pos: Pos2, align: Align2, text: &str, font: FontId, col: Color32) {
     pt.text(pos + Vec2::new(0.0, 1.2), align, text, font.clone(), Color32::from_black_alpha(110));
     pt.text(pos, align, text, font, col);
 }
 
 /// Aero glass: a see-through tinted pane (sky-blue in light, deep blue in dark).
-fn glass_tint(p: &Palette) -> Color32 {
+pub(crate) fn glass_tint(p: &Palette) -> Color32 {
     if p.dark { Color32::from_rgba_unmultiplied(22, 36, 60, 165) } else { Color32::from_rgba_unmultiplied(225, 238, 252, 150) }
 }
 
 /// The glossy reflection on the upper half of a glass pane.
-fn glass_gloss(p: &Palette) -> Color32 {
+pub(crate) fn glass_gloss(p: &Palette) -> Color32 {
     Color32::from_rgba_unmultiplied(255, 255, 255, if p.dark { 26 } else { 80 })
 }
 
 /// The bright rim round a glass pane.
-fn glass_rim(p: &Palette) -> Color32 {
+pub(crate) fn glass_rim(p: &Palette) -> Color32 {
     Color32::from_rgba_unmultiplied(255, 255, 255, if p.dark { 55 } else { 150 })
 }
 

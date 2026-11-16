@@ -444,22 +444,31 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
         let wide = rect.width() > rect.height() * 1.2;
         // Upright phone: the title and one column of buttons, all of it in the middle of the
         // screen.
-        let list_h = 3.0 * 56.0 + 30.0;
+        let list_h = 3.0 * 60.0 + 34.0;
         let (logo_area, list_area) = if wide {
             (Rect::from_min_max(rect.min, Pos2::new(rect.center().x, rect.bottom())), Rect::from_min_max(Pos2::new(rect.center().x, rect.top()), rect.max))
         } else {
             let top = (rect.center().y - (100.0 + list_h) / 2.0).max(rect.top() + 8.0);
             (Rect::from_min_max(Pos2::new(rect.left(), top), Pos2::new(rect.right(), top + 100.0)), Rect::from_min_max(Pos2::new(rect.left(), top + 100.0), rect.max))
         };
+        let width = (list_area.width() - 32.0).clamp(200.0, 380.0);
+        // Aero: one glass pane behind the title and the buttons (like the launcher's cards).
+        {
+            let pane = if wide {
+                Rect::from_center_size(list_area.center(), Vec2::new(width + 36.0, list_h + 36.0))
+            } else {
+                Rect::from_min_max(Pos2::new(list_area.center().x - width / 2.0 - 18.0, logo_area.top() + 6.0), Pos2::new(list_area.center().x + width / 2.0 + 18.0, list_area.top() + list_h + 18.0))
+            };
+            aero_pane(ui.painter(), pane, &p);
+        }
         // Title: just the name in capitals and a line under it, centred (no icon).
         {
             let painter = ui.painter();
             let size = (logo_area.width() * 0.105).clamp(26.0, 40.0);
             let cy = logo_area.center().y + if wide { -10.0 } else { 0.0 };
-            painter.text(Pos2::new(logo_area.center().x, cy - 6.0), Align2::CENTER_BOTTOM, "WOLFCRAFT", bold_font(size), Color32::WHITE);
+            crate::launcher::shadow_text(painter, Pos2::new(logo_area.center().x, cy - 6.0), Align2::CENTER_BOTTOM, "WOLFCRAFT", bold_font(size), Color32::WHITE);
             painter.text(Pos2::new(logo_area.center().x, cy + 2.0), Align2::CENTER_TOP, "Целая планета из блоков", FontId::proportional((size * 0.38).max(12.0)), Color32::from_white_alpha(170));
         }
-        let width = (list_area.width() - 32.0).clamp(200.0, 380.0);
         let height = (list_area.height() - 16.0).max(150.0);
         let col = if wide { Rect::from_center_size(list_area.center(), Vec2::new(width, height)) } else { Rect::from_min_size(Pos2::new(list_area.center().x - width / 2.0, list_area.top()), Vec2::new(width, height)) };
         let sheet_id = egui::Id::new("game-menu-sheet");
@@ -471,7 +480,7 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
                     ui.spacing_mut().item_spacing = Vec2::new(10.0, if compact { 6.0 } else { 10.0 });
                     let w = width.min(380.0);
                     let half = (w - 10.0) / 2.0;
-                    if pill_button(ui, icons, Some(icon::PLAY), "Играть", ButtonKind::Primary, w, true).clicked() {
+                    if aero_menu_button(ui, icons, &p, icon::PLAY, "Играть", Some(Color32::from_rgb(62, 172, 56)), w).clicked() {
                         action = MenuAction::OpenWorldSelect;
                     }
                     let mut sheet = |ui: &mut Ui, want: Sheet| {
@@ -488,7 +497,7 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
                             ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
                             for (ic, label, k) in row {
                                 let on = (k == 3 && open == Some(Sheet::News)) || (k == 4 && open == Some(Sheet::More));
-                                if pill_button(ui, icons, Some(ic), label, if on { ButtonKind::Primary } else { ButtonKind::Secondary }, bw, true).clicked() {
+                                if aero_menu_button(ui, icons, &p, ic, label, on.then_some(p.accent), bw).clicked() {
                                     match k {
                                         0 => action = MenuAction::OpenNetwork,
                                         1 => action = open_settings_at(ui.ctx(), 0),
@@ -501,7 +510,7 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
                             }
                         });
                     }
-                    if pill_button(ui, icons, Some(icon::EXIT), "Выход", ButtonKind::Secondary, w, true)
+                    if aero_menu_button(ui, icons, &p, icon::EXIT, "Выход", None, w)
                         .on_hover_text("Вернуться в лаунчер").clicked() {
                         action = MenuAction::Back;
                     }
@@ -509,8 +518,9 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
                     let short: String = version.split('.').take(2).collect::<Vec<_>>().join(".");
                     let g = ui.painter().layout_no_wrap(format!("v{short}"), FontId::proportional(12.0), Color32::from_white_alpha(200));
                     let (r, _) = ui.allocate_exact_size(Vec2::new(g.size().x + 22.0, 24.0), Sense::hover());
-                    ui.painter().rect_filled(r, Rounding::same(12.0), Color32::from_white_alpha(18));
-                    ui.painter().rect_stroke(r, Rounding::same(12.0), Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
+                    ui.painter().rect_filled(r, Rounding::same(12.0), crate::launcher::glass_tint(&p));
+                    ui.painter().add(crate::launcher::grad_shape(Rect::from_min_max(r.min + Vec2::splat(1.0), Pos2::new(r.right() - 1.0, r.center().y)), 11.0, 0.0, crate::launcher::glass_gloss(&p), Color32::TRANSPARENT));
+                    ui.painter().rect_stroke(r, Rounding::same(12.0), Stroke::new(1.0_f32, crate::launcher::glass_rim(&p)));
                     ui.painter().galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
                 });
             });
@@ -521,6 +531,46 @@ pub fn game_menu(ctx: &egui::Context, icons: &GuiIcons, version: &str, planet: O
         action = a;
     }
     action
+}
+
+/// A glass pane in the launcher's Aero style: shadow, tint, a sheen fading downwards, rims.
+fn aero_pane(pt: &egui::Painter, r: Rect, p: &crate::theme_manager::Palette) {
+    use crate::launcher::{glass_gloss, glass_rim, glass_tint, grad_shape};
+    pt.rect_filled(r.translate(Vec2::new(0.0, 5.0)).expand(2.0), Rounding::same(24.0), Color32::from_black_alpha(55));
+    pt.rect_filled(r, Rounding::same(22.0), glass_tint(p));
+    pt.add(grad_shape(Rect::from_min_max(r.min + Vec2::splat(1.0), Pos2::new(r.right() - 1.0, r.top() + (r.height() * 0.45).min(110.0))), 21.0, 0.0, glass_gloss(p).gamma_multiply(1.3), Color32::TRANSPARENT));
+    pt.rect_stroke(r.shrink(1.0), Rounding::same(21.0), Stroke::new(1.0_f32, glass_rim(p).gamma_multiply(0.7)));
+    pt.rect_stroke(r, Rounding::same(22.0), Stroke::new(1.0_f32, Color32::from_black_alpha(70)));
+}
+
+/// A glossy Aero menu button: a coloured capsule (`fill`) or clear glass (None).
+fn aero_menu_button(ui: &mut Ui, icons: &GuiIcons, p: &crate::theme_manager::Palette, ic: u16, label: &str, fill: Option<Color32>, w: f32) -> egui::Response {
+    use crate::launcher::{glass_gloss, glass_rim, gloss_capsule, grad_shape, shadow_text};
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 50.0), Sense::click());
+    let press = resp.is_pointer_button_down_on();
+    let hot = resp.hovered() || press;
+    match fill {
+        Some(c) => gloss_capsule(ui, r, if press { crate::launcher::mix(c, Color32::BLACK, 0.15) } else { c }),
+        None => {
+            let pt = ui.painter();
+            pt.rect_filled(r, Rounding::same(25.0), Color32::from_black_alpha(if p.dark { 70 } else { 22 }));
+            let shine = Rect::from_min_max(r.min + Vec2::new(16.0, 2.5), Pos2::new(r.right() - 16.0, r.center().y));
+            pt.add(grad_shape(shine, shine.height() * 0.7, shine.height() * 0.3, glass_gloss(p).gamma_multiply(if hot { 2.2 } else { 1.4 }), Color32::TRANSPARENT));
+            pt.rect_stroke(r, Rounding::same(25.0), Stroke::new(1.0_f32, glass_rim(p).gamma_multiply(if hot { 1.0 } else { 0.7 })));
+        }
+    }
+    let col = if fill.is_some() { Color32::WHITE } else { p.text };
+    let galley = ui.painter().layout_no_wrap(label.to_string(), bold_font(16.0), col);
+    let total = galley.size().x + 28.0;
+    let x = r.center().x - total / 2.0;
+    icons.paint(ui.painter(), Rect::from_center_size(Pos2::new(x + 10.0, r.center().y), Vec2::splat(20.0)), ic, col);
+    let pos = Pos2::new(x + 28.0, r.center().y);
+    if fill.is_some() {
+        shadow_text(ui.painter(), pos, Align2::LEFT_CENTER, label, bold_font(16.0), col);
+    } else {
+        ui.painter().text(pos, Align2::LEFT_CENTER, label, bold_font(16.0), col);
+    }
+    resp
 }
 
 /// What the dock's «Новости» and «Ещё» open over the menu.
