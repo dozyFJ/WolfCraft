@@ -2216,7 +2216,7 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
             }
             let glow_from = v.len();
             let pulse = if g.loaded { 0.55 + 0.45 * work * (0.5 + 0.5 * (pose.time * 12.0).sin()) } else { 0.15 };
-            bx(&mut v, [0.050, 0.010, 0.00], [0.054, 0.050, 0.16], [CYAN[0] * pulse, CYAN[1] * pulse, CYAN[2] * pulse]);
+            bx(&mut v, [0.050, 0.010, 0.00], [0.054, 0.050, 0.16], [0.35 * pulse, 0.92 * pulse, 1.0 * pulse]);
             if work > 0.4 {
                 for k in 0..4u32 {
                     let t = (pose.time * 6.0 + k as f32 * 0.41).fract();
@@ -2248,7 +2248,7 @@ fn build_firearm_view(pose: &HandsPose, g: GunPose) -> Vec<ModelVertex> {
                 bx(&mut v, [-0.034, -0.034, z], [0.034, 0.034, z + 0.012], [RED[0] * flare, (RED[1] + 0.3) * flare, RED[2] * flare]);
             }
             let charge = if g.loaded { 1.0 } else { 0.2 };
-            bx(&mut v, [0.045, 0.00, 0.00], [0.049, 0.040, 0.24], [CYAN[0] * charge, CYAN[1] * charge, CYAN[2] * charge]);
+            bx(&mut v, [0.045, 0.00, 0.00], [0.049, 0.040, 0.24], [0.35 * charge, 0.92 * charge, 1.0 * charge]);
             if kick > 0.2 {
                 bx(&mut v, [-0.012, -0.012, 0.52], [0.012, 0.012, 0.52 + 1.6 * kick], [1.0, 0.45, 0.30]);
             }
