@@ -5188,7 +5188,7 @@ fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, 
     let screen = ctx.screen_rect();
     let w = (screen.width() - 24.0).min(460.0);
     let card_h = 58.0;
-    let h = 56.0 + card_h * 5.0 + 8.0 * 4.0 + 20.0;
+    let h: f32 = 56.0 + card_h * 5.0 + 8.0 * 4.0 + 20.0;
     let rect = Rect::from_center_size(screen.center(), Vec2::new(w, h.min(screen.height() - 20.0)));
     cover.push(rect);
     egui::Area::new(egui::Id::new("rocket-menu")).fixed_pos(rect.min).order(egui::Order::Foreground).show(ctx, |ui| {
