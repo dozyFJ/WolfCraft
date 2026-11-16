@@ -461,7 +461,7 @@ impl MobManager {
             let flat = tangent(to_player, up);
             let dist = to_player.length();
             if let Some(boss)=&mut m.boss {
-                use crate::bosses::{Attack,BossKind};
+                use crate::bosses::Attack;
                 // A guardian fights whoever called it, in creative too (the game ignores its
                 // damage there): it used to stand still in front of a creative player.
                 let targetable = true;

@@ -530,7 +530,7 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
     if s.compact {
         let r = Rect::from_min_size(Pos2::new(hotbar.right() + inv_gap, hotbar.top()), Vec2::splat(slot_sz));
         painter.rect_filled(r, Rounding::same(6.0), tile);
-        painter.rect_stroke(r, Rounding::same(6.0), Stroke::new(1.5, Color32::from_white_alpha(70)));
+        painter.rect_stroke(r, Rounding::same(6.0), Stroke::new(1.5_f32, Color32::from_white_alpha(70)));
         icons.paint(&painter, r.shrink(slot_sz * 0.22), icon::BACKPACK, Color32::WHITE);
         if let Ok(mut h) = INV_RECT.write() {
             *h = [r.min.x, r.min.y, r.max.x, r.max.y];

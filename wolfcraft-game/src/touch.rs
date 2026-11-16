@@ -403,7 +403,7 @@ impl TouchState {
         use egui::{Align2, Color32, FontId, Pos2, Stroke};
         let pt = |x: f32, y: f32| Pos2::new(x / ppp, y / ppp);
         let fill = Color32::from_rgba_unmultiplied(20, 24, 32, 110);
-        let line = Stroke::new(2.0, Color32::from_rgba_unmultiplied(220, 230, 240, 150));
+        let line = Stroke::new(2.0_f32, Color32::from_rgba_unmultiplied(220, 230, 240, 150));
         let u = unit(size);
         // Joystick: base where the thumb went down, otherwise a hint in the lower left.
         let rr = stick_r(size);
@@ -425,20 +425,20 @@ impl TouchState {
         // Faint while waiting, clear while in use.
         let a = if held.is_some() { 1.0 } else { 0.55 };
         let fade = |c: Color32| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (c.a() as f32 * a) as u8);
-        painter.circle(pt(bx, by), rr / ppp, fade(fill), Stroke::new(2.0, fade(line.color)));
-        painter.circle(pt(kx, ky), rr * 0.42 / ppp, fade(Color32::from_rgba_unmultiplied(230, 240, 250, 160)), Stroke::new(2.0, fade(line.color)));
+        painter.circle(pt(bx, by), rr / ppp, fade(fill), Stroke::new(2.0_f32, fade(line.color)));
+        painter.circle(pt(kx, ky), rr * 0.42 / ppp, fade(Color32::from_rgba_unmultiplied(230, 240, 250, 160)), Stroke::new(2.0_f32, fade(line.color)));
         // Top island: one rounded pill holding chat, camera, debug and pause.
         if !self.studio {
             let (x0, y, step) = island_layout(size);
             let hh = 34.0 * u;
             let rect = egui::Rect::from_min_max(pt(x0 - 8.0 * u, y - hh), pt(x0 + step * self.island().len() as f32 + 8.0 * u, y + hh));
-            painter.rect(rect, hh / ppp, Color32::from_rgba_unmultiplied(12, 14, 20, 200), Stroke::new(1.5, Color32::from_rgba_unmultiplied(220, 230, 240, 70)));
+            painter.rect(rect, hh / ppp, Color32::from_rgba_unmultiplied(12, 14, 20, 200), Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(220, 230, 240, 70)));
             for i in 1..self.island().len() {
                 let x = x0 + step * i as f32;
-                painter.line_segment([pt(x, y - hh * 0.45), pt(x, y + hh * 0.45)], Stroke::new(1.0, Color32::from_rgba_unmultiplied(220, 230, 240, 50)));
+                painter.line_segment([pt(x, y - hh * 0.45), pt(x, y + hh * 0.45)], Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(220, 230, 240, 50)));
             }
             let white = Color32::from_rgba_unmultiplied(240, 245, 250, 235);
-            let st = Stroke::new(2.4, white);
+            let st = Stroke::new(2.4_f32, white);
             for &b in self.island() {
                 let (cx, cy, r) = button_rect(b, size, self.hotbar);
                 let c = pt(cx, cy);
@@ -467,9 +467,9 @@ impl TouchState {
                         if self.voice_state == 2 {
                             painter.rect_filled(cap, k * 0.4, col);
                         } else {
-                            painter.rect_stroke(cap, k * 0.4, Stroke::new(2.2, col));
+                            painter.rect_stroke(cap, k * 0.4, Stroke::new(2.2_f32, col));
                         }
-                        let s2 = Stroke::new(2.2, col);
+                        let s2 = Stroke::new(2.2_f32, col);
                         let pts: Vec<egui::Pos2> = (0..=10).map(|i| {
                             let a = std::f32::consts::PI * (i as f32 / 10.0);
                             c + egui::vec2(-a.cos() * k * 0.7, -k * 0.2 + a.sin() * k * 0.55)
@@ -478,7 +478,7 @@ impl TouchState {
                         painter.line_segment([c + egui::vec2(0.0, k * 0.35), c + egui::vec2(0.0, k * 0.8)], s2);
                         painter.line_segment([c + egui::vec2(-k * 0.4, k * 0.8), c + egui::vec2(k * 0.4, k * 0.8)], s2);
                         if self.voice_state == 0 {
-                            painter.line_segment([c + egui::vec2(-k * 0.9, -k * 0.9), c + egui::vec2(k * 0.9, k * 0.9)], Stroke::new(2.6, Color32::from_rgb(240, 90, 90)));
+                            painter.line_segment([c + egui::vec2(-k * 0.9, -k * 0.9), c + egui::vec2(k * 0.9, k * 0.9)], Stroke::new(2.6_f32, Color32::from_rgb(240, 90, 90)));
                         }
                     }
                     Btn::Camera => {
@@ -510,7 +510,7 @@ impl TouchState {
             let white = Color32::from_rgba_unmultiplied(240, 245, 250, 235);
             let c = pt(cx, cy);
             let k = r * 0.42 / ppp;
-            let st = Stroke::new(2.6, white);
+            let st = Stroke::new(2.6_f32, white);
             match b {
                 Btn::Jump | Btn::Sneak => {
                     // The pixel font has no arrow glyphs: draw the triangle as a shape.

@@ -72,7 +72,7 @@ impl Page {
         let frame = Frame::window(&ctx.style())
             .fill(fill)
             .rounding(Rounding::same(if bs.radius > 0.0 { bs.radius } else { 12.0 }))
-            .stroke(bs.border.map(|(w, c)| Stroke::new(w, col(c, 1.0))).unwrap_or(Stroke::new(1.0, Color32::from_white_alpha(60))))
+            .stroke(bs.border.map(|(w, c)| Stroke::new(w, col(c, 1.0))).unwrap_or(Stroke::new(1.0_f32, Color32::from_white_alpha(60))))
             .inner_margin(if bs.padding == [0.0; 4] { Margin::same(12.0) } else { margin(bs.padding) });
         let clickable: Vec<bool> = (0..self.it.dom.nodes.len()).map(|n| self.it.dom.attr(n, "onclick").is_some() || self.it.handler(n, "click").is_some()).collect();
         let mut cx = Cx { dom: &mut self.it.dom, rules: &self.rules, events: Vec::new(), hover: self.hovered, new_hover: None, clickable };

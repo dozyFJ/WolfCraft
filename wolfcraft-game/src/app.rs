@@ -2061,6 +2061,8 @@ impl App {
         let mut studio_actions: Vec<wolfcraft_ui::studio_ui::StudioAction> = Vec::new();
         let mut studio_cover: Vec<egui::Rect> = Vec::new();
         let mut stellar_cover: Vec<egui::Rect> = Vec::new();
+        // Mini-game panels and mod windows over the world: touches there are theirs.
+        let mut ui_cover: Vec<egui::Rect> = Vec::new();
         let icons = gfx.gui.icons.clone();
         let version = wolfcraft_common::VERSION;
         let data_dir_str = self.data_dir.display().to_string();
@@ -2275,12 +2277,14 @@ impl App {
                             petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
                             voice_changed |= voice_ui(ctx, &icons, voice, voice_menu, settings, net_players, net.as_ref().map(|n| n.voice), time.elapsed() as f64);
                             buttonsim_overlay(ctx, &s.buttonsim);
-                            if s.clicker.active && (s.minigames || s.studio) && !studio_edit {
-                                clicker_acts = clicker_overlay(ctx, &icons, &s.clicker);
+                            // Mini-game panels only over the world itself (not over the inventory,
+                            // a chest or the pause menu).
+                            if s.clicker.active && (s.minigames || s.studio) && !studio_edit && screen == Screen::Playing {
+                                clicker_acts = clicker_overlay(ctx, &icons, &s.clicker, &mut ui_cover);
                             }
                             if let Some(a) = &s.arena {
-                                if !studio_edit {
-                                    arena_buys = arena_overlay(ctx, a, &s.player.inventory);
+                                if !studio_edit && matches!(screen, Screen::Playing | Screen::Dead) {
+                                    arena_buys = arena_overlay(ctx, a, &s.player.inventory, &mut ui_cover);
                                 }
                             }
                             // «Звёздный пульт»: its button and skill menu, cinema bars, flashes.
@@ -2314,6 +2318,9 @@ impl App {
                             for p in web_pages.iter_mut() {
                                 web_fx.extend(p.show(ctx, &web_host, dt));
                                 web_log.extend(p.take_log());
+                                if let Some(r) = ctx.memory(|m| m.area_rect(egui::Id::new(("wolfhtml", &p.name)))) {
+                                    ui_cover.push(r);
+                                }
                             }
                             web_pages.retain(|p| p.open);
                         }
@@ -2623,7 +2630,7 @@ impl App {
             self.touch.flying = s.player.body.flying;
         }
         if self.screen == Screen::Playing {
-            self.touch.blocked = studio_cover.iter().chain(stellar_cover.iter()).map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
+            self.touch.blocked = studio_cover.iter().chain(stellar_cover.iter()).chain(ui_cover.iter()).map(|r| (r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp)).collect();
             // The studio's tools sidebar on the left: the stick moves out from under it.
             self.touch.left_inset = self.studio.as_ref().filter(|st| !st.playtest).and_then(|st| st.view_left).map(|x| x * ppp).unwrap_or(0.0);
         }
@@ -4320,7 +4327,7 @@ fn voice_ui(ctx: &egui::Context, icons: &wolfcraft_ui::gui_renderer::GuiIcons, v
         ui.painter().rect_filled(egui::Rect::from_min_size(r.min, Vec2::new(r.width() * lv, r.height())), 5.0, if v.talking { Color32::from_rgb(90, 230, 120) } else { p.accent });
         if !st.voice_push_to_talk {
             let x = r.left() + r.width() * (st.voice_threshold / 0.15).clamp(0.0, 1.0).sqrt();
-            ui.painter().line_segment([egui::pos2(x, r.top() - 2.0), egui::pos2(x, r.bottom() + 2.0)], egui::Stroke::new(2.0, Color32::WHITE));
+            ui.painter().line_segment([egui::pos2(x, r.top() - 2.0), egui::pos2(x, r.bottom() + 2.0)], egui::Stroke::new(2.0_f32, Color32::WHITE));
         }
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Громкость голосов").size(12.5).color(p.text_muted));
@@ -4395,14 +4402,14 @@ fn petsim_overlay(ctx: &egui::Context, p: &wolfcraft_engine::petsim::PetSim, lob
                 c + Vec2::new(x * ca - y * sa, x * sa + y * ca)
             })
             .collect();
-        painter.add(Shape::convex_polygon(pts, Color32::from_rgb(245, 242, 232), Stroke::new(4.0, col(rc, 1.0))));
+        painter.add(Shape::convex_polygon(pts, Color32::from_rgb(245, 242, 232), Stroke::new(4.0_f32, col(rc, 1.0))));
         // Capsule band across the middle.
-        painter.line_segment([c + Vec2::new(-46.0 * ca, -46.0 * sa), c + Vec2::new(46.0 * ca, 46.0 * sa)], Stroke::new(6.0, col(rc, 0.9)));
+        painter.line_segment([c + Vec2::new(-46.0 * ca, -46.0 * sa), c + Vec2::new(46.0 * ca, 46.0 * sa)], Stroke::new(6.0_f32, col(rc, 0.9)));
         if t > 0.9 {
             let crack = [(-10.0, -30.0), (0.0, -14.0), (-8.0, 2.0), (6.0, 16.0), (-2.0, 30.0)];
             let n = (((t - 0.9) / 0.9) * crack.len() as f32).ceil() as usize;
             let pts: Vec<Pos2> = crack.iter().take(n.max(2)).map(|(x, y)| c + Vec2::new(x * ca - y * sa, x * sa + y * ca)).collect();
-            painter.add(Shape::line(pts, Stroke::new(3.0, Color32::from_rgb(60, 50, 40))));
+            painter.add(Shape::line(pts, Stroke::new(3.0_f32, Color32::from_rgb(60, 50, 40))));
         }
     } else {
         // Burst: rays and a ring in the rarity colour, then the name.
@@ -4411,7 +4418,7 @@ fn petsim_overlay(ctx: &egui::Context, p: &wolfcraft_engine::petsim::PetSim, lob
             let a = i as f32 / 16.0 * std::f32::consts::TAU + t * 0.6;
             let r0 = 30.0 + 40.0 * k2;
             let r1 = r0 + 60.0 + 30.0 * (i % 2) as f32;
-            painter.line_segment([c + Vec2::angled(a) * r0, c + Vec2::angled(a) * r1], Stroke::new(5.0, col(rc, 0.85 * dim)));
+            painter.line_segment([c + Vec2::angled(a) * r0, c + Vec2::angled(a) * r1], Stroke::new(5.0_f32, col(rc, 0.85 * dim)));
         }
         painter.circle_stroke(c, 40.0 + 70.0 * k2, Stroke::new(6.0 * (1.0 - k2) + 1.0, col(rc, dim)));
         painter.circle_filled(c, 26.0, col(rc, dim));
@@ -4424,7 +4431,7 @@ fn petsim_overlay(ctx: &egui::Context, p: &wolfcraft_engine::petsim::PetSim, lob
 /// «Кнопки» on screen: money, income per second, multiplier and rebirths (top right).
 /// PvP templates on screen: the mode, team or role, the timer, the bed / egg, the seeker's
 /// count-down, the result; a «Магазин» button and window in Бед/Эггварс. Returns purchases.
-fn arena_overlay(ctx: &egui::Context, a: &wolfcraft_engine::arenas::Arena, inv: &wolfcraft_engine::inventory::Inventory) -> Vec<usize> {
+fn arena_overlay(ctx: &egui::Context, a: &wolfcraft_engine::arenas::Arena, inv: &wolfcraft_engine::inventory::Inventory, cover: &mut Vec<egui::Rect>) -> Vec<usize> {
     use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
     use wolfcraft_engine::arenas::SHOP;
     let mut buys = Vec::new();
@@ -4461,8 +4468,9 @@ fn arena_overlay(ctx: &egui::Context, a: &wolfcraft_engine::arenas::Arena, inv: 
         pt.rect_filled(bar.translate(Vec2::new(0.0, 3.0)), Rounding::same(18.0), Color32::from_black_alpha(60));
         pt.rect_filled(bar, Rounding::same(18.0), Color32::from_rgba_unmultiplied(18, 30, 52, 215));
         pt.rect_filled(Rect::from_min_max(bar.min + Vec2::new(10.0, 2.0), Pos2::new(bar.right() - 10.0, bar.center().y)), Rounding::same(9.0), Color32::from_white_alpha(18));
-        pt.rect_stroke(bar, Rounding::same(18.0), Stroke::new(1.0, Color32::from_white_alpha(90)));
+        pt.rect_stroke(bar, Rounding::same(18.0), Stroke::new(1.0_f32, Color32::from_white_alpha(90)));
         pt.galley(Pos2::new(bar.left() + 14.0, bar.center().y - g.size().y / 2.0), g, Color32::WHITE);
+        cover.push(bar);
         if a.mode.has_shop() && !a.eliminated {
             let r = Rect::from_min_max(Pos2::new(bar.right() - 96.0, bar.top() + 4.0), Pos2::new(bar.right() - 4.0, bar.bottom() - 4.0));
             let resp = ui.interact(r, egui::Id::new("arena-shop-btn"), Sense::click());
@@ -4487,7 +4495,7 @@ fn arena_overlay(ctx: &egui::Context, a: &wolfcraft_engine::arenas::Arena, inv: 
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-            .frame(egui::Frame::window(&ctx.style()).fill(Color32::from_rgba_unmultiplied(16, 26, 46, 240)).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0, Color32::from_white_alpha(90))))
+            .frame(egui::Frame::window(&ctx.style()).fill(Color32::from_rgba_unmultiplied(16, 26, 46, 240)).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0_f32, Color32::from_white_alpha(90))))
             .show(ctx, |ui| {
                 ui.label(egui::RichText::new(format!("У вас: железо {} · золото {} · алмазы {}", inv.count(wolfcraft_engine::items::ids::IRON_INGOT), inv.count(wolfcraft_engine::items::ids::GOLD_INGOT), inv.count(wolfcraft_engine::items::ids::DIAMOND))).color(Color32::from_white_alpha(210)));
                 ui.add_space(4.0);
@@ -4512,6 +4520,9 @@ fn arena_overlay(ctx: &egui::Context, a: &wolfcraft_engine::arenas::Arena, inv: 
             });
         if !open {
             shop = false;
+        }
+        if let Some(r) = ctx.memory(|m| m.area_rect(egui::Id::new("arena-shop-window"))) {
+            cover.push(r);
         }
     }
     ctx.data_mut(|d| d.insert_temp(shop_id, shop));
@@ -4578,7 +4589,7 @@ fn paint_pet(painter: &egui::Painter, r: egui::Rect, k: usize, t: f32) {
             }
         }
     }
-    painter.circle_stroke(o, rad, Stroke::new(1.5, Color32::from_black_alpha(90)));
+    painter.circle_stroke(o, rad, Stroke::new(1.5_f32, Color32::from_black_alpha(90)));
     // Face.
     for sx in [-1.0f32, 1.0] {
         let e = o + Vec2::new(sx * rad * 0.36, -rad * 0.05);
@@ -4586,8 +4597,8 @@ fn paint_pet(painter: &egui::Painter, r: egui::Rect, k: usize, t: f32) {
         painter.circle_filled(e + Vec2::new(-rad * 0.04, -rad * 0.05), rad * 0.05, Color32::WHITE);
         painter.circle_filled(o + Vec2::new(sx * rad * 0.62, rad * 0.22), rad * 0.11, Color32::from_rgba_unmultiplied(255, 120, 140, 120));
     }
-    painter.line_segment([o + Vec2::new(-rad * 0.12, rad * 0.25), o + Vec2::new(0.0, rad * 0.32)], Stroke::new(1.5, Color32::from_rgb(40, 30, 30)));
-    painter.line_segment([o + Vec2::new(0.0, rad * 0.32), o + Vec2::new(rad * 0.12, rad * 0.25)], Stroke::new(1.5, Color32::from_rgb(40, 30, 30)));
+    painter.line_segment([o + Vec2::new(-rad * 0.12, rad * 0.25), o + Vec2::new(0.0, rad * 0.32)], Stroke::new(1.5_f32, Color32::from_rgb(40, 30, 30)));
+    painter.line_segment([o + Vec2::new(0.0, rad * 0.32), o + Vec2::new(rad * 0.12, rad * 0.25)], Stroke::new(1.5_f32, Color32::from_rgb(40, 30, 30)));
     // Mythic pets sparkle.
     if pet.rarity == wolfcraft_engine::clicker::Rarity::Mythic {
         for i in 0..4 {
@@ -4609,15 +4620,15 @@ fn paint_capsule(painter: &egui::Painter, r: egui::Rect, egg: usize) {
     let c = |v: [u8; 3]| Color32::from_rgb(v[0], v[1], v[2]);
     painter.rect_filled(top, Rounding { nw: w / 2.0, ne: w / 2.0, sw: 0.0, se: 0.0 }, c(e.colors[0]));
     painter.rect_filled(bot, Rounding { nw: 0.0, ne: 0.0, sw: w / 2.0, se: w / 2.0 }, c(e.colors[1]));
-    painter.line_segment([egui::pos2(cap.left(), cap.center().y), egui::pos2(cap.right(), cap.center().y)], Stroke::new(2.0, Color32::from_black_alpha(80)));
+    painter.line_segment([egui::pos2(cap.left(), cap.center().y), egui::pos2(cap.right(), cap.center().y)], Stroke::new(2.0_f32, Color32::from_black_alpha(80)));
     painter.rect_filled(egui::Rect::from_min_size(cap.min + Vec2::new(w * 0.2, w * 0.15), Vec2::new(w * 0.18, w * 0.45)), Rounding::same(w * 0.09), Color32::from_white_alpha(120));
-    painter.rect_stroke(cap, Rounding::same(w / 2.0), Stroke::new(1.5, Color32::from_black_alpha(100)));
+    painter.rect_stroke(cap, Rounding::same(w / 2.0), Stroke::new(1.5_f32, Color32::from_black_alpha(100)));
 }
 
 /// «Кликер» on screen: the counters on top, a menu row (Улучшения, Капсулы, Питомцы,
 /// Перерождение, Острова), the big glossy tap button with «+N» popping out, «Продать»,
 /// and the open panel. Returns what was pressed.
-fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolfcraft_engine::clicker::Clicker) -> Vec<ClickAct> {
+fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolfcraft_engine::clicker::Clicker, cover: &mut Vec<egui::Rect>) -> Vec<ClickAct> {
     use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
     use wolfcraft_engine::buttonsim::short;
     use wolfcraft_engine::clicker::{EGGS, ISLANDS, PETS, UPGRADES};
@@ -4633,14 +4644,16 @@ fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolf
         p.rect_filled(r.translate(Vec2::new(0.0, 3.0)), Rounding::same(rad), Color32::from_black_alpha(60));
         p.rect_filled(r, Rounding::same(rad), Color32::from_rgba_unmultiplied(18, 30, 52, 205));
         p.rect_filled(Rect::from_min_max(r.min + Vec2::splat(1.0), Pos2::new(r.right() - 1.0, r.center().y)), Rounding { nw: rad, ne: rad, sw: 0.0, se: 0.0 }, Color32::from_white_alpha(16));
-        p.rect_stroke(r, Rounding::same(rad), Stroke::new(1.0, Color32::from_white_alpha(80)));
+        p.rect_stroke(r, Rounding::same(rad), Stroke::new(1.0_f32, Color32::from_white_alpha(80)));
     };
     egui::Area::new(egui::Id::new("clicker-hud")).order(egui::Order::Foreground).fixed_pos(screen.min).interactable(true).show(ctx, |ui| {
         let pt = ui.painter().clone();
         // ---- Counters ----
-        let w = (screen.width() - 24.0).min(520.0);
+        // Narrow enough to leave the minimap (top right) free.
+        let w = (screen.width() - 2.0 * 170.0).clamp(300.0, 480.0).min(screen.width() - 16.0);
         let bar = Rect::from_min_size(Pos2::new(screen.center().x - w / 2.0, screen.top() + 10.0), Vec2::new(w, 54.0));
         glass(&pt, bar, 16.0);
+        cover.push(Rect::from_min_max(bar.min, Pos2::new(bar.right(), bar.bottom() + 44.0)));
         let cells = [
             ("КЛИКИ", format!("{}/{}", short(c.clicks), short(c.backpack())), if c.full() { Color32::from_rgb(255, 120, 90) } else { Color32::from_rgb(140, 210, 255) }),
             ("ДЕНЬГИ", format!("${}", short(c.money)), Color32::from_rgb(120, 235, 120)),
@@ -4663,7 +4676,7 @@ fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolf
             let on = panel == i + 1;
             pt.rect_filled(r, Rounding::same(17.0), if on { Color32::from_rgb(40, 110, 220) } else if resp.hovered() { Color32::from_rgba_unmultiplied(40, 60, 90, 220) } else { Color32::from_rgba_unmultiplied(18, 30, 52, 200) });
             pt.rect_filled(Rect::from_min_max(r.min + Vec2::new(8.0, 2.0), Pos2::new(r.right() - 8.0, r.center().y)), Rounding::same(8.0), Color32::from_white_alpha(if on { 50 } else { 14 }));
-            pt.rect_stroke(r, Rounding::same(17.0), Stroke::new(1.0, Color32::from_white_alpha(90)));
+            pt.rect_stroke(r, Rounding::same(17.0), Stroke::new(1.0_f32, Color32::from_white_alpha(90)));
             let fs = if bw < 90.0 { 10.5 } else { 12.5 };
             pt.text(r.center(), Align2::CENTER_CENTER, *n, bold(fs), Color32::WHITE);
             if resp.clicked() {
@@ -4675,13 +4688,14 @@ fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolf
         let centre = Pos2::new(screen.center().x, screen.bottom() - rad - 96.0);
         let tap = Rect::from_center_size(centre, Vec2::splat(rad * 2.0));
         let resp = ui.interact(tap, egui::Id::new("clicker-tap"), Sense::click());
+        cover.push(tap);
         let press = resp.is_pointer_button_down_on();
         let r2 = if press { rad * 0.93 } else { rad * (1.0 + (t * 3.0).sin() * 0.015) };
         pt.circle_filled(centre + Vec2::new(0.0, 4.0), r2, Color32::from_black_alpha(70));
         pt.circle_filled(centre, r2, if c.full() { Color32::from_rgb(170, 70, 60) } else { Color32::from_rgb(255, 160, 40) });
         pt.circle_filled(centre + Vec2::new(0.0, r2 * 0.12), r2 * 0.86, if c.full() { Color32::from_rgb(140, 50, 45) } else { Color32::from_rgb(235, 110, 20) });
         pt.circle_filled(centre - Vec2::new(0.0, r2 * 0.38), r2 * 0.5, Color32::from_white_alpha(55));
-        pt.circle_stroke(centre, r2, Stroke::new(2.0, Color32::from_white_alpha(150)));
+        pt.circle_stroke(centre, r2, Stroke::new(2.0_f32, Color32::from_white_alpha(150)));
         pt.text(centre + Vec2::new(0.0, 1.5), Align2::CENTER_CENTER, if c.full() { "ПОЛНО" } else { "КЛИК!" }, bold(rad * 0.38), Color32::from_black_alpha(110));
         pt.text(centre, Align2::CENTER_CENTER, if c.full() { "ПОЛНО" } else { "КЛИК!" }, bold(rad * 0.38), Color32::WHITE);
         if resp.clicked() {
@@ -4689,10 +4703,11 @@ fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolf
         }
         let sell = Rect::from_center_size(Pos2::new(centre.x + rad + 74.0, centre.y), Vec2::new(116.0, 44.0));
         let sresp = ui.interact(sell, egui::Id::new("clicker-sell"), Sense::click());
+        cover.push(sell);
         pt.rect_filled(sell.translate(Vec2::new(0.0, 3.0)), Rounding::same(22.0), Color32::from_black_alpha(60));
         pt.rect_filled(sell, Rounding::same(22.0), if sresp.is_pointer_button_down_on() { Color32::from_rgb(40, 140, 50) } else { Color32::from_rgb(60, 180, 70) });
         pt.rect_filled(Rect::from_min_max(sell.min + Vec2::new(14.0, 2.0), Pos2::new(sell.right() - 14.0, sell.center().y)), Rounding::same(10.0), Color32::from_white_alpha(55));
-        pt.rect_stroke(sell, Rounding::same(22.0), Stroke::new(1.0, Color32::from_white_alpha(140)));
+        pt.rect_stroke(sell, Rounding::same(22.0), Stroke::new(1.0_f32, Color32::from_white_alpha(140)));
         pt.text(sell.center(), Align2::CENTER_CENTER, "Продать", bold(15.0), Color32::WHITE);
         if sresp.clicked() {
             acts.push(ClickAct::Sell);
@@ -4740,7 +4755,7 @@ fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolf
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 10.0))
         .default_width(340.0f32.min(screen.width() - 30.0))
-        .frame(egui::Frame::window(&ctx.style()).fill(Color32::from_rgba_unmultiplied(16, 26, 46, 240)).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0, Color32::from_white_alpha(90))))
+        .frame(egui::Frame::window(&ctx.style()).fill(Color32::from_rgba_unmultiplied(16, 26, 46, 240)).rounding(Rounding::same(16.0)).stroke(Stroke::new(1.0_f32, Color32::from_white_alpha(90))))
         .show(ctx, |ui| {
             ui.set_width(340.0f32.min(screen.width() - 50.0));
             let row = |ui: &mut egui::Ui, draw: &dyn Fn(&egui::Painter, Rect), name: String, info: String, price: String, can: bool| -> bool {
@@ -4842,6 +4857,9 @@ fn clicker_overlay(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, c: &wolf
     if !open {
         ctx.data_mut(|d| d.insert_temp(panel_id, 0usize));
     }
+    if let Some(r) = ctx.memory(|m| m.area_rect(egui::Id::new("clicker-window"))) {
+        cover.push(r);
+    }
     acts
 }
 
@@ -4856,7 +4874,7 @@ fn buttonsim_overlay(ctx: &egui::Context, b: &wolfcraft_engine::buttonsim::Butto
     let w = 210.0;
     let r = Rect::from_min_size(Pos2::new(screen.center().x - w / 2.0, screen.top() + 12.0), Vec2::new(w, 86.0));
     painter.rect_filled(r, Rounding::same(14.0), Color32::from_black_alpha(150));
-    painter.rect_stroke(r, Rounding::same(14.0), Stroke::new(1.0, Color32::from_white_alpha(40)));
+    painter.rect_stroke(r, Rounding::same(14.0), Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
     painter.text(Pos2::new(r.center().x, r.top() + 22.0), Align2::CENTER_CENTER, format!("$ {}", short(b.money)), FontId::proportional(24.0), Color32::from_rgb(120, 230, 120));
     painter.text(Pos2::new(r.center().x, r.top() + 46.0), Align2::CENTER_CENTER, format!("+{}/с", short(b.income())), FontId::proportional(13.0), Color32::from_white_alpha(200));
     painter.text(Pos2::new(r.left() + 14.0, r.bottom() - 16.0), Align2::LEFT_CENTER, format!("×{}", short(b.multiplier)), FontId::proportional(15.0), Color32::from_rgb(110, 170, 255));

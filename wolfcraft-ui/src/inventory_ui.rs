@@ -318,7 +318,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
             pill = pill.translate(Vec2::new((sr.left() + 4.0 - pill.left()).max(0.0) + (sr.right() - 4.0 - pill.right()).min(0.0), (sr.top() + 4.0 - pill.top()).max(0.0)));
             let a = (*t * 4.0).clamp(0.0, 1.0);
             layer.rect_filled(pill, Rounding::same(6.0), p.surface.gamma_multiply(0.96 * a));
-            layer.rect_stroke(pill, Rounding::same(6.0), Stroke::new(1.5, p.accent.gamma_multiply(a)));
+            layer.rect_stroke(pill, Rounding::same(6.0), Stroke::new(1.5_f32, p.accent.gamma_multiply(a)));
             layer.galley(pill.min + Vec2::new(8.0, 4.0), galley, p.text);
         }
     }
@@ -838,11 +838,21 @@ fn bin(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState,
     icons.paint(ui.painter(), rect.shrink(s * 0.24), icon::TRASH, p.danger);
     // Tap: delete the item in the selected hotbar slot. Or drag any slot here.
     if resp.double_clicked() {
-        // Double tap: everything goes (hotbar and backpack).
-        for s in inv.slots.iter_mut() {
-            *s = None;
+        // Double tap: everything goes (hotbar and backpack) — but only on a second double tap
+        // within 3 s, so a slip of the finger doesn't wipe the inventory.
+        let armed_id = Id::new("inv-clear-armed");
+        let now = ui.input(|i| i.time);
+        let armed: Option<f64> = ui.ctx().data(|d| d.get_temp(armed_id));
+        if armed.is_some_and(|t| now - t < 3.0) {
+            for s in inv.slots.iter_mut() {
+                *s = None;
+            }
+            state.toast = Some(("Инвентарь очищен".to_string(), 1.6));
+            ui.ctx().data_mut(|d| d.remove::<f64>(armed_id));
+        } else {
+            state.toast = Some(("Ещё раз двойное нажатие — очистить весь инвентарь".to_string(), 2.5));
+            ui.ctx().data_mut(|d| d.insert_temp(armed_id, now));
         }
-        state.toast = Some(("Инвентарь очищен".to_string(), 1.6));
     } else if resp.clicked() {
         inv.slots[inv.selected] = None;
     }

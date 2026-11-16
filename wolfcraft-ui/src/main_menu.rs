@@ -1,7 +1,7 @@
 //! Menu screens: main menu, world selection, world creation, settings, loading, pause.
 
 use crate::gui_renderer::GuiIcons;
-use crate::theme_manager::{ANIM_TIME, Palette, RADIUS_LG, RADIUS_MD, bold_font, palette};
+use crate::theme_manager::{ANIM_TIME, Palette, bold_font, palette};
 use crate::ui_components::*;
 use egui::{Align2, Color32, FontId, Frame, Margin, Pos2, Rect, Rounding, Sense, Stroke, TextureHandle, Ui, Vec2};
 use wolfcraft_assets::gui as icon;
@@ -262,13 +262,13 @@ fn liquid_bar(painter: &egui::Painter, bar: Rect, fill: f32, t: f32, accent: Col
             let hh = half(bx);
             let by = bar.center().y + hh * 0.8 - ph * hh * 1.4;
             let wiggle = (t * 5.0 + b as f32).sin() * 1.2;
-            painter.circle_stroke(Pos2::new(bx + wiggle, by), 1.0 + ((h >> 4) % 3) as f32 * 0.5, Stroke::new(1.0, Color32::from_white_alpha((150.0 * (1.0 - ph)) as u8)));
+            painter.circle_stroke(Pos2::new(bx + wiggle, by), 1.0 + ((h >> 4) % 3) as f32 * 0.5, Stroke::new(1.0_f32, Color32::from_white_alpha((150.0 * (1.0 - ph)) as u8)));
         }
     }
     // Glass gloss on top and the rim.
     let gloss = Rect::from_min_max(Pos2::new(bar.left() + r * 0.7, bar.top() + 3.0), Pos2::new(bar.right() - r * 0.7, bar.top() + 6.0));
     painter.rect_filled(gloss, Rounding::same(2.0), Color32::from_white_alpha(40));
-    painter.rect_stroke(bar, Rounding::same(r), Stroke::new(1.5, Color32::from_white_alpha(120)));
+    painter.rect_stroke(bar, Rounding::same(r), Stroke::new(1.5_f32, Color32::from_white_alpha(120)));
 }
 
 /// A living world behind the loading text: dusk sky, drifting clouds, blocky hills scrolling
@@ -339,7 +339,7 @@ pub(crate) fn world_backdrop(painter: &egui::Painter, rect: Rect, t: f32) {
             // Block seams.
             let mut y = ytop + bs;
             while y < water_y {
-                painter.line_segment([Pos2::new(x, y), Pos2::new(x + bs, y)], Stroke::new(1.0, Color32::from_black_alpha(28)));
+                painter.line_segment([Pos2::new(x, y), Pos2::new(x + bs, y)], Stroke::new(1.0_f32, Color32::from_black_alpha(28)));
                 y += bs;
             }
             // A tree now and then on the near hills.
@@ -380,7 +380,7 @@ pub(crate) fn world_backdrop(painter: &egui::Painter, rect: Rect, t: f32) {
         let w = 10.0 + fy * 60.0;
         let shift = (t * 2.0 + j as f32 * 1.7).sin() * 8.0;
         let a = (0.5 + 0.5 * (t * 3.0 + j as f32).sin()) * (1.0 - fy) * 120.0;
-        painter.line_segment([Pos2::new(sun.x - w / 2.0 + shift, y), Pos2::new(sun.x + w / 2.0 + shift, y)], Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 220, 170, a as u8)));
+        painter.line_segment([Pos2::new(sun.x - w / 2.0 + shift, y), Pos2::new(sun.x + w / 2.0 + shift, y)], Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(255, 220, 170, a as u8)));
     }
     // Darken a bit so the text stays readable.
     painter.add(vgrad(rect, Color32::from_black_alpha(90), Color32::from_black_alpha(40)));
