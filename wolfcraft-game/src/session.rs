@@ -1080,6 +1080,31 @@ impl GameSession {
         self.tick_achievements(&events, dt);
         self.tick_kinetic(&events, dt);
         self.tick_pipes(&events, dt);
+        // Broken blocks fall apart: textured pieces of the block fly out and tumble down
+        // (a wide drill dig shares one budget so a 13×13 square stays smooth).
+        if self.fx_amount > 0.0 {
+            let broken: Vec<(wolfcraft_engine::cubesphere::Cell, wolfcraft_engine::block::Block)> = events.iter().filter_map(|e| if let InteractionEvent::Broken { pos, block } = e { Some((*pos, *block)) } else { None }).collect();
+            let per = if broken.len() <= 1 { 8.0 } else if broken.len() <= 9 { 6.0 } else { (96.0 / broken.len() as f32).max(1.0) };
+            let n = ((per * self.fx_amount).round() as usize).max(1);
+            for (pos, block) in broken {
+                let info = block.info();
+                if block == wolfcraft_engine::block::Block::Air || block.is_fluid() || info.render == wolfcraft_engine::block::RenderKind::Invisible {
+                    continue;
+                }
+                let tile = info.tiles[0];
+                if tile == 0 {
+                    continue;
+                }
+                let c = self.chunks.grid().cell_center(pos);
+                // Plants and torches: a few small bits; blocks: eighths of the cube.
+                let small = info.render == wolfcraft_engine::block::RenderKind::Cross || !block.boxes().is_empty();
+                if small {
+                    self.mobs.shards(c - wolfcraft_engine::physics::up_at(c) * 0.2, tile, n.min(4), 0.14);
+                } else {
+                    self.mobs.shards(c, tile, n, 0.34);
+                }
+            }
+        }
         // Redstone-style power: re-evaluate the network around every edit.
         for e in &events {
             if let InteractionEvent::Broken { pos, block } = e {

@@ -353,7 +353,7 @@ impl Explosives {
             let white = (time * rate).fract() < 0.5;
             let color = if white { [1.0, 0.95, 0.90] } else { [0.86, 0.20, 0.16] };
             let size = 0.98 + if white { 0.06 } else { 0.0 };
-            v.push(Debris { pos: l.pos, vel: DVec3::ZERO, color, size, age: 0.0, spin: 0.0, kind: FxKind::Fall, glow: white });
+            v.push(Debris { pos: l.pos, vel: DVec3::ZERO, color, size, age: 0.0, spin: 0.0, kind: FxKind::Fall, glow: white, tile: 0, piece: 0 });
         }
         for s in &self.shots {
             let (color, size) = match s.kind {
@@ -366,7 +366,7 @@ impl Explosives {
                 ShotKind::Meteor => ([1.0, 0.55, 0.15], 0.8),
                 ShotKind::Plasma => ([0.45, 0.95, 1.0], 0.22),
             };
-            v.push(Debris { pos: s.pos, vel: s.vel, color, size, age: 0.0, spin: s.age * 4.0, kind: FxKind::Fall, glow: matches!(s.kind, ShotKind::Bullet | ShotKind::Star | ShotKind::Meteor | ShotKind::Plasma) });
+            v.push(Debris { pos: s.pos, vel: s.vel, color, size, age: 0.0, spin: s.age * 4.0, kind: FxKind::Fall, glow: matches!(s.kind, ShotKind::Bullet | ShotKind::Star | ShotKind::Meteor | ShotKind::Plasma), tile: 0, piece: 0 });
         }
         v
     }

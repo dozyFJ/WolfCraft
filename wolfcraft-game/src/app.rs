@@ -2954,7 +2954,7 @@ impl App {
                         .iter()
                         .map(|f| {
                             let c = self.tile_colors.get(f.block.info().tiles[0] as usize).map(|c| c[1]).unwrap_or([0.6, 0.6, 0.6]);
-                            wolfcraft_engine::mobs::Debris { pos: f.pos, vel: f.vel, color: c, size: if f.debris { 0.7 } else { 0.98 }, age: 0.0, spin: f.spin * f.age, kind: wolfcraft_engine::mobs::FxKind::Fall, glow: false }
+                            wolfcraft_engine::mobs::Debris { pos: f.pos, vel: f.vel, color: c, size: if f.debris { 0.7 } else { 0.98 }, age: 0.0, spin: f.spin * f.age, kind: wolfcraft_engine::mobs::FxKind::Fall, glow: false, tile: 0, piece: 0 }
                         })
                         .collect();
                     model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&cubes, cam.eye));

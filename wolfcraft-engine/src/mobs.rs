@@ -239,7 +239,7 @@ impl MobManager {
             let vel = (t1 * a.cos() + t2 * a.sin()) * s + up * (3.0 + self.rand() * 5.0);
             let size = (0.10 + self.rand() * 0.14) as f32;
             let spin = (self.rand() * 6.0) as f32;
-            self.debris.push(Debris { pos: pos + up * h, vel, color: palette[i % palette.len()], size, age: 0.0, spin, kind: FxKind::Fall, glow: false });
+            self.debris.push(Debris { pos: pos + up * h, vel, color: palette[i % palette.len()], size, age: 0.0, spin, kind: FxKind::Fall, glow: false, tile: 0, piece: 0 });
         }
     }
 
@@ -261,7 +261,36 @@ impl MobManager {
             let size = (0.045 + self.rand() * 0.055) as f32;
             let spin = (self.rand() * 6.0) as f32;
             // Start aged so chips live about a second instead of three.
-            let d = Debris { pos: pos + off, vel, color: palette[i % palette.len()], size, age: 2.0 + (self.rand() * 0.4) as f32, spin, kind: FxKind::Fall, glow: false };
+            let d = Debris { pos: pos + off, vel, color: palette[i % palette.len()], size, age: 2.0 + (self.rand() * 0.4) as f32, spin, kind: FxKind::Fall, glow: false, tile: 0, piece: 0 };
+            if self.debris.len() >= MAX_DEBRIS {
+                let oldest = self.debris.iter().enumerate().max_by(|a, b| a.1.age.total_cmp(&b.1.age)).map(|(i, _)| i).unwrap_or(0);
+                self.debris[oldest] = d;
+            } else {
+                self.debris.push(d);
+            }
+        }
+    }
+
+    /// A block falls apart: `count` textured pieces (eighths of its picture) burst out of the
+    /// cell around `center`, tumble, bounce on the ground and shrink away.
+    pub fn shards(&mut self, center: DVec3, tile: u16, count: usize, size: f32) {
+        let up = up_at(center);
+        let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let t1 = tangent(helper, up).normalize();
+        let t2 = up.cross(t1);
+        for i in 0..count {
+            // Eighths of the cell: each piece starts where it was in the block.
+            let o = i % 8;
+            let sx = if o & 1 == 0 { -1.0 } else { 1.0 };
+            let sy = if o & 2 == 0 { -1.0 } else { 1.0 };
+            let sz = if o & 4 == 0 { -1.0 } else { 1.0 };
+            let off = (t1 * sx + t2 * sz + up * sy) * 0.22 + (t1 * (self.rand() - 0.5) + t2 * (self.rand() - 0.5)) * 0.08;
+            let out = (t1 * sx + t2 * sz) * (1.2 + self.rand() * 1.8);
+            let vel = out + up * (2.2 + self.rand() * 2.6 + if sy > 0.0 { 0.8 } else { 0.0 });
+            let s = size * (0.75 + self.rand() as f32 * 0.5);
+            let spin = (self.rand() * 6.0) as f32;
+            // About 1.5 s of life (debris lives until age 3).
+            let d = Debris { pos: center + off, vel, color: [1.0; 3], size: s, age: 1.5 + (self.rand() * 0.3) as f32, spin, kind: FxKind::Fall, glow: false, tile, piece: o as u8 };
             if self.debris.len() >= MAX_DEBRIS {
                 let oldest = self.debris.iter().enumerate().max_by(|a, b| a.1.age.total_cmp(&b.1.age)).map(|(i, _)| i).unwrap_or(0);
                 self.debris[oldest] = d;
@@ -275,7 +304,7 @@ impl MobManager {
     #[allow(clippy::too_many_arguments)]
     pub fn fx(&mut self, pos: DVec3, vel: DVec3, color: [f32; 3], size: f32, life: f32, kind: FxKind) {
         let spin = (self.rand() * 6.0) as f32;
-        let d = Debris { pos, vel, color, size, age: (3.0 - life).clamp(0.0, 2.9), spin, kind, glow: false };
+        let d = Debris { pos, vel, color, size, age: (3.0 - life).clamp(0.0, 2.9), spin, kind, glow: false, tile: 0, piece: 0 };
         if self.debris.len() >= MAX_DEBRIS {
             // Full: replace the oldest particle.
             if let Some((i, _)) = self.debris.iter().enumerate().max_by(|a, b| a.1.age.total_cmp(&b.1.age)) {
@@ -907,6 +936,10 @@ pub struct Debris {
     pub kind: FxKind,
     /// Glows in the dark (embers, sparks): drawn unlit.
     pub glow: bool,
+    /// A piece of a broken block: its sprite (0 = a plain coloured cube) and which eighth of
+    /// the picture it shows.
+    pub tile: u16,
+    pub piece: u8,
 }
 
 /// How a particle moves.

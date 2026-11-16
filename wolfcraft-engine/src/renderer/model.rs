@@ -1236,6 +1236,30 @@ fn add_tiled_cube(out: &mut Vec<ModelVertex>, f: &Frame, h: f32, tiles: [u16; 6]
     }
 }
 
+/// A piece of a broken block: a cube of half-size `h` around the frame's origin showing one
+/// quarter of the sprite (which quarter: `piece`), so the pieces look cut from the block.
+fn add_piece_cube(out: &mut Vec<ModelVertex>, f: &Frame, h: f32, tile: u16, piece: u8) {
+    let faces: [(Vec3, Vec3, Vec3); 6] = [
+        (Vec3::X, Vec3::Z, Vec3::Y),
+        (Vec3::NEG_X, Vec3::NEG_Z, Vec3::Y),
+        (Vec3::Y, Vec3::X, Vec3::NEG_Z),
+        (Vec3::NEG_Y, Vec3::X, Vec3::Z),
+        (Vec3::Z, Vec3::NEG_X, Vec3::Y),
+        (Vec3::NEG_Z, Vec3::X, Vec3::Y),
+    ];
+    let (u0, v0) = (if piece & 1 == 0 { 0.0 } else { 0.5 }, if piece & 2 == 0 { 0.5 } else { 0.0 });
+    let color = [tile as f32, 0.0, 0.0];
+    for (n, ua, va) in faces {
+        let corner = |u: f32, w: f32| (n + ua * (u * 2.0 - 1.0) + va * (w * 2.0 - 1.0)) * h;
+        let p = [corner(0.0, 0.0), corner(1.0, 0.0), corner(1.0, 1.0), corner(0.0, 1.0)];
+        let uv = [[u0, v0 + 0.5], [u0 + 0.5, v0 + 0.5], [u0 + 0.5, v0], [u0, v0]];
+        let nw = f.dir(n).normalize_or_zero().to_array();
+        for i in [0usize, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2] {
+            out.push(ModelVertex { pos: f.to_world(p[i]).as_vec3().to_array(), normal: nw, color, uv: uv[i], tex: 4.0 });
+        }
+    }
+}
+
 /// Upright two-sided card with one block sprite (flowers, torches…).
 fn add_tiled_card(out: &mut Vec<ModelVertex>, f: &Frame, s: f32, tile: u16) {
     let p = [Vec3::new(-s * 0.5, 0.0, 0.0), Vec3::new(s * 0.5, 0.0, 0.0), Vec3::new(s * 0.5, s, 0.0), Vec3::new(-s * 0.5, s, 0.0)];
@@ -2859,6 +2883,14 @@ pub fn build_debris(debris: &[crate::mobs::Debris], camera: DVec3) -> Vec<ModelV
         let k = ((3.0 - d.age) / 0.5).clamp(0.0, 1.0);
         let h = h * k.max(0.05);
         let start = v.len();
+        if d.tile > 0 {
+            // A piece of a broken block: tumbling, with its part of the block's picture.
+            let axis = (right * (d.spin as f64).cos() + fwd * (d.spin as f64).sin() + up * 0.4).normalize_or_zero();
+            let q = glam::DQuat::from_axis_angle(axis, (d.spin + d.age * 7.0) as f64);
+            let f = Frame { origin: d.pos - camera, right: q * right, up: q * up, fwd: q * fwd };
+            add_piece_cube(&mut v, &f, h, d.tile, d.piece);
+            continue;
+        }
         match d.kind {
             // A thin streak along "up" for rain, a flat flake for snow.
             crate::mobs::FxKind::Rain => add_box(&mut v, &f, Vec3::new(-0.012, -0.24, -0.012), Vec3::new(0.012, 0.24, 0.012), Vec3::ZERO, 0.0, d.color),
