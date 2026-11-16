@@ -226,9 +226,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         let width = 10.0 * CELL + 9.0 * GAP + 8.0;
         let esc = crate::ui_components::block_screen_ex(ctx, "inventory", width, false, |ui| {
             if recipes_were_open { ui.set_enabled(false); }
-            let (banner, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
-            icons.paint_panel(ui.painter(), banner, crate::gui_renderer::block_panel(wolfcraft_engine::block::Block::CraftingTable), Color32::WHITE);
-            ui.painter().text(banner.center(), Align2::CENTER_CENTER, "Верстак", bold_font(18.0), p.text);
+            let (banner, _) = ui.allocate_exact_size(Vec2::new(width, 76.0), Sense::hover());
+            icons.paint_block_header(ui.painter(),banner,crate::gui_renderer::block_panel(wolfcraft_engine::block::Block::CraftingTable),"Верстак");
             ui.horizontal(|ui| {
                 if ui.button("Рецепты +").clicked() { state.recipes_open = true; state.drag_slot=None; state.picked_slot=None; }
                 if ui.button("Закрыть").clicked() { result.close=true; }
@@ -682,6 +681,9 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     let full_w = ui.available_width();
     // Mode: 0 Творчество (the item grid), 1 Крафт, 2 Персонаж, 3 Рюкзак.
     let mode = if state.tab == BACKPACK_TAB { match state.inv_page { 1 => 1, 0 => 2, _ => 3 } } else { 0 };
+    let (banner,_) = ui.allocate_exact_size(Vec2::new(full_w,68.0),Sense::hover());
+    icons.paint_block_header(ui.painter(),banner,wolfcraft_assets::gui::PANEL_WORKBENCH,"Творческий инвентарь");
+    ui.add_space(4.0);
     // ---- Header: icon + title on the left, modes and «Закрыть» on the right ----
     ui.horizontal(|ui| {
         ui.set_width(full_w);

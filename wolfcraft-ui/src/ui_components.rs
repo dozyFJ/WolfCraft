@@ -363,7 +363,7 @@ pub fn full_screen(ctx: &egui::Context, id: &str, add: impl FnOnce(&mut Ui)) -> 
     egui::Area::new(Id::new(id).with("full")).order(egui::Order::Foreground).fixed_pos(screen.min).fade_in(false).show(ctx, |ui| {
         let (bg, _) = ui.allocate_exact_size(screen.size(), Sense::click());
         // Out to the real edges of the phone (past the safe margins).
-        ui.painter().with_clip_rect(bg.expand(200.0)).rect_filled(bg.expand(200.0), 0.0, Color32::from_black_alpha(170));
+        let _ = bg; // No dark full-screen backplate behind in-game panels.
     });
     egui::Area::new(Id::new(id).with("full-body")).order(egui::Order::Tooltip).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
         // No panel of its own: the screen is dimmed and the HUD-style tiles float on it.
@@ -483,7 +483,7 @@ pub fn block_screen_ex(ctx: &egui::Context, id: &str, width: f32, corner_close: 
     let mut dismissed = false;
     let scrim = egui::Area::new(Id::new(id).with("screen")).order(egui::Order::Foreground).fixed_pos(screen.min).fade_in(false).show(ctx, |ui| {
         let (rect, resp) = ui.allocate_exact_size(screen.size(), Sense::click());
-        ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(110));
+        // Keep the world clear: this area only catches outside taps.
         resp.clicked()
     });
     let body = egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, Vec2::ZERO).fade_in(false).constrain(false).default_height(4000.0).show(ctx, |ui| {
@@ -494,9 +494,8 @@ pub fn block_screen_ex(ctx: &egui::Context, id: &str, width: f32, corner_close: 
         // of whatever it showed last.)
         ui.set_max_height(4000.0);
         Frame::none()
-            .fill(p.surface)
-            .rounding(Rounding::same(10.0))
-            .stroke(Stroke::new(2.0_f32, Color32::from_rgb(20, 20, 22)))
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::NONE)
             .inner_margin(Margin::same(14.0))
             .show(ui, |ui| {
                 ui.set_width(width);
@@ -549,10 +548,9 @@ fn modal_opts(ctx: &egui::Context, id: &str, title: &str, width: f32, scrim: boo
     });
     egui::Area::new(Id::new(id).with("body")).order(egui::Order::Tooltip).anchor(Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
         Frame::none()
-            .fill(p.surface)
+            .fill(if scrim {p.surface} else {Color32::TRANSPARENT})
             .rounding(Rounding::same(10.0))
-            .stroke(Stroke::new(1.0_f32, p.outline))
-            .shadow(egui::Shadow { offset: Vec2::new(6.0, 6.0), blur: 0.0, spread: 0.0, color: Color32::from_black_alpha(120) })
+            .stroke(if scrim {Stroke::new(1.0_f32, p.outline)} else {Stroke::NONE})
             .inner_margin(Margin::same(18.0))
             .show(ui, |ui| {
                 ui.set_width(width);
