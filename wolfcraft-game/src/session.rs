@@ -2101,7 +2101,7 @@ impl GameSession {
                         chests.push((c, false));
                     }
                     if n == 0 {
-                        if let Some(c) = at(*a0, *b0, lift) {
+                        if let Some(c) = at(a0, b0, lift) {
                             arena.base = centre_of(c);
                         }
                     }
@@ -2161,8 +2161,8 @@ impl GameSession {
                 // A little village: grass, houses with doorways, bushes and barrels to hide behind.
                 slab(&mut cells, 0, 18, 14, 0, B::Grass, B::Dirt, 5);
                 for (a0, b0) in [(-8, 10), (8, 10), (-8, 26), (8, 26), (0, 18)] {
-                    for a in -2..=2 {
-                        for b in -2..=2 {
+                    for a in -2i32..=2 {
+                        for b in -2i32..=2 {
                             if a.abs() < 2 && b.abs() < 2 {
                                 continue;
                             }
