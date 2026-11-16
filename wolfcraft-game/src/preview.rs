@@ -32,6 +32,9 @@ pub fn biome_color(c: &Column) -> [f32; 3] {
         Biome::Mountains => [0.50, 0.50, 0.52],
         Biome::SnowyPeaks => [0.96, 0.97, 1.0],
         Biome::Volcano => [0.28, 0.20, 0.20],
+        Biome::CherryGrove => [0.80, 0.55, 0.65],
+        Biome::DarkForest => [0.12, 0.30, 0.10],
+        Biome::FlowerMeadow => [0.45, 0.70, 0.30],
     };
     // Subtle height shading on land, depth shading on water.
     let k = if e >= 0.0 { 1.0 + (e / 220.0).min(0.35) } else { 1.0 + (e / 120.0).max(-0.5) };

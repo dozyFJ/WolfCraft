@@ -103,7 +103,7 @@ pub fn sky_hint(planet: &Planet, key: ChunkKey) -> bool {
 }
 
 fn is_grassy(b: Biome) -> bool {
-    matches!(b, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Jungle | Biome::Taiga | Biome::Savanna | Biome::Swamp | Biome::Tundra)
+    matches!(b, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Jungle | Biome::Taiga | Biome::Savanna | Biome::Swamp | Biome::Tundra | Biome::CherryGrove | Biome::DarkForest | Biome::FlowerMeadow)
 }
 
 fn table(u: f64, t: &[(f64, Block)]) -> Option<Block> {
@@ -114,7 +114,8 @@ fn table(u: f64, t: &[(f64, Block)]) -> Option<Block> {
 /// shrubs, cacti (up to three high), seagrass and kelp.
 pub fn flora(planet: &Planet, f: u8, i: i32, j: i32, col: &Column) -> Vec<(i32, Block)> {
     let s = planet.radius + col.elev as f64;
-    let k_top = planet.top_k(col);
+    // On the real ground (cliffs bend it away from the height map); none near: no plants.
+    let Some(k_top) = (if s < planet.radius - 0.5 { Some(planet.top_k(col)) } else { planet.surface_k(f, i, j, col) }) else { return vec![] };
     let k_above = k_top + 1;
     let u = to01(hash3(planet.seed ^ FLORA_SEED ^ ((f as u64 + 1) << 56), i, j, 0));
 
@@ -173,6 +174,9 @@ pub fn flora(planet: &Planet, f: u8, i: i32, j: i32, col: &Column) -> Vec<(i32, 
         Biome::Savanna => table(u, &[(0.12, Block::TallGrass), (0.13, Block::Shrub)]),
         Biome::Swamp => table(u, &[(0.15, Block::TallGrass), (0.165, Block::MushroomBrown), (0.18, Block::MushroomRed), (0.19, Block::FlowerYellow)]),
         Biome::Tundra => table(u, &[(0.04, Block::TallGrass)]),
+        Biome::FlowerMeadow => table(u, &[(0.16, Block::TallGrass), (0.24, Block::FlowerRed), (0.32, Block::FlowerYellow), (0.40, Block::FlowerBlue), (0.42, Block::Shrub)]),
+        Biome::CherryGrove => table(u, &[(0.18, Block::TallGrass), (0.22, Block::FlowerRed), (0.25, Block::FlowerBlue)]),
+        Biome::DarkForest => table(u, &[(0.06, Block::TallGrass), (0.11, Block::MushroomBrown), (0.15, Block::MushroomRed), (0.22, Block::Fern)]),
         _ => None,
     };
     pick.map(|bl| vec![(k_above, bl)]).unwrap_or_default()
@@ -188,6 +192,10 @@ pub enum TreeKind {
     Spruce,
     Jungle,
     Acacia,
+    /// Pink crown on a short trunk.
+    Cherry,
+    /// A thick 2×2 trunk under a wide flat crown.
+    DarkOak,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -211,6 +219,9 @@ fn tree_chance(b: Biome) -> (f64, &'static [(TreeKind, u32)]) {
         Biome::Savanna => (0.07, &[(TreeKind::Acacia, 100)]),
         Biome::Swamp => (0.22, &[(TreeKind::Oak, 100)]),
         Biome::Mountains => (0.06, &[(TreeKind::Spruce, 100)]),
+        Biome::CherryGrove => (0.30, &[(TreeKind::Cherry, 90), (TreeKind::Birch, 10)]),
+        Biome::DarkForest => (0.70, &[(TreeKind::DarkOak, 75), (TreeKind::Oak, 25)]),
+        Biome::FlowerMeadow => (0.02, &[(TreeKind::Oak, 70), (TreeKind::Birch, 30)]),
         _ => (0.0, &[]),
     }
 }
@@ -262,7 +273,8 @@ pub fn trees_near(planet: &Planet, key: ChunkKey) -> Vec<Tree> {
             if to01(splitmix(h ^ 9)) > chance / 0.66 {
                 continue;
             }
-            let k_top = planet.top_k(&col);
+            // The real ground (not the height map: cliffs bend it), else no tree.
+            let Some(k_top) = planet.surface_k(a.f, a.i, a.j, &col) else { continue };
             let ground = planet.block_at(Cell::new(a.f, a.i, a.j, k_top));
             if !matches!(ground, Block::Grass | Block::DryGrass | Block::SwampGrass | Block::Snow | Block::Dirt | Block::Mud) {
                 continue;
@@ -283,6 +295,8 @@ pub fn trees_near(planet: &Planet, key: ChunkKey) -> Vec<Tree> {
                 TreeKind::Spruce => 7 + (r % 5) as i32,
                 TreeKind::Jungle => 10 + (r % 6) as i32,
                 TreeKind::Acacia => 4 + (r % 3) as i32,
+                TreeKind::Cherry => 4 + (r % 3) as i32,
+                TreeKind::DarkOak => 6 + (r % 3) as i32,
             };
             // Vertical overlap with the chunk?
             if k_top + height + 5 < o.z || k_top - 1 >= o.z + CHUNK_SIZE {
@@ -296,7 +310,8 @@ pub fn trees_near(planet: &Planet, key: ChunkKey) -> Vec<Tree> {
 
 fn leaves_of(kind: TreeKind) -> Block {
     match kind {
-        TreeKind::Oak | TreeKind::Jungle => Block::OakLeaves,
+        TreeKind::Oak | TreeKind::Jungle | TreeKind::DarkOak => Block::OakLeaves,
+        TreeKind::Cherry => Block::CherryLeaves,
         TreeKind::Birch => Block::BirchLeaves,
         TreeKind::Spruce => Block::SpruceLeaves,
         TreeKind::Acacia => Block::AcaciaLeaves,
@@ -305,7 +320,8 @@ fn leaves_of(kind: TreeKind) -> Block {
 
 fn log_of(kind: TreeKind) -> Block {
     match kind {
-        TreeKind::Oak | TreeKind::Jungle => Block::OakLog,
+        TreeKind::Oak | TreeKind::Jungle | TreeKind::DarkOak => Block::OakLog,
+        TreeKind::Cherry => Block::BirchLog,
         TreeKind::Birch => Block::BirchLog,
         TreeKind::Spruce => Block::SpruceLog,
         TreeKind::Acacia => Block::AcaciaLog,
@@ -346,6 +362,14 @@ pub fn tree_blocks(t: &Tree) -> Vec<((i32, i32, i32), Block)> {
             ellipsoid(&mut out, h as f64 * 0.6, 2.4, 2.0);
         }
         TreeKind::Acacia => ellipsoid(&mut out, h as f64 + 0.8, 3.6, 1.3),
+        TreeKind::Cherry => {
+            ellipsoid(&mut out, h as f64 + 0.4, 3.4, 2.2);
+            ellipsoid(&mut out, h as f64 - 1.2, 2.2, 1.2);
+        }
+        TreeKind::DarkOak => {
+            ellipsoid(&mut out, h as f64 + 0.6, 4.2, 2.2);
+            ellipsoid(&mut out, h as f64 + 2.0, 2.6, 1.4);
+        }
         TreeKind::Spruce => {
             for dk in 2..=(h + 1) {
                 let mut radius = ((h + 2) as f64 - dk as f64) * 0.38;
@@ -366,6 +390,13 @@ pub fn tree_blocks(t: &Tree) -> Vec<((i32, i32, i32), Block)> {
     let log = log_of(t.kind);
     for dk in 1..=h {
         out.push(((0, 0, dk), log));
+    }
+    if t.kind == TreeKind::DarkOak {
+        for dk in 1..=h {
+            for (di, dj) in [(1, 0), (0, 1), (1, 1)] {
+                out.push(((di, dj, dk), log));
+            }
+        }
     }
     if t.kind == TreeKind::Jungle {
         for dk in 1..=(h / 2) {

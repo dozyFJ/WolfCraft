@@ -251,6 +251,7 @@ pub mod tiles {
     pub const ARC_FRONT: u16 = 252;
     pub const SMELTERY_FRONT: u16 = 253;
     pub const SEARED_BRICKS: u16 = 254;
+    pub const CHERRY_LEAVES: u16 = 255;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2878,6 +2879,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    l.add(CHERRY_LEAVES, "cherry_leaves", leaves(Rgb(0.96, 0.62, 0.78), 361));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

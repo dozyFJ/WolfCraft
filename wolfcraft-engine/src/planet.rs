@@ -350,9 +350,13 @@ impl Planet {
         }
 
         let lat = d.y.abs();
-        let temp = (1.0 - lat.powf(1.4) * 1.05 + 0.12 * Self::n3(&self.n_temp, dw * 2.0) - e.max(0.0) / 230.0).clamp(0.0, 1.0);
-        let humid = (0.5 + 0.75 * Self::n3(&self.n_humid, dw * 2.3) + 0.15 * (1.0 - smoothstep(0.0, 0.5, m))).clamp(0.0, 1.0);
-        let misc = Self::n3(&self.n_misc, dw * 6.0);
+        // Fine noise on top of the climate: biome borders wander and interleave in fingers
+        // and patches instead of running as straight walls.
+        let ragged_t = Self::n3(&self.n_temp, wp * 0.035 + DVec3::splat(17.0)) * 0.05;
+        let ragged_h = Self::n3(&self.n_humid, wp * 0.035 + DVec3::splat(-29.0)) * 0.06;
+        let temp = (1.0 - lat.powf(1.4) * 1.05 + 0.12 * Self::n3(&self.n_temp, dw * 2.0) + ragged_t - e.max(0.0) / 230.0).clamp(0.0, 1.0);
+        let humid = (0.5 + 0.75 * Self::n3(&self.n_humid, dw * 2.3) + 0.15 * (1.0 - smoothstep(0.0, 0.5, m)) + ragged_h).clamp(0.0, 1.0);
+        let misc = Self::n3(&self.n_misc, dw * 6.0) + Self::n3(&self.n_misc, wp * 0.03) * 0.12;
 
         let biome = if m <= 0.0 && !flat {
             if temp < 0.12 {
@@ -380,11 +384,21 @@ impl Planet {
             if humid > 0.45 { Biome::Taiga } else { Biome::Tundra }
         } else if temp < 0.72 {
             if humid < 0.28 {
-                Biome::Plains
+                if misc > 0.45 { Biome::FlowerMeadow } else { Biome::Plains }
             } else if humid < 0.5 {
-                if misc > 0.3 { Biome::Plains } else { Biome::Forest }
+                if misc > 0.55 {
+                    Biome::FlowerMeadow
+                } else if misc > 0.3 {
+                    Biome::Plains
+                } else {
+                    Biome::Forest
+                }
             } else if humid > 0.78 && e < 10.0 {
                 Biome::Swamp
+            } else if misc > 0.5 && e > 6.0 && temp > 0.42 {
+                Biome::CherryGrove
+            } else if misc < -0.45 {
+                Biome::DarkForest
             } else if misc > 0.0 {
                 Biome::BirchForest
             } else {
@@ -495,6 +509,22 @@ impl Planet {
     /// Index of the topmost solid layer of a column (from the terrain height).
     pub fn top_k(&self, col: &Column) -> i32 {
         (self.radius + col.elev as f64 - 0.5).floor() as i32
+    }
+
+    /// The real ground of column `(f, i, j)`: on high ground cliffs and overhangs bend the
+    /// surface away from the height map, so trees, plants and buildings look for the actual
+    /// top block (they would float or sink into the slope otherwise). `None`: no ground near.
+    pub fn surface_k(&self, f: u8, i: i32, j: i32, col: &Column) -> Option<i32> {
+        let k0 = self.top_k(col);
+        if col.elev < 20.0 {
+            return Some(k0);
+        }
+        let dir = self.grid.cell_dir(f, i, j);
+        let solid = |k: i32| {
+            let b = self.cell_block(Cell::new(f, i, j, k), dir, Some(col));
+            b.is_solid() && !b.is_fluid()
+        };
+        (k0 - 11..=k0 + 11).rev().find(|&k| solid(k) && !solid(k + 1) && !solid(k + 2))
     }
 
     fn deep_crust_block(&self, c: Cell, r: f64) -> Block {
@@ -662,7 +692,7 @@ impl Planet {
         for i in 0..4000 {
             let d = rng.unit_vec();
             let col = self.column(d);
-            let ok_biome = matches!(col.biome, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Savanna | Biome::Taiga | Biome::Desert | Biome::Jungle | Biome::Tundra);
+            let ok_biome = matches!(col.biome, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Savanna | Biome::Taiga | Biome::Desert | Biome::Jungle | Biome::Tundra | Biome::FlowerMeadow | Biome::CherryGrove);
             if col.elev < 3.0 || col.elev > 40.0 || col.river {
                 continue;
             }
@@ -695,7 +725,7 @@ impl Planet {
         let col = self.column(dir);
         let top = self.top_k(&col);
         let is_leaf_or_log = |b: Block| {
-            matches!(b, Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves | Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog)
+            matches!(b, Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves | Block::CherryLeaves | Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog)
         };
         let free = |k: i32| {
             let b = self.block_at(Cell::new(base.f, base.i, base.j, k));

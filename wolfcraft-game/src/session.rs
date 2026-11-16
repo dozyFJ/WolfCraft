@@ -4153,7 +4153,7 @@ impl GameSession {
             let (di, dj, dk) = ((self.mobs.rand() * 25.0) as i32 - 12, (self.mobs.rand() * 25.0) as i32 - 12, (self.mobs.rand() * 14.0) as i32 - 2);
             let Some(c) = g.offset(feet, di, dj, dk) else { continue };
             let b = self.chunks.get_block(c).unwrap_or(Block::Air);
-            if !matches!(b, Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves) {
+            if !matches!(b, Block::OakLeaves | Block::BirchLeaves | Block::SpruceLeaves | Block::AcaciaLeaves | Block::CherryLeaves) {
                 continue;
             }
             let below = g.neighbor(c, 2, -1).and_then(|n| self.chunks.get_block(n)).unwrap_or(Block::Stone);

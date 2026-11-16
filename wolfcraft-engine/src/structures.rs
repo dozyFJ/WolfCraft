@@ -546,6 +546,8 @@ fn candidate(planet: &Planet, f: u8, cell: (i32, i32), h: u64) -> Option<Placeme
         let col = planet.column(g.cell_dir(f, i, j));
         let k_top = planet.top_k(&col);
         let roll = to01(splitmix(hh ^ 4));
+        // Buildings stand on the real ground (cliffs bend it away from the height map).
+        let k_ground = planet.surface_k(f, i, j, &col).unwrap_or(k_top);
         if underground {
             let depth = to01(splitmix(hh ^ 6)) * 69.0 + 16.0;
             let k = k_top - depth as i32;
@@ -577,13 +579,13 @@ fn candidate(planet: &Planet, f: u8, cell: (i32, i32), h: u64) -> Option<Placeme
         if !ok {
             continue;
         }
-        return Some(Placement { kind, face: f, anchor: IVec3::new(i, j, k_top), seed: hh, biome: col.biome });
+        return Some(Placement { kind, face: f, anchor: IVec3::new(i, j, k_ground), seed: hh, biome: col.biome });
     }
     None
 }
 
 fn pick_kind(biome: Biome, elev: f32, roll: f64) -> Option<StructureKind> {
-    let flat_land = matches!(biome, Biome::Plains | Biome::Savanna | Biome::Taiga | Biome::Desert | Biome::Forest | Biome::BirchForest | Biome::Tundra | Biome::Badlands | Biome::Jungle);
+    let flat_land = matches!(biome, Biome::Plains | Biome::Savanna | Biome::Taiga | Biome::Desert | Biome::Forest | Biome::BirchForest | Biome::Tundra | Biome::Badlands | Biome::Jungle | Biome::CherryGrove | Biome::FlowerMeadow | Biome::DarkForest);
     if !flat_land && biome != Biome::Mountains && biome != Biome::Swamp {
         return None;
     }
