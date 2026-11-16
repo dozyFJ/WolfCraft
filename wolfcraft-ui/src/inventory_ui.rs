@@ -214,7 +214,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         let (rows, cols) = (5usize, 9usize);
         let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;
         let width = grid_w + 10.0 * (cell + GAP) - 9.0 * (cell + GAP) + 24.0;
-        let width = width.max(grid_w + 8.0);
+        let width = width.max(grid_w + 8.0) + if cfg!(target_os="android") || ctx.screen_rect().width()<1000.0 {128.0}else{0.0};
         let esc = crate::ui_components::block_screen_ex(ctx, "inventory", width, false, |ui| {
             creative_layout(ui, icons, &p, state, inv, cell, rows, cols, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
@@ -440,13 +440,14 @@ fn construction_panel(ui: &mut Ui, icons: &GuiIcons, state: &mut InventoryUiStat
     use wolfcraft_engine::construction as c;
     use crate::ui_components::{pill_button, ButtonKind};
     state.build_form=state.build_form.min(c::FORMS.len()-1);
+    if !c::ENTRIES.iter().any(|e|e.form==c::FORMS[state.build_form].0&&c::available(e)) {state.build_form=0;}
     ui.horizontal_wrapped(|ui| {
         ui.label("Форма");
         egui::ComboBox::from_id_salt("build-form").selected_text(c::FORMS[state.build_form].1).width(220.0).show_ui(ui, |ui| {
-            for (i,(_,name)) in c::FORMS.iter().enumerate() {ui.selectable_value(&mut state.build_form,i,*name);}
+            for (i,(form,name)) in c::FORMS.iter().enumerate().filter(|(_, (form,_))|c::ENTRIES.iter().any(|e|e.form==*form&&c::available(e))) {let _=form;ui.selectable_value(&mut state.build_form,i,*name);}
         });
         let form=c::FORMS[state.build_form].0;
-        let valid:Vec<usize>=c::ENTRIES.iter().filter(|e|e.form==form).map(|e|e.material).collect();
+        let valid:Vec<usize>=c::ENTRIES.iter().filter(|e|e.form==form&&c::available(e)).map(|e|e.material).collect();
         if !valid.contains(&state.build_material) { state.build_material=valid[0]; }
         ui.label("Материал");
         egui::ComboBox::from_id_salt("build-material").selected_text(c::MATERIALS[state.build_material].name).width(170.0).show_ui(ui, |ui| {
@@ -454,7 +455,7 @@ fn construction_panel(ui: &mut Ui, icons: &GuiIcons, state: &mut InventoryUiStat
         });
     });
     let form=c::FORMS[state.build_form].0;
-    let entry=c::ENTRIES.iter().find(|e|e.form==form&&e.material==state.build_material)?;
+    let entry=c::ENTRIES.iter().find(|e|e.form==form&&e.material==state.build_material&&c::available(e))?;
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         let (rect,_)=ui.allocate_exact_size(Vec2::splat(110.0),Sense::hover());
@@ -678,6 +679,7 @@ fn paint_character(painter: &egui::Painter, r: Rect, shield: bool, armor: [Optio
 #[allow(clippy::too_many_arguments)]
 fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, cols: usize, grid_w: f32, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let palette_all = items::creative_palette();
+    let mobile = cfg!(target_os="android") || ui.ctx().screen_rect().width()<1000.0;
     let full_w = ui.available_width();
     // Mode: 0 Творчество (the item grid), 1 Крафт, 2 Персонаж, 3 Рюкзак.
     let mode = if state.tab == BACKPACK_TAB { match state.inv_page { 1 => 1, 0 => 2, _ => 3 } } else { 0 };
@@ -748,7 +750,7 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     ui.add_space(4.0);
     let grid_h = rows as f32 * (cell + GAP) - GAP + 12.0;
     // ---- Category menu: pills in one row with arrows (Творчество only) ----
-    if mode == 0 {
+    if mode == 0 && !mobile {
         ui.horizontal(|ui| {
             ui.set_width(full_w);
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -821,12 +823,31 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     }
     // ---- The section: the item grid (or the page of Крафт / Персонаж / Рюкзак) ----
     let section_h = grid_h + if mode == 0 { 0.0 } else { 40.0 + 6.0 };
-    ui.allocate_ui_with_layout(Vec2::new(full_w, section_h), egui::Layout::top_down(egui::Align::Center), |ui| {
-        ui.set_width(full_w);
-        ui.set_height(section_h);
-        ui.allocate_ui_with_layout(Vec2::new(grid_w, section_h), egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.set_width(grid_w);
-            creative_main(ui, icons, p, state, inv, cell, rows, cols, grid_w, palette_all, slot_rects, trash_rect, result);
+    ui.horizontal_top(|ui| {
+        if mobile {
+            ui.allocate_ui_with_layout(Vec2::new(120.0,section_h),egui::Layout::top_down(egui::Align::Min),|ui| {
+                ui.set_width(120.0);
+                egui::ScrollArea::vertical().id_salt("creative-category-sidebar").max_height(section_h).auto_shrink([false,false]).show(ui,|ui| {
+                    if crate::ui_components::pill_button(ui,icons,Some(icon::SEARCH),"Поиск",crate::ui_components::ButtonKind::Secondary,112.0,true).clicked() {
+                        state.tab=state.last_tab.min(BACKPACK_TAB-1);state.search_open=!state.search_open;
+                        if !state.search_open {state.search.clear();}
+                    }
+                    for (i,name) in CREATIVE_TABS.iter().enumerate().take(BACKPACK_TAB) {
+                        let on=state.tab==i&&!state.search_open;
+                        let (r,resp)=ui.allocate_exact_size(Vec2::new(112.0,44.0),Sense::click());
+                        icons.paint_panel(ui.painter(),r,if on {wolfcraft_assets::gui::PANEL_WORKBENCH}else{wolfcraft_assets::gui::PANEL_METAL},Color32::WHITE);
+                        let ir=Rect::from_center_size(Pos2::new(r.left()+17.0,r.center().y),Vec2::splat(23.0));
+                        if i==0 {icons.paint(ui.painter(),ir,icon::STAR,p.accent);} else if let Some(id)=palette_all.iter().copied().find(|id|items::category(*id)==*name) {icons.paint_item(ui.painter(),ir,id);}
+                        let text=ui.painter().layout(name.to_string(),bold_font(11.0),Color32::WHITE,77.0);
+                        ui.painter().galley(Pos2::new(r.left()+32.0,r.center().y-text.size().y/2.0),text,Color32::WHITE);
+                        if resp.clicked(){state.tab=i;state.last_tab=i;state.search_open=false;state.search.clear();}
+                    }
+                });
+            });
+        }
+        ui.allocate_ui_with_layout(Vec2::new(grid_w,section_h),egui::Layout::top_down(egui::Align::Min),|ui| {
+            ui.set_width(grid_w);ui.set_height(section_h);
+            creative_main(ui,icons,p,state,inv,cell,rows,cols,grid_w,palette_all,slot_rects,trash_rect,result);
         });
     });
     // ---- Hotbar and the bin (double tap: clear everything) ----
@@ -1215,7 +1236,7 @@ mod tests {
         let ctx=egui::Context::default();crate::theme_manager::install(&ctx);crate::theme_manager::apply(&ctx,wolfcraft_engine::config::ThemeMode::Dark);
         let atlas=wolfcraft_assets::AtlasManager::new(None).unwrap();let icons=GuiIcons::new(&ctx,&atlas);
         let mut inv=Inventory::default();let mut state=InventoryUiState::default();
-        state.build_form=c::FORMS.iter().position(|(f,_)|*f==c::Form::Arc45Large).unwrap();
+        state.build_form=c::FORMS.iter().position(|(f,_)|*f==c::Form::Door).unwrap();
         state.build_material=8;
         let raw=egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(800.,540.))),..Default::default()};
         let _=ctx.run(raw,|ctx|{egui::CentralPanel::default().show(ctx,|ui|{construction_panel(ui,&icons,&mut state,&mut inv,true);});});
