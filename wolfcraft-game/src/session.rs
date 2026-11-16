@@ -2016,7 +2016,7 @@ impl GameSession {
             }
         }
         let n = cells.len();
-        crate::worldedit::apply(self, cells.into_iter().map(|(c, _)| (c, Block::Air)).collect());
+        crate::worldedit::apply(self, cells.into_iter().map(|(c, _)| (c, Block::Air)).collect::<Vec<_>>());
         if !creative {
             if let Some(s) = self.player.inventory.slots[self.player.inventory.selected].as_mut() {
                 s.damage = (s.damage + 20).min(s.info().durability);
