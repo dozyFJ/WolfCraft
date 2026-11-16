@@ -26,6 +26,7 @@ const HISTORY: usize = 20;
 pub struct WorldEdit {
     pub pos1: Option<Cell>,
     pub pos2: Option<Cell>,
+    pub selected_cells: Vec<Cell>,
     /// Copied blocks as offsets from where the player stood, plus the block.
     clipboard: Vec<((i32, i32, i32), Block)>,
     undo: Vec<Vec<(Cell, Block)>>,
@@ -91,10 +92,67 @@ pub fn save_models(s: &GameSession) {
     }
 }
 
+fn set_selection(s:&mut GameSession,cells:Vec<Cell>) {
+    if let Some(first)=cells.first() {
+        let mut lo=*first;let mut hi=*first;
+        for c in &cells {lo.i=lo.i.min(c.i);lo.j=lo.j.min(c.j);lo.k=lo.k.min(c.k);hi.i=hi.i.max(c.i);hi.j=hi.j.max(c.j);hi.k=hi.k.max(c.k);}
+        s.we.pos1=Some(lo);s.we.pos2=Some(hi);
+    }
+    if cells.is_empty(){s.we.pos1=None;s.we.pos2=None;}
+    s.we.selected_cells=cells;
+}
+
+/// Pick a known model, or preview connected construction without swallowing the terrain.
+pub fn select_object(s:&mut GameSession,start:Cell)->Result<Option<usize>,String> {
+    load_models(s);
+    if let Some(i)=s.we.models.iter().position(|m|m.cells.contains(&start)) {
+        set_selection(s,s.we.models[i].cells.clone());return Ok(Some(i));
+    }
+    let building=|b:Block|b!=Block::Air&&!b.is_fluid()&&b.is_breakable()&&!matches!(b.info().render,wolfcraft_engine::block::RenderKind::Cross)&&!matches!(items::category(b.base_item() as u16),"Природа"|"Растения"|"Руды")&&!b.info().name.contains("листв")&&!b.info().name.contains("хвоя");
+    if !s.chunks.get_block(start).is_some_and(building) {return Err("Для земли и природных блоков используйте «Область»: два угла".into());}
+    let g=s.chunks.grid();let mut seen=std::collections::HashSet::new();let mut queue=std::collections::VecDeque::from([start]);let mut cells=Vec::new();
+    while let Some(c)=queue.pop_front() {
+        if !seen.insert(c){continue;}
+        let Some(b)=s.chunks.get_block(c) else {return Err("Часть объекта не загружена: подойдите ближе".into());};
+        if !building(b){continue;}
+        if cells.len()>=20_000||c.f!=start.f||(c.i-start.i).abs()>64||(c.j-start.j).abs()>64||(c.k-start.k).abs()>64 {return Err("Объект слишком большой: выберите границы инструментом «Область»".into());}
+        cells.push(c);
+        for axis in 0..3 {for sign in [-1,1] {if let Some(n)=g.neighbor(c,axis,sign) {queue.push_back(n);}}}
+    }
+    set_selection(s,cells);Ok(None)
+}
+
+pub fn group_selection(s:&mut GameSession)->Result<usize,String> {
+    load_models(s);
+    let cells=if !s.we.selected_cells.is_empty(){s.we.selected_cells.clone()}else{
+        let (f,lo,hi)=s.we.region()?;
+        if volume(lo,hi)>20_000 {return Err("Выделение больше 20 000 ячеек".into());}
+        let mut cells=Vec::new();
+        for i in lo[0]..=hi[0] {for j in lo[1]..=hi[1] {for k in lo[2]..=hi[2] {
+            let c=Cell{f,i,j,k};let Some(b)=s.chunks.get_block(c)else{return Err("Выделение ещё не загружено".into());};
+            if b!=Block::Air {cells.push(c);}
+        }}}
+        cells
+    };
+    if cells.is_empty(){return Err("В выделении нет блоков".into());}
+    let chosen:std::collections::HashSet<_>=cells.iter().copied().collect();
+    for m in &mut s.we.models {m.cells.retain(|c|!chosen.contains(c));}
+    s.we.models.retain(|m|!m.cells.is_empty());
+    let i=s.we.models.len();s.we.models.push(Model{name:format!("Модель {}",i+1),cells:cells.clone()});
+    set_selection(s,cells);save_models(s);Ok(i)
+}
+
+pub fn selection_outline(s:&GameSession)->Option<[glam::DVec3;8]> {
+    let (f,lo,hi)=s.we.region().ok()?;let g=s.chunks.grid();
+    Some(std::array::from_fn(|n|g.point(f,if n&1==0 {lo[0] as f64}else{hi[0] as f64+1.0},if n&2==0 {lo[1] as f64}else{hi[1] as f64+1.0},if n&4==0 {lo[2] as f64}else{hi[2] as f64+1.0})))
+}
+
 /// Moves, turns, resizes, deletes or ungroups a model. Returns a message for the output.
 pub fn model_cmd(s: &mut GameSession, idx: usize, cmd: ModelCmd) -> Result<String, String> {
     let Some(m) = s.we.models.get(idx).cloned() else { return Err("Модели нет".into()) };
     let g = s.chunks.grid();
+    if m.cells.iter().any(|c|s.chunks.get_block(*c).is_none()){return Err("Модель не полностью загружена".into());}
+    if !matches!(cmd,ModelCmd::Select|ModelCmd::Ungroup)&&m.cells.iter().any(|c|s.containers.contains_key(c)||s.tech.contains_key(c)||s.block_commands.contains_key(c)){return Err("Сначала исключите из модели хранилища и механизмы с данными".into());}
     let Some(f) = m.cells.first().map(|c| c.f) else {
         s.we.models.remove(idx);
         save_models(s);
@@ -116,6 +174,7 @@ pub fn model_cmd(s: &mut GameSession, idx: usize, cmd: ModelCmd) -> Result<Strin
             return Ok(format!("«{}» разгруппирована: блоки остались", m.name));
         }
         ModelCmd::Select => {
+            s.we.selected_cells=m.cells.clone();
             s.we.pos1 = Some(Cell { f, i: lo[0], j: lo[1], k: lo[2] });
             s.we.pos2 = Some(Cell { f, i: hi[0], j: hi[1], k: hi[2] });
             return Ok(format!("«{}» выделена: Копия, Заполнить и другие инструменты Модели работают с ней", m.name));
@@ -149,8 +208,10 @@ pub fn model_cmd(s: &mut GameSession, idx: usize, cmd: ModelCmd) -> Result<Strin
     };
     let mut ops: Vec<(Cell, Block)> = cells.iter().map(|(c, _)| (*c, Block::Air)).collect();
     let mut out_cells = Vec::new();
+    let source:std::collections::HashSet<_>=cells.iter().map(|(c,_)|*c).collect();
     for (r, b) in &new {
         let Some(c) = place(*r, lo) else { return Err("Модель вышла бы за край грани планеты".into()) };
+        match s.chunks.get_block(c) {None=>return Err("Место назначения не загружено".into()),Some(other) if other!=Block::Air&&!source.contains(&c)=>return Err("Место занято другими блоками".into()),_=>{}}
         ops.push((c, *b));
         out_cells.push(c);
     }
@@ -161,8 +222,9 @@ pub fn model_cmd(s: &mut GameSession, idx: usize, cmd: ModelCmd) -> Result<Strin
     if new.is_empty() {
         s.we.models.remove(idx);
     } else if let Some(m) = s.we.models.get_mut(idx) {
-        m.cells = out_cells;
+        m.cells = out_cells.clone();
     }
+    set_selection(s,out_cells);
     save_models(s);
     Ok(match cmd {
         ModelCmd::Delete => format!("«{}» удалена", m.name),
@@ -599,3 +661,32 @@ pub fn brush(s: &mut GameSession, op: BrushOp, radius: i32, cube: bool, block: B
     apply(s, cells).0
 }
 
+
+#[cfg(test)]
+mod studio_selection_tests {
+    use super::*;
+    #[test]
+    fn select_group_move_collision_and_reload() {
+        use wolfcraft_engine::config::{WorldConfig,PlanetSize,GameMode};
+        let root=std::env::temp_dir().join(format!("wolf-selection-{}",std::process::id()));
+        let mut cfg=WorldConfig::new("Selection",19);cfg.size=PlanetSize::Small;cfg.structures=false;cfg.mode=GameMode::Creative;
+        let load=crate::loader::start(crate::loader::LoadRequest{cfg,worlds_dir:root.clone(),is_new:true});
+        let deadline=std::time::Instant::now();
+        while !load.is_done(){assert!(deadline.elapsed().as_secs()<60);std::thread::sleep(std::time::Duration::from_millis(2));}
+        let mut s=GameSession::new(load.take_result().unwrap().unwrap());
+        let g=s.chunks.grid();let c=g.world_to_cell(s.player.body.pos);let c=g.offset(c,0,0,5).unwrap();
+        while s.chunks.get_block(c).is_none(){s.update(&Default::default(),0.016,3,true);assert!(deadline.elapsed().as_secs()<60);}
+        // Clear a small loaded test volume and build a connected two-block wall.
+        for x in -2..=4 {for y in -2..=2 {for z in -2..=2 {let q=g.offset(c,x,y,z).unwrap();assert!(s.chunks.get_block(q).is_some());s.chunks.set_block(q,Block::Air);}}}
+        let b=g.offset(c,1,0,0).unwrap();s.chunks.set_block(c,Block::Bricks);s.chunks.set_block(b,Block::Bricks);
+        assert_eq!(select_object(&mut s,c).unwrap(),None);assert_eq!(s.we.selected_cells.len(),2);
+        let i=group_selection(&mut s).unwrap();assert_eq!(s.we.models[i].cells.len(),2);
+        model_cmd(&mut s,i,ModelCmd::Move([0,1,0])).unwrap();
+        assert_eq!(s.chunks.get_block(c),Some(Block::Air));let moved=g.offset(c,0,1,0).unwrap();assert_eq!(s.chunks.get_block(moved),Some(Block::Bricks));
+        let obstacle=g.offset(c,0,2,0).unwrap();s.chunks.set_block(obstacle,Block::Glass);
+        assert!(model_cmd(&mut s,i,ModelCmd::Move([0,1,0])).is_err());
+        assert_eq!(s.chunks.get_block(moved),Some(Block::Bricks));assert_eq!(s.chunks.get_block(obstacle),Some(Block::Glass));
+        s.we.models.clear();s.we.models_loaded=false;load_models(&mut s);assert_eq!(s.we.models.len(),1);assert_eq!(s.we.models[0].cells.len(),2);
+        let _=std::fs::remove_dir_all(root);
+    }
+}
