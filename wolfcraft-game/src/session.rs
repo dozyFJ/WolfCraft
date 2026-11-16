@@ -307,6 +307,8 @@ pub struct GameSession {
     /// a second), timers and the player's state last frame (for splashes and landing dust).
     pub fx_amount: f32,
     fx_lights: Vec<(DVec3, wolfcraft_engine::block::Block)>,
+    /// Reactor meltdowns still going up as a mushroom cloud: (ground point, seconds since).
+    nukes: Vec<(DVec3, f32)>,
     fx_scan: f32,
     fx_dust: f32,
     fx_was_in_water: bool,
@@ -455,6 +457,7 @@ impl GameSession {
             aim_dir: None,
             fx_amount: 1.0,
             fx_lights: Vec::new(),
+            nukes: Vec::new(),
             fx_scan: 0.0,
             fx_dust: 0.0,
             fx_was_in_water: false,
@@ -2849,6 +2852,8 @@ impl GameSession {
         }
         // Reactors: smoke and sparks when hot, a meltdown when the hull gives way.
         self.reactor_fx(meltdowns, dt);
+        // Working machines show it: smoke, sparks, dust, glow.
+        self.tech_fx(dt);
         // Energy flows inside each network.
         for net in &self.tech_nets {
             let mut nodes = Vec::with_capacity(net.len());
@@ -3289,9 +3294,213 @@ impl GameSession {
                 self.explosives.lit.push(wolfcraft_engine::explosives::Lit { pos: p + ta * *a + tb * *b, fuse: 0.05 + k as f32 * 0.06 });
             }
             self.shake = self.shake.max(1.0);
-            self.flash = Some(([0.75, 1.0, 0.65], 0.5));
+            self.flash = Some(([1.0, 1.0, 0.85], 0.9));
+            self.nuke_burst(p);
+            self.nukes.push((p, 0.0));
             self.item_name = Some(("☢ Реактор взорвался!".into(), 3.0));
             self.grant("meltdown");
+        }
+    }
+
+    /// The first instant of a meltdown: a white-hot fireball bursting out in every direction
+    /// and a ring of dust racing along the ground (the shock wave).
+    fn nuke_burst(&mut self, p: DVec3) {
+        use wolfcraft_engine::mobs::FxKind;
+        let up = wolfcraft_engine::physics::up_at(p);
+        let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+        let t1 = up.cross(helper).normalize();
+        let t2 = up.cross(t1);
+        let amount = self.fx_amount.max(0.3) as f64;
+        // Fireball: glowing chunks flying out of a sphere, hotter at the core.
+        for _ in 0..(140.0 * amount) as usize {
+            let (a, z) = (self.mobs.rand() * std::f64::consts::TAU, self.mobs.rand() * 2.0 - 1.0);
+            let r = (1.0 - z * z).sqrt();
+            let dir = (t1 * a.cos() + t2 * a.sin()) * r + up * z.abs();
+            let speed = 6.0 + self.mobs.rand() * 14.0;
+            let hot = self.mobs.rand();
+            let col = if hot < 0.3 { [1.0, 0.97, 0.80] } else if hot < 0.7 { [1.0, 0.70, 0.18] } else { [0.95, 0.35, 0.08] };
+            let (size, life) = (0.35 + self.mobs.rand() as f32 * 0.45, 1.4 + self.mobs.rand() as f32 * 0.8);
+            self.mobs.fx_glow(p + dir * 0.8, dir * speed, col, size, life, FxKind::Rise);
+        }
+        // Shock wave: a flat ring of dust along the ground.
+        for i in 0..(72.0 * amount) as usize {
+            let a = i as f64 / (72.0 * amount) * std::f64::consts::TAU;
+            let dir = t1 * a.cos() + t2 * a.sin();
+            self.mobs.fx(p + dir * 1.5 + up * 0.3, dir * 22.0 + up * 0.4, [0.82, 0.80, 0.76], 0.7, 1.6, FxKind::Rise);
+        }
+        // Green-white radiation sparks.
+        for _ in 0..(40.0 * amount) as usize {
+            let v = (t1 * (self.mobs.rand() - 0.5) + t2 * (self.mobs.rand() - 0.5) + up * self.mobs.rand()) * 18.0;
+            self.mobs.fx_glow(p, v, [0.70, 1.0, 0.55], 0.12, 1.2, FxKind::Fall);
+        }
+    }
+
+    /// A meltdown's mushroom cloud, eight seconds long: a glowing stem climbs, a rolling cap
+    /// spreads at its top, the fire cools to smoke.
+    fn tick_nukes(&mut self, dt: f32) {
+        use wolfcraft_engine::mobs::FxKind;
+        if self.nukes.is_empty() {
+            return;
+        }
+        let amount = self.fx_amount.max(0.3) as f64;
+        let mut nukes = std::mem::take(&mut self.nukes);
+        for (p, age) in nukes.iter_mut() {
+            *age += dt;
+            let t = *age as f64;
+            let up = wolfcraft_engine::physics::up_at(*p);
+            let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+            let t1 = up.cross(helper).normalize();
+            let t2 = up.cross(t1);
+            // Cooling: white-orange early, then dark orange, then grey smoke.
+            let heat = (1.0 - t / 6.0).clamp(0.0, 1.0);
+            let top = (t * 7.0).min(24.0);
+            let spread = 3.0 + (t * 1.6).min(9.0);
+            let n = ((70.0 * amount) * dt as f64).ceil() as usize;
+            for _ in 0..n {
+                let a = self.mobs.rand() * std::f64::consts::TAU;
+                let ring = t1 * a.cos() + t2 * a.sin();
+                // Stem: a column of rising fire and smoke.
+                let h = self.mobs.rand() * top;
+                let pos = *p + up * h + ring * (1.2 + self.mobs.rand() * 1.0);
+                let col = if heat > 0.5 { [1.0, 0.55 + 0.3 * heat as f32, 0.15] } else { [0.45 + 0.4 * heat as f32, 0.40 + 0.2 * heat as f32, 0.38] };
+                if heat > 0.35 {
+                    self.mobs.fx_glow(pos, up * 5.0 + ring * 0.6, col, 0.6, 1.2, FxKind::Rise);
+                } else {
+                    self.mobs.fx(pos, up * 4.0 + ring * 0.6, col, 0.7, 1.6, FxKind::Rise);
+                }
+                // Cap: a rolling doughnut at the top, rolling outward.
+                let r = spread * (0.6 + self.mobs.rand() * 0.5);
+                let cap = *p + up * (top + self.mobs.rand() * 3.0) + ring * r;
+                let roll = ring * 2.5 + up * (self.mobs.rand() * 2.0 - 0.5);
+                let ccol = if heat > 0.4 { [1.0, 0.45 + 0.4 * heat as f32, 0.12] } else { [0.55, 0.50, 0.48] };
+                let grow = self.mobs.rand() as f32;
+                if heat > 0.4 && self.mobs.rand() < 0.6 {
+                    self.mobs.fx_glow(cap, roll, ccol, 0.9 + grow * 0.6, 1.8, FxKind::Rise);
+                } else {
+                    self.mobs.fx(cap, roll, ccol, 1.0 + grow * 0.7, 2.2, FxKind::Rise);
+                }
+            }
+            // A low rumble: the ground keeps shaking for the first seconds.
+            if t < 3.0 {
+                self.shake = self.shake.max((0.6 * (1.0 - t / 3.0)) as f32);
+            }
+        }
+        nukes.retain(|(_, a)| *a < 8.0);
+        self.nukes = nukes;
+    }
+
+    /// Machines at work, near the player: each kind shows it in its own way.
+    fn tech_fx(&mut self, dt: f32) {
+        use wolfcraft_engine::mobs::FxKind;
+        use wolfcraft_engine::wolftech::Kind;
+        if self.fx_amount <= 0.0 {
+            return;
+        }
+        let me = self.player.body.pos;
+        let g = self.chunks.grid();
+        let busy: Vec<(DVec3, Kind)> = self
+            .tech
+            .iter()
+            .filter(|(_, st)| st.working)
+            .filter_map(|(c, _)| {
+                let p = g.cell_center(*c);
+                ((p - me).length_squared() < 28.0 * 28.0).then_some(())?;
+                Some((p, self.chunks.get_block(*c).and_then(wolfcraft_engine::wolftech::kind)?))
+            })
+            .take(48)
+            .collect();
+        let k = self.fx_amount as f64 * dt as f64;
+        for (p, kind) in busy {
+            let up = wolfcraft_engine::physics::up_at(p);
+            let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
+            let t1 = up.cross(helper).normalize();
+            let t2 = up.cross(t1);
+            let r = self.mobs.rand();
+            let side = |m: &mut wolfcraft_engine::mobs::MobManager| {
+                let a = m.rand() * std::f64::consts::TAU;
+                t1 * a.cos() + t2 * a.sin()
+            };
+            let top = p + up * 0.55;
+            match kind {
+                // Fire inside: smoke from the top and embers.
+                Kind::Generator | Kind::Magma | Kind::CokeOven | Kind::BlastFurnace => {
+                    if r < k * 3.0 {
+                        let s = side(&mut self.mobs);
+                        self.mobs.fx(top + s * 0.2, up * 1.2 + s * 0.2, [0.55, 0.54, 0.56], 0.22, 2.2, FxKind::Rise);
+                    }
+                    if r < k * 2.0 {
+                        let s = side(&mut self.mobs);
+                        let col = if kind == Kind::BlastFurnace { [1.0, 0.80, 0.30] } else { [1.0, 0.50, 0.12] };
+                        let h = self.mobs.rand();
+                        self.mobs.fx_glow(p + s * 0.52 + up * (h - 0.6) * 0.5, s * 0.8 + up * 1.4, col, 0.05, 0.8, FxKind::Rise);
+                    }
+                }
+                // Grinding: dust and chips spat out of the sides.
+                Kind::Crusher | Kind::Centrifuge | Kind::Recycler | Kind::Quarry | Kind::Enricher | Kind::Compressor => {
+                    if r < k * 5.0 {
+                        let s = side(&mut self.mobs);
+                        self.mobs.fx(p + s * 0.55, s * 2.0 + up * 1.5, [0.62, 0.60, 0.57], 0.06, 0.9, FxKind::Fall);
+                    }
+                }
+                Kind::Sawmill => {
+                    if r < k * 6.0 {
+                        let s = side(&mut self.mobs);
+                        self.mobs.fx(p + s * 0.55, s * 2.5 + up * 1.8, [0.85, 0.68, 0.42], 0.05, 0.9, FxKind::Fall);
+                    }
+                }
+                // Electric heat: white-blue sparks jumping out.
+                Kind::Induction | Kind::ArcFurnace | Kind::Tesla | Kind::ChargePad => {
+                    if r < k * 6.0 {
+                        let s = side(&mut self.mobs);
+                        let col = if self.mobs.rand() < 0.5 { [0.70, 0.90, 1.0] } else { [1.0, 1.0, 1.0] };
+                        self.mobs.fx_glow(top + s * 0.3, s * 3.0 + up * 2.5, col, 0.04, 0.5, FxKind::Fall);
+                    }
+                }
+                // Draconic: orange and purple motes spiralling up around the block.
+                Kind::Fusion | Kind::DracoCore | Kind::MatterFab => {
+                    if r < k * 8.0 {
+                        let a = self.mobs.rand() * std::f64::consts::TAU;
+                        let s = t1 * a.cos() + t2 * a.sin();
+                        let swirl = t1 * (a + 1.57).cos() + t2 * (a + 1.57).sin();
+                        let col = if self.mobs.rand() < 0.5 { [1.0, 0.55, 0.15] } else { [0.65, 0.30, 1.0] };
+                        self.mobs.fx_glow(p + s * 0.75, swirl * 1.5 + up * 1.2, col, 0.07, 1.4, FxKind::Rise);
+                    }
+                }
+                // Lava heat: embers.
+                Kind::Geo | Kind::Smeltery | Kind::Extruder => {
+                    if r < k * 2.5 {
+                        let s = side(&mut self.mobs);
+                        self.mobs.fx_glow(top + s * 0.3, up * 1.0 + s * 0.3, [1.0, 0.45, 0.10], 0.05, 1.0, FxKind::Rise);
+                    }
+                }
+                // The reactor at work: green motes; the cells sparkle cyan while charging.
+                Kind::Reactor => {
+                    if r < k * 3.0 {
+                        let s = side(&mut self.mobs);
+                        self.mobs.fx_glow(p + s * 0.6, up * 0.8, [0.55, 1.0, 0.45], 0.05, 1.2, FxKind::Rise);
+                    }
+                }
+                Kind::Cell | Kind::BigCell => {
+                    if r < k * 3.0 {
+                        let s = side(&mut self.mobs);
+                        let h = self.mobs.rand();
+                        self.mobs.fx_glow(p + s * 0.56 + up * (h - 0.5) * 0.8, up * 0.6, [0.40, 0.95, 1.0], 0.04, 0.8, FxKind::Rise);
+                    }
+                }
+                Kind::Glacier => {
+                    if r < k * 3.0 {
+                        let s = side(&mut self.mobs);
+                        self.mobs.fx(top + s * 0.3, up * 0.5 + s * 0.4, [0.92, 0.96, 1.0], 0.06, 1.2, FxKind::Rise);
+                    }
+                }
+                Kind::Insolator => {
+                    if r < k * 1.5 {
+                        let s = side(&mut self.mobs);
+                        self.mobs.fx(top + s * 0.3, up * 0.6, [0.45, 0.85, 0.35], 0.05, 1.5, FxKind::Leaf);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -3847,6 +4056,8 @@ impl GameSession {
     /// sparks over lava, glowing motes around uranium, falling leaves, a splash when the
     /// player jumps into water, dust on landing and behind a sprinting player.
     fn special_effects(&mut self, dt: f32) {
+        // A meltdown's mushroom cloud keeps rising (also when no machine is left).
+        self.tick_nukes(dt);
         use wolfcraft_engine::block::Block;
         use wolfcraft_engine::mobs::FxKind;
         let k = self.fx_amount.clamp(0.0, 2.0);
