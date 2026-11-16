@@ -1943,6 +1943,20 @@ blocks! {
     2547 Smeltery => needs_pick(info("Плавильня", Opaque, 5.0, Pickaxe, column(t::SMELTERY_FRONT, t::SEARED_BRICKS, t::SEARED_BRICKS))),
     2548 SearedBricks => needs_pick(info("Обожжённый кирпич", Opaque, 4.0, Pickaxe, all(t::SEARED_BRICKS))),
     2549 CherryLeaves => info("Вишнёвая листва", Cutout, 0.35, Hand, all(t::CHERRY_LEAVES)),
+    // Other planets.
+    2550 MoonDust => info("Лунный реголит", Opaque, 0.7, Shovel, all(t::MOON_DUST)),
+    2551 MoonRock => needs_pick(info("Лунный камень", Opaque, 6.0, Pickaxe, all(t::MOON_ROCK))),
+    2552 MoonOre => emissive(ore("Лунная руда", t::MOON_ORE, 2)),
+    2553 FireCrystalOre => emissive(ore("Огненная руда", t::FIRE_ORE, 2)),
+    2554 FrostOre => ore("Морозная руда", t::FROST_ORE, 2),
+    2555 BlueIce => needs_pick(info("Синий лёд", Opaque, 1.4, Pickaxe, all(t::BLUE_ICE))),
+    2556 AlienGrass => info("Ксенодёрн", Opaque, 0.9, Shovel, column(t::ALIEN_GRASS_SIDE, t::ALIEN_GRASS_TOP, t::ALIEN_SOIL)),
+    2557 AlienSoil => info("Ксенопочва", Opaque, 0.75, Shovel, all(t::ALIEN_SOIL)),
+    2558 AlienLog => info("Ксенобревно", Opaque, 3.0, Axe, column(t::ALIEN_LOG_SIDE, t::ALIEN_LOG_TOP, t::ALIEN_LOG_TOP)),
+    2559 AlienLeaves => info("Ксенолиства", Cutout, 0.35, Hand, all(t::ALIEN_LEAVES)),
+    2560 GlowShroom => emissive(info("Светогриб", Cross, 0.0, Hand, all(t::GLOW_SHROOM))),
+    2561 XenoOre => emissive(ore("Ксенорудa", t::XENO_ORE, 2)),
+    2562 AlienPlant => info("Ксенопобег", Cross, 0.0, Hand, all(t::ALIEN_PLANT)),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2575,6 +2589,9 @@ impl Block {
             NetherPortal => 11,
             IskritTorch => 7,
             DraconicCore => 12,
+            GlowShroom => 10,
+            MoonOre | XenoOre => 4,
+            FireCrystalOre => 7,
             DraconiumOre => 5,
             Magma => 4,
             _ => 0,

@@ -92,6 +92,66 @@ impl Layer {
     }
 }
 
+/// Which world a planet is: our home, or one of the planets the rocket flies to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum PlanetKind {
+    #[default]
+    Home,
+    Moon,
+    Lava,
+    Ice,
+    Alien,
+}
+
+impl PlanetKind {
+    pub const ALL: [PlanetKind; 5] = [PlanetKind::Home, PlanetKind::Moon, PlanetKind::Lava, PlanetKind::Ice, PlanetKind::Alien];
+    pub fn name(self) -> &'static str {
+        match self {
+            PlanetKind::Home => "Родная планета",
+            PlanetKind::Moon => "Луна",
+            PlanetKind::Lava => "Игнис (огненная)",
+            PlanetKind::Ice => "Глация (ледяная)",
+            PlanetKind::Alien => "Ксенос (джунгли)",
+        }
+    }
+    pub fn about(self) -> &'static str {
+        match self {
+            PlanetKind::Home => "Луга, леса, океаны — здесь всё начиналось",
+            PlanetKind::Moon => "Низкая гравитация, кратеры, реголит, лунная руда, лунные слизни",
+            PlanetKind::Lava => "Пепел, базальт и лавовые моря, огненная руда, магмовые твари",
+            PlanetKind::Ice => "Снег, синий лёд, замёрзшие моря, морозная руда, ледяные волки",
+            PlanetKind::Alien => "Фиолетовый дёрн, бирюзовые деревья, светогрибы, ксенотвари",
+        }
+    }
+    /// Folder of this planet inside the world (`None` for home).
+    pub fn slug(self) -> &'static str {
+        match self {
+            PlanetKind::Home => "home",
+            PlanetKind::Moon => "moon",
+            PlanetKind::Lava => "lava",
+            PlanetKind::Ice => "ice",
+            PlanetKind::Alien => "alien",
+        }
+    }
+    pub fn from_slug(s: &str) -> Option<PlanetKind> {
+        PlanetKind::ALL.iter().copied().find(|k| k.slug() == s)
+    }
+    /// Gravity compared to home.
+    pub fn gravity(self) -> f32 {
+        match self {
+            PlanetKind::Home => 1.0,
+            PlanetKind::Moon => 0.35,
+            PlanetKind::Lava => 1.1,
+            PlanetKind::Ice => 0.9,
+            PlanetKind::Alien => 0.8,
+        }
+    }
+    /// Number used for creatures of this planet (their colours and names).
+    pub fn index(self) -> u8 {
+        self as u8
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Column {
     /// Surface height above sea level (blocks); negative = under water.
@@ -108,6 +168,8 @@ pub struct Column {
 
 pub struct Planet {
     pub seed: u64,
+    /// Home or another planet (the rocket's worlds).
+    pub kind: PlanetKind,
     pub radius: f64,
     pub world_type: WorldType,
     pub structures: bool,
@@ -156,6 +218,7 @@ impl Planet {
 
         let mut p = Self {
             seed,
+            kind: PlanetKind::Home,
             radius,
             world_type: cfg.world_type,
             structures: cfg.structures,
@@ -183,6 +246,67 @@ impl Planet {
         };
         p.continents = p.make_continents(cfg.continents);
         p
+    }
+
+    /// Another planet of this world (the rocket flies there): same size and shape, its own
+    /// seed, terrain, blocks and climate, no buildings.
+    pub fn new_world(cfg: &WorldConfig, kind: PlanetKind) -> Self {
+        if kind == PlanetKind::Home {
+            return Self::new(cfg);
+        }
+        let mut c = cfg.clone();
+        c.seed ^= 0x504C_414E_4554_0000 ^ (kind as u64 * 0x9E37_79B9);
+        c.structures = false;
+        c.world_type = WorldType::Standard;
+        let mut p = Self::new(&c);
+        p.kind = kind;
+        p
+    }
+
+    /// Terrain of the other planets.
+    fn alien_column(&self, d: DVec3) -> Column {
+        let wp = d * self.radius;
+        let amp = self.amp;
+        let hills = Self::n3(&self.n_hill, wp * 0.012) * 9.0 + Self::n3(&self.n_hill, wp * 0.045 + DVec3::splat(91.7)) * 3.2 + Self::n3(&self.n_misc, wp * 0.11) * 1.1;
+        let ridge = (Self::n3(&self.n_ridge, wp * 0.005) * 0.5 + 0.5).clamp(0.0, 1.0).powf(1.4);
+        let mmask = smoothstep(0.1, 0.55, Self::n3(&self.n_mmask, d * 2.4));
+        let misc = Self::n3(&self.n_misc, d * 6.0) + Self::n3(&self.n_misc, wp * 0.03) * 0.12;
+        let sea = Self::n3(&self.n_edge, d * 3.0);
+        let (e, biome, temp) = match self.kind {
+            PlanetKind::Moon => {
+                // Craters: round bowls with raised rims, everywhere, of every size.
+                let mut e = 8.0 + hills * 0.8 + mmask * ridge * 60.0 * amp;
+                for (scale, depth) in [(0.006, 30.0), (0.02, 10.0), (0.06, 4.0)] {
+                    let c = Self::n3(&self.n_lake, wp * scale + DVec3::splat(scale * 977.0));
+                    e += smoothstep(0.12, 0.22, c) * (1.0 - smoothstep(0.22, 0.32, c)) * depth * 0.35;
+                    e -= smoothstep(0.24, 0.55, c) * depth;
+                }
+                (e.max(1.0), if misc < 0.0 { Biome::MoonMare } else { Biome::MoonHighlands }, 0.5)
+            }
+            PlanetKind::Lava => {
+                let mut e = 4.0 + hills + mmask * ridge * 90.0 * amp;
+                if sea < -0.25 {
+                    e = lerp(e, -6.0, smoothstep(-0.25, -0.4, sea));
+                }
+                (e, if e < 1.0 || misc > 0.25 { Biome::LavaFields } else { Biome::AshWastes }, 1.0)
+            }
+            PlanetKind::Ice => {
+                let mut e = 5.0 + hills + mmask * ridge * 110.0 * amp;
+                if sea < -0.3 {
+                    e = lerp(e, -10.0, smoothstep(-0.3, -0.45, sea));
+                }
+                (e, if e > 40.0 || (misc > 0.55 && e > 10.0) { Biome::CrystalPeaks } else { Biome::FrozenPlains }, 0.02)
+            }
+            _ => {
+                let mut e = 4.0 + hills * 1.2 + mmask * ridge * 70.0 * amp;
+                if sea < -0.3 {
+                    e = lerp(e, -8.0, smoothstep(-0.3, -0.45, sea));
+                }
+                let wet = Self::n3(&self.n_humid, d * 2.3);
+                (e, if wet > 0.25 && e < 14.0 { Biome::GlowSwamp } else { Biome::AlienJungle }, 0.7)
+            }
+        };
+        Column { elev: e as f32, biome, temp, humid: 0.5, land: if e > 0.0 { 0.5 } else { -0.5 }, river: false, volcanic: 0.0, lava_lake: false }
     }
 
     /// The Hell dimension of a world: same size, its own seed, no structures.
@@ -272,6 +396,9 @@ impl Planet {
     pub fn column(&self, d: DVec3) -> Column {
         if self.hell {
             return self.hell_column(d);
+        }
+        if self.kind != PlanetKind::Home {
+            return self.alien_column(d);
         }
         let flat = matches!(self.world_type, WorldType::Flat | WorldType::Baseplate);
         let wp = d * self.radius;
@@ -547,6 +674,12 @@ impl Planet {
         } else {
             s
         };
+        if r > s && self.kind == PlanetKind::Moon {
+            return Block::Air;
+        }
+        if r > s && self.kind == PlanetKind::Lava {
+            return if r <= self.radius { Block::Lava } else { Block::Air };
+        }
         if r > s {
             // Above ground: lava lake, sea, ice sheet or air.
             if col.lava_lake && r <= self.radius + 72.0 * self.amp {
@@ -611,7 +744,11 @@ impl Planet {
         if let Some(ore) = self.ore_at(c, self.radius - r) {
             return ore;
         }
-        Block::Stone
+        match self.kind {
+            PlanetKind::Moon => Block::MoonRock,
+            PlanetKind::Lava => Block::Basalt,
+            _ => Block::Stone,
+        }
     }
 
     fn cave(&self, c: DVec3, r: f64, depth: f64) -> Option<Block> {
@@ -644,6 +781,32 @@ impl Planet {
         let (ci, cj, ck) = (c.i.div_euclid(6), c.j.div_euclid(6), c.k.div_euclid(6));
         let h = hash3(self.seed ^ 0x0BE5 ^ ((c.f as u64 + 1) << 56), ci, cj, ck);
         let roll = (h % 1000) as u32;
+        if self.kind != PlanetKind::Home {
+            // Other planets: their own crystal ore, plus a little iron, gold and diamond.
+            let own = match self.kind {
+                PlanetKind::Moon => Block::MoonOre,
+                PlanetKind::Lava => Block::FireCrystalOre,
+                PlanetKind::Ice => Block::FrostOre,
+                _ => Block::XenoOre,
+            };
+            let kind = if roll < 40 && depth_below_sea > -6.0 {
+                own
+            } else if roll < 70 && depth_below_sea > 4.0 {
+                Block::IronOre
+            } else if roll < 80 && depth_below_sea > 15.0 {
+                Block::GoldOre
+            } else if roll < 85 && depth_below_sea > 30.0 {
+                Block::DiamondOre
+            } else if roll < 88 && depth_below_sea > 20.0 {
+                Block::DraconiumOre
+            } else {
+                return None;
+            };
+            let (ox, oy, oz) = (to01(splitmix(h ^ 1)), to01(splitmix(h ^ 2)), to01(splitmix(h ^ 3)));
+            let centre = (ci as f64 * 6.0 + 1.0 + ox * 4.0, cj as f64 * 6.0 + 1.0 + oy * 4.0, ck as f64 * 6.0 + 1.0 + oz * 4.0);
+            let (dx, dy, dz) = (c.i as f64 + 0.5 - centre.0, c.j as f64 + 0.5 - centre.1, c.k as f64 + 0.5 - centre.2);
+            return (dx * dx + dy * dy + dz * dz < 2.6).then_some(kind);
+        }
         let kind = if roll < 48 && depth_below_sea > 2.0 {
             Block::CoalOre
         } else if roll < 76 && depth_below_sea > 10.0 {

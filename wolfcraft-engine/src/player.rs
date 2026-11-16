@@ -446,7 +446,7 @@ impl Player {
             self.fall_peak = self.fall_peak.max(alt);
         }
         if impact > 0.0 && !self.body.in_water && !self.is_creative() {
-            let height = impact * impact / (2.0 * physics::GRAVITY);
+            let height = impact * impact / (2.0 * physics::gravity());
             if height > 3.5 {
                 // «Пёрышко» on the boots: −25 % fall damage per level.
                 let feather = self.inventory.armor[3].map(|b| b.ench_level(crate::magic::Ench::Feather)).unwrap_or(0);

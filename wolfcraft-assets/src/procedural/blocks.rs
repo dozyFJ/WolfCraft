@@ -252,6 +252,22 @@ pub mod tiles {
     pub const SMELTERY_FRONT: u16 = 253;
     pub const SEARED_BRICKS: u16 = 254;
     pub const CHERRY_LEAVES: u16 = 255;
+    // Other planets: the Moon, the lava world, the ice world, the alien jungle.
+    pub const MOON_DUST: u16 = 256;
+    pub const MOON_ROCK: u16 = 257;
+    pub const MOON_ORE: u16 = 258;
+    pub const FIRE_ORE: u16 = 259;
+    pub const FROST_ORE: u16 = 260;
+    pub const BLUE_ICE: u16 = 261;
+    pub const ALIEN_GRASS_TOP: u16 = 262;
+    pub const ALIEN_GRASS_SIDE: u16 = 263;
+    pub const ALIEN_SOIL: u16 = 264;
+    pub const ALIEN_LOG_SIDE: u16 = 265;
+    pub const ALIEN_LOG_TOP: u16 = 266;
+    pub const ALIEN_LEAVES: u16 = 267;
+    pub const GLOW_SHROOM: u16 = 268;
+    pub const XENO_ORE: u16 = 269;
+    pub const ALIEN_PLANT: u16 = 270;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2880,6 +2896,67 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
     }));
     l.add(CHERRY_LEAVES, "cherry_leaves", leaves(Rgb(0.96, 0.62, 0.78), 361));
+    // ---- Other planets ----
+    l.add(MOON_DUST, "moon_dust", p(|q| {
+        q.noisy(Rgb(0.70, 0.70, 0.72), 0.06, 362);
+        q.speckle(Rgb(0.55, 0.55, 0.58), 0.12, 363);
+        // Tiny craters: a dark rim and a light centre.
+        for (cx, cy) in [(4u32, 5u32), (11, 10), (12, 3)] {
+            for (dx, dy) in [(0i32, -1i32), (1, 0), (0, 1), (-1, 0)] {
+                q.put((cx as i32 + dx) as u32, (cy as i32 + dy) as u32, Rgb(0.52, 0.52, 0.55), 1.0);
+            }
+            q.put(cx, cy, Rgb(0.80, 0.80, 0.82), 1.0);
+        }
+    }));
+    l.add(MOON_ROCK, "moon_rock", p(|q| {
+        q.noisy(Rgb(0.46, 0.46, 0.50), 0.08, 364);
+        q.speckle(Rgb(0.34, 0.34, 0.38), 0.15, 365);
+    }));
+    l.add(MOON_ORE, "moon_ore", ore(Rgb(0.55, 0.95, 1.0), 366));
+    l.add(FIRE_ORE, "fire_ore", ore(Rgb(1.0, 0.42, 0.10), 367));
+    l.add(FROST_ORE, "frost_ore", ore(Rgb(0.70, 0.92, 1.0), 368));
+    l.add(BLUE_ICE, "blue_ice", p(|q| {
+        q.noisy(Rgb(0.42, 0.62, 0.95), 0.06, 369);
+        for i in 0..S {
+            q.put(i, (i * 5 / 7 + 2) % 16, Rgb(0.70, 0.85, 1.0), 1.0);
+            q.put((i * 3 + 5) % 16, i, Rgb(0.55, 0.75, 1.0), 1.0);
+        }
+    }));
+    let alien_grass = Rgb(0.58, 0.28, 0.80);
+    let alien_soil = Rgb(0.28, 0.22, 0.34);
+    l.add(ALIEN_GRASS_TOP, "alien_grass_top", p(|q| {
+        q.noisy(alien_grass, 0.08, 370);
+        q.speckle(Rgb(0.40, 0.95, 0.85), 0.05, 371);
+    }));
+    l.add(ALIEN_GRASS_SIDE, "alien_grass_side", side_with_top(alien_soil, alien_grass, 372));
+    l.add(ALIEN_SOIL, "alien_soil", p(|q| earth(q, alien_soil, 373)));
+    l.add(ALIEN_LOG_SIDE, "alien_log_side", log_side(Rgb(0.22, 0.45, 0.50), 374, false));
+    l.add(ALIEN_LOG_TOP, "alien_log_top", p(|q| {
+        q.noisy(Rgb(0.30, 0.60, 0.62), 0.05, 375);
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                if ((dx * dx + dy * dy).sqrt() as u32) % 3 == 0 {
+                    q.put(x, y, Rgb(0.20, 0.42, 0.45), 1.0);
+                }
+            }
+        }
+    }));
+    l.add(ALIEN_LEAVES, "alien_leaves", leaves(Rgb(0.30, 0.85, 0.75), 376));
+    l.add(GLOW_SHROOM, "glow_shroom", mushroom(Rgb(0.30, 0.95, 0.90), true));
+    l.add(XENO_ORE, "xeno_ore", ore(Rgb(0.85, 0.30, 1.0), 377));
+    l.add(ALIEN_PLANT, "alien_plant", p(|q| {
+        for blade in 0..6u32 {
+            let bx = 2 + blade * 2 + hash(blade, 0, 378) % 2;
+            let h = 7 + hash(blade, 1, 378) % 8;
+            for y in (S - h)..S {
+                let curl = (((S - y) as f32 * 0.5 + blade as f32).sin() * 1.2) as i32;
+                let x = (bx as i32 + curl).clamp(0, 15) as u32;
+                let tip = y < S - h + 2;
+                q.put(x, y, if tip { Rgb(0.45, 1.0, 0.90) } else { Rgb(0.62, 0.30, 0.85) }, 1.0);
+            }
+        }
+    }));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);

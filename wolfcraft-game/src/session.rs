@@ -43,6 +43,16 @@ struct Stellar {
     side: DVec3,
 }
 
+/// A rocket flight: lift-off (`phase` 0), in orbit choosing the planet (1), landing (2).
+#[derive(Clone, Copy, Debug)]
+pub struct RocketFlight {
+    pub phase: u8,
+    /// Seconds in this phase.
+    pub t: f32,
+    /// Speed along up (blocks/s).
+    pub speed: f64,
+}
+
 /// Everything the player did this frame.
 #[derive(Default, Clone, Debug)]
 pub struct InputFrame {
@@ -278,6 +288,12 @@ pub struct GameSession {
     /// Set when the dimension changed: the renderer must drop every chunk mesh.
     pub dimension_changed: bool,
     overworld_pos: Option<DVec3>,
+    /// The planet being played (home or one the rocket flew to).
+    pub planet_kind: wolfcraft_engine::planet::PlanetKind,
+    /// A rocket flight in progress (lift-off, choosing the planet, landing).
+    pub rocket: Option<RocketFlight>,
+    /// The planet picked in the rocket menu (the app sets it).
+    pub rocket_pick: Option<wolfcraft_engine::planet::PlanetKind>,
     portal_t: f32,
     pending_portal: Option<wolfcraft_engine::cubesphere::Cell>,
     pub block_commands: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, String>,
@@ -343,6 +359,9 @@ pub struct GameSession {
 impl GameSession {
     pub fn new(l: Loaded) -> Self {
         wolfcraft_engine::cubesphere::set_world_grid(l.planet.grid);
+        // Home gravity until the saved place says otherwise (a world played before may have
+        // been on the Moon).
+        wolfcraft_engine::physics::set_gravity_scale(1.0);
         let chunks = ChunkManager::new(l.planet.clone(), l.storage.clone());
         let seed = l.cfg.seed;
         let mut s = Self {
@@ -432,6 +451,9 @@ impl GameSession {
             remote_edits: Vec::new(),
             dimension_changed: false,
             overworld_pos: None,
+            planet_kind: wolfcraft_engine::planet::PlanetKind::Home,
+            rocket: None,
+            rocket_pick: None,
             portal_t: -2.0,
             pending_portal: None,
             furnace_t: Default::default(),
@@ -596,6 +618,10 @@ impl GameSession {
         if input.swap_hands && !self.player.survival.dead {
             self.player.inventory.swap_offhand();
         }
+        // The rocket: a tap with it in hand (and fuel in the bag) lifts off.
+        if input.use_pressed && self.rocket.is_none() && !self.player.survival.dead && self.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::ROCKET) {
+            self.start_rocket();
+        }
         // WolfTech mining laser: a tap burns a tunnel of up to 8 blocks ahead.
         if input.use_pressed && !self.player.survival.dead && self.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::MINING_LASER) {
             self.fire_laser();
@@ -683,7 +709,9 @@ impl GameSession {
         // Resting: asleep (the night passes in a few seconds) or sitting until you move.
         let resting = self.tick_rest(input, dt);
         // Physics, split into steps of at most 1/30 s.
-        if self.ground_ready() && !self.player.survival.dead && !resting && self.riding.is_none() {
+        if self.rocket.is_some() {
+            self.tick_rocket(dt);
+        } else if self.ground_ready() && !self.player.survival.dead && !resting && self.riding.is_none() {
             let controls = Controls { forward: input.forward, strafe: input.strafe, jump: input.jump, sprint: input.sprint, sneak: input.sneak };
             let mut left = dt.min(0.25) as f64;
             while left > 1e-6 {
@@ -3506,7 +3534,7 @@ impl GameSession {
     }
 
     fn tech_path(&self) -> PathBuf {
-        self.dir.join(if self.hell { "tech_hell.txt" } else { "tech.txt" })
+        self.dir.join(if self.hell { "tech_hell.txt".to_string() } else if self.planet_kind != wolfcraft_engine::planet::PlanetKind::Home { format!("tech_{}.txt", self.planet_kind.slug()) } else { "tech.txt".to_string() })
     }
 
     fn save_tech(&self) {
@@ -3619,7 +3647,17 @@ impl GameSession {
     fn load_dimension(&mut self) {
         let Ok(text) = std::fs::read_to_string(self.dimension_path()) else { return };
         let mut it = text.split_whitespace();
-        if it.next() != Some("hell") {
+        let first = it.next();
+        if first == Some("planet") {
+            let Some(kind) = it.next().and_then(wolfcraft_engine::planet::PlanetKind::from_slug) else { return };
+            let n: Vec<f64> = it.filter_map(|x| x.parse().ok()).collect();
+            if n.len() == 3 {
+                self.overworld_pos = Some(DVec3::new(n[0], n[1], n[2]));
+            }
+            self.enter_place(false, kind);
+            return;
+        }
+        if first != Some("hell") {
             return;
         }
         let n: Vec<f64> = it.filter_map(|x| x.parse().ok()).collect();
@@ -3631,14 +3669,26 @@ impl GameSession {
 
     /// Swaps planet + chunk streaming for the other dimension (the player is not moved).
     fn enter_dimension(&mut self, hell: bool) {
+        self.enter_place(hell, wolfcraft_engine::planet::PlanetKind::Home);
+    }
+
+    /// Swaps planet + chunk streaming: home, its hell, or another planet of the world.
+    fn enter_place(&mut self, hell: bool, kind: wolfcraft_engine::planet::PlanetKind) {
+        use wolfcraft_engine::planet::PlanetKind;
         self.save_containers();
         self.save_tech();
         self.containers.clear();
         self.kin.clear();
         self.tech.clear();
         self.tech_nets.clear();
-        let planet = Arc::new(if hell { Planet::new_hell(&self.cfg) } else { Planet::new(&self.cfg) });
-        let dir = if hell { self.dir.join("hell") } else { self.dir.clone() };
+        let planet = Arc::new(if hell { Planet::new_hell(&self.cfg) } else { Planet::new_world(&self.cfg, kind) });
+        let dir = if hell {
+            self.dir.join("hell")
+        } else if kind != PlanetKind::Home {
+            self.dir.join(kind.slug())
+        } else {
+            self.dir.clone()
+        };
         let Ok(storage) = wolfcraft_engine::storage::Storage::open(&dir) else {
             log::error!("cannot open dimension storage {}", dir.display());
             return;
@@ -3646,8 +3696,11 @@ impl GameSession {
         self.planet = planet.clone();
         self.chunks = ChunkManager::new(planet, Arc::new(storage));
         self.mobs = wolfcraft_engine::mobs::MobManager::new(self.cfg.seed);
+        self.mobs.planet = if hell { 0 } else { kind.index() };
         self.explosives = wolfcraft_engine::explosives::Explosives::new(self.cfg.seed);
         self.hell = hell;
+        self.planet_kind = if hell { PlanetKind::Home } else { kind };
+        wolfcraft_engine::physics::set_gravity_scale(self.planet_kind.gravity());
         self.load_containers();
         self.load_tech();
         self.refresh_globe();
@@ -3668,6 +3721,126 @@ impl GameSession {
             }
         }
         wolfcraft_engine::renderer::sky::set_globe(N as u32, cols);
+    }
+
+    /// Lift-off: needs open sky and 4 rocket fuel (free in creative).
+    fn start_rocket(&mut self) {
+        use wolfcraft_engine::items::ids;
+        if self.hell {
+            self.item_name = Some(("Из Ада ракета не взлетит".into(), 2.5));
+            return;
+        }
+        let up = self.player.up();
+        let p = self.player.body.pos;
+        let blocked = (2..40).any(|h| self.chunks.block_at_world(p + up * h as f64).is_solid());
+        if blocked {
+            self.item_name = Some(("Ракете нужно открытое небо над головой".into(), 2.5));
+            return;
+        }
+        if !self.player.is_creative() {
+            if self.player.inventory.count(ids::ROCKET_FUEL) < 4 {
+                self.item_name = Some(("Нужно 4 ракетного топлива".into(), 2.5));
+                return;
+            }
+            self.player.inventory.take(ids::ROCKET_FUEL, 4);
+        }
+        self.player.body.flying = true;
+        self.player.body.vel = DVec3::ZERO;
+        self.rocket = Some(RocketFlight { phase: 0, t: 0.0, speed: 0.0 });
+        self.rocket_pick = None;
+        self.shake = self.shake.max(0.5);
+        self.item_name = Some(("🚀 Старт!".into(), 2.0));
+    }
+
+    /// The flight: thrust up through the sky, wait in orbit for the planet, come down slowly on
+    /// the new world's surface with the engine braking.
+    fn tick_rocket(&mut self, dt: f32) {
+        use wolfcraft_engine::mobs::FxKind;
+        use wolfcraft_engine::planet::PlanetKind;
+        let Some(mut r) = self.rocket else { return };
+        r.t += dt;
+        let up = self.player.up();
+        let pos = self.player.body.pos;
+        let flame = |s: &mut Self, power: f64| {
+            let amount = (s.fx_amount.max(0.3) * 6.0 * power as f32) as usize + 1;
+            for _ in 0..amount {
+                let j = DVec3::new(s.mobs.rand() - 0.5, s.mobs.rand() - 0.5, s.mobs.rand() - 0.5) * 0.6;
+                let hot = s.mobs.rand();
+                let col = if hot < 0.35 { [1.0, 0.95, 0.70] } else if hot < 0.75 { [1.0, 0.60, 0.15] } else { [0.95, 0.30, 0.08] };
+                s.mobs.fx_glow(pos - up * 3.4 + j, -up * (8.0 + hot * 6.0) + j * 3.0, col, 0.18, 0.5, FxKind::Rise);
+            }
+            if s.mobs.rand() < 0.6 * power {
+                let j = DVec3::new(s.mobs.rand() - 0.5, s.mobs.rand() - 0.5, s.mobs.rand() - 0.5);
+                s.mobs.fx(pos - up * 4.0 + j, -up * 2.0 + j * 2.0, [0.80, 0.80, 0.82], 0.6, 2.4, FxKind::Rise);
+            }
+        };
+        match r.phase {
+            0 => {
+                r.speed = (r.speed + dt as f64 * (6.0 + r.t as f64 * 10.0)).min(140.0);
+                self.player.body.pos += up * r.speed * dt as f64;
+                self.player.body.vel = DVec3::ZERO;
+                flame(self, 1.0);
+                self.shake = self.shake.max((0.4 * (1.0 - r.t / 6.0)).max(0.05));
+                if r.t > 6.0 {
+                    r = RocketFlight { phase: 1, t: 0.0, speed: 0.0 };
+                    self.item_name = Some(("Орбита: выберите планету".into(), 3.0));
+                }
+            }
+            1 => {
+                self.player.body.vel = DVec3::ZERO;
+                if let Some(kind) = self.rocket_pick.take() {
+                    self.travel_to(kind);
+                    r = RocketFlight { phase: 2, t: 0.0, speed: 60.0 };
+                }
+            }
+            _ => {
+                // Down to the ground, braking: fast up high, slow near the surface. Waits in
+                // the air while the ground is still being generated.
+                let below = (1..60).find(|h| self.chunks.get_block(self.chunks.grid().world_to_cell(pos - up * *h as f64)).is_some_and(|b| b.is_solid()));
+                let loaded = self.ground_ready();
+                let target = match below {
+                    Some(h) => (h as f64 * 1.4).clamp(3.0, 60.0),
+                    None if loaded => 60.0,
+                    None => 0.0,
+                };
+                r.speed += (target - r.speed) * (1.0 - (-3.0 * dt as f64).exp());
+                self.player.body.pos -= up * r.speed * dt as f64;
+                self.player.body.vel = DVec3::ZERO;
+                flame(self, 0.6);
+                if below.is_some_and(|h| h <= 1) {
+                    self.player.body.flying = false;
+                    self.rocket = None;
+                    self.shake = self.shake.max(0.4);
+                    self.item_name = Some((format!("Посадка: {}", self.planet_kind.name()), 3.0));
+                    if self.planet_kind != PlanetKind::Home {
+                        self.grant("space");
+                    }
+                    return;
+                }
+            }
+        }
+        self.rocket = Some(r);
+    }
+
+    /// Moves the world to `kind` (from orbit): the player comes down above its surface — at
+    /// home where they took off from it, elsewhere at a safe spot.
+    fn travel_to(&mut self, kind: wolfcraft_engine::planet::PlanetKind) {
+        use wolfcraft_engine::planet::PlanetKind;
+        let here = self.player.body.pos;
+        if kind == self.planet_kind {
+            return;
+        }
+        self.save();
+        if self.planet_kind == PlanetKind::Home {
+            self.overworld_pos = Some(here);
+        }
+        self.enter_place(false, kind);
+        let ground = if kind == PlanetKind::Home { self.overworld_pos } else { Some(self.planet.find_spawn()) };
+        let ground = ground.unwrap_or_else(|| self.planet.find_spawn());
+        let up = wolfcraft_engine::physics::up_at(ground);
+        self.teleport(ground + up * 90.0);
+        self.player.body.flying = true;
+        self.spawn_checked = true;
     }
 
     /// Hell <-> Overworld through a portal (or `/hell`).
@@ -3730,7 +3903,7 @@ impl GameSession {
     }
 
     fn containers_path(&self) -> PathBuf {
-        self.dir.join(if self.hell {"containers_hell.txt"}else{"containers.txt"})
+        self.dir.join(if self.hell { "containers_hell.txt".to_string() } else if self.planet_kind != wolfcraft_engine::planet::PlanetKind::Home { format!("containers_{}.txt", self.planet_kind.slug()) } else { "containers.txt".to_string() })
     }
 
     fn load_containers(&mut self) {
@@ -3802,6 +3975,9 @@ impl GameSession {
         let dim = if self.hell {
             let p = self.overworld_pos.unwrap_or(DVec3::ZERO);
             format!("hell {} {} {}", p.x, p.y, p.z)
+        } else if self.planet_kind != wolfcraft_engine::planet::PlanetKind::Home {
+            let p = self.overworld_pos.unwrap_or(DVec3::ZERO);
+            format!("planet {} {} {} {}", self.planet_kind.slug(), p.x, p.y, p.z)
         } else {
             "overworld".to_string()
         };
@@ -3924,7 +4100,7 @@ impl GameSession {
             ));
         }
         let (biome, _, _) = self.env_col.unwrap_or((B::Plains, 0.5, 0.5));
-        let dry = matches!(biome, B::Desert | B::Badlands | B::Volcano | B::Savanna);
+        let dry = matches!(biome, B::Desert | B::Badlands | B::Volcano | B::Savanna | B::MoonMare | B::MoonHighlands | B::AshWastes | B::LavaFields);
         let rain = if dry { 0.0 } else { self.weather.rain };
         self.mobs.sun_burns = rain < 0.3;
         if rain <= 0.01 {
@@ -4067,7 +4243,7 @@ impl GameSession {
             return 0.0;
         }
         let (biome, _, _) = self.env_col.unwrap_or((B::Plains, 0.5, 0.5));
-        if matches!(biome, B::Desert | B::Badlands | B::Volcano | B::Savanna) { 0.0 } else { self.weather.rain }
+        if matches!(biome, B::Desert | B::Badlands | B::Volcano | B::Savanna | B::MoonMare | B::MoonHighlands | B::AshWastes | B::LavaFields) { 0.0 } else { self.weather.rain }
     }
 
     /// Particles that bring the world to life: embers and smoke over torches, bubbles and

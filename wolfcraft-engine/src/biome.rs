@@ -32,6 +32,23 @@ pub enum Biome {
     DarkForest,
     /// Open grass thick with flowers.
     FlowerMeadow,
+    // ---- Other planets ----
+    /// Moon: dark dusty plains.
+    MoonMare,
+    /// Moon: bright cratered highlands.
+    MoonHighlands,
+    /// Lava world: grey ash over basalt.
+    AshWastes,
+    /// Lava world: black basalt cracked with magma, lava seas.
+    LavaFields,
+    /// Ice world: snow over packed ice.
+    FrozenPlains,
+    /// Ice world: blue ice ridges.
+    CrystalPeaks,
+    /// Alien world: purple turf, tall teal trees.
+    AlienJungle,
+    /// Alien world: wet lowlands glowing with mushrooms.
+    GlowSwamp,
 }
 
 impl Biome {
@@ -60,6 +77,14 @@ impl Biome {
             Biome::CherryGrove => "Вишнёвая роща",
             Biome::DarkForest => "Тёмный лес",
             Biome::FlowerMeadow => "Цветочный луг",
+            Biome::MoonMare => "Лунное море",
+            Biome::MoonHighlands => "Лунные нагорья",
+            Biome::AshWastes => "Пепельная пустошь",
+            Biome::LavaFields => "Лавовые поля",
+            Biome::FrozenPlains => "Мёрзлые равнины",
+            Biome::CrystalPeaks => "Хрустальные пики",
+            Biome::AlienJungle => "Ксеноджунгли",
+            Biome::GlowSwamp => "Светящееся болото",
         }
     }
 
@@ -80,6 +105,13 @@ impl Biome {
             Biome::Mountains => (Block::Stone, Block::Stone, Block::Stone),
             Biome::SnowyPeaks => (Block::Snow, Block::Snow, Block::Stone),
             Biome::Volcano => (Block::Ash, Block::Basalt, Block::Basalt),
+            Biome::MoonMare => (Block::MoonDust, Block::MoonDust, Block::MoonRock),
+            Biome::MoonHighlands => (Block::MoonDust, Block::MoonRock, Block::MoonRock),
+            Biome::AshWastes => (Block::Ash, Block::Basalt, Block::Basalt),
+            Biome::LavaFields => (Block::Basalt, Block::Basalt, Block::Basalt),
+            Biome::FrozenPlains => (Block::Snow, Block::PackedIce, Block::Stone),
+            Biome::CrystalPeaks => (Block::BlueIce, Block::PackedIce, Block::Stone),
+            Biome::AlienJungle | Biome::GlowSwamp => (Block::AlienGrass, Block::AlienSoil, Block::Stone),
             Biome::Ocean | Biome::DeepOcean | Biome::FrozenOcean => (Block::Sand, Block::Sand, Block::Stone),
             Biome::WarmOcean => (Block::Sand, Block::Sand, Block::Sandstone),
             Biome::ColdOcean => (Block::Gravel, Block::Gravel, Block::Stone),

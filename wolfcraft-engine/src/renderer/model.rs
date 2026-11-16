@@ -755,7 +755,10 @@ pub fn build_mob_models(mobs: &[crate::mobs::Mob], camera: DVec3, forward: DVec3
         let f = Frame { origin: m.body.pos - camera, right, up, fwd };
         let swing = m.anim.sin() * 0.7 * m.amount;
         // Red flash when hurt.
+        // Creatures of other planets in their planet's colours.
+        let pt = m.planet_tint();
         let tint = |c: [f32; 3]| -> [f32; 3] {
+            let c = [(c[0] * pt[0]).min(1.0), (c[1] * pt[1]).min(1.0), (c[2] * pt[2]).min(1.0)];
             let k = (m.hurt / 0.35).clamp(0.0, 1.0) * 0.6;
             [c[0] + (1.0 - c[0]) * k, c[1] * (1.0 - k), c[2] * (1.0 - k)]
         };

@@ -167,7 +167,14 @@ pub mod ids {
     pub const TINKER_EXCAVATOR: ItemId = 431;
     pub const LUMBER_AXE: ItemId = 432;
     pub const CLEAVER: ItemId = 433;
-    pub const LAST: ItemId = 433;
+    /// Space: crystals mined on the other planets, the rocket and its fuel.
+    pub const LUNAR_CRYSTAL: ItemId = 434;
+    pub const FIRE_CRYSTAL: ItemId = 435;
+    pub const FROST_CRYSTAL: ItemId = 436;
+    pub const XENO_CRYSTAL: ItemId = 437;
+    pub const ROCKET: ItemId = 438;
+    pub const ROCKET_FUEL: ItemId = 439;
+    pub const LAST: ItemId = 439;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -332,6 +339,12 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::TINKER_EXCAVATOR => ItemInfo { max_stack: 1, durability: 1500, attack: 5.0, tool: Some((ToolKind::Shovel, 3)), ..plain("Землекоп (3×3)", sp::TINKER_EXCAVATOR) },
         ids::LUMBER_AXE => ItemInfo { max_stack: 1, durability: 1500, attack: 9.0, tool: Some((ToolKind::Axe, 3)), ..plain("Лесорубный топор", sp::LUMBER_AXE) },
         ids::CLEAVER => ItemInfo { max_stack: 1, durability: 1200, attack: 16.0, ..plain("Тесак", sp::CLEAVER) },
+        ids::LUNAR_CRYSTAL => plain("Лунный кристалл", sp::LUNAR_CRYSTAL),
+        ids::FIRE_CRYSTAL => plain("Огненный кристалл", sp::FIRE_CRYSTAL),
+        ids::FROST_CRYSTAL => plain("Морозный кристалл", sp::FROST_CRYSTAL),
+        ids::XENO_CRYSTAL => plain("Ксенокристалл", sp::XENO_CRYSTAL),
+        ids::ROCKET => ItemInfo { max_stack: 1, ..plain("Ракета", sp::ROCKET) },
+        ids::ROCKET_FUEL => plain("Ракетное топливо", sp::ROCKET_FUEL),
         ids::CHAINSAW => ItemInfo { max_stack: 1, durability: 600, attack: 7.0, tool: Some((ToolKind::Axe, 3)), ..plain("Электропила", sp::CHAINSAW) },
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
         ids::BRONZE_INGOT => plain("Бронзовый слиток", sp::BRONZE_INGOT),
@@ -516,6 +529,11 @@ pub fn drops(block: Block, harvested: bool, pos: IVec3, seed: u64) -> Vec<ItemSt
         Block::SilverOre => vec![ItemStack::new(ids::RAW_SILVER, 1)],
         Block::IskritOre => vec![ItemStack::of_block(Block::IskritWire, 4 + (roll * 2.0) as u8)],
         Block::UraniumOre => vec![ItemStack::new(ids::RAW_URANIUM, 1)],
+        Block::MoonOre => vec![ItemStack::new(ids::LUNAR_CRYSTAL, 1 + (roll * 2.0) as u8)],
+        Block::FireCrystalOre => vec![ItemStack::new(ids::FIRE_CRYSTAL, 1 + (roll * 2.0) as u8)],
+        Block::FrostOre => vec![ItemStack::new(ids::FROST_CRYSTAL, 1 + (roll * 2.0) as u8)],
+        Block::XenoOre => vec![ItemStack::new(ids::XENO_CRYSTAL, 1 + (roll * 2.0) as u8)],
+        Block::AlienGrass => vec![ItemStack::of_block(Block::AlienSoil, 1)],
         b if b.is_door_top() => vec![],
         b if matches!(b.part(), Some(crate::block::Part::Head { .. })) => vec![],
         Block::ElectricLampOn => vec![ItemStack::of_block(Block::ElectricLamp, 1)],
@@ -611,6 +629,7 @@ pub fn xp_for(block: Block) -> u32 {
         Block::CopperOre | Block::TinOre => 2,
         Block::SilverOre | Block::CobaltOre => 5,
         Block::DraconiumOre => 12,
+        Block::MoonOre | Block::FireCrystalOre | Block::FrostOre | Block::XenoOre => 6,
         Block::IskritOre => 4,
         _ => 0,
     }

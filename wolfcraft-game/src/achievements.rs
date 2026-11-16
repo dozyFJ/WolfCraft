@@ -35,6 +35,7 @@ pub const ALL: &[Achievement] = &[
     Achievement { id: "plasma", name: "Плазма", desc: "Сделать плазменную винтовку или рельсотрон", icon: ids::PLASMA_RIFLE },
     Achievement { id: "atom", name: "Мирный атом", desc: "Поставить ядерный реактор", icon: b(Block::Reactor) },
     Achievement { id: "meltdown", name: "Это было ожидаемо", desc: "Перегреть реактор", icon: ids::URANIUM_ROD },
+    Achievement { id: "space", name: "Один маленький шаг", desc: "Долететь на ракете до другой планеты", icon: ids::ROCKET },
     Achievement { id: "dragon", name: "Повелитель драконов", desc: "Оседлать дракона", icon: ids::SADDLE },
     Achievement { id: "hell", name: "В пекло", desc: "Попасть в Ад", icon: b(Block::Obsidian) },
     Achievement { id: "boss", name: "Гроза стражей", desc: "Победить стража", icon: ids::RITUAL_SEAL },
