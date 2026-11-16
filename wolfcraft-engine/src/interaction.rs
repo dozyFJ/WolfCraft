@@ -129,7 +129,13 @@ impl Interaction {
         };
         // «Сноровка»: +35 % mining speed per level.
         let eff = player.inventory.held().map(|s| s.ench_level(crate::magic::Ench::Efficiency)).unwrap_or(0);
-        let time = time / (1.0 + 0.35 * eff as f32);
+        let mut time = time / (1.0 + 0.35 * eff as f32);
+        // The drill digging a wide square works a little longer.
+        let drill = player.inventory.held().is_some_and(|s| s.id == items::ids::DRILL);
+        let side = if drill { crate::tools::drill_side(player.drill_area) } else { 1 };
+        if side > 1 && time > 0.0 {
+            time *= 1.0 + (side - 1) as f32 * 0.1;
+        }
         if time <= 0.0 {
             if self.cooldown > 0.0 {
                 return events;
@@ -146,6 +152,9 @@ impl Interaction {
             if self.break_block(world, player, hit.cell, hit.block, seed, &mut spilled) {
                 events.extend(spilled.into_iter().map(|stack| InteractionEvent::Dropped { pos: hit.cell, stack }));
                 events.push(InteractionEvent::Broken { pos: hit.cell, block: hit.block });
+                if side > 1 {
+                    self.drill_square(world, player, &hit, side, seed, &mut events);
+                }
                 // A door is two blocks: the other half goes too (one door drops).
                 if let Some((other, ob)) = door_partner(world, hit.cell, hit.block) {
                     if world.set_block(other, Block::Air) {
@@ -165,7 +174,64 @@ impl Interaction {
         events
     }
 
+    /// The drill's wide mode: the square around the dug block, across the face that was hit
+    /// (a wall is dug as a wall, a floor as a floor). Only what the drill can mine goes;
+    /// the tool wears once per four extra blocks.
+    fn drill_square(&mut self, world: &mut impl WorldEdit, player: &mut Player, hit: &Hit, side: i32, seed: u64, events: &mut Vec<InteractionEvent>) {
+        let r = side / 2;
+        let (a, b) = match hit.normal.0 {
+            0 => (1, 2),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        let g = *world.grid();
+        let step = |c: Cell, axis: usize, n: i32| -> Option<Cell> {
+            let mut c = c;
+            for _ in 0..n.abs() {
+                c = g.neighbor(c, axis, n.signum())?;
+            }
+            Some(c)
+        };
+        let mut extra = 0u32;
+        for da in -r..=r {
+            for db in -r..=r {
+                if da == 0 && db == 0 {
+                    continue;
+                }
+                let Some(c) = step(hit.cell, a, da).and_then(|c| step(c, b, db)) else { continue };
+                let blk = world.cell_block(c);
+                if blk == Block::Air || blk == Block::Bedrock || blk.is_fluid() || blk.info().render == RenderKind::Invisible {
+                    continue;
+                }
+                let held = player.inventory.held().map(|s| s.info());
+                if !matches!(blk.info().tool, crate::block::ToolKind::Pickaxe | crate::block::ToolKind::Shovel) || !items::can_harvest(held, blk) {
+                    continue;
+                }
+                if player.inventory.held().is_none_or(|s| s.id != items::ids::DRILL) {
+                    break;
+                }
+                // Wear is paid below (per four blocks), not per block.
+                let creative = player.is_creative();
+                let mut spilled = Vec::new();
+                let ok = self.break_block_ex(world, player, c, blk, seed, &mut spilled, false);
+                if ok {
+                    events.extend(spilled.into_iter().map(|stack| InteractionEvent::Dropped { pos: c, stack }));
+                    events.push(InteractionEvent::Broken { pos: c, block: blk });
+                    extra += 1;
+                    if !creative && extra % 4 == 0 {
+                        player.inventory.wear_selected();
+                    }
+                }
+            }
+        }
+    }
+
     fn break_block(&mut self, world: &mut impl WorldEdit, player: &mut Player, pos: Cell, block: Block, seed: u64, spilled: &mut Vec<ItemStack>) -> bool {
+        self.break_block_ex(world, player, pos, block, seed, spilled, true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn break_block_ex(&mut self, world: &mut impl WorldEdit, player: &mut Player, pos: Cell, block: Block, seed: u64, spilled: &mut Vec<ItemStack>, wear: bool) -> bool {
         if !world.set_block(pos, Block::Air) {
             return false;
         }
@@ -188,7 +254,7 @@ impl Interaction {
             player.survival.add_xp(items::xp_for(block));
             player.survival.exhaust(0.025);
             // Own blocks wear the tool once, other blocks twice, instant ones never.
-            for _ in 0..crate::tools::wear_for_block(player.inventory.held().map(|s| s.id), block) {
+            for _ in 0..if wear { crate::tools::wear_for_block(player.inventory.held().map(|s| s.id), block) } else { 0 } {
                 player.inventory.wear_selected();
             }
         }
