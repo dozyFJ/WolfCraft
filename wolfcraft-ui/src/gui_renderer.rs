@@ -84,13 +84,14 @@ impl GuiIcons {
     pub fn paint_block_header(&self,painter:&egui::Painter,rect:Rect,skin:u16,title:&str) {
         use wolfcraft_assets::gui as g;
         self.paint_panel(painter,rect,skin,Color32::WHITE);
+        painter.rect_stroke(rect,egui::Rounding::same(10.0),egui::Stroke::new(1.5,crate::ui_components::ACHIEVEMENT_GOLD));
         let art=match skin {g::PANEL_WORKBENCH=>Some(g::ART_WORKBENCH),g::PANEL_FURNACE=>Some(g::ART_FURNACE),g::PANEL_CHEST=>Some(g::ART_CHEST),g::PANEL_FORGE=>Some(g::ART_FORGE),_=>None};
         if let Some(art)=art {
             let size=egui::vec2(rect.height()*1.65,rect.height()-8.0);
             self.paint(painter,Rect::from_min_size(egui::pos2(rect.right()-size.x-8.0,rect.top()+4.0),size),art,Color32::WHITE);
         }
         let text_rect=Rect::from_min_max(rect.min+egui::vec2(14.0,4.0),egui::pos2(rect.right()-if art.is_some(){rect.height()*1.65+20.0}else{12.0},rect.bottom()-4.0));
-        painter.with_clip_rect(text_rect).text(egui::pos2(text_rect.left(),text_rect.center().y),egui::Align2::LEFT_CENTER,title,egui::FontId::proportional(18.0),Color32::WHITE);
+        painter.with_clip_rect(text_rect).text(egui::pos2(text_rect.left(),text_rect.center().y),egui::Align2::LEFT_CENTER,title,egui::FontId::proportional(18.0),crate::ui_components::ACHIEVEMENT_GOLD);
     }
 
     /// Draws only the left `fraction` (0..1) of an icon, e.g. a half heart.
