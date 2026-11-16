@@ -148,7 +148,26 @@ pub mod ids {
     /// energy crystal is the heart of the big storage.
     pub const BATTERY: ItemId = 418;
     pub const ENERGY_CRYSTAL: ItemId = 419;
-    pub const LAST: ItemId = 419;
+    /// Mod packs in WolfTech. Draconic Evolution: draconium, the draconic core, the draconic
+    /// pickaxe (digs wide squares, like the drill) and sword.
+    pub const DRACONIUM_DUST: ItemId = 420;
+    pub const DRACONIUM_INGOT: ItemId = 421;
+    pub const AWAKENED_DRACONIUM: ItemId = 422;
+    pub const DRACONIC_CORE: ItemId = 423;
+    pub const DRACONIC_PICKAXE: ItemId = 424;
+    pub const DRACONIC_SWORD: ItemId = 425;
+    /// Immersive Engineering: coal coke and steel.
+    pub const COKE: ItemId = 426;
+    pub const STEEL_INGOT: ItemId = 427;
+    /// Tinkers' Construct: cobalt, manyullyn and the big tools (hammer and excavator dig
+    /// 3×3, the lumber axe fells a whole tree, the cleaver hits hard).
+    pub const COBALT_INGOT: ItemId = 428;
+    pub const MANYULLYN_INGOT: ItemId = 429;
+    pub const TINKER_HAMMER: ItemId = 430;
+    pub const TINKER_EXCAVATOR: ItemId = 431;
+    pub const LUMBER_AXE: ItemId = 432;
+    pub const CLEAVER: ItemId = 433;
+    pub const LAST: ItemId = 433;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -233,7 +252,7 @@ pub fn armor_material(id: ItemId) -> Option<u8> {
 
 /// WolfTech gear that runs on charge (durability) and is recharged in an energy cell.
 pub fn rechargeable(id: ItemId) -> bool {
-    matches!(id, ids::PLASMA_RIFLE | ids::RAILGUN | ids::ENERGY_SWORD | ids::JETPACK | ids::DRILL | ids::CHAINSAW | ids::OMNI_TOOL | ids::MINING_LASER | ids::BATTERY) || (ids::NANO_BASE..=ids::NANO_LAST).contains(&id)
+    matches!(id, ids::PLASMA_RIFLE | ids::RAILGUN | ids::ENERGY_SWORD | ids::JETPACK | ids::DRILL | ids::CHAINSAW | ids::OMNI_TOOL | ids::MINING_LASER | ids::BATTERY | ids::DRACONIC_PICKAXE | ids::DRACONIC_SWORD) || (ids::NANO_BASE..=ids::NANO_LAST).contains(&id)
 }
 
 fn plain(name: &'static str, icon: u16) -> ItemInfo {
@@ -299,6 +318,20 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::MINING_LASER => ItemInfo { max_stack: 1, durability: 400, ..plain("Горный лазер", sp::MINING_LASER) },
         ids::BATTERY => ItemInfo { max_stack: 1, durability: 1000, ..plain("Аккумулятор", sp::BATTERY) },
         ids::ENERGY_CRYSTAL => plain("Энергокристалл", sp::ENERGY_CRYSTAL),
+        ids::DRACONIUM_DUST => plain("Дракониевая пыль", sp::DRACONIUM_DUST),
+        ids::DRACONIUM_INGOT => plain("Дракониевый слиток", sp::DRACONIUM_INGOT),
+        ids::AWAKENED_DRACONIUM => plain("Пробуждённый драконий", sp::AWAKENED_DRACONIUM),
+        ids::DRACONIC_CORE => plain("Драконье ядро", sp::DRACONIC_CORE),
+        ids::DRACONIC_PICKAXE => ItemInfo { max_stack: 1, durability: 4000, attack: 8.0, tool: Some((ToolKind::Pickaxe, 3)), ..plain("Драконья кирка", sp::DRACONIC_PICKAXE) },
+        ids::DRACONIC_SWORD => ItemInfo { max_stack: 1, durability: 4000, attack: 24.0, ..plain("Драконий меч", sp::DRACONIC_SWORD) },
+        ids::COKE => plain("Кокс", sp::COKE),
+        ids::STEEL_INGOT => plain("Стальной слиток", sp::STEEL_INGOT),
+        ids::COBALT_INGOT => plain("Кобальтовый слиток", sp::COBALT_INGOT),
+        ids::MANYULLYN_INGOT => plain("Манюллиновый слиток", sp::MANYULLYN_INGOT),
+        ids::TINKER_HAMMER => ItemInfo { max_stack: 1, durability: 1500, attack: 7.0, tool: Some((ToolKind::Pickaxe, 3)), ..plain("Молот (3×3)", sp::TINKER_HAMMER) },
+        ids::TINKER_EXCAVATOR => ItemInfo { max_stack: 1, durability: 1500, attack: 5.0, tool: Some((ToolKind::Shovel, 3)), ..plain("Землекоп (3×3)", sp::TINKER_EXCAVATOR) },
+        ids::LUMBER_AXE => ItemInfo { max_stack: 1, durability: 1500, attack: 9.0, tool: Some((ToolKind::Axe, 3)), ..plain("Лесорубный топор", sp::LUMBER_AXE) },
+        ids::CLEAVER => ItemInfo { max_stack: 1, durability: 1200, attack: 16.0, ..plain("Тесак", sp::CLEAVER) },
         ids::CHAINSAW => ItemInfo { max_stack: 1, durability: 600, attack: 7.0, tool: Some((ToolKind::Axe, 3)), ..plain("Электропила", sp::CHAINSAW) },
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
         ids::BRONZE_INGOT => plain("Бронзовый слиток", sp::BRONZE_INGOT),
@@ -539,6 +572,7 @@ pub fn ore_glow(b: Block) -> Option<[f32; 3]> {
         Block::CobaltOre => [0.30, 0.50, 1.0],
         Block::IskritOre => [1.0, 0.32, 0.78],
         Block::UraniumOre => [0.50, 1.0, 0.32],
+        Block::DraconiumOre => [0.70, 0.35, 1.0],
         _ => return None,
     })
 }
@@ -576,6 +610,7 @@ pub fn xp_for(block: Block) -> u32 {
         Block::DiamondOre => 8,
         Block::CopperOre | Block::TinOre => 2,
         Block::SilverOre | Block::CobaltOre => 5,
+        Block::DraconiumOre => 12,
         Block::IskritOre => 4,
         _ => 0,
     }
@@ -696,7 +731,7 @@ pub fn category(id: ItemId) -> &'static str {
         return "Механика";
     }
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
-    if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (ids::SCRAP..=ids::ENERGY_CRYSTAL).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId || crate::pipes::is_pipe(crate::block::Block::from_id(id)))) {
+    if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (ids::SCRAP..=ids::LAST).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId || crate::pipes::is_pipe(crate::block::Block::from_id(id)))) {
         return "WolfTech";
     }
     if (ITEM_BASE..1024).contains(&id) {
@@ -746,7 +781,7 @@ pub fn category(id: ItemId) -> &'static str {
             Block::CoalOre | Block::IronOre | Block::GoldOre | Block::DiamondOre | Block::GoldBlock | Block::CopperOre | Block::TinOre | Block::SilverOre | Block::CobaltOre | Block::CopperBlock | Block::IronBlock | Block::DiamondBlock | Block::CoalBlock | Block::BronzeBlock => "Руды",
             Block::MachineCasing | Block::Battery | Block::ElectricFurnace => "Строительство",
             Block::ElectricLamp | Block::CommandBlock | Block::Terminal | Block::SwitchOff => "Техника",
-            Block::IskritOre | Block::UraniumOre | Block::UraniumBlock => "Руды",
+            Block::IskritOre | Block::UraniumOre | Block::UraniumBlock | Block::DraconiumOre | Block::DraconiumBlock => "Руды",
             Block::StoneBricks | Block::MossyStoneBricks | Block::CrackedStoneBricks | Block::Bricks | Block::Glass | Block::Lamp | Block::Chest | Block::CraftingTable | Block::BuilderTable => "Строительство",
             _ => "Природа",
         },

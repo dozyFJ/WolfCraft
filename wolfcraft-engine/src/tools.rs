@@ -47,8 +47,15 @@ pub fn role(id: Option<ItemId>) -> Role {
     if id == ids::CHAINSAW {
         return Role::Chainsaw;
     }
-    if id == ids::OMNI_TOOL {
+    if id == ids::OMNI_TOOL || id == ids::DRACONIC_PICKAXE {
         return Role::Omni;
+    }
+    // Tinkers' big tools dig and chop like the diamond ones.
+    match id {
+        ids::TINKER_HAMMER => return Role::Pickaxe(3),
+        ids::TINKER_EXCAVATOR => return Role::Shovel(3),
+        ids::LUMBER_AXE => return Role::Axe(3),
+        _ => {}
     }
     match items::tool_shape(id) {
         Some((0, m)) => Role::Pickaxe(m),
@@ -219,6 +226,32 @@ pub const DRILL_AREAS: [i32; 6] = [1, 3, 5, 7, 9, 13];
 /// The drill's area side for a mode index.
 pub fn drill_side(mode: u8) -> i32 {
     DRILL_AREAS[mode as usize % DRILL_AREAS.len()]
+}
+
+/// Tools with switchable digging squares (the drill and the draconic pickaxe).
+pub fn has_area_modes(id: ItemId) -> bool {
+    matches!(id, ids::DRILL | ids::DRACONIC_PICKAXE)
+}
+
+/// The square a held tool digs at once: the drill and the draconic pickaxe by their mode,
+/// the Tinkers' hammer and excavator 3×3, everything else one block.
+pub fn area_side(id: Option<ItemId>, mode: u8) -> i32 {
+    match id {
+        Some(i) if has_area_modes(i) => drill_side(mode),
+        Some(ids::TINKER_HAMMER | ids::TINKER_EXCAVATOR) => 3,
+        _ => 1,
+    }
+}
+
+/// Which blocks the wide dig takes for this tool.
+pub fn area_takes(id: ItemId, b: Block) -> bool {
+    let tool = b.info().tool;
+    match id {
+        ids::TINKER_HAMMER => tool == ToolKind::Pickaxe,
+        ids::TINKER_EXCAVATOR => tool == ToolKind::Shovel,
+        ids::DRACONIC_PICKAXE => matches!(tool, ToolKind::Pickaxe | ToolKind::Shovel | ToolKind::Axe),
+        _ => matches!(tool, ToolKind::Pickaxe | ToolKind::Shovel),
+    }
 }
 
 /// The next drill mode (taps cycle through them).

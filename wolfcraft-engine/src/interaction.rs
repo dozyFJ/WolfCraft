@@ -130,9 +130,9 @@ impl Interaction {
         // «Сноровка»: +35 % mining speed per level.
         let eff = player.inventory.held().map(|s| s.ench_level(crate::magic::Ench::Efficiency)).unwrap_or(0);
         let mut time = time / (1.0 + 0.35 * eff as f32);
-        // The drill digging a wide square works a little longer.
-        let drill = player.inventory.held().is_some_and(|s| s.id == items::ids::DRILL);
-        let side = if drill { crate::tools::drill_side(player.drill_area) } else { 1 };
+        // A tool digging a wide square (drill, draconic pickaxe, Tinkers' hammer) works a
+        // little longer.
+        let side = crate::tools::area_side(player.inventory.held().map(|s| s.id), player.drill_area);
         if side > 1 && time > 0.0 {
             time *= 1.0 + (side - 1) as f32 * 0.1;
         }
@@ -154,6 +154,10 @@ impl Interaction {
                 events.push(InteractionEvent::Broken { pos: hit.cell, block: hit.block });
                 if side > 1 {
                     self.drill_square(world, player, &hit, side, seed, &mut events);
+                }
+                // Lumber axe: the whole tree comes down.
+                if player.inventory.held().is_some_and(|s| s.id == items::ids::LUMBER_AXE) && is_log(hit.block) {
+                    self.fell_tree(world, player, hit.cell, seed, &mut events);
                 }
                 // A door is two blocks: the other half goes too (one door drops).
                 if let Some((other, ob)) = door_partner(world, hit.cell, hit.block) {
@@ -204,11 +208,9 @@ impl Interaction {
                     continue;
                 }
                 let held = player.inventory.held().map(|s| s.info());
-                if !matches!(blk.info().tool, crate::block::ToolKind::Pickaxe | crate::block::ToolKind::Shovel) || !items::can_harvest(held, blk) {
+                let Some(tool) = player.inventory.held().map(|s| s.id).filter(|&i| crate::tools::area_side(Some(i), player.drill_area) > 1) else { break };
+                if !crate::tools::area_takes(tool, blk) || !items::can_harvest(held, blk) {
                     continue;
-                }
-                if player.inventory.held().is_none_or(|s| s.id != items::ids::DRILL) {
-                    break;
                 }
                 // Wear is paid below (per four blocks), not per block.
                 let creative = player.is_creative();
@@ -220,6 +222,50 @@ impl Interaction {
                     extra += 1;
                     if !creative && extra % 4 == 0 {
                         player.inventory.wear_selected();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Lumber axe: every log joined to the cut one (also on the diagonals, for branches) goes,
+    /// up to 160; the axe wears once per four logs.
+    fn fell_tree(&mut self, world: &mut impl WorldEdit, player: &mut Player, start: Cell, seed: u64, events: &mut Vec<InteractionEvent>) {
+        let g = *world.grid();
+        let mut queue = std::collections::VecDeque::from([start]);
+        let mut seen = std::collections::HashSet::from([start]);
+        let mut cut = 0u32;
+        while let Some(c) = queue.pop_front() {
+            for di in -1..=1i32 {
+                for dj in -1..=1i32 {
+                    for dk in -1..=1i32 {
+                        if di == 0 && dj == 0 && dk == 0 || cut >= 160 {
+                            continue;
+                        }
+                        let mut n = Some(c);
+                        for (axis, d) in [(0usize, di), (1, dj), (2, dk)] {
+                            if d != 0 {
+                                n = n.and_then(|x| g.neighbor(x, axis, d));
+                            }
+                        }
+                        let Some(n) = n else { continue };
+                        if !seen.insert(n) {
+                            continue;
+                        }
+                        let b = world.cell_block(n);
+                        if !is_log(b) {
+                            continue;
+                        }
+                        let mut spilled = Vec::new();
+                        if self.break_block_ex(world, player, n, b, seed, &mut spilled, false) {
+                            events.extend(spilled.into_iter().map(|stack| InteractionEvent::Dropped { pos: n, stack }));
+                            events.push(InteractionEvent::Broken { pos: n, block: b });
+                            cut += 1;
+                            if !player.is_creative() && cut % 4 == 0 {
+                                player.inventory.wear_selected();
+                            }
+                            queue.push_back(n);
+                        }
                     }
                 }
             }
@@ -958,6 +1004,9 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
         ids::COPPER_DUST => ids::COPPER_INGOT,
         ids::TIN_DUST => ids::TIN_INGOT,
         ids::SILVER_DUST => ids::SILVER_INGOT,
+        ids::DRACONIUM_DUST => ids::DRACONIUM_INGOT,
+        x if x == Block::DraconiumOre as items::ItemId => ids::DRACONIUM_INGOT,
+        x if x == Block::CobaltOre as items::ItemId => ids::COBALT_INGOT,
         ids::POTATO => ids::BAKED_POTATO,
         ids::RAW_MEAT => ids::COOKED_MEAT,
         ids::RAW_FISH => ids::COOKED_FISH,
@@ -972,4 +1021,9 @@ pub fn smelt_result(id: items::ItemId) -> Option<items::ItemId> {
 fn is_wall_decor(b: Block) -> bool {
     use crate::construction::Form::*;
     crate::construction::entry(b as u16).is_some_and(|(e, _)| matches!(e.form, ItemFrame | PaintingForest | PaintingSky | PaintingAbstract | Mirror | Curtain | Panel | Shelf))
+}
+
+/// Tree trunks (the lumber axe fells what is joined).
+fn is_log(b: Block) -> bool {
+    matches!(b, Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog)
 }

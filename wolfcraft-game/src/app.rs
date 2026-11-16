@@ -1296,7 +1296,7 @@ impl App {
             }
             (Screen::Playing | Screen::Paused | Screen::Inventory, KeyCode::F3 | KeyCode::Tab) => self.debug = !self.debug,
             // WolfTech drill: R changes the digging square (1×1, 3×3 … 13×13).
-            (Screen::Playing, KeyCode::KeyR) if self.session.as_ref().is_some_and(|s| s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::DRILL)) => {
+            (Screen::Playing, KeyCode::KeyR) if self.session.as_ref().is_some_and(|s| s.player.inventory.held().is_some_and(|h| wolfcraft_engine::tools::has_area_modes(h.id))) => {
                 if let Some(s) = &mut self.session {
                     s.player.drill_area = wolfcraft_engine::tools::next_drill_mode(s.player.drill_area);
                     let n = wolfcraft_engine::tools::drill_side(s.player.drill_area);
@@ -2314,7 +2314,7 @@ impl App {
                                 }
                             }
                             // WolfTech drill: a glass pill with the digging square; tap to change.
-                            if screen == Screen::Playing && !studio_edit && s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::DRILL) && drill_overlay(ctx, s.player.drill_area, &mut ui_cover) {
+                            if screen == Screen::Playing && !studio_edit && s.player.inventory.held().is_some_and(|h| wolfcraft_engine::tools::has_area_modes(h.id)) && drill_overlay(ctx, s.player.drill_area, &mut ui_cover) {
                                 s.player.drill_area = wolfcraft_engine::tools::next_drill_mode(s.player.drill_area);
                                 let n = wolfcraft_engine::tools::drill_side(s.player.drill_area);
                                 s.item_name = Some((format!("Бур: копает {n}×{n}"), 1.4));
@@ -2511,7 +2511,7 @@ impl App {
                                                 Kind::Generator | Kind::Magma => slot == 1 && wolfcraft_engine::wolftech::fuel_for(k, st.id) > 0.0,
                                                 Kind::Reactor => wolfcraft_engine::wolftech::is_reactor_part(st.id),
                                                 k if wolfcraft_engine::wolftech::is_machine(k) => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
-                                                Kind::Cell | Kind::BigCell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
+                                                Kind::Cell | Kind::BigCell | Kind::DracoCore => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
                                                 // Quarry and magnet: their slots are only for taking out.
                                                 _ => false,
                                             }
@@ -2568,7 +2568,7 @@ impl App {
                                                 Kind::Generator | Kind::Magma => wolfcraft_ui::container_ui::Layout::Generator,
                                                 Kind::Reactor => wolfcraft_ui::container_ui::Layout::Reactor,
                                                 Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Dynamo | Kind::Motor | Kind::Lunar | Kind::Tesla | Kind::ChargePad => wolfcraft_ui::container_ui::Layout::Panel,
-                                                Kind::Cell | Kind::BigCell => wolfcraft_ui::container_ui::Layout::Charger,
+                                                Kind::Cell | Kind::BigCell | Kind::DracoCore => wolfcraft_ui::container_ui::Layout::Charger,
                                                 Kind::Quarry | Kind::Magnet => wolfcraft_ui::container_ui::Layout::Grid,
                                                 _ => wolfcraft_ui::container_ui::Layout::Machine,
                                             }

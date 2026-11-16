@@ -1932,6 +1932,16 @@ blocks! {
     2537 WallSwitchOn1 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
     2538 WallSwitchOn2 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
     2539 WallSwitchOn3 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
+    // Mod packs in WolfTech: Draconic Evolution, Immersive Engineering, Tinkers' Construct.
+    2540 DraconiumOre => emissive(ore("Дракониевая руда", t::DRACONIUM_ORE, 3)),
+    2541 DraconiumBlock => needs_pick(info("Блок дракония", Opaque, 20.0, Pickaxe, all(t::DRACONIUM_BLOCK))),
+    2542 DraconicCore => emissive(needs_pick(info("Драконье энергоядро", Opaque, 12.0, Pickaxe, all(t::DRACO_CORE)))),
+    2543 FusionCrafter => needs_pick(info("Термоядерный крафтер", Opaque, 8.0, Pickaxe, column(t::FUSION_FRONT, t::DRACONIUM_BLOCK, t::TECH_TOP))),
+    2544 CokeOven => needs_pick(info("Коксовая печь", Opaque, 4.0, Pickaxe, column(t::COKE_FRONT, t::BRICKS, t::BRICKS))),
+    2545 BlastFurnace => needs_pick(info("Доменная печь", Opaque, 5.0, Pickaxe, column(t::BLAST_FRONT, t::BRICKS, t::BRICKS))),
+    2546 ArcFurnace => needs_pick(info("Дуговая печь", Opaque, 5.0, Pickaxe, column(t::ARC_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2547 Smeltery => needs_pick(info("Плавильня", Opaque, 5.0, Pickaxe, column(t::SMELTERY_FRONT, t::SEARED_BRICKS, t::SEARED_BRICKS))),
+    2548 SearedBricks => needs_pick(info("Обожжённый кирпич", Opaque, 4.0, Pickaxe, all(t::SEARED_BRICKS))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2563,6 +2573,8 @@ impl Block {
             UraniumOre => 6,
             NetherPortal => 11,
             IskritTorch => 7,
+            DraconicCore => 12,
+            DraconiumOre => 5,
             Magma => 4,
             _ => 0,
         }

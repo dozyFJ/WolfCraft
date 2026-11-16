@@ -1236,6 +1236,29 @@ fn add_tiled_cube(out: &mut Vec<ModelVertex>, f: &Frame, h: f32, tiles: [u16; 6]
     }
 }
 
+/// A particle: a cube of half-size `h` turned by `angle` about the frame's X axis. The cheap
+/// path for the thousands of chips, sparks and puffs (`add_box` chamfers and allocates).
+fn add_particle_cube(out: &mut Vec<ModelVertex>, f: &Frame, h: f32, angle: f32, color: [f32; 3]) {
+    let (s, c) = angle.sin_cos();
+    let rot = |p: Vec3| Vec3::new(p.x, p.y * c - p.z * s, p.y * s + p.z * c);
+    let k = |x: bool, y: bool, z: bool| Vec3::new(if x { h } else { -h }, if y { h } else { -h }, if z { h } else { -h });
+    let faces: [(Vec3, [Vec3; 4]); 6] = [
+        (Vec3::X, [k(true, false, false), k(true, true, false), k(true, true, true), k(true, false, true)]),
+        (Vec3::NEG_X, [k(false, false, true), k(false, true, true), k(false, true, false), k(false, false, false)]),
+        (Vec3::Y, [k(false, true, false), k(false, true, true), k(true, true, true), k(true, true, false)]),
+        (Vec3::NEG_Y, [k(false, false, true), k(false, false, false), k(true, false, false), k(true, false, true)]),
+        (Vec3::Z, [k(true, false, true), k(true, true, true), k(false, true, true), k(false, false, true)]),
+        (Vec3::NEG_Z, [k(false, false, false), k(false, true, false), k(true, true, false), k(true, false, false)]),
+    ];
+    for (n, q) in faces {
+        let nw = f.dir(rot(n)).normalize_or_zero().to_array();
+        let p = q.map(|p| f.to_world(rot(p)).as_vec3().to_array());
+        for i in [0usize, 2, 1, 0, 3, 2] {
+            out.push(ModelVertex { pos: p[i], normal: nw, color, uv: [0.0, 0.0], tex: 0.0 });
+        }
+    }
+}
+
 /// A piece of a broken block: a cube of half-size `h` around the frame's origin showing one
 /// quarter of the sprite (which quarter: `piece`), so the pieces look cut from the block.
 fn add_piece_cube(out: &mut Vec<ModelVertex>, f: &Frame, h: f32, tile: u16, piece: u8) {
@@ -2873,6 +2896,12 @@ pub fn player_palette() -> [[f32; 3]; 5] {
 pub fn build_debris(debris: &[crate::mobs::Debris], camera: DVec3) -> Vec<ModelVertex> {
     let mut v = Vec::with_capacity(debris.len() * 36);
     for d in debris {
+        // Far particles are not worth their triangles: none past 56 blocks, only the bigger
+        // ones past 24.
+        let dist2 = (d.pos - camera).length_squared();
+        if dist2 > 56.0 * 56.0 || (dist2 > 24.0 * 24.0 && d.size < 0.07 && !d.glow) {
+            continue;
+        }
         let up = crate::physics::up_at(d.pos);
         let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
         let fwd = (helper - up * helper.dot(up)).normalize_or_zero();
@@ -2895,7 +2924,8 @@ pub fn build_debris(debris: &[crate::mobs::Debris], camera: DVec3) -> Vec<ModelV
             // A thin streak along "up" for rain, a flat flake for snow.
             crate::mobs::FxKind::Rain => add_box(&mut v, &f, Vec3::new(-0.012, -0.24, -0.012), Vec3::new(0.012, 0.24, 0.012), Vec3::ZERO, 0.0, d.color),
             crate::mobs::FxKind::Snow => add_box(&mut v, &f, Vec3::new(-0.035, -0.01, -0.035), Vec3::new(0.035, 0.01, 0.035), Vec3::ZERO, d.spin + d.age, d.color),
-            _ => add_box(&mut v, &f, Vec3::new(-h, -h, -h), Vec3::new(h, h, h), Vec3::ZERO, d.spin + d.age * 6.0, d.color),
+            // Plain chips and puffs: a bare cube (36 vertices, no chamfer, no allocations).
+            _ => add_particle_cube(&mut v, &f, h, d.spin + d.age * 6.0, d.color),
         }
         if d.glow {
             for vx in &mut v[start..] {
