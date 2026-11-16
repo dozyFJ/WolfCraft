@@ -710,6 +710,7 @@ pub fn creative_palette() -> Vec<ItemId> {
     let mut v: Vec<ItemId> = Block::ALL
         .iter()
         .filter(|b| b.crop().is_none())
+        .filter(|b| crate::construction::entry(**b as u16).is_none_or(|(e,_)|crate::construction::available(e)))
         // The electric machines are put away for now.
         .filter(|b| !matches!(b, Block::ElectricLamp))
         .filter(|b| !matches!(b, Block::Air | Block::Water | Block::Magma | Block::InnerCore | Block::Bedrock | Block::ElectricLampOn | Block::SwitchOn | Block::GlassPaneB | Block::StoneSlabVerticalB | Block::PlankSlabVerticalB | Block::BrickSlabVerticalB) && b.base_item() == **b)
@@ -750,6 +751,7 @@ pub fn category(id: ItemId) -> &'static str {
         return "Механика";
     }
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
+    if id < ITEM_BASE && matches!(Block::from_id(id),Block::Glass|Block::RedGlass|Block::BlueGlass|Block::GreenGlass|Block::YellowGlass|Block::GlassPaneA|Block::RedPaneA|Block::BluePaneA|Block::GreenPaneA|Block::YellowPaneA) {return "Стекло";}
     if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (ids::SCRAP..=ids::LAST).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId || crate::pipes::is_pipe(crate::block::Block::from_id(id)))) {
         return "WolfTech";
     }
