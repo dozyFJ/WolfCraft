@@ -18,6 +18,8 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     a.lerp_to_gamma(b, t.clamp(0.0, 1.0))
 }
 
+pub const ACHIEVEMENT_GOLD: Color32 = Color32::from_rgb(255,205,70);
+
 pub const BUTTON_HEIGHT: f32 = 38.0;
 
 /// Pill-shaped button: icon on the left, label on the right.
@@ -499,7 +501,8 @@ pub fn block_screen_material(ctx: &egui::Context, id: &str, width: f32, corner_c
         ui.set_max_height(4000.0);
         Frame::none()
             .fill(fill)
-            .stroke(Stroke::NONE)
+            .rounding(Rounding::same(18.0))
+            .stroke(Stroke::new(2.0,ACHIEVEMENT_GOLD.gamma_multiply(0.8)))
             .inner_margin(Margin::same(14.0))
             .show(ui, |ui| {
                 ui.set_width(width);
