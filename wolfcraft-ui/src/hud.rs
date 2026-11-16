@@ -182,7 +182,7 @@ fn draw_achievement(painter: &Painter, icons: &GuiIcons, screen: Rect, s: &HudSt
     let ease_in = 1.0 - (1.0 - t_in).powi(3) * (1.0 + 2.4 * t_in);
     let t_out = ((a - 3.8) / 0.4).clamp(0.0, 1.0);
     let slide = ease_in * (1.0 - t_out * t_out);
-    let gold = Color32::from_rgb(255, 205, 70);
+    let gold = crate::ui_components::ACHIEVEMENT_GOLD;
     let title = painter.layout_no_wrap(name.clone(), FontId::proportional(16.0), Color32::WHITE);
     let sub = painter.layout_no_wrap(desc.clone(), FontId::proportional(12.0), Color32::WHITE);
     let w = title.size().x.max(sub.size().x).max(150.0) + 70.0;
