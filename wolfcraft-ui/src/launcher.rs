@@ -1268,13 +1268,17 @@ mod tests {
                 action = show(ctx, &icons, "0.2.1", true, None, 0, "dozyFJ", &[]);
             })
         };
+        run(vec![]);
+        run(vec![]);
+        // The launch controls follow the news feed: scroll them into view before tapping.
+        run(vec![egui::Event::PointerMoved(Pos2::new(190.0,500.0)), egui::Event::MouseWheel {unit:egui::MouseWheelUnit::Point,delta:Vec2::new(0.0,-2000.0),modifiers:Default::default()}]);
         let out = run(vec![]);
         let texts: Vec<_> = out.shapes.iter().filter_map(|s| {
             if let egui::epaint::Shape::Text(t) = &s.shape { Some(t) } else { None }
         }).collect();
         assert!(texts.iter().any(|t| t.galley.job.text.contains("dozyFJ")));
         assert!(!texts.iter().any(|t| t.galley.job.text == "Игра"));
-        let play = texts.iter().find(|t| t.galley.job.text == "Играть" && t.pos.y > 650.0).expect("Home launch button");
+        let play = texts.iter().find(|t| t.galley.job.text == "Играть" && t.pos.y > 150.0 && t.pos.y < 800.0).expect("Home launch button");
         let pos = play.pos + play.galley.size() * 0.5;
         run(vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
         run(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
