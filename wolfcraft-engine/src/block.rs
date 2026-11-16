@@ -1898,6 +1898,10 @@ blocks! {
     2504 Gearbox => needs_pick(info("Редуктор", Opaque, 3.0, Pickaxe, all(t::KIN_GEARBOX))),
     2505 TeamBed => info("Кровать команды", Shape, 0.6, Hand, column(t::WOOL_RED, t::WOOL_RED, t::PLANKS)),
     2506 TeamEgg => info("Яйцо команды", Shape, 2.5, Hand, all(t::DIAMOND_BLOCK)),
+    2507 Quarry => needs_pick(info("Буровая установка", Opaque, 5.0, Pickaxe, column(t::QUARRY_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2508 Recycler => needs_pick(info("Утилизатор", Opaque, 4.0, Pickaxe, column(t::RECYCLER_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2509 MatterFab => needs_pick(info("Фабрикатор материи", Opaque, 6.0, Pickaxe, column(t::FAB_FRONT, t::TECH_TOP, t::TECH_TOP))),
+    2510 ItemMagnet => needs_pick(info("Магнит предметов", Opaque, 4.0, Pickaxe, column(t::MAGNET_FRONT, t::TECH_TOP, t::TECH_TOP))),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a

@@ -138,7 +138,13 @@ pub mod ids {
     pub const IRON_PLATE: ItemId = 411;
     pub const COPPER_PLATE: ItemId = 412;
     pub const GOLD_PLATE: ItemId = 413;
-    pub const LAST: ItemId = 413;
+    /// WolfTech: scrap from the recycler, UU-matter from the matter fabricator.
+    pub const SCRAP: ItemId = 414;
+    pub const UU_MATTER: ItemId = 415;
+    /// WolfTech: the omni-tool (pickaxe + axe + shovel) and the mining laser.
+    pub const OMNI_TOOL: ItemId = 416;
+    pub const MINING_LASER: ItemId = 417;
+    pub const LAST: ItemId = 417;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -223,7 +229,7 @@ pub fn armor_material(id: ItemId) -> Option<u8> {
 
 /// WolfTech gear that runs on charge (durability) and is recharged in an energy cell.
 pub fn rechargeable(id: ItemId) -> bool {
-    matches!(id, ids::PLASMA_RIFLE | ids::RAILGUN | ids::ENERGY_SWORD | ids::JETPACK | ids::DRILL | ids::CHAINSAW) || (ids::NANO_BASE..=ids::NANO_LAST).contains(&id)
+    matches!(id, ids::PLASMA_RIFLE | ids::RAILGUN | ids::ENERGY_SWORD | ids::JETPACK | ids::DRILL | ids::CHAINSAW | ids::OMNI_TOOL | ids::MINING_LASER) || (ids::NANO_BASE..=ids::NANO_LAST).contains(&id)
 }
 
 fn plain(name: &'static str, icon: u16) -> ItemInfo {
@@ -283,6 +289,10 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::IRON_PLATE => plain("Железная пластина", sp::IRON_PLATE),
         ids::COPPER_PLATE => plain("Медная пластина", sp::COPPER_PLATE),
         ids::GOLD_PLATE => plain("Золотая пластина", sp::GOLD_PLATE),
+        ids::SCRAP => plain("Лом", sp::SCRAP),
+        ids::UU_MATTER => plain("Материя", sp::UU_MATTER),
+        ids::OMNI_TOOL => ItemInfo { max_stack: 1, durability: 900, attack: 6.0, tool: Some((ToolKind::Pickaxe, 3)), ..plain("Мульти-инструмент", sp::OMNI_TOOL) },
+        ids::MINING_LASER => ItemInfo { max_stack: 1, durability: 400, ..plain("Горный лазер", sp::MINING_LASER) },
         ids::CHAINSAW => ItemInfo { max_stack: 1, durability: 600, attack: 7.0, tool: Some((ToolKind::Axe, 3)), ..plain("Электропила", sp::CHAINSAW) },
         ids::TIN_INGOT => plain("Оловянный слиток", sp::TIN_INGOT),
         ids::BRONZE_INGOT => plain("Бронзовый слиток", sp::BRONZE_INGOT),
@@ -680,7 +690,7 @@ pub fn category(id: ItemId) -> &'static str {
         return "Механика";
     }
     if let Some((e, _)) = crate::construction::entry(id) { return e.category; }
-    if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId || crate::pipes::is_pipe(crate::block::Block::from_id(id)))) {
+    if (ids::IRON_DUST..=ids::CHAINSAW).contains(&id) || (ids::SCRAP..=ids::MINING_LASER).contains(&id) || (id < 4096 && (crate::wolftech::kind(crate::block::Block::from_id(id)).is_some() || id == crate::block::Block::Cable as ItemId || crate::pipes::is_pipe(crate::block::Block::from_id(id)))) {
         return "WolfTech";
     }
     if (ITEM_BASE..1024).contains(&id) {

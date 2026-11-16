@@ -2480,6 +2480,7 @@ impl App {
                                                 Kind::Reactor => wolfcraft_engine::wolftech::is_reactor_part(st.id),
                                                 k if wolfcraft_engine::wolftech::is_machine(k) => (slot == 0 && wolfcraft_engine::wolftech::recipe(k, st.id).is_some()) || (slot >= 3 && wolfcraft_engine::wolftech::is_upgrade(st.id)),
                                                 Kind::Cell => slot == 0 && wolfcraft_engine::items::rechargeable(st.id),
+                                                // Quarry and magnet: their slots are only for taking out.
                                                 _ => false,
                                             }
                                         } else if furnace {
@@ -2492,7 +2493,37 @@ impl App {
                                             true
                                         }
                                     };
+                                    // WolfTech facts for the chips under the slots.
+                                    let stats: Vec<String> = match tech {
+                                        Some(k) => {
+                                            let sp = wolfcraft_engine::wolftech::spec(k);
+                                            let mut v = Vec::new();
+                                            if let Some((_, _, e, cap)) = s.tech_status(pos, block) {
+                                                v.push(format!("⚡ {:.0} / {:.0} ЭЕ", e, cap));
+                                            }
+                                            let (tm, em, _) = s.tech_mods(pos, block);
+                                            let st = s.tech.get(&pos).copied().unwrap_or_default();
+                                            if wolfcraft_engine::wolftech::is_source(k) {
+                                                v.push(format!("+{:.1} ЭЕ/с", st.flow));
+                                            } else if sp.rate > 0.0 {
+                                                v.push(format!("−{:.0} ЭЕ/с", sp.rate * em));
+                                            }
+                                            if tm < 0.999 {
+                                                v.push(format!("скорость ×{:.1}", 1.0 / tm.max(0.01)));
+                                            }
+                                            let (make, _, machines) = s.tech_net(pos);
+                                            if machines > 1 {
+                                                v.push(format!("сеть: {machines} бл. · +{make:.0} ЭЕ/с"));
+                                            }
+                                            if k == wolfcraft_engine::wolftech::Kind::Quarry {
+                                                v.push(format!("глубина {}", st.progress as i32 / 25 + 1));
+                                            }
+                                            v
+                                        }
+                                        None => Vec::new(),
+                                    };
                                     let view = wolfcraft_ui::container_ui::ContainerView {
+                                        stats: &stats,
                                         skin:wolfcraft_ui::gui_renderer::block_panel(block),
                                         title: if let Some(p) = kin { wolfcraft_engine::kinetic::name(p) } else if let Some(k) = tech { wolfcraft_engine::wolftech::spec(k).name } else if furnace { "Печь" } else if forge { "Кузница" } else if magic { "Чаровальня" } else if block == B::Battery { "Бочка" } else if wolfcraft_engine::construction::entry(block as u16).is_some() { block.info().name } else { "Сундук" },
                                         columns: if furnace || forge || tech.is_some() || kin.is_some() { 3 } else if magic { 2 } else { 9 },
@@ -2506,6 +2537,7 @@ impl App {
                                                 Kind::Reactor => wolfcraft_ui::container_ui::Layout::Reactor,
                                                 Kind::Solar | Kind::Wind | Kind::Geo | Kind::Water | Kind::Dynamo | Kind::Motor => wolfcraft_ui::container_ui::Layout::Panel,
                                                 Kind::Cell => wolfcraft_ui::container_ui::Layout::Charger,
+                                                Kind::Quarry | Kind::Magnet => wolfcraft_ui::container_ui::Layout::Grid,
                                                 _ => wolfcraft_ui::container_ui::Layout::Machine,
                                             }
                                         } else if furnace { wolfcraft_ui::container_ui::Layout::Furnace } else if forge { wolfcraft_ui::container_ui::Layout::Forge } else if magic { wolfcraft_ui::container_ui::Layout::Enchant } else { wolfcraft_ui::container_ui::Layout::Grid },
@@ -3132,11 +3164,13 @@ impl App {
                                 ids::DRILL => 11,
                                 ids::CHAINSAW => 12,
                                 ids::ENERGY_SWORD => 13,
+                                ids::OMNI_TOOL => 14,
+                                ids::MINING_LASER => 15,
                                 _ => return None,
                             };
                             let ammo = wolfcraft_engine::explosives::weapon(st.id).map(|w| w.0).unwrap_or(0);
                             let reload = s.explosives.reload();
-                            let loaded = if matches!(kind, 11 | 12) {
+                            let loaded = if matches!(kind, 11 | 12 | 14 | 15) {
                                 // Electric tools: charged unless worn down to zero.
                                 s.player.is_creative() || st.damage < st.info().durability.max(1)
                             } else {
@@ -4152,6 +4186,8 @@ fn held_visual(inv: &wolfcraft_engine::inventory::Inventory, tile_colors: &[[[f3
             ids::DRILL => Some(11),
             ids::CHAINSAW => Some(12),
             ids::ENERGY_SWORD => Some(13),
+            ids::OMNI_TOOL => Some(14),
+            ids::MINING_LASER => Some(15),
             _ => None,
         };
         if let Some(k) = gun {

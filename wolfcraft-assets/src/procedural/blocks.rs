@@ -231,6 +231,10 @@ pub mod tiles {
     pub const KIN_SAW: u16 = 233;
     pub const KIN_CRUSH: u16 = 234;
     pub const KIN_GEARBOX: u16 = 235;
+    pub const QUARRY_FRONT: u16 = 236;
+    pub const RECYCLER_FRONT: u16 = 237;
+    pub const FAB_FRONT: u16 = 238;
+    pub const MAGNET_FRONT: u16 = 239;
 }
 
 /// Top of a repeater or comparator: a stone slab with an arrow pointing along `dir`
@@ -2299,6 +2303,52 @@ pub(crate) fn build() -> Vec<(String, Image)> {
                     }
                 }
             }
+            // Quarry: a drill bit pointing down.
+            14 => {
+                for y in 3..13u32 {
+                    let w = (13 - y) / 2;
+                    for x in (8 - w.min(4))..=(7 + w.min(4)) {
+                        q.put(x, y, if (x + y) % 3 == 0 { Rgb(0.85, 0.87, 0.92) } else { c }, 1.0);
+                    }
+                }
+            }
+            // Recycler: three arrows in a circle.
+            15 => {
+                for k in 0..24u32 {
+                    let a = k as f32 / 24.0 * std::f32::consts::TAU;
+                    let (x, y) = (7.5 + a.cos() * 4.0, 7.5 + a.sin() * 4.0);
+                    if k % 8 != 7 {
+                        q.put(x as u32, y as u32, c, 1.0);
+                    }
+                }
+            }
+            // Matter fabricator: a purple swirl with a bright core.
+            16 => {
+                for y in 3..13u32 {
+                    for x in 3..13u32 {
+                        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+                        let r = (dx * dx + dy * dy).sqrt();
+                        if r < 5.0 && ((dy.atan2(dx) * 2.0 + r) as i32).rem_euclid(2) == 0 {
+                            q.put(x, y, c, 1.0);
+                        }
+                        if r < 1.6 {
+                            q.put(x, y, Rgb(1.0, 0.95, 1.0), 1.0);
+                        }
+                    }
+                }
+            }
+            // Magnet: a red-and-silver horseshoe.
+            17 => {
+                for y in 4..12u32 {
+                    for x in [4u32, 5, 10, 11] {
+                        q.put(x, y, if y < 6 { Rgb(0.85, 0.87, 0.92) } else { c }, 1.0);
+                    }
+                }
+                for x in 4..12u32 {
+                    q.put(x, 11, c, 1.0);
+                    q.put(x, 10, c, 1.0);
+                }
+            }
             // Magmatic generator: glowing magma cracks.
             13 => {
                 for y in 4..12u32 {
@@ -2613,6 +2663,10 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             }
         }
     }));
+    l.add(QUARRY_FRONT, "quarry", p(|q| front(q, 341, Rgb(0.95, 0.75, 0.20), 14)));
+    l.add(RECYCLER_FRONT, "recycler", p(|q| front(q, 342, Rgb(0.40, 0.85, 0.40), 15)));
+    l.add(FAB_FRONT, "matter_fab", p(|q| front(q, 343, Rgb(0.75, 0.35, 0.95), 16)));
+    l.add(MAGNET_FRONT, "item_magnet", p(|q| front(q, 344, Rgb(0.90, 0.20, 0.20), 17)));
     for (i, (name, img)) in l.0.iter_mut().enumerate() {
         if NATURAL.contains(&name.as_str()) {
             painterly(img, 900 + i as u32);
