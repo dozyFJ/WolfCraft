@@ -1,4 +1,4 @@
-//! WolfCraft Studio: edit a server (place) like in Roblox Studio.
+//! WolfCraft Studio: a scene workspace for places and servers.
 //!
 //! * A menu row of tabs (Главная, Модель, Кисть, Тест, Вид) over a ribbon of icon tools.
 //! * Docked windows in resizable columns (split screen): Тулбокс on the left (blocks, items,
@@ -278,6 +278,9 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &
 
     // One layout for phones in both orientations: ribbon, window pills, and a dock (under
     // the world when upright, at the right side in landscape).
+    if screen.width() > screen.height() {
+        return draw_workspace(ctx, icons, st, view, inv, &p);
+    }
     if DOCK_LAYOUT || screen.height() > screen.width() {
         return draw_portrait(ctx, icons, st, view, inv, &p, actions, covered);
     }
@@ -434,6 +437,104 @@ const DOCK_TABS: [(&str, u16); 5] = [("Тулбокс", icon::CUBE), ("Пров�
 /// live world in the middle (with the touch controls), and a dock of windows below with
 /// tabs; the border between world and dock can be dragged.
 #[allow(clippy::too_many_arguments)]
+/// A scene workspace shared by place and server editing. All panels use the real
+/// selection, inventory, script and action handlers, rather than a second editor model.
+fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &StudioView, inv: &mut Inventory, p: &Palette) -> (Vec<StudioAction>, Vec<Rect>) {
+    let screen = ctx.screen_rect();
+    let mut actions = Vec::new();
+    let mut covered = Vec::new();
+    let header_h = 36.0;
+    let top_h = header_h + RIBBON_H;
+    let footer_h = 32.0;
+    let top = Rect::from_min_size(screen.min, Vec2::new(screen.width(), top_h));
+    covered.push(top);
+    egui::Area::new(Id::new("workspace-header")).order(egui::Order::Foreground).fixed_pos(top.min).show(ctx, |ui| {
+        Frame::none().fill(p.surface).show(ui, |ui| {
+            ui.set_width(top.width());
+            ui.set_clip_rect(top);
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(Rect::from_min_size(top.min + Vec2::new(6.0, 0.0), Vec2::new(top.width()-12.0, header_h))), |ui| {
+                ui.horizontal_centered(|ui| {
+                    if ui.button("←").on_hover_text("Сохранить и выйти").clicked() { actions.push(StudioAction::Exit); }
+                    ui.label(egui::RichText::new("WolfStudio").font(bold_font(14.0)).color(p.accent));
+                    if screen.width() > 1000.0 { ui.label(&view.project); }
+                    if ui.selectable_label(st.center == Center::World, "3D · Сцена").clicked() { st.center = Center::World; }
+                    if ui.selectable_label(st.center == Center::Script, "Скрипт").clicked() { st.center = Center::Script; }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("▶ Тест").clicked() { actions.push(StudioAction::Playtest(true)); }
+                        if ui.button("Сервер").on_hover_text("Сохранить мир и запустить сервер").clicked() { actions.push(StudioAction::Publish); }
+                        if ui.button("Сохранить").clicked() { actions.push(StudioAction::Save); }
+                    });
+                });
+            });
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(Rect::from_min_size(top.min + Vec2::new(6.0, header_h), Vec2::new(top.width()-12.0, RIBBON_H))), |ui| {
+                egui::ScrollArea::horizontal().id_salt("workspace-tools").show(ui, |ui| {
+                    ui.horizontal_centered(|ui| {
+                        for (tab, name) in [(Tab::Home,"Главная"),(Tab::Model,"Модель"),(Tab::Brush,"Кисть"),(Tab::Test,"Тест"),(Tab::View,"Вид")] {
+                            if ui.selectable_label(st.tab == tab, name).clicked() { st.tab = tab; if tab == Tab::Brush { st.brush_on = true; } }
+                        }
+                        sep(ui, p);
+                        ribbon(ui, icons, p, st, view, &mut actions);
+                    });
+                });
+            });
+        });
+    });
+    // Reserve at least 40% for the scene, including on a landscape phone.
+    let side_max = (screen.width() * 0.28).max(120.0);
+    st.left_w = st.left_w.clamp(120.0, side_max);
+    st.right_w = st.right_w.clamp(120.0, side_max);
+    let bottom = screen.bottom() - footer_h;
+    let body_top = top.bottom() + 3.0;
+    let left = Rect::from_min_max(Pos2::new(screen.left(), body_top), Pos2::new(screen.left()+st.left_w, bottom));
+    let right = Rect::from_min_max(Pos2::new(screen.right()-st.right_w, body_top), Pos2::new(screen.right(), bottom));
+    let mid_l = left.right()+4.0;
+    let mid_r = right.left()-4.0;
+    let scene_bottom = if st.show_output { bottom - st.out_h.clamp(65.0, ((bottom-body_top)*0.45).max(65.0)) } else { bottom };
+    st.view_left = Some(mid_l);
+    st.view_right = Some(mid_r);
+    st.view_bottom = Some(scene_bottom);
+    // Scene tree and asset browser stay together; selecting a node updates the inspector.
+    let split = body_top + (bottom-body_top)*0.48;
+    let tree = Rect::from_min_max(left.min, Pos2::new(left.right(), split-2.0));
+    let assets = Rect::from_min_max(Pos2::new(left.left(), split+2.0), left.max);
+    for r in [left, right] { covered.push(r); }
+    window(ctx,"workspace-tree",tree,p,icons,icon::TREE,"Сцена",|ui| explorer(ui,p,st,view));
+    window(ctx,"workspace-assets",assets,p,icons,icon::CUBE,"Ресурсы",|ui| toolbox(ui,icons,p,st,inv,&mut actions));
+    window(ctx,"workspace-inspector",right,p,icons,icon::PROPS,"Инспектор",|ui| properties(ui,icons,p,st,view,&mut actions));
+    if st.center == Center::Script {
+        let r = Rect::from_min_max(Pos2::new(mid_l,body_top),Pos2::new(mid_r,scene_bottom));
+        covered.push(r);
+        window(ctx,"workspace-script",r,p,icons,icon::CODE,"script.lua · Luau",|ui| code_window(ui,icons,p,st,view,&mut actions));
+    }
+    if st.show_output {
+        let r = Rect::from_min_max(Pos2::new(mid_l,scene_bottom+3.0),Pos2::new(mid_r,bottom));
+        covered.push(r);
+        window(ctx,"workspace-output",r,p,icons,icon::OUTPUT,"Вывод",|ui| output(ui,p,view));
+        if let Some(dy) = splitter(ctx,"workspace-output-size",Rect::from_min_max(Pos2::new(mid_l,scene_bottom-3.0),Pos2::new(mid_r,scene_bottom+3.0)),false,p) { st.out_h -= dy; }
+    }
+    for (id,rect,left_side) in [("workspace-left-size",Rect::from_min_max(Pos2::new(left.right()-2.0,body_top),Pos2::new(mid_l+2.0,bottom)),true),("workspace-right-size",Rect::from_min_max(Pos2::new(mid_r-2.0,body_top),Pos2::new(right.left()+2.0,bottom)),false)] {
+        if let Some(dx) = splitter(ctx,id,rect,true,p) { if left_side { st.left_w += dx; } else { st.right_w -= dx; } }
+    }
+    let footer = Rect::from_min_max(Pos2::new(screen.left(),bottom),screen.max);
+    covered.push(footer);
+    egui::Area::new(Id::new("workspace-footer")).order(egui::Order::Foreground).fixed_pos(footer.min).show(ctx,|ui| {
+        Frame::none().fill(p.surface).show(ui,|ui| {
+            ui.set_width(footer.width());
+            ui.set_clip_rect(footer);
+            ui.horizontal(|ui| {
+                if ui.selectable_label(st.show_output,"Вывод").clicked() { st.show_output = !st.show_output; }
+                if ui.selectable_label(st.center == Center::Script,"Код").clicked() { st.center = if st.center == Center::Script { Center::World } else { Center::Script }; }
+                if ui.button("Ресурсы").clicked() { st.toolbox_cat=0; }
+                ui.label(egui::RichText::new(&view.project).color(p.text_muted));
+                if !st.status.is_empty() && view.now-st.status_t < 4.0 { ui.label(egui::RichText::new(&st.status).color(p.success)); }
+            });
+        });
+    });
+    // Existing ribbon shortcuts also open their corresponding workspace panels.
+    if st.dock_open { match st.dock_tab { 3 => st.show_output=true, 4 => st.center=Center::Script, _ => {} } st.dock_open=false; }
+    (actions,covered)
+}
+
 fn draw_portrait(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &StudioView, inv: &mut Inventory, p: &Palette, mut actions: Vec<StudioAction>, mut covered: Vec<Rect>) -> (Vec<StudioAction>, Vec<Rect>) {
     let screen = ctx.screen_rect();
     // Landscape: the window buttons are a column on the right (a sidebar); upright: a row
@@ -940,6 +1041,7 @@ fn explorer(ui: &mut Ui, p: &Palette, st: &mut StudioState, view: &StudioView) {
                 // (the script opens straight in the code window).
                 st.selected = node;
                 if node == Node::Script {
+                    if ui.ctx().screen_rect().width() > ui.ctx().screen_rect().height() { st.center = Center::Script; }
                     st.dock_tab = 4;
                 } else if !matches!(node, Node::Players | Node::Mobs) {
                     st.dock_tab = 2;
@@ -1187,6 +1289,7 @@ fn output(ui: &mut Ui, p: &Palette, view: &StudioView) {
 fn window(ctx: &egui::Context, id: &str, rect: Rect, p: &Palette, icons: &GuiIcons, ic: u16, title: &str, add: impl FnOnce(&mut Ui)) {
     egui::Area::new(Id::new(id)).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         Frame::none().fill(p.surface.gamma_multiply(0.97)).rounding(Rounding::same(6.0)).stroke(Stroke::new(1.0_f32, p.outline)).show(ui, |ui| {
+            ui.set_clip_rect(rect);
             ui.set_width(rect.width());
             ui.set_height(rect.height());
             let (bar, _) = ui.allocate_exact_size(Vec2::new(rect.width(), 24.0), Sense::hover());
@@ -1213,7 +1316,7 @@ fn splitter(ctx: &egui::Context, id: &str, rect: Rect, vertical: bool, p: &Palet
             ui.ctx().set_cursor_icon(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
         }
         if resp.dragged() {
-            let d = resp.drag_delta();
+            let d = ui.input(|i| i.pointer.delta());
             out = Some(if vertical { d.x } else { d.y });
         }
     });
@@ -1292,6 +1395,33 @@ mod tests {
                     let (_, covered) = draw(c, &icons, &mut st, &view, &mut inv);
                     assert!(!covered.is_empty());
                 });
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_reserves_a_usable_scene_on_phone_and_desktop() {
+        let ctx = egui::Context::default();
+        crate::theme_manager::install(&ctx);
+        let atlases = wolfcraft_assets::atlas_manager::AtlasManager::new(None).unwrap();
+        let icons = GuiIcons::new(&ctx, &atlases);
+        let mut inv = Inventory::default();
+        for (w,h) in [(640.0,360.0),(900.0,420.0),(1440.0,900.0)] {
+            for script in [false,true] {
+                let mut st = StudioState { show_output:true, center:if script {Center::Script} else {Center::World}, ..Default::default() };
+                let view = StudioView { project:"Плейс".into(),compact:w<1000.0,..Default::default() };
+                for _ in 0..2 {
+                    let input = egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(w,h))),..Default::default()};
+                    let _ = ctx.run(input,|ctx| {
+                        let (_,covered)=draw(ctx,&icons,&mut st,&view,&mut inv);
+                        let l=st.view_left.unwrap();let r=st.view_right.unwrap();let b=st.view_bottom.unwrap();
+                        assert!(r-l>=w*0.4,"scene too narrow at {w}");
+                        assert!(b>150.0,"scene too short at {h}");
+                        let center=Pos2::new((l+r)*0.5,(90.0+b)*0.5);
+                        if !script {assert!(!covered.iter().any(|r|r.contains(center)),"panel blocks the scene");}
+                        assert!(covered.iter().all(|r|r.is_finite()&&r.width()>0.0&&r.height()>0.0));
+                    });
+                }
             }
         }
     }
