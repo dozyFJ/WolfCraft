@@ -478,7 +478,11 @@ pub fn block_screen(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(
 /// `block_screen` with or without the round close button on the corner (windows with their
 /// own «Закрыть» in the header go without).
 pub fn block_screen_ex(ctx: &egui::Context, id: &str, width: f32, corner_close: bool, add: impl FnOnce(&mut Ui)) -> bool {
-    let p: Palette = palette(ctx);
+    block_screen_material(ctx,id,width,corner_close,Color32::from_rgb(66,73,84),add)
+}
+
+/// A continuous opaque material surface, without a separate black backdrop.
+pub fn block_screen_material(ctx: &egui::Context, id: &str, width: f32, corner_close: bool, fill: Color32, add: impl FnOnce(&mut Ui)) -> bool {
     let screen = ctx.screen_rect();
     let mut dismissed = false;
     let scrim = egui::Area::new(Id::new(id).with("screen")).order(egui::Order::Foreground).fixed_pos(screen.min).fade_in(false).show(ctx, |ui| {
@@ -494,7 +498,7 @@ pub fn block_screen_ex(ctx: &egui::Context, id: &str, width: f32, corner_close: 
         // of whatever it showed last.)
         ui.set_max_height(4000.0);
         Frame::none()
-            .fill(Color32::TRANSPARENT)
+            .fill(fill)
             .stroke(Stroke::NONE)
             .inner_margin(Margin::same(14.0))
             .show(ui, |ui| {
@@ -507,6 +511,23 @@ pub fn block_screen_ex(ctx: &egui::Context, id: &str, width: f32, corner_close: 
     });
     // Sized to the screen: scaled down when the window is taller or wider than it.
     let fit = fit_body(ctx, id, &body.response, screen.shrink(10.0));
+    // Reopen after a missing UI pass starts a fresh pop. Input and painting share this
+    // transform, including the saved inverse used by drag-and-drop.
+    let pop_id=Id::new(id).with("pop-start");
+    let pass=ctx.cumulative_pass_nr();let now=ctx.input(|i|i.time);
+    let start=ctx.data_mut(|d| {
+        let old=d.get_temp::<(u64,f64)>(pop_id);
+        let start=old.filter(|(last,_)|pass<=last.saturating_add(1)).map_or(now,|(_,start)|start);
+        d.insert_temp(pop_id,(pass,start));start
+    });
+    let progress=((now-start)/0.18).clamp(0.0,1.0) as f32;
+    let ease=1.0-(1.0-progress).powi(3);
+    let k=0.93+0.07*ease;
+    let center=fit*body.response.rect.center();
+    let fit=egui::emath::TSTransform::new(fit.translation*k+center.to_vec2()*(1.0-k)+Vec2::new(0.0,12.0*(1.0-ease)),fit.scaling*k);
+    ctx.set_transform_layer(body.response.layer_id,fit);
+    ctx.data_mut(|d|d.insert_temp(Id::new(id).with("fit"),(fit.scaling,fit.translation)));
+    if progress<1.0 {ctx.request_repaint();}
     let card = Rect::from_min_max(fit * body.response.rect.min, fit * body.response.rect.max);
     // Round close button riding on the card's top-right corner.
     let c = Pos2::new((card.right() + 4.0).min(screen.right() - 20.0), (card.top() - 4.0).max(screen.top() + 20.0));
@@ -529,6 +550,7 @@ pub fn block_screen_ex(ctx: &egui::Context, id: &str, width: f32, corner_close: 
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         dismissed = true;
     }
+    if dismissed {ctx.data_mut(|d|d.remove::<(u64,f64)>(pop_id));}
     dismissed
 }
 
