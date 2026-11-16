@@ -775,21 +775,19 @@ fn server(ui: &mut Ui, icons: &GuiIcons, p: &Palette, worlds: &[crate::main_menu
                 }
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(&w.cfg.name).font(bold_font(15.0)).color(p.text));
-                    ui.label(egui::RichText::new(if w.cfg.studio_project { "Мини-игра · нажмите, чтобы редактировать" } else { "Мир" }).size(12.0).color(p.text_muted));
+                    ui.label(egui::RichText::new(if w.cfg.studio_project { "Мини-игра" } else { "Мир" }).size(12.0).color(p.text_muted));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if pill_button(ui, icons, Some(icon::GLOBE), "Запустить", ButtonKind::Primary, 120.0, true).clicked() {
+                    // «Запустить» opens it for friends; the pencil opens it in the editor.
+                    if pill_button(ui, icons, Some(icon::GLOBE), "Запустить", ButtonKind::Primary, 110.0, true).clicked() {
                         *action = MenuAction::HostServer(Some(w.cfg.id.clone()));
+                    }
+                    if round_icon(ui, icons, p, icon::EDIT).on_hover_text("Редактировать").clicked() {
+                        *action = MenuAction::OpenStudio(w.cfg.id.clone());
                     }
                 });
             });
-            // Tap the mini-game itself (not «Запустить») to open it in the editor.
-            if place_mode {
-                let tap = ui.interact(row.response.rect, Id::new(("place-card", &w.cfg.id)), Sense::click());
-                if tap.clicked() && matches!(action, MenuAction::None) {
-                    *action = MenuAction::OpenStudio(w.cfg.id.clone());
-                }
-            }
+            let _ = row;
             ui.add_space(4.0);
         }
         if !worlds.iter().any(|w| w.cfg.studio_project == place_mode) {

@@ -22,7 +22,7 @@ jobs:
       - name: Destruction physics and weapons
         run: cargo test -p wolfcraft-engine --lib -- collapse explosives bosses mobs config --nocapture
       - name: Blocks placement, physics, stairs, swimming
-        run: cargo test -p wolfcraft-engine --lib -- interaction physics player construction power storage mesher renderer chunk::tests wolftech kinetic pipes --nocapture
+        run: cargo test -p wolfcraft-engine --lib -- interaction physics player construction power storage mesher renderer chunk::tests wolftech kinetic pipes clicker --nocapture
       - name: Cartoon resource packs
         run: cargo test -p wolfcraft-assets --lib -- packs --nocapture
       - name: Invite codes
