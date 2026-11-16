@@ -13,6 +13,8 @@ use wolfcraft_assets::gui as icon;
 const TOOLBAR_H: f32 = 56.0;
 const NAV_H: f32 = 50.0;
 const HEAD_H: f32 = 52.0;
+/// PC launcher: width of the left sidebar.
+const SIDE_W: f32 = 230.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -127,6 +129,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
     let tabs = tabs();
     tab = tab.min(tabs.len() - 1);
 
+    // PC (a wide window, not a phone): the page menu is a sidebar on the left.
+    let side = !cfg!(target_os = "android") && ctx.screen_rect().width() >= 760.0;
     // ---- Full-bleed background ----
     // The phone's safe margins (and the strip under the status bar) are outside egui's
     // screen; paint the page and bar colours out to the real edges so nothing looks cut.
@@ -137,15 +141,77 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
         // The living world from the loading splash, dimmed so cards stay readable.
         crate::main_menu::world_backdrop(&bg, full, ctx.input(|i| i.time) as f32);
         bg.rect_filled(full, 0.0, p.bg.gamma_multiply(if p.dark { 0.38 } else { 0.30 }));
+        if side {
+            // PC: a glass sidebar down the left instead of the header.
+            let bar = Rect::from_min_max(full.min, Pos2::new(screen.left() + SIDE_W, full.bottom()));
+            bg.rect_filled(bar, 0.0, glass_tint(&p));
+            bg.add(grad_shape(Rect::from_min_max(bar.min, Pos2::new(bar.right(), screen.top() + 160.0)), 0.0, 0.0, glass_gloss(&p), Color32::TRANSPARENT));
+            bg.line_segment([Pos2::new(bar.right(), full.top()), Pos2::new(bar.right(), full.bottom())], Stroke::new(1.0_f32, glass_rim(&p)));
+        } else {
         // Aero glass header with the page menu across the top (no bottom dock).
         let top = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top() + HEAD_H + NAV_H));
         bg.rect_filled(top, 0.0, glass_tint(&p));
         bg.add(grad_shape(Rect::from_min_max(Pos2::new(top.left(), screen.top()), Pos2::new(top.right(), screen.top() + HEAD_H * 0.7)), 0.0, 0.0, glass_gloss(&p), Color32::TRANSPARENT));
         bg.line_segment([Pos2::new(full.left(), screen.top() + HEAD_H), Pos2::new(full.right(), screen.top() + HEAD_H)], Stroke::new(1.0_f32, glass_rim(&p).gamma_multiply(0.4)));
         bg.line_segment([Pos2::new(full.left(), top.bottom()), Pos2::new(full.right(), top.bottom())], Stroke::new(1.0_f32, glass_rim(&p)));
+        }
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
+    if side {
+        egui::SidePanel::left("launcher-side")
+            .exact_width(SIDE_W)
+            .resizable(false)
+            .frame(Frame::none().inner_margin(Margin::symmetric(14.0, 16.0)))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
+                    icons.paint(ui.painter(), r, icon::LOGO, Color32::WHITE);
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(if is_studio_app() { "WolfStudio" } else { "WolfCraft" }).font(bold_font(21.0)).color(p.text));
+                });
+                ui.add_space(20.0);
+                // The pages, top to bottom: glossy capsule for the open one.
+                for (i, (t, label)) in tabs.iter().enumerate() {
+                    let on = tab == i;
+                    let col = if on { Color32::WHITE } else { p.text };
+                    let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), Sense::click());
+                    if on {
+                        gloss_capsule(ui, r, p.accent);
+                    } else if resp.hovered() || resp.is_pointer_button_down_on() {
+                        ui.painter().rect_filled(r, Rounding::same(23.0), glass_gloss(&p).gamma_multiply(2.0));
+                    }
+                    nav_icon(ui, icons, *t, Rect::from_center_size(Pos2::new(r.left() + 26.0, r.center().y), Vec2::splat(20.0)), col);
+                    let pos = Pos2::new(r.left() + 48.0, r.center().y);
+                    if on {
+                        shadow_text(ui.painter(), pos, Align2::LEFT_CENTER, label, bold_font(15.0), col);
+                    } else {
+                        ui.painter().text(pos, Align2::LEFT_CENTER, *label, bold_font(15.0), col);
+                    }
+                    if resp.clicked() {
+                        tab = i;
+                    }
+                    ui.add_space(6.0);
+                }
+                // At the bottom: the theme, updates and the version.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    ui.label(egui::RichText::new(format!("v{version}")).size(12.0).color(p.text_muted));
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        if round_icon(ui, icons, &p, if dark { icon::SUN } else { icon::MOON }).on_hover_text(if dark { "Светлая тема" } else { "Тёмная тема" }).clicked() {
+                            action = MenuAction::ToggleTheme;
+                        }
+                        if round_icon(ui, icons, &p, icon::REFRESH).on_hover_text("Проверить обновления").clicked() {
+                            action = MenuAction::CheckUpdates;
+                        }
+                        if round_icon(ui, icons, &p, icon::GEAR).on_hover_text("Настройки").clicked() {
+                            action = MenuAction::OpenSettings;
+                        }
+                    });
+                });
+            });
+    } else {
     // ---- Header: logo and title; theme and updates on the right ----
     egui::TopBottomPanel::top("launcher-head")
         .exact_height(HEAD_H)
@@ -202,6 +268,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, version: &str, dark: bool, pl
                 });
             });
         });
+
+    }
 
     // ---- Toolbar: each page has its own (title and its own buttons) ----
     let page = tabs[tab].0;
