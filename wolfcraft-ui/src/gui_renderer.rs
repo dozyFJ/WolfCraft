@@ -66,7 +66,18 @@ impl GuiIcons {
         let ys=[rect.top(),rect.top()+b,rect.bottom()-b,rect.bottom()];
         let us=[uv.left(),uv.left()+uv.width()*3./32.,uv.right()-uv.width()*3./32.,uv.right()];
         let vs=[uv.top(),uv.top()+uv.height()*3./32.,uv.bottom()-uv.height()*3./32.,uv.bottom()];
-        for y in 0..3 {for x in 0..3 {painter.image(self.gui.id(),Rect::from_min_max(egui::pos2(xs[x],ys[y]),egui::pos2(xs[x+1],ys[y+1])),Rect::from_min_max(egui::pos2(us[x],vs[y]),egui::pos2(us[x+1],vs[y+1])),tint);}}
+        for y in 0..3 {for x in 0..3 {
+            if x==1&&y==1 {
+                // Repeat the material at a fixed scale; stretching makes planks and bricks huge.
+                let tile=52.0;let mut py=ys[1];
+                while py<ys[2] {let hh=(ys[2]-py).min(tile);let mut px=xs[1];
+                    while px<xs[2] {let ww=(xs[2]-px).min(tile);
+                        painter.image(self.gui.id(),Rect::from_min_size(egui::pos2(px,py),egui::vec2(ww,hh)),Rect::from_min_max(egui::pos2(us[1],vs[1]),egui::pos2(us[1]+(us[2]-us[1])*ww/tile,vs[1]+(vs[2]-vs[1])*hh/tile)),tint);
+                        px+=tile;
+                    }py+=tile;
+                }
+            } else {painter.image(self.gui.id(),Rect::from_min_max(egui::pos2(xs[x],ys[y]),egui::pos2(xs[x+1],ys[y+1])),Rect::from_min_max(egui::pos2(us[x],vs[y]),egui::pos2(us[x+1],vs[y+1])),tint);}
+        }}
     }
 
     /// A block's illustrated header, using original sprites from the GUI atlas.
@@ -424,6 +435,11 @@ pub fn centered_square(rect: Rect, size: f32) -> Rect {
 
 
 /// Material and purpose select the block's UI skin, without matching translated names.
+pub fn panel_color(skin:u16)->Color32 {
+    use wolfcraft_assets::gui as g;
+    match skin {g::PANEL_WORKBENCH|g::PANEL_WOOD=>Color32::from_rgb(91,62,40),g::PANEL_CHEST=>Color32::from_rgb(83,52,31),g::PANEL_FURNACE=>Color32::from_rgb(70,66,62),g::PANEL_MAGIC|g::PANEL_PORTABLE=>Color32::from_rgb(62,45,78),g::PANEL_RESONANCE=>Color32::from_rgb(38,52,65),g::PANEL_KITCHEN=>Color32::from_rgb(56,78,76),_=>Color32::from_rgb(56,67,79)}
+}
+
 pub fn block_panel(block:Block)->u16 {
     use wolfcraft_assets::gui as g;use wolfcraft_engine::construction::{self,Form};
     if let Some((e,_))=construction::entry(block as u16){match e.form{

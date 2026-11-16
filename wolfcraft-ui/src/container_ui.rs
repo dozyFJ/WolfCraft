@@ -210,7 +210,7 @@ pub fn show_with(ctx: &egui::Context, icons: &GuiIcons, view: &ContainerView, sl
     let mut thrown = Vec::new();
     let cols = view.columns.max(1);
     let width = cols.max(9) as f32 * (CELL + GAP) - GAP;
-    let dismissed = crate::ui_components::block_screen(ctx, "container", width + 4.0, |ui| {
+    let dismissed = crate::ui_components::block_screen_material(ctx, "container", width + 4.0, true, crate::gui_renderer::panel_color(view.skin), |ui| {
         // Atlas banner and recess belong to the interacted block.
         let (banner,_)=ui.allocate_exact_size(Vec2::new(width,76.),Sense::hover());
         icons.paint_block_header(ui.painter(),banner,view.skin,view.title);
