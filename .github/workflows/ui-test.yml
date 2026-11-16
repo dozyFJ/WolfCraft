@@ -20,7 +20,7 @@ jobs:
       - name: Tap on a nearby server joins it
         run: cargo test -p wolfcraft-ui --lib -- main_menu studio_ui texture_editor server_page webgui --nocapture
       - name: Destruction physics and weapons
-        run: cargo test -p wolfcraft-engine --lib -- collapse explosives bosses mobs config --nocapture
+        run: cargo test -p wolfcraft-engine --lib -- collapse explosives bosses mobs config cubesphere planet worldgen structures --nocapture
       - name: Blocks placement, physics, stairs, swimming
         run: cargo test -p wolfcraft-engine --lib -- interaction physics player construction power storage mesher renderer chunk::tests wolftech kinetic pipes clicker arenas --nocapture
       - name: Cartoon resource packs
