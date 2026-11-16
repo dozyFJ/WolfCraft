@@ -392,6 +392,7 @@ pub fn splash_screen(ctx:&egui::Context,icons:&GuiIcons,progress:f32,version:&st
 }
 
 /// Space backdrop with a big planet rising from the bottom edge (the planet of the last played world).
+#[allow(dead_code)]
 fn planet_backdrop(ui: &Ui, planet: Option<&TextureHandle>, p: &Palette) {
     let rect = ui.max_rect();
     let painter = ui.painter();
