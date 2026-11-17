@@ -1285,6 +1285,7 @@ impl App {
                 }
             }
             (Screen::Paused, KeyCode::Escape) => self.screen = Screen::Playing,
+            (Screen::Playing, KeyCode::KeyE | KeyCode::F5) if self.session.as_ref().is_some_and(|s| s.rocket.is_some()) => {},
             (Screen::Playing, KeyCode::KeyE) => {
                 self.container = None;
                 self.near_table = false;
@@ -2262,7 +2263,8 @@ impl App {
                     }
                 }
                 Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Dead | Screen::Map => {
-                    if touch.seen && screen == Screen::Playing && !chat.open {
+                    if session.as_ref().is_some_and(|s| s.rocket.is_some()) { touch.clear_hud(); }
+                    if touch.seen && screen == Screen::Playing && !chat.open && session.as_ref().is_none_or(|s| s.rocket.is_none()) {
                         if studio.as_ref().is_some_and(|st| !st.playtest) || touch.place_play {
                             touch.clear_hud();
                         } else {
@@ -2350,7 +2352,7 @@ impl App {
                         if screen == Screen::Playing && !studio_edit {
                             // A place in play draws its own GUI: no hotbar, bars, minimap or
                             // crosshair from the game (its mini-game panels and voice stay).
-                            if !touch.place_play {
+                            if !touch.place_play && s.rocket.is_none() {
                                 hud::draw(ctx, &icons, &hud);
                             }
                             petsim_overlay(ctx, &s.petsim, s.petsim_home.is_some());
@@ -2365,6 +2367,14 @@ impl App {
                                 if !studio_edit && matches!(screen, Screen::Playing | Screen::Dead) {
                                     arena_buys = arena_overlay(ctx, a, &s.player.inventory, &mut ui_cover);
                                 }
+                            }
+                            if let Some(flight) = s.rocket {
+                                let phase = match flight.phase { 0 => "ВЗЛЁТ", 1 => "ОРБИТА · ВЫБЕРИТЕ ПЛАНЕТУ", 3 => "ПЕРЕЛЁТ", _ => "ПОСАДКА" };
+                                egui::Area::new(egui::Id::new("rocket-caption")).anchor(egui::Align2::CENTER_TOP, [0.0, 12.0]).interactable(false).show(ctx, |ui| {
+                                    egui::Frame::none().fill(egui::Color32::from_rgba_unmultiplied(12, 20, 32, 220)).inner_margin(egui::Margin::symmetric(18.0, 8.0)).show(ui, |ui| {
+                                        ui.label(egui::RichText::new(phase).size(18.0).color(egui::Color32::WHITE));
+                                    });
+                                });
                             }
                             // Rocket in orbit: the planet menu (space travel is single-player for now).
                             if s.rocket.is_some_and(|r| r.phase == 1) {
@@ -2991,7 +3001,7 @@ impl App {
                 }
                 let arrows: Vec<(glam::DVec3, glam::DVec3)> = s.arrows.list.iter().map(|a| (a.pos, a.dir)).collect();
                 model_verts.extend(wolfcraft_engine::renderer::model::build_arrow_models(&arrows, cam.eye));
-                if s.camera_mode != crate::session::CameraMode::First && !s.player.survival.dead {
+                if (s.camera_mode != crate::session::CameraMode::First || s.rocket.is_some()) && !s.player.survival.dead {
                     let (rest_at, rest_dir) = match s.rest {
                         Some(crate::session::Rest::Sleep { at, dir, .. }) | Some(crate::session::Rest::Sit { at, dir, .. }) => (Some(at), Some(dir)),
                         None => (None, None),
@@ -3009,7 +3019,7 @@ impl App {
                         skin: self.settings.skin,
                         // Mining/attacking swings; placing a block is a short push of the arm.
                         attack: if self.hand_cycle > 0.0 { self.hand_cycle } else if self.hand_place > 0.0 { (1.0 - self.hand_place) * 0.5 } else { 0.0 },
-                        held: held_visual(&s.player.inventory, &self.tile_colors),
+                        held: if s.rocket.is_some() { wolfcraft_engine::renderer::model::Held::Nothing } else { held_visual(&s.player.inventory, &self.tile_colors) },
                         armor: worn_armor(&s.player.inventory),
                         shield: s.player.inventory.has_shield(),
                     };
@@ -3027,24 +3037,11 @@ impl App {
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_kinetic(&s.kinetic_models(), cam.eye));
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.mobs.debris, cam.eye));
-                // The rocket under the player while flying: a white hull, red fins and nose
-                // ring, a glowing nozzle.
-                if s.rocket.is_some() {
-                    let up = s.player.up();
-                    let feet = s.player.body.pos;
-                    let helper = if up.y.abs() < 0.9 { glam::DVec3::Y } else { glam::DVec3::X };
-                    let side = up.cross(helper).normalize();
-                    let side2 = up.cross(side);
-                    let cube = |pos: glam::DVec3, color: [f32; 3], size: f32, glow: bool| wolfcraft_engine::mobs::Debris { pos, vel: glam::DVec3::ZERO, color, size, age: 0.0, spin: 0.0, kind: wolfcraft_engine::mobs::FxKind::Fall, glow, tile: 0, piece: 0 };
-                    let mut parts = Vec::new();
-                    for (k, h) in [0.55f64, 1.45, 2.35, 3.0].iter().enumerate() {
-                        parts.push(cube(feet - up * *h, if k == 1 { [0.85, 0.15, 0.12] } else { [0.94, 0.95, 0.97] }, 0.95, false));
-                    }
-                    for s2 in [side, -side, side2, -side2] {
-                        parts.push(cube(feet - up * 3.1 + s2 * 0.7, [0.85, 0.15, 0.12], 0.45, false));
-                    }
-                    parts.push(cube(feet - up * 3.6, [1.0, 0.65, 0.20], 0.6, true));
-                    model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&parts, cam.eye));
+                if let Some(flight) = s.rocket {
+                    model_verts.extend(wolfcraft_engine::renderer::model::build_space_rocket(
+                        s.player.body.pos, s.player.up(), s.player.heading, cam.eye,
+                        self.time.elapsed(), flight.phase != 1,
+                    ));
                 }
                 model_verts.extend(wolfcraft_engine::renderer::model::build_debris(&s.explosives.debris(self.time.elapsed()), cam.eye));
                 // Falling and thrown blocks: cubes in their block's colours, tumbling.
@@ -3075,7 +3072,7 @@ impl App {
                 }
                 // First-person arms (Bedrock-style): one swing per click, a held button keeps
                 // swinging, and a started swing always plays to the end.
-                let first_person = s.camera_mode == crate::session::CameraMode::First && !s.player.survival.dead;
+                let first_person = s.camera_mode == crate::session::CameraMode::First && s.rocket.is_none() && !s.player.survival.dead;
                 let tool = s.player.inventory.held().and_then(|st| wolfcraft_engine::items::tool_shape(st.id));
                 // Mouse button or a held finger (touch) keeps swinging; every blow that lands on a
                 // creature starts a swing too (a tap on a mob).
@@ -5246,10 +5243,10 @@ fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, 
     use wolfcraft_engine::planet::PlanetKind;
     let mut pick = None;
     let screen = ctx.screen_rect();
-    let w = (screen.width() - 24.0).min(460.0);
-    let card_h = 58.0;
+    let w = (screen.width() * 0.43).clamp(260.0, 380.0).min(screen.width() - 24.0);
+    let card_h = ((screen.height() - 108.0) / 5.0 - 8.0).clamp(40.0, 58.0);
     let h: f32 = 56.0 + card_h * 5.0 + 8.0 * 4.0 + 20.0;
-    let rect = Rect::from_center_size(screen.center(), Vec2::new(w, h.min(screen.height() - 20.0)));
+    let rect = Rect::from_min_size(Pos2::new(screen.right() - w - 12.0, screen.center().y - h.min(screen.height() - 20.0) * 0.5), Vec2::new(w, h.min(screen.height() - 20.0)));
     cover.push(rect);
     egui::Area::new(egui::Id::new("rocket-menu")).fixed_pos(rect.min).order(egui::Order::Foreground).show(ctx, |ui| {
         let p = ui.painter();

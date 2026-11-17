@@ -43,7 +43,7 @@ struct Stellar {
     side: DVec3,
 }
 
-/// A rocket flight: lift-off (`phase` 0), in orbit choosing the planet (1), landing (2).
+/// A rocket flight: lift-off (`phase` 0), in orbit choosing the planet (1), landing (2), transfer cinematic (3).
 #[derive(Clone, Copy, Debug)]
 pub struct RocketFlight {
     pub phase: u8,
@@ -294,6 +294,7 @@ pub struct GameSession {
     pub planet_kind: wolfcraft_engine::planet::PlanetKind,
     /// A rocket flight in progress (lift-off, choosing the planet, landing).
     pub rocket: Option<RocketFlight>,
+    rocket_was_flying: bool,
     /// The planet picked in the rocket menu (the app sets it).
     pub rocket_pick: Option<wolfcraft_engine::planet::PlanetKind>,
     portal_t: f32,
@@ -457,6 +458,7 @@ impl GameSession {
             overworld_pos: None,
             planet_kind: wolfcraft_engine::planet::PlanetKind::Home,
             rocket: None,
+            rocket_was_flying: false,
             rocket_pick: None,
             portal_t: -2.0,
             pending_portal: None,
@@ -821,7 +823,7 @@ impl GameSession {
         // Phones pick what is under the finger; with no finger on the world nothing is picked.
         self.aim_dir = if input.touch { input.aim } else { Some(self.player.look_dir()) };
         self.hit = self.aim_dir.and_then(|d| raycast(&self.chunks, eye, d, reach));
-        if !self.player.survival.dead {
+        if !self.player.survival.dead && self.rocket.is_none() {
             let hit = self.hit;
             // A creature in front of the block takes the blow: holding to hit it never digs the
             // block behind it.
@@ -3736,15 +3738,19 @@ impl GameSession {
         const N: i32 = 20;
         let sampler = wolfcraft_engine::cubesphere::Grid { n: N, cube: self.planet.grid.cube };
         let mut cols = Vec::with_capacity((6 * N * N) as usize);
+        let mut heights = Vec::with_capacity((6 * N * N) as usize);
         for f in 0..6u8 {
             for b in 0..N {
                 for a in 0..N {
                     let col = self.planet.column(sampler.cell_dir(f, a, b));
                     cols.push(crate::preview::biome_color(&col));
+                    // Four-block steps retain the voxel silhouette without whole-planet chunks.
+                    let elev = (col.elev.max(0.0) as f64 / 4.0).round() * 4.0;
+                    heights.push((1.0 + elev / self.planet.radius) as f32);
                 }
             }
         }
-        wolfcraft_engine::renderer::sky::set_globe(N as u32, cols);
+        wolfcraft_engine::renderer::sky::set_globe_terrain(N as u32, cols, heights);
     }
 
     /// Lift-off: needs open sky and 4 rocket fuel (free in creative).
@@ -3768,6 +3774,14 @@ impl GameSession {
             }
             self.player.inventory.take(ids::ROCKET_FUEL, 4);
         }
+        self.rocket_was_flying = self.player.body.flying;
+        self.rest = None;
+        self.riding = None;
+        self.player.sneaking = false;
+        if self.planet_kind == wolfcraft_engine::planet::PlanetKind::Home {
+            self.overworld_pos = Some(self.player.body.pos);
+        }
+        self.player.body.pos += up * 3.5;
         self.player.body.flying = true;
         self.player.body.vel = DVec3::ZERO;
         self.rocket = Some(RocketFlight { phase: 0, t: 0.0, speed: 0.0 });
@@ -3812,9 +3826,22 @@ impl GameSession {
             }
             1 => {
                 self.player.body.vel = DVec3::ZERO;
-                if let Some(kind) = self.rocket_pick.take() {
-                    self.travel_to(kind);
-                    r = RocketFlight { phase: 2, t: 0.0, speed: 60.0 };
+                if self.rocket_pick.is_some() {
+                    r = RocketFlight { phase: 3, t: 0.0, speed: 0.0 };
+                    self.item_name = Some(("Разгон · курс на выбранную планету".into(), 3.0));
+                }
+            }
+            3 => {
+                // A visible departure shot before loading the destination. Camera stays outside.
+                r.speed = (r.speed + 30.0 * dt as f64).min(180.0);
+                self.player.body.pos += up * r.speed * dt as f64;
+                self.player.body.vel = DVec3::ZERO;
+                flame(self, 1.0);
+                if r.t >= 4.0 {
+                    if let Some(kind) = self.rocket_pick.take() {
+                        self.travel_to(kind);
+                    }
+                    r = RocketFlight { phase: 2, t: 0.0, speed: 0.0 };
                 }
             }
             _ => {
@@ -3828,11 +3855,14 @@ impl GameSession {
                     None => 0.0,
                 };
                 r.speed += (target - r.speed) * (1.0 - (-3.0 * dt as f64).exp());
-                self.player.body.pos -= up * r.speed * dt as f64;
+                let descent = (r.speed * dt as f64).min(below.map(|h| (h as f64 - 4.5).max(0.0)).unwrap_or(f64::INFINITY));
+                self.player.body.pos -= up * descent;
                 self.player.body.vel = DVec3::ZERO;
                 flame(self, 0.6);
-                if below.is_some_and(|h| h <= 1) {
-                    self.player.body.flying = false;
+                if let Some(h) = below.filter(|h| *h <= 5) {
+                    // Exit the cockpit onto the surface, rather than burying the hull.
+                    self.player.body.pos = pos - up * (h as f64 - 1.2).max(0.0);
+                    self.player.body.flying = self.rocket_was_flying;
                     self.rocket = None;
                     self.shake = self.shake.max(0.4);
                     self.item_name = Some((format!("Посадка: {}", self.planet_kind.name()), 3.0));
@@ -3855,7 +3885,7 @@ impl GameSession {
             return;
         }
         self.save();
-        if self.planet_kind == PlanetKind::Home {
+        if self.planet_kind == PlanetKind::Home && self.rocket.is_none() {
             self.overworld_pos = Some(here);
         }
         self.enter_place(false, kind);
@@ -4038,6 +4068,9 @@ impl GameSession {
     }
 
     fn camera_base(&self) -> Camera {
+        if let Some(r) = self.rocket {
+            return rocket_camera(self.player.body.pos, self.player.heading, self.player.up(), r);
+        }
         if let Some(c) = self.cutscene {
             return c;
         }
@@ -6522,6 +6555,44 @@ mod tests {
         assert_eq!(s.chunks.get_block(chest), Some(Block::Chest), "shockwave preserves nearby storage");
     }
 
+    #[test]
+    fn rocket_flight_regression() {
+        let mut s = load("rocket_cinematic", 9137, true);
+        settle(&mut s);
+        let origin = s.player.body.pos;
+        let old_camera = s.camera_mode;
+        let old_flight = s.player.body.flying;
+        for height in 2..40 {
+            let c = s.chunks.grid().world_to_cell(origin + s.player.up() * height as f64);
+            s.chunks.set_block(c, Block::Air);
+        }
+        s.start_rocket();
+        assert!(s.rocket.is_some());
+        assert_eq!(s.overworld_pos, Some(origin));
+        assert_eq!(s.camera_mode, old_camera);
+        assert!((s.camera().eye - s.player.eye_pos()).length() > 7.0);
+        s.tick_rocket(6.1);
+        assert_eq!(s.rocket.unwrap().phase, 1);
+        s.rocket_pick = Some(wolfcraft_engine::planet::PlanetKind::Moon);
+        s.tick_rocket(0.01);
+        assert_eq!(s.rocket.unwrap().phase, 3);
+        assert_eq!(s.planet_kind, wolfcraft_engine::planet::PlanetKind::Home);
+        s.tick_rocket(3.8);
+        assert_eq!(s.planet_kind, wolfcraft_engine::planet::PlanetKind::Home);
+        s.tick_rocket(0.3);
+        assert_eq!(s.planet_kind, wolfcraft_engine::planet::PlanetKind::Moon);
+        assert_eq!(s.rocket.unwrap().phase, 2);
+        assert_eq!(s.overworld_pos, Some(origin), "return must retain the launch pad, not orbit coordinates");
+        // Return to the loaded launch surface and verify the touchdown restores player state.
+        s.enter_place(false, wolfcraft_engine::planet::PlanetKind::Home);
+        s.player.body.pos = origin + wolfcraft_engine::physics::up_at(origin) * 3.0;
+        settle(&mut s);
+        s.tick_rocket(0.016);
+        assert!(s.rocket.is_none());
+        assert_eq!(s.player.body.flying, old_flight);
+        assert_eq!(s.camera_mode, old_camera);
+    }
+
     /// A bot plays for a few game minutes in three worlds (survival, creative, studio
     /// baseplate): walks, sprints, sneaks, jumps, looks around, breaks and places blocks,
     /// pours water and lava, builds the iskrit showcase and flips its switches, places
@@ -7101,3 +7172,46 @@ pub fn tipped_effect(id: wolfcraft_engine::items::ItemId) -> Option<wolfcraft_en
     (ids::TIPPED_BASE..=ids::TIPPED_LAST).contains(&id).then(|| [Effect::Poison, Effect::Slowness, Effect::Harm][(id - ids::TIPPED_BASE) as usize])
 }
 
+
+fn rocket_camera(feet: DVec3, heading: DVec3, up: DVec3, flight: RocketFlight) -> Camera {
+    let up = up.normalize();
+    let mut forward = (heading - up * heading.dot(up)).normalize_or_zero();
+    if forward.length_squared() < 0.5 {
+        forward = up.cross(if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X }).normalize();
+    }
+    let right = forward.cross(up).normalize();
+    let t = flight.t.max(0.0) as f64;
+    let orbit = if flight.phase == 1 { (t * 0.12).sin() * 1.5 } else { 0.0 };
+    let (back, high) = match flight.phase {
+        0 => (8.0 + (t / 6.0).min(1.0) * 3.0, 3.0),
+        1 => (13.0, 6.0),
+        3 => (13.0 + (t / 4.0).min(1.0) * 5.0, 5.0),
+        _ => (10.0, 4.0),
+    };
+    let eye = feet - forward * back + right * (3.0 + orbit) + up * high;
+    let target = feet - up * 0.6;
+    Camera { eye, forward: (target - eye).normalize(), up }
+}
+
+#[cfg(test)]
+mod rocket_camera_tests {
+    use super::*;
+    #[test]
+    fn outside_camera_frames_pilot_and_hull_on_all_planet_faces() {
+        for up in [DVec3::X, -DVec3::X, DVec3::Y, -DVec3::Y, DVec3::Z, -DVec3::Z] {
+            let feet = up * 1400.0;
+            let heading = up.cross(if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X }).normalize();
+            for phase in 0..4 {
+                for t in [0.0, 2.0, 6.0] {
+                    let c = rocket_camera(feet, heading, up, RocketFlight { phase, t, speed: 0.0 });
+                    assert!(c.eye.is_finite() && c.forward.is_finite());
+                    assert!((c.eye - feet).dot(heading) < -7.0, "camera must stay behind the pilot");
+                    for height in [-4.9, 3.4] {
+                        let to = (feet + up * height - c.eye).normalize();
+                        assert!(to.dot(c.forward) > 0.82, "whole rocket remains in the shot");
+                    }
+                }
+            }
+        }
+    }
+}
