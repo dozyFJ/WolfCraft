@@ -389,13 +389,30 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
             let shape = crate::cubesphere::Grid { n: 2, cube };
             let sampler = crate::cubesphere::Grid { n: gn as i32, cube };
             let pt = |f: u8, a: u32, b: u32| shape.along(sampler.dir_at(f, a as f64, b as f64), 1.0).as_vec3();
+            // Average the incident cells at each vertex, including across cube-face seams.
+            // Every patch uses the same edge; no walls extending down to sea level.
+            let key = |p: Vec3| ((p.x * 100000.0).round() as i32, (p.y * 100000.0).round() as i32, (p.z * 100000.0).round() as i32);
+            let mut corners = std::collections::HashMap::<_, (f32, u32)>::new();
             for f in 0..6u8 {
                 for b in 0..gn {
                     for a in 0..gn {
-                        let index = (f as u32 * gn * gn + b * gn + a) as usize;
-                        let h = heights[index];
-                        let base_points = [pt(f, a, b), pt(f, a + 1, b), pt(f, a + 1, b + 1), pt(f, a, b + 1)];
-                        let [p0, p1, p2, p3] = base_points.map(|p| p * h);
+                        let h = heights[(f as u32 * gn * gn + b * gn + a) as usize];
+                        for (i, j) in [(a,b), (a+1,b), (a+1,b+1), (a,b+1)] {
+                            let e = corners.entry(key(pt(f,i,j))).or_default();
+                            e.0 += h; e.1 += 1;
+                        }
+                    }
+                }
+            }
+            let vertex = |f, a, b| {
+                let p = pt(f,a,b);
+                let (sum, count) = corners[&key(p)];
+                p * (sum / count as f32)
+            };
+            for f in 0..6u8 {
+                for b in 0..gn {
+                    for a in 0..gn {
+                        let [p0, p1, p2, p3] = [vertex(f,a,b), vertex(f,a+1,b), vertex(f,a+1,b+1), vertex(f,a,b+1)];
                         let n = (p1 - p0).cross(p3 - p0).normalize_or_zero();
                         let n = if n.dot(p0) < 0.0 { -n } else { n };
                         // Back side of the planet: not seen.
@@ -406,18 +423,6 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
                         let base = cols[(f as u32 * gn * gn + b * gn + a) as usize];
                         let rim = (1.0 - n.dot(up).abs()).powi(3) * 0.35 * lit.max(0.1);
                         let c = [(base[0] * lit.max(0.07) + rim * 0.3).min(1.0), (base[1] * lit.max(0.07) + rim * 0.5).min(1.0), (base[2] * lit.max(0.07) + rim).min(1.0)];
-                        if h > 1.00001 {
-                            // Visible cliffs give orbit terrain depth instead of a painted shell.
-                            for edge in 0..4 {
-                                let q0 = base_points[edge];
-                                let q1 = base_points[(edge + 1) % 4];
-                                let wall = c.map(|v| v * 0.72);
-                                o.tri(centre + q0 * rad, centre + q1 * rad, centre + q1 * h * rad, wall);
-                                o.tri(centre + q0 * rad, centre + q1 * h * rad, centre + q0 * h * rad, wall);
-                                o.tri(centre + q0 * rad, centre + q1 * h * rad, centre + q1 * rad, wall);
-                                o.tri(centre + q0 * rad, centre + q0 * h * rad, centre + q1 * h * rad, wall);
-                            }
-                        }
                         o.tri(centre + p0 * rad, centre + p1 * rad, centre + p2 * rad, c);
                         o.tri(centre + p0 * rad, centre + p2 * rad, centre + p3 * rad, c);
                         o.tri(centre + p0 * rad, centre + p2 * rad, centre + p1 * rad, c);
@@ -454,14 +459,14 @@ mod tests {
     }
 
     #[test]
-    fn orbit_terrain_has_cliff_geometry_instead_of_only_a_colored_shell() {
+    fn orbit_terrain_is_a_connected_shell_without_sea_level_walls() {
         let colors = vec![[0.2, 0.5, 0.3]; 24];
         let p = params(DVec3::new(0.0, 1400.0, 0.0), 1.0);
         set_globe(2, colors.clone());
         let flat = build_sky(&p).len();
         set_globe_terrain(2, colors, vec![1.1; 24]);
         let raised = build_sky(&p);
-        assert!(raised.len() > flat, "raised terrain needs solid cliff faces");
+        assert_eq!(raised.len(), flat, "relief must not add sea-level curtain walls");
         assert!(raised.iter().all(|v| v.pos.iter().all(|p| p.is_finite())));
         if let Ok(mut g) = GLOBE.lock() { *g = None; }
     }

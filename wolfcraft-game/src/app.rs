@@ -2100,7 +2100,7 @@ impl App {
         // PC: hold Alt to free the cursor and click the panels over the world (clicker, arena
         // shop, script GUIs); release it to look around again.
         let alt = self.input.keys.contains(&KeyCode::AltLeft) || self.input.keys.contains(&KeyCode::AltRight);
-        let want_grab = self.screen == Screen::Playing && !self.chat.open && self.web_pages.is_empty() && !alt;
+        let want_grab = self.screen == Screen::Playing && !self.chat.open && self.web_pages.is_empty() && !alt && !self.session.as_ref().is_some_and(|s| matches!(s.rest, Some(crate::session::Rest::Sleep { .. })) || s.rocket.is_some_and(|r| r.phase == 1));
         if want_grab != self.grabbed {
             let w = gfx.window.clone();
             self.set_grab(&w, want_grab);
@@ -2459,6 +2459,16 @@ impl App {
                                 painter.text(pos, egui::Align2::CENTER_CENTER, "Z", egui::FontId::proportional(18.0 + k * 22.0), egui::Color32::from_rgba_unmultiplied(200, 215, 255, a));
                             }
                             painter.text(r.center() + egui::vec2(0.0, 60.0), egui::Align2::CENTER_CENTER, format!("Ночь проходит… {}", s.clock()), egui::FontId::proportional(16.0), egui::Color32::from_rgba_unmultiplied(220, 225, 240, (fade * 255.0) as u8));
+                        }
+                        if screen == Screen::Playing && matches!(s.rest, Some(crate::session::Rest::Sleep { .. })) {
+                            egui::Area::new(egui::Id::new("leave_bed"))
+                                .order(egui::Order::Foreground)
+                                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -32.0))
+                                .show(ctx, |ui| {
+                                    let button = ui.add_sized([240.0, 48.0], egui::Button::new("Встать с кровати"));
+                                    ui_cover.push(button.rect);
+                                    if button.clicked() { s.end_rest(); }
+                                });
                         }
                         if s.saved_notice > 0.0 {
                             ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("saved")))
@@ -2936,12 +2946,18 @@ impl App {
                 } else {
                     // Other planets have their own skies: black on the Moon, smoky red over the
                     // lava world, pale over the ice, violet over the alien jungle.
-                    let planet_sky = match s.planet_kind {
+                    let planet_sky = match s.planet_kind.terrain_kind() {
                         wolfcraft_engine::planet::PlanetKind::Moon => Some([0.01, 0.01, 0.03]),
                         wolfcraft_engine::planet::PlanetKind::Lava => Some([0.42, 0.14, 0.06]),
                         wolfcraft_engine::planet::PlanetKind::Ice => Some([0.70, 0.84, 0.96]),
                         wolfcraft_engine::planet::PlanetKind::Alien => Some([0.48, 0.30, 0.62]),
-                        wolfcraft_engine::planet::PlanetKind::Home => None,
+                        _ => None,
+                    };
+                    let planet_sky = match s.planet_kind {
+                        wolfcraft_engine::planet::PlanetKind::Venus => Some([0.62,0.43,0.16]),
+                        wolfcraft_engine::planet::PlanetKind::Mars => Some([0.47,0.25,0.17]),
+                        wolfcraft_engine::planet::PlanetKind::Titan => Some([0.58,0.32,0.08]),
+                        _ => planet_sky,
                     };
                     if let Some(ps) = planet_sky {
                         let k = (day as f32).max(0.15);
@@ -3001,7 +3017,7 @@ impl App {
                 }
                 let arrows: Vec<(glam::DVec3, glam::DVec3)> = s.arrows.list.iter().map(|a| (a.pos, a.dir)).collect();
                 model_verts.extend(wolfcraft_engine::renderer::model::build_arrow_models(&arrows, cam.eye));
-                if (s.camera_mode != crate::session::CameraMode::First || s.rocket.is_some()) && !s.player.survival.dead {
+                if (s.camera_mode != crate::session::CameraMode::First || s.rocket.is_some()) && !s.player.survival.dead && !s.bed_view_active() {
                     let (rest_at, rest_dir) = match s.rest {
                         Some(crate::session::Rest::Sleep { at, dir, .. }) | Some(crate::session::Rest::Sit { at, dir, .. }) => (Some(at), Some(dir)),
                         None => (None, None),
@@ -3072,7 +3088,7 @@ impl App {
                 }
                 // First-person arms (Bedrock-style): one swing per click, a held button keeps
                 // swinging, and a started swing always plays to the end.
-                let first_person = s.camera_mode == crate::session::CameraMode::First && s.rocket.is_none() && !s.player.survival.dead;
+                let first_person = s.camera_mode == crate::session::CameraMode::First && s.rocket.is_none() && !s.player.survival.dead && !s.bed_view_active();
                 let tool = s.player.inventory.held().and_then(|st| wolfcraft_engine::items::tool_shape(st.id));
                 // Mouse button or a held finger (touch) keeps swinging; every blow that lands on a
                 // creature starts a swing too (a tap on a mob).
@@ -5244,8 +5260,7 @@ fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, 
     let mut pick = None;
     let screen = ctx.screen_rect();
     let w = (screen.width() * 0.43).clamp(260.0, 380.0).min(screen.width() - 24.0);
-    let card_h = ((screen.height() - 108.0) / 5.0 - 8.0).clamp(40.0, 58.0);
-    let h: f32 = 56.0 + card_h * 5.0 + 8.0 * 4.0 + 20.0;
+    let h = (screen.height() - 24.0).min(640.0);
     let rect = Rect::from_min_size(Pos2::new(screen.right() - w - 12.0, screen.center().y - h.min(screen.height() - 20.0) * 0.5), Vec2::new(w, h.min(screen.height() - 20.0)));
     cover.push(rect);
     egui::Area::new(egui::Id::new("rocket-menu")).fixed_pos(rect.min).order(egui::Order::Foreground).show(ctx, |ui| {
@@ -5254,31 +5269,36 @@ fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, 
         p.rect_filled(rect, Rounding::same(22.0), Color32::from_rgba_unmultiplied(12, 20, 40, 225));
         p.rect_stroke(rect, Rounding::same(22.0), Stroke::new(1.0_f32, Color32::from_white_alpha(90)));
         p.text(Pos2::new(rect.center().x, rect.top() + 28.0), Align2::CENTER_CENTER, "🚀 Куда летим?", FontId::proportional(20.0), Color32::WHITE);
-        let swatch = |k: PlanetKind| match k {
-            PlanetKind::Home => Color32::from_rgb(70, 150, 90),
-            PlanetKind::Moon => Color32::from_rgb(170, 170, 178),
-            PlanetKind::Lava => Color32::from_rgb(230, 90, 30),
-            PlanetKind::Ice => Color32::from_rgb(150, 200, 250),
-            PlanetKind::Alien => Color32::from_rgb(150, 80, 200),
-        };
-        for (i, k) in PlanetKind::ALL.iter().enumerate() {
-            let r = Rect::from_min_size(Pos2::new(rect.left() + 14.0, rect.top() + 56.0 + i as f32 * (card_h + 8.0)), Vec2::new(rect.width() - 28.0, card_h));
-            let locked = online && *k != here;
-            let resp = ui.interact(r, egui::Id::new(("rocket-pick", i)), if locked { Sense::hover() } else { Sense::click() });
-            let p = ui.painter();
-            let bg = if *k == here { Color32::from_rgba_unmultiplied(60, 90, 140, 200) } else if resp.hovered() { Color32::from_rgba_unmultiplied(50, 70, 110, 210) } else { Color32::from_rgba_unmultiplied(30, 42, 70, 200) };
-            p.rect_filled(r, Rounding::same(16.0), bg);
-            p.rect_stroke(r, Rounding::same(16.0), Stroke::new(1.0_f32, Color32::from_white_alpha(60)));
-            p.circle_filled(Pos2::new(r.left() + 30.0, r.center().y), 17.0, swatch(*k));
-            p.circle_filled(Pos2::new(r.left() + 24.0, r.center().y - 6.0), 5.0, Color32::from_white_alpha(70));
-            let name = if *k == here { format!("{} · вы здесь", k.name()) } else { k.name().to_string() };
-            p.text(Pos2::new(r.left() + 58.0, r.top() + 18.0), Align2::LEFT_CENTER, name, FontId::proportional(16.0), Color32::WHITE);
-            let about = if locked { "В сетевой игре — только родная планета" } else { k.about() };
-            p.text(Pos2::new(r.left() + 58.0, r.top() + 40.0), Align2::LEFT_CENTER, about, FontId::proportional(11.5), Color32::from_white_alpha(185));
-            if resp.clicked() {
-                pick = Some(*k);
-            }
-        }
+        let content = Rect::from_min_max(rect.min + Vec2::new(14.0,56.0), rect.max - Vec2::splat(14.0));
+        ui.allocate_ui_at_rect(content, |ui| {
+            ui.set_width(content.width());
+            egui::ScrollArea::vertical().id_salt("planet-destinations").max_height(content.height()).show(ui, |ui| {
+                for (group, heading) in [(0,"Солнечная система"),(1,"Экзопланеты"),(2,"Вымышленные миры")] {
+                    ui.label(egui::RichText::new(heading).color(Color32::from_rgb(155,190,230)).strong());
+                    let order = [PlanetKind::Mercury,PlanetKind::Venus,PlanetKind::Home,PlanetKind::Moon,PlanetKind::Mars,PlanetKind::Europa,PlanetKind::Titan,PlanetKind::Titania,PlanetKind::Triton,PlanetKind::ProximaB,PlanetKind::Kepler186f,PlanetKind::Lava,PlanetKind::Ice,PlanetKind::Alien];
+                    for k in order.into_iter().filter(|k| k.group()==group) {
+                        let locked=online && k!=here;
+                        let (r,resp)=ui.allocate_exact_size(Vec2::new(content.width()-8.0,94.0), if locked {Sense::hover()}else{Sense::click()});
+                        let p=ui.painter();
+                        let bg=if k==here {Color32::from_rgb(45,75,115)}else if resp.hovered() {Color32::from_rgb(40,60,95)}else{Color32::from_rgb(23,35,59)};
+                        p.rect_filled(r,Rounding::same(14.0),bg);
+                        let [red,green,blue]=k.swatch();
+                        p.circle_filled(Pos2::new(r.left()+26.0,r.center().y),16.0,Color32::from_rgb(red,green,blue));
+                        let text_w=(r.width()-62.0).max(1.0);
+                        let name=if k==here {format!("{} · вы здесь",k.name())}else{k.name().to_string()};
+                        let title=p.layout(name,FontId::proportional(15.0),Color32::WHITE,text_w);
+                        let y=r.top()+8.0+title.size().y;
+                        p.galley(Pos2::new(r.left()+52.0,r.top()+8.0),title,Color32::WHITE);
+                        let about=if locked {"Перелёты доступны в одиночной игре"}else{k.about()};
+                        let desc=p.layout(about.into(),FontId::proportional(11.5),Color32::from_gray(190),text_w);
+                        p.galley(Pos2::new(r.left()+52.0,y+4.0),desc,Color32::from_gray(190));
+                        #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("planet-card-test",k.slug())),r));
+                        if resp.clicked() {pick=Some(k);}
+                        ui.add_space(6.0);
+                    }
+                }
+            });
+        });
     });
     pick
 }
@@ -5286,6 +5306,26 @@ fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, 
 #[cfg(test)]
 mod inventory_context_tests {
     use super::*;
+    #[test]
+    fn rocket_menu_mouse_can_select_a_solar_destination_on_desktop_and_phone() {
+        use wolfcraft_engine::planet::PlanetKind;
+        for size in [egui::vec2(1400.0,800.0),egui::vec2(802.0,360.0)] {
+            let ctx=egui::Context::default();
+            let mut selected=None;
+            let mut render=|events| {
+                let _=ctx.run(egui::RawInput {screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,size)),events,..Default::default()}, |ctx| {
+                    selected=rocket_menu(ctx,PlanetKind::Home,false,&mut Vec::new());
+                });
+                selected
+            };
+            render(vec![]); render(vec![]);
+            let r=ctx.data(|d|d.get_temp::<egui::Rect>(egui::Id::new(("planet-card-test","mercury")))).unwrap();
+            assert!(egui::Rect::from_min_size(egui::Pos2::ZERO,size).contains(r.center()));
+            let event=|pressed|egui::Event::PointerButton{pos:r.center(),button:egui::PointerButton::Primary,pressed,modifiers:Default::default()};
+            render(vec![egui::Event::PointerMoved(r.center()),event(true)]);
+            assert_eq!(render(vec![event(false)]),Some(PlanetKind::Mercury));
+        }
+    }
     #[test]
     fn opening_player_inventory_discards_previous_chest_and_workbench() {
         let dir = std::env::temp_dir().join(format!("wolf_inventory_context_{}", std::process::id()));

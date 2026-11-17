@@ -261,15 +261,21 @@ enum ControlIcon { Gui(u16), Item(ItemId) }
 const INVENTORY_BODY_H:f32=432.0;
 fn section_label(ui:&mut Ui,text:&str) {ui.label(egui::RichText::new(text).font(bold_font(12.0)).color(Color32::from_rgb(164,178,192)));}
 fn inventory_surface(painter:&egui::Painter,rect:Rect,recessed:bool) {
-    painter.rect_filled(rect,Rounding::same(4.0),if recessed {Color32::from_rgb(23,28,35)}else{Color32::from_rgb(36,43,52)});
-    painter.rect_stroke(rect,Rounding::same(4.0),Stroke::new(1.0,Color32::from_rgb(68,82,97)));
+    let p = Palette::dark();
+    let radius = if recessed { 12.0 } else { 18.0 };
+    painter.rect_filled(rect, Rounding::same(radius), if recessed { Color32::from_rgb(14, 23, 38) } else { Color32::from_rgb(22, 36, 60) });
+    let shine = Rect::from_min_max(rect.min + Vec2::splat(1.0), Pos2::new(rect.right()-1.0, rect.top()+rect.height()*0.45));
+    painter.add(crate::launcher::grad_shape(shine, radius-1.0, 0.0, crate::launcher::glass_gloss(&p), Color32::TRANSPARENT));
+    painter.rect_stroke(rect, Rounding::same(radius), Stroke::new(1.0, crate::launcher::glass_rim(&p)));
 }
 
 fn inventory_plate(ui:&mut Ui,icons:&GuiIcons,p:&Palette,rect:Rect,id:Id,icon:ControlIcon,label:&str,on:bool)->egui::Response {
     let response=ui.interact(rect,id,Sense::click());let edge=if on {p.accent}else{Color32::from_rgb(78,93,110)};
     let hot=response.hovered()||response.is_pointer_button_down_on();
-    ui.painter().rect_filled(rect,Rounding::same(4.0),if on||hot {Color32::from_rgb(46,60,75)}else{Color32::from_rgb(32,39,49)});
-    ui.painter().rect_stroke(rect,Rounding::same(4.0),Stroke::new(if on {1.5}else{1.0},edge));
+    ui.painter().rect_filled(rect,Rounding::same(12.0),if on||hot {Color32::from_rgb(38,70,102)}else{Color32::from_rgb(22,36,60)});
+    let shine=Rect::from_min_max(rect.min+Vec2::splat(1.0),Pos2::new(rect.right()-1.0,rect.center().y));
+    ui.painter().add(crate::launcher::grad_shape(shine,11.0,0.0,crate::launcher::glass_gloss(&Palette::dark()),Color32::TRANSPARENT));
+    ui.painter().rect_stroke(rect,Rounding::same(12.0),Stroke::new(if on {1.5}else{1.0},edge));
     let ir=Rect::from_center_size(if label.is_empty(){rect.center()}else{Pos2::new(rect.left()+18.0,rect.center().y)},Vec2::splat(22.0));
     match icon {ControlIcon::Gui(ic)=>icons.paint(ui.painter(),ir,ic,if on {p.accent}else{p.text}),ControlIcon::Item(item)=>icons.paint_item(ui.painter(),ir,item)}
     if !label.is_empty(){let text=ui.painter().layout(label.to_string(),bold_font(12.0),p.text,(rect.width()-40.0).max(1.0));ui.painter().galley(Pos2::new(rect.left()+33.0,rect.center().y-text.size().y/2.0),text,p.text);}
@@ -283,7 +289,7 @@ fn clear_inventory(state:&mut InventoryUiState,inv:&mut Inventory) {
 
 /// Shows the inventory. `near_table` turns the crafting grid into 3×3.
 pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState, inv: &mut Inventory, creative: bool, near_table: bool, dt: f32) -> InventoryResult {
-    let mut p = palette(ctx);
+    let mut p = Palette::dark();
     p.text=Color32::from_rgb(226,232,239);p.text_muted=Color32::from_rgb(155,171,187);p.surface_hi=Color32::from_rgb(36,43,53);p.surface_hover=Color32::from_rgb(47,58,71);p.outline=Color32::from_rgb(65,79,95);
     state.hold_seen=false;
     if state.touch_source.is_none(){ctx.data_mut(|d|d.insert_temp(Id::new("inventory-touch-drag"),false));}
@@ -303,9 +309,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     let recipes_were_open = state.recipes_open;
     let confirmation_was_open=state.confirm_clear;
     if creative {
-        // A block window like the machines' (WolfTech): a metal banner with the title, the
-        // categories and the item grid in recessed panels, the hotbar under them; the window
-        // is scaled to fit the screen.
+        // Dark Aero surfaces match the launcher; the existing layout scales to the screen.
         let cell = 46.0f32;
         let (rows, cols) = (7usize, 9usize);
         let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;

@@ -57,10 +57,10 @@ impl GpuAtlas {
     }
 
     /// Mip levels of an atlas: the block atlas gets two smaller copies (½ and ¼), so distant
-    /// blocks read a small texture (fast on phones, no shimmering); others have none.
+    /// blocks, skins and items read smaller textures in the distance; UI stays crisp.
     fn levels(atlas: &TextureAtlas) -> u32 {
         let img = atlas.image();
-        if atlas.kind() == AtlasKind::Blocks && img.width % 4 == 0 && img.height % 4 == 0 { MIP_LEVELS } else { 1 }
+        if matches!(atlas.kind(), AtlasKind::Blocks | AtlasKind::Entities | AtlasKind::Items) && img.width % 4 == 0 && img.height % 4 == 0 { MIP_LEVELS } else { 1 }
     }
 
     /// Writes the smaller mip levels of the region `(x, y, w, h)` (level-0 pixels, aligned to 4).
@@ -542,7 +542,7 @@ impl WorldRenderer {
             label: Some("pixel-sampler"),
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Linear,
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()

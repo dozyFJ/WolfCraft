@@ -567,20 +567,23 @@ fn vs_model(in: ModelIn) -> ModelOut {
 @fragment
 fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     // Base colour: flat (sRGB constant) or sampled from the skin / item atlases (already linear).
-    let skin = textureSampleLevel(entities_atlas, samp, in.uv, 0.0);
-    let item = textureSampleLevel(items_atlas, samp, in.uv, 0.0);
+    let skin = textureSampleGrad(entities_atlas, samp, in.uv, dpdx(in.uv), dpdy(in.uv));
+    let item = textureSampleGrad(items_atlas, samp, in.uv, dpdx(in.uv), dpdy(in.uv));
+    let uv_dx = dpdx(in.uv);
+    let uv_dy = dpdy(in.uv);
+    let grain_visibility = 1.0 - smoothstep(0.35, 1.0, max(length(uv_dx), length(uv_dy)));
     var base = pow(in.color, vec3<f32>(2.2));
     let toon = fx_on(8u);
     if (in.tex < 0.5 && !toon) {
         // Pixel-art grain on flat-colour creatures: every 1/16 block gets its own brightness.
         let cell = floor(in.uv);
         let h = fract(sin(dot(cell, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-        base = base * (0.80 + 0.36 * h);
+        base = base * mix(1.0, 0.80 + 0.36 * h, grain_visibility);
     }
     if (in.tex > 3.5) {
         // Dropped block: a block sprite from the world atlas (sprite id in colour.r).
         let r = g.tiles[min(u32(in.color.r + 0.5), 511u)];
-        let bt = textureSampleLevel(atlas, samp, r.xy + clamp(in.uv, vec2<f32>(0.01), vec2<f32>(0.99)) * r.zw, 0.0);
+        let bt = textureSampleGrad(atlas, samp, r.xy + clamp(in.uv, vec2<f32>(0.01), vec2<f32>(0.99)) * r.zw, uv_dx * r.zw, uv_dy * r.zw);
         if (bt.a < 0.5) {
             discard;
         }

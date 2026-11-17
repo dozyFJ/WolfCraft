@@ -176,6 +176,7 @@ pub struct GameSession {
     pub camera_mode: CameraMode,
     /// Camera mode to return to after resting.
     rest_camera: Option<CameraMode>,
+    wake_camera: Option<(Camera, f32)>,
     /// Vertical camera lag (blocks along up) that smooths automatic steps.
     cam_lag: f64,
     /// Camera feel: dip after a hard landing, last vertical speed (to spot the landing),
@@ -236,7 +237,7 @@ pub struct GameSession {
     pub arena: Option<wolfcraft_engine::arenas::Arena>,
     arena_dead_seen: bool,
     /// Bow draw 0..1 while the use button is held with a bow.
-    /// The player is asleep in a bed or sits on a chair (drawn in third person, cannot walk).
+    /// The player sleeps in first person or sits on a chair; walking is suspended.
     pub rest: Option<Rest>,
     pub bow_charge: f32,
     /// The arrow the bow would shoot now (drawn on the string, tinted if tipped).
@@ -385,6 +386,7 @@ impl GameSession {
             saved_notice: 0.0,
             camera_mode: CameraMode::First,
             rest_camera: None,
+            wake_camera: None,
             cam_lag: 0.0,
             land_dip: 0.0,
             tech: std::collections::HashMap::new(),
@@ -713,6 +715,9 @@ impl GameSession {
         // Riding a dragon: the stick steers it, «Прыжок» climbs, «Присесть» dives.
         self.tick_ride(input, dt);
         // Resting: asleep (the night passes in a few seconds) or sitting until you move.
+        if let Some((camera, t)) = self.wake_camera {
+            self.wake_camera = (t + dt < 0.85).then_some((camera, t + dt));
+        }
         let resting = self.tick_rest(input, dt);
         // Physics, split into steps of at most 1/30 s.
         if self.rocket.is_some() {
@@ -823,7 +828,7 @@ impl GameSession {
         // Phones pick what is under the finger; with no finger on the world nothing is picked.
         self.aim_dir = if input.touch { input.aim } else { Some(self.player.look_dir()) };
         self.hit = self.aim_dir.and_then(|d| raycast(&self.chunks, eye, d, reach));
-        if !self.player.survival.dead && self.rocket.is_none() {
+        if !self.player.survival.dead && self.rocket.is_none() && !self.bed_view_active() {
             let hit = self.hit;
             // A creature in front of the block takes the blow: holding to hit it never digs the
             // block behind it.
@@ -3743,7 +3748,7 @@ impl GameSession {
             for b in 0..N {
                 for a in 0..N {
                     let col = self.planet.column(sampler.cell_dir(f, a, b));
-                    cols.push(crate::preview::biome_color(&col));
+                    cols.push(if self.planet_kind == wolfcraft_engine::planet::PlanetKind::Mars { [0.65,0.30,0.17] } else { crate::preview::biome_color(&col) });
                     // Four-block steps retain the voxel silhouette without whole-planet chunks.
                     let elev = (col.elev.max(0.0) as f64 / 4.0).round() * 4.0;
                     heights.push((1.0 + elev / self.planet.radius) as f32);
@@ -4073,6 +4078,22 @@ impl GameSession {
         }
         if let Some(c) = self.cutscene {
             return c;
+        }
+        if let Some(Rest::Sleep { at, dir, back, t, .. }) = self.rest {
+            let up = wolfcraft_engine::physics::up_at(at);
+            let k = (t / 0.65).clamp(0.0, 1.0) as f64;
+            let k = k * k * (3.0 - 2.0 * k);
+            let pillow = at + dir * 0.62 + up * 0.32;
+            let forward = (-dir * 0.65 + up * 0.76).normalize();
+            return Camera { eye: (back + up * 1.62).lerp(pillow, k),
+                forward: self.player.look_dir().lerp(forward, k).normalize_or_zero(), up };
+        }
+        if let Some((from, t)) = self.wake_camera {
+            let k = (t / 0.85).clamp(0.0, 1.0) as f64;
+            let k = k * k * (3.0 - 2.0 * k);
+            return Camera { eye: from.eye.lerp(self.player.eye_pos(), k),
+                forward: from.forward.lerp(self.player.look_dir(), k).normalize_or_zero(),
+                up: from.up.lerp(self.player.up(), k).normalize_or_zero() };
         }
         let up = self.player.up();
         let raw_eye = self.player.eye_pos();
@@ -4478,12 +4499,16 @@ impl GameSession {
         if self.rest.is_none() {
             self.rest_camera = Some(self.camera_mode);
         }
-        self.camera_mode = CameraMode::ThirdBack;
+        self.wake_camera = None;
+        self.camera_mode = if matches!(r, Rest::Sleep { .. }) { CameraMode::First } else { CameraMode::ThirdBack };
         self.player.body.vel = DVec3::ZERO;
         self.rest = Some(r);
     }
 
-    fn end_rest(&mut self) {
+    pub fn end_rest(&mut self) {
+        if matches!(self.rest, Some(Rest::Sleep { .. })) {
+            self.wake_camera = Some((self.camera_base(), 0.0));
+        }
         if let Some(r) = self.rest.take() {
             let back = match r {
                 Rest::Sleep { back, .. } | Rest::Sit { back, .. } => back,
@@ -4522,6 +4547,10 @@ impl GameSession {
 
     /// Seconds a night's sleep takes on screen.
     pub const SLEEP_SECS: f32 = 5.0;
+
+    pub fn bed_view_active(&self) -> bool {
+        matches!(self.rest, Some(Rest::Sleep { .. })) || self.wake_camera.is_some()
+    }
 
     /// How dark the screen is while sleeping (0..1): fades in, stays, fades out.
     pub fn sleep_fade(&self) -> f32 {
@@ -6430,6 +6459,7 @@ impl GameSession {
     }
 
     pub fn cycle_camera(&mut self) {
+        if self.bed_view_active() { return; }
         self.camera_mode = self.camera_mode.next();
     }
 
@@ -6983,7 +7013,20 @@ mod tests {
         let mut ev = vec![InteractionEvent::Slept { night: true, pos: bed_cell }];
         s.handle_building_events(&mut ev, None);
         assert!(matches!(s.rest, Some(Rest::Sleep { .. })));
-        assert_eq!(s.camera_mode, CameraMode::ThirdBack);
+        assert_eq!(s.camera_mode, CameraMode::First);
+        // Cancelling sleep keeps the first frame continuous and starts a rising view.
+        s.tick_rest(&InputFrame::default(), 1.0);
+        let lying = s.camera();
+        assert!((lying.eye - s.player.body.pos).length() < 1.0, "camera is at the pillow");
+        s.end_rest();
+        assert!(s.rest.is_none());
+        assert!(s.bed_view_active());
+        assert!((s.camera().eye - lying.eye).length() < 1e-6, "no jump when leaving bed");
+        s.wake_camera = s.wake_camera.map(|(c, _)| (c, 0.84));
+        assert!((s.camera().eye - s.player.eye_pos()).length() < 0.01, "view rises to standing eyes");
+        s.wake_camera = None;
+        s.player.world_time = 3.0 * DAY_LENGTH;
+        s.lie_down(bed_cell, true);
         let mut darkest = 0.0f32;
         for _ in 0..(GameSession::SLEEP_SECS * 60.0) as usize + 30 {
             s.update(&InputFrame { forward: 0.0, ..Default::default() }, 1.0 / 60.0, 4, false);

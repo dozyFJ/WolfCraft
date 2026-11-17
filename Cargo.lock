@@ -3985,6 +3985,8 @@ dependencies = [
 name = "wolfcraft-net"
 version = "0.3.0"
 dependencies = [
+ "base64",
+ "flate2",
  "if-addrs",
  "log",
  "serde",

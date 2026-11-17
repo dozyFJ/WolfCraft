@@ -46,7 +46,7 @@ impl AtlasKind {
         match self {
             // 4: with sprites a multiple of 4 wide, every tile then starts on a multiple of 4,
             // so the GPU's 2× and 4× smaller mip levels never mix neighbouring tiles.
-            AtlasKind::Blocks => 4,
+            AtlasKind::Blocks | AtlasKind::Items | AtlasKind::Entities => 4,
             _ => 1,
         }
     }

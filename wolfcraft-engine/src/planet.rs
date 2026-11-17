@@ -101,17 +101,27 @@ pub enum PlanetKind {
     Lava,
     Ice,
     Alien,
+    Mercury, Venus, Mars, Europa, Titan, Titania, Triton, ProximaB, Kepler186f,
 }
 
 impl PlanetKind {
-    pub const ALL: [PlanetKind; 5] = [PlanetKind::Home, PlanetKind::Moon, PlanetKind::Lava, PlanetKind::Ice, PlanetKind::Alien];
+    pub const ALL: [PlanetKind; 14] = [PlanetKind::Home, PlanetKind::Moon, PlanetKind::Lava, PlanetKind::Ice, PlanetKind::Alien, PlanetKind::Mercury, PlanetKind::Venus, PlanetKind::Mars, PlanetKind::Europa, PlanetKind::Titan, PlanetKind::Titania, PlanetKind::Triton, PlanetKind::ProximaB, PlanetKind::Kepler186f];
     pub fn name(self) -> &'static str {
         match self {
-            PlanetKind::Home => "Родная планета",
+            PlanetKind::Home => "Земля",
             PlanetKind::Moon => "Луна",
             PlanetKind::Lava => "Игнис (огненная)",
             PlanetKind::Ice => "Глация (ледяная)",
             PlanetKind::Alien => "Ксенос (джунгли)",
+            PlanetKind::Mercury => "Меркурий",
+            PlanetKind::Venus => "Венера",
+            PlanetKind::Mars => "Марс",
+            PlanetKind::Europa => "Юпитер · Европа",
+            PlanetKind::Titan => "Сатурн · Титан",
+            PlanetKind::Titania => "Уран · Титания",
+            PlanetKind::Triton => "Нептун · Тритон",
+            PlanetKind::ProximaB => "Проксима Центавра b",
+            PlanetKind::Kepler186f => "Kepler-186f",
         }
     }
     pub fn about(self) -> &'static str {
@@ -121,6 +131,15 @@ impl PlanetKind {
             PlanetKind::Lava => "Пепел, базальт и лавовые моря, огненная руда, магмовые твари",
             PlanetKind::Ice => "Снег, синий лёд, замёрзшие моря, морозная руда, ледяные волки",
             PlanetKind::Alien => "Фиолетовый дёрн, бирюзовые деревья, светогрибы, ксенотвари",
+            PlanetKind::Mercury => "Кратеры и каменные равнины",
+            PlanetKind::Venus => "Горячие базальтовые плато, густое жёлтое небо",
+            PlanetKind::Mars => "Красные пустыни и кратеры",
+            PlanetKind::Europa => "Высадка на ледяной спутник Юпитера",
+            PlanetKind::Titan => "Высадка на спутник с оранжевой дымкой",
+            PlanetKind::Titania => "Высадка на холодный каменно-ледяной спутник",
+            PlanetKind::Triton => "Высадка на далёкий ледяной спутник",
+            PlanetKind::ProximaB => "Известная экзопланета · вымышленный ландшафт",
+            PlanetKind::Kepler186f => "Известная экзопланета · вымышленная биосфера",
         }
     }
     /// Folder of this planet inside the world (`None` for home).
@@ -131,6 +150,15 @@ impl PlanetKind {
             PlanetKind::Lava => "lava",
             PlanetKind::Ice => "ice",
             PlanetKind::Alien => "alien",
+            PlanetKind::Mercury => "mercury",
+            PlanetKind::Venus => "venus",
+            PlanetKind::Mars => "mars",
+            PlanetKind::Europa => "europa",
+            PlanetKind::Titan => "titan",
+            PlanetKind::Titania => "titania",
+            PlanetKind::Triton => "triton",
+            PlanetKind::ProximaB => "proxima_b",
+            PlanetKind::Kepler186f => "kepler_186f",
         }
     }
     pub fn from_slug(s: &str) -> Option<PlanetKind> {
@@ -144,11 +172,57 @@ impl PlanetKind {
             PlanetKind::Lava => 1.1,
             PlanetKind::Ice => 0.9,
             PlanetKind::Alien => 0.8,
+            PlanetKind::Mercury => 0.38,
+            PlanetKind::Venus => 0.9,
+            PlanetKind::Mars => 0.38,
+            PlanetKind::Europa => 0.13,
+            PlanetKind::Titan => 0.14,
+            PlanetKind::Titania => 0.04,
+            PlanetKind::Triton => 0.08,
+            PlanetKind::ProximaB => 1.1,
+            PlanetKind::Kepler186f => 1.05,
+        }
+    }
+    /// Reuse the established terrain families without changing legacy save identifiers.
+    pub fn terrain_kind(self) -> Self {
+        match self {
+            Self::Mercury => Self::Moon,
+            Self::Venus => Self::Lava,
+            Self::Mars => Self::Moon,
+            Self::Europa => Self::Ice,
+            Self::Titan => Self::Moon,
+            Self::Titania => Self::Ice,
+            Self::Triton => Self::Ice,
+            Self::ProximaB => Self::Lava,
+            Self::Kepler186f => Self::Alien,
+            other => other,
+        }
+    }
+    pub fn group(self) -> u8 {
+        match self {
+            Self::Lava | Self::Ice | Self::Alien => 2,
+            Self::ProximaB | Self::Kepler186f => 1,
+            _ => 0,
+        }
+    }
+    pub fn swatch(self) -> [u8; 3] {
+        match self {
+            Self::Mercury => [160, 146, 133],
+            Self::Venus => [211, 168, 91],
+            Self::Mars => [192, 91, 55],
+            Self::Europa => [197, 191, 161],
+            Self::Titan => [198, 142, 61],
+            Self::Titania => [128, 194, 205],
+            Self::Triton => [97, 137, 219],
+            Self::ProximaB => [170, 90, 90],
+            Self::Kepler186f => [75, 155, 137],
+            Self::Home => [70,150,90], Self::Moon => [170,170,178],
+            Self::Lava => [230,90,30], Self::Ice => [150,200,250], Self::Alien => [150,80,200],
         }
     }
     /// Number used for creatures of this planet (their colours and names).
     pub fn index(self) -> u8 {
-        self as u8
+        self.terrain_kind() as u8
     }
 }
 
@@ -272,7 +346,7 @@ impl Planet {
         let mmask = smoothstep(0.1, 0.55, Self::n3(&self.n_mmask, d * 2.4));
         let misc = Self::n3(&self.n_misc, d * 6.0) + Self::n3(&self.n_misc, wp * 0.03) * 0.12;
         let sea = Self::n3(&self.n_edge, d * 3.0);
-        let (e, biome, temp) = match self.kind {
+        let (e, biome, temp) = match self.kind.terrain_kind() {
             PlanetKind::Moon => {
                 // Craters: round bowls with raised rims, everywhere, of every size.
                 let mut e = 8.0 + hills * 0.8 + mmask * ridge * 60.0 * amp;
@@ -674,10 +748,10 @@ impl Planet {
         } else {
             s
         };
-        if r > s && self.kind == PlanetKind::Moon {
+        if r > s && self.kind.terrain_kind() == PlanetKind::Moon {
             return Block::Air;
         }
-        if r > s && self.kind == PlanetKind::Lava {
+        if r > s && self.kind.terrain_kind() == PlanetKind::Lava {
             return if r <= self.radius { Block::Lava } else { Block::Air };
         }
         if r > s {
@@ -694,6 +768,9 @@ impl Planet {
             return Block::Air;
         }
         let depth = s - r;
+        if self.kind == PlanetKind::Mars && s - r < 5.0 {
+            return if s-r < 1.0 { Block::RedSand } else { Block::Terracotta };
+        }
         let underwater = s < self.radius;
         let (top, filler, under) = if underwater {
             let h = hash3(self.seed ^ 0x5EA, c.i >> 2, c.j >> 2, (c.k >> 2) + c.f as i32 * 4096) % 100;
@@ -744,7 +821,7 @@ impl Planet {
         if let Some(ore) = self.ore_at(c, self.radius - r) {
             return ore;
         }
-        match self.kind {
+        match self.kind.terrain_kind() {
             PlanetKind::Moon => Block::MoonRock,
             PlanetKind::Lava => Block::Basalt,
             _ => Block::Stone,
@@ -783,7 +860,7 @@ impl Planet {
         let roll = (h % 1000) as u32;
         if self.kind != PlanetKind::Home {
             // Other planets: their own crystal ore, plus a little iron, gold and diamond.
-            let own = match self.kind {
+            let own = match self.kind.terrain_kind() {
                 PlanetKind::Moon => Block::MoonOre,
                 PlanetKind::Lava => Block::FireCrystalOre,
                 PlanetKind::Ice => Block::FrostOre,
@@ -918,6 +995,27 @@ mod tests {
         Planet::new(&c)
     }
 
+    #[test]
+    fn destinations_keep_legacy_saves_and_generate_distinct_worlds() {
+        let cfg=WorldConfig::new("solar",77);
+        let mut slugs=std::collections::HashSet::new();
+        let mut seeds=std::collections::HashSet::new();
+        for kind in PlanetKind::ALL {
+            assert!(slugs.insert(kind.slug()));
+            assert_eq!(PlanetKind::from_slug(kind.slug()),Some(kind));
+            let p=Planet::new_world(&cfg,kind);
+            assert!(seeds.insert(p.seed));
+            let spawn=p.find_spawn();
+            assert!(spawn.is_finite(),"{:?}",kind);
+            assert!(!p.block_at_world(spawn).is_solid(),"{:?}: blocked spawn",kind);
+        }
+        for (slug,kind) in [("home",PlanetKind::Home),("moon",PlanetKind::Moon),("lava",PlanetKind::Lava),("ice",PlanetKind::Ice),("alien",PlanetKind::Alien)] {
+            assert_eq!(PlanetKind::from_slug(slug),Some(kind));
+        }
+        let mars=Planet::new_world(&cfg,PlanetKind::Mars);
+        let spawn=mars.find_spawn();
+        assert_eq!(mars.block_at_world(spawn+spawn.normalize()*4.0),Block::Air);
+    }
     #[test]
     fn deterministic_by_seed() {
         let a = planet(PlanetSize::Small, WorldType::Standard, 1);
