@@ -3194,3 +3194,74 @@ pub fn build_kinetic(parts: &[(DVec3, DVec3, DVec3, DVec3, u8, f32)], eye: DVec3
     }
     v
 }
+
+/// Open observation cockpit: the pilot remains visible from the chase camera.
+/// All parts are real shaded geometry, independent of particles and item sprites.
+pub fn build_space_rocket(feet: DVec3, up: DVec3, heading: DVec3, camera: DVec3, time: f32, thrust: bool) -> Vec<ModelVertex> {
+    let up = up.normalize();
+    let fwd = (heading - up * heading.dot(up)).normalize_or_zero();
+    let fwd = if fwd.length_squared() > 0.5 { fwd } else { up.cross(if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X }).normalize() };
+    let frame = Frame { origin: feet - camera, right: fwd.cross(up).normalize(), up, fwd };
+    let mut v = Vec::new();
+    let mut part = |lo: [f32; 3], hi: [f32; 3], color| add_box_r(&mut v, &frame, Vec3::from(lo), Vec3::from(hi), Vec3::ZERO, 0.0, color, false);
+    let white = [0.84, 0.89, 0.94];
+    let metal = [0.20, 0.28, 0.35];
+    let red = [0.78, 0.13, 0.12];
+    // Stepped octagonal body, pressure bands, deck and combustion chamber.
+    part([-0.70, -2.9, -0.48], [0.70, -0.1, 0.48], white);
+    part([-0.48, -2.9, -0.70], [0.48, -0.1, 0.70], white);
+    for y in [-2.6, -1.25] {
+        part([-0.73, y, -0.51], [0.73, y + 0.16, 0.51], red);
+        part([-0.51, y, -0.73], [0.51, y + 0.16, 0.73], red);
+    }
+    part([-0.8, -0.12, -0.8], [0.8, 0.0, 0.8], metal);
+    part([-0.48, -3.25, -0.48], [0.48, -2.9, 0.48], metal);
+    // Four fins and landing shoes. The deck is at the pilot's feet.
+    for side in [-1.0f32, 1.0] {
+        let (a, b) = if side < 0.0 { (-1.30, -0.65) } else { (0.65, 1.30) };
+        part([a, -2.9, -0.12], [b, -1.65, 0.12], red);
+        part([-0.12, -2.9, a], [0.12, -1.65, b], red);
+        part([a, -3.35, -0.25], [b, -3.15, 0.25], metal);
+        part([-0.25, -3.35, a], [0.25, -3.15, b], metal);
+        // Cabin pillars frame the player instead of covering their body with an opaque cube.
+        for z in [-0.72f32, 0.64] {
+            let x = side * 0.68;
+            part([x - 0.055, 0.0, z], [x + 0.055, 2.15, z + 0.08], metal);
+        }
+    }
+    part([-0.78, 2.1, -0.78], [0.78, 2.3, 0.78], white);
+    part([-0.60, 2.3, -0.60], [0.60, 2.65, 0.60], red);
+    part([-0.38, 2.65, -0.38], [0.38, 3.0, 0.38], red);
+    part([-0.16, 3.0, -0.16], [0.16, 3.35, 0.16], white);
+    part([-0.48, 0.7, 0.55], [0.48, 1.0, 0.74], metal);
+    drop(part);
+    // Blue console and exhaust use the emissive model material.
+    let glow = v.len();
+    add_box_r(&mut v, &frame, Vec3::new(-0.30, 0.98, 0.53), Vec3::new(0.30, 1.01, 0.73), Vec3::ZERO, 0.0, [0.1, 0.8, 1.0], false);
+    if thrust {
+        let pulse = (time * 27.0).sin() * 0.15;
+        add_box_r(&mut v, &frame, Vec3::new(-0.30, -4.6 - pulse, -0.30), Vec3::new(0.30, -3.2, 0.30), Vec3::ZERO, 0.0, [1.0, 0.5, 0.08], false);
+        add_box_r(&mut v, &frame, Vec3::new(-0.14, -4.9 - pulse, -0.14), Vec3::new(0.14, -3.2, 0.14), Vec3::ZERO, 0.0, [1.0, 0.92, 0.5], false);
+    }
+    for vertex in &mut v[glow..] { vertex.tex = 3.0; }
+    v
+}
+
+#[cfg(test)]
+mod space_rocket_tests {
+    use super::*;
+    #[test]
+    fn rocket_has_volume_finite_normals_and_emissive_thrust() {
+        for up in [DVec3::Y, DVec3::X, DVec3::Z] {
+            let origin = up * 1000.0;
+            let heading = up.cross(if up == DVec3::Y { DVec3::X } else { DVec3::Y });
+            let v = build_space_rocket(origin, up, heading, origin, 0.0, true);
+            assert!(v.len() > 1000);
+            assert!(v.iter().all(|v| v.pos.iter().chain(v.normal.iter()).all(|x| x.is_finite())));
+            assert!(v.iter().any(|v| v.tex == 3.0));
+            let heights: Vec<_> = v.iter().map(|v| DVec3::from(Vec3::from(v.pos)).dot(up)).collect();
+            assert!(heights.iter().copied().fold(f64::NEG_INFINITY, f64::max) > 3.0);
+            assert!(heights.iter().copied().fold(f64::INFINITY, f64::min) < -4.5);
+        }
+    }
+}

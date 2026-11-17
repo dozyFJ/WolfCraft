@@ -24,12 +24,20 @@ const SKY_TEX: f32 = 3.0;
 
 /// The real planet seen from space: colours of its surface, `n × n` samples per cube face
 /// (face-major, then j, then i). Set by the game when a world (or dimension) is loaded.
-static GLOBE: std::sync::Mutex<Option<(u32, Vec<[f32; 3]>)>> = std::sync::Mutex::new(None);
+static GLOBE: std::sync::Mutex<Option<(u32, Vec<[f32; 3]>, Vec<f32>)>> = std::sync::Mutex::new(None);
 
 /// Gives the sky the planet's surface colours for the view from orbit (`n × n` per face).
 pub fn set_globe(n: u32, colors: Vec<[f32; 3]>) {
+    let count = colors.len();
+    set_globe_terrain(n, colors, vec![1.0; count]);
+}
+
+/// Coarse solid terrain columns for orbit; nearby chunks remain the actual editable voxels.
+pub fn set_globe_terrain(n: u32, colors: Vec<[f32; 3]>, heights: Vec<f32>) {
     if let Ok(mut g) = GLOBE.lock() {
-        *g = (colors.len() == (6 * n * n) as usize && n > 0).then_some((n, colors));
+        *g = (n > 0 && colors.len() == (6 * n as usize * n as usize)
+            && heights.len() == colors.len() && heights.iter().all(|h| h.is_finite() && *h >= 1.0 && *h <= 2.0))
+            .then_some((n, colors, heights));
     }
 }
 
@@ -97,12 +105,32 @@ impl Out {
                 if fnorm.dot(-centre) <= 0.0 {
                     continue;
                 }
-                let (u, v) = (axes[(i + 1) % 3] * h, axes[(i + 2) % 3] * h);
-                let fc = centre + fnorm * h;
-                let lit = 0.35 + 0.65 * fnorm.dot(sun).max(0.0);
-                let shade = mix(sky, [col[0] * lit, col[1] * lit, col[2] * lit], vis);
-                self.tri(fc - u - v, fc + u - v, fc + u + v, shade);
-                self.tri(fc - u - v, fc + u + v, fc - u + v, shade);
+                let u = axes[(i + 1) % 3];
+                let v = axes[(i + 2) % 3];
+                // Small solid columns, rather than one painted quad per face.
+                const N: u32 = 6;
+                let step = 2.0 * h / N as f32;
+                for y in 0..N {
+                    for x in 0..N {
+                        let noise = rnd(x + y * N + i as u32 * N * N, 17);
+                        let relief = (noise * 3.0).floor() * step * 0.22;
+                        let base = centre + fnorm * h + u * (-h + x as f32 * step) + v * (-h + y as f32 * step);
+                        let bottom = [base, base + u * step, base + (u + v) * step, base + v * step];
+                        let top = bottom.map(|p| p + fnorm * relief);
+                        let lit = (0.35 + 0.65 * fnorm.dot(sun).max(0.0)) * (0.88 + noise * 0.20);
+                        let shade = mix(sky, col.map(|c| c * lit), vis);
+                        self.tri(top[0], top[1], top[2], shade);
+                        self.tri(top[0], top[2], top[3], shade);
+                        if relief > 0.0 {
+                            for edge in 0..4 {
+                                let next = (edge + 1) % 4;
+                                let side = mix(sky, col.map(|c| c * lit * 0.68), vis);
+                                self.tri(bottom[edge], bottom[next], top[next], side);
+                                self.tri(bottom[edge], top[next], top[edge], side);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -256,8 +284,8 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
     // ---- neighbouring planets (fixed in the sky, like distant worlds) ----
     if vis > 0.08 {
         let planets: [(Vec3, f32, [f32; 3], bool); 4] = [
-            (Vec3::new(0.55, 0.45, 0.70), 0.040, [0.86, 0.44, 0.30], false),
-            (Vec3::new(-0.62, 0.52, -0.58), 0.065, [0.88, 0.76, 0.56], true),
+            (Vec3::new(0.55, 0.45, 0.70), 0.040, [0.64, 0.65, 0.69], false),
+            (Vec3::new(-0.62, 0.52, -0.58), 0.065, [0.86, 0.30, 0.13], false),
             (Vec3::new(0.15, 0.78, -0.62), 0.028, [0.62, 0.82, 0.92], false),
             (Vec3::new(-0.45, 0.30, 0.84), 0.034, [0.55, 0.40, 0.70], false),
         ];
@@ -357,14 +385,17 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
         // The real surface, face by face (continents, deserts, ice where they really are).
         let globe = GLOBE.lock().ok().and_then(|g| g.clone());
         let fake_rows = if globe.is_some() { 0 } else { lat_n };
-        if let Some((gn, cols)) = globe {
+        if let Some((gn, cols, heights)) = globe {
             let shape = crate::cubesphere::Grid { n: 2, cube };
             let sampler = crate::cubesphere::Grid { n: gn as i32, cube };
             let pt = |f: u8, a: u32, b: u32| shape.along(sampler.dir_at(f, a as f64, b as f64), 1.0).as_vec3();
             for f in 0..6u8 {
                 for b in 0..gn {
                     for a in 0..gn {
-                        let (p0, p1, p2, p3) = (pt(f, a, b), pt(f, a + 1, b), pt(f, a + 1, b + 1), pt(f, a, b + 1));
+                        let index = (f as u32 * gn * gn + b * gn + a) as usize;
+                        let h = heights[index];
+                        let base_points = [pt(f, a, b), pt(f, a + 1, b), pt(f, a + 1, b + 1), pt(f, a, b + 1)];
+                        let [p0, p1, p2, p3] = base_points.map(|p| p * h);
                         let n = (p1 - p0).cross(p3 - p0).normalize_or_zero();
                         let n = if n.dot(p0) < 0.0 { -n } else { n };
                         // Back side of the planet: not seen.
@@ -375,6 +406,18 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
                         let base = cols[(f as u32 * gn * gn + b * gn + a) as usize];
                         let rim = (1.0 - n.dot(up).abs()).powi(3) * 0.35 * lit.max(0.1);
                         let c = [(base[0] * lit.max(0.07) + rim * 0.3).min(1.0), (base[1] * lit.max(0.07) + rim * 0.5).min(1.0), (base[2] * lit.max(0.07) + rim).min(1.0)];
+                        if h > 1.00001 {
+                            // Visible cliffs give orbit terrain depth instead of a painted shell.
+                            for edge in 0..4 {
+                                let q0 = base_points[edge];
+                                let q1 = base_points[(edge + 1) % 4];
+                                let wall = c.map(|v| v * 0.72);
+                                o.tri(centre + q0 * rad, centre + q1 * rad, centre + q1 * h * rad, wall);
+                                o.tri(centre + q0 * rad, centre + q1 * h * rad, centre + q0 * h * rad, wall);
+                                o.tri(centre + q0 * rad, centre + q1 * h * rad, centre + q1 * rad, wall);
+                                o.tri(centre + q0 * rad, centre + q0 * h * rad, centre + q1 * h * rad, wall);
+                            }
+                        }
                         o.tri(centre + p0 * rad, centre + p1 * rad, centre + p2 * rad, c);
                         o.tri(centre + p0 * rad, centre + p2 * rad, centre + p3 * rad, c);
                         o.tri(centre + p0 * rad, centre + p2 * rad, centre + p1 * rad, c);
@@ -408,6 +451,19 @@ mod tests {
 
     fn params(eye: DVec3, day: f32) -> SkyParams {
         SkyParams { eye, sun_dir: Vec3::new(0.0, 1.0, 0.0), day, planet_radius: 1000.0, sky: [0.1, 0.2, 0.4], time: 1.0, underwater: false, cube: false }
+    }
+
+    #[test]
+    fn orbit_terrain_has_cliff_geometry_instead_of_only_a_colored_shell() {
+        let colors = vec![[0.2, 0.5, 0.3]; 24];
+        let p = params(DVec3::new(0.0, 1400.0, 0.0), 1.0);
+        set_globe(2, colors.clone());
+        let flat = build_sky(&p).len();
+        set_globe_terrain(2, colors, vec![1.1; 24]);
+        let raised = build_sky(&p);
+        assert!(raised.len() > flat, "raised terrain needs solid cliff faces");
+        assert!(raised.iter().all(|v| v.pos.iter().all(|p| p.is_finite())));
+        if let Ok(mut g) = GLOBE.lock() { *g = None; }
     }
 
     #[test]
