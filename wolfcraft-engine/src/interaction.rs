@@ -317,6 +317,11 @@ impl Interaction {
     pub fn use_item(&mut self, world: &mut impl WorldEdit, player: &mut Player, hit: Option<Hit>) -> Vec<InteractionEvent> {
         let mut events = Vec::new();
         let held_id = player.inventory.held().map(|s| s.id);
+        // Utility tools must act before a targeted machine opens its container.
+        if held_id == Some(items::ids::SHIP_HAMMER) {
+            events.push(InteractionEvent::Fire { weapon: items::ids::SHIP_HAMMER });
+            return events;
+        }
         if let Some(h) = hit {
             // Lighter on dynamite: it starts to burn.
             if held_id == Some(items::ids::LIGHTER) && h.block == Block::Dynamite {
@@ -695,6 +700,21 @@ mod tests {
         w.blocks.insert(c(1, 50, 0), Block::Dirt);
         let p = Player::new(wp(0.5, 80.0, 0.5), GameMode::Survival);
         (w, p)
+    }
+
+    #[test]
+    fn ship_hammer_acts_on_machines_before_opening_their_gui() {
+        let (mut w, mut p) = setup();
+        p.inventory.selected = 0;
+        p.inventory.slots[0] = Some(ItemStack::new(ids::SHIP_HAMMER, 1));
+        let cell = c(0, 50, 0);
+        w.blocks.insert(cell, Block::MechPress);
+        let h = hit(&w, cell, UP);
+        let mut interaction = Interaction::default();
+        let events = interaction.use_item(&mut w, &mut p, Some(h));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], InteractionEvent::Fire { weapon: ids::SHIP_HAMMER }));
+        assert_eq!(w.block(cell), Block::MechPress);
     }
 
     #[test]

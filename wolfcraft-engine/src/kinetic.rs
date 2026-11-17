@@ -202,3 +202,31 @@ mod tests {
         assert!(!spins(Block::Gearbox) && spins(Block::Shaft));
     }
 }
+
+/// Per-dynamo generation: natural drive supplies energy; electric drive loses 25% on conversion.
+/// All dynamos share one budget, so adding dynamos cannot multiply motor input.
+pub fn dynamo_output(rpm: f32, natural_capacity: f32, motor_input: f32, dynamos: usize) -> f32 {
+    if dynamos == 0 || rpm <= 0.0 { return 0.0; }
+    let budget = natural_capacity.max(0.0) * rpm / 256.0 + motor_input.max(0.0) * 0.75;
+    (rpm / 2.0).min(budget / dynamos as f32)
+}
+
+#[cfg(test)]
+mod energy_budget_tests {
+    use super::*;
+    #[test]
+    fn motor_dynamo_loop_always_loses_energy() {
+        for count in 1..100 {
+            let output = dynamo_output(64.0, 0.0, 16.0, count) * count as f32;
+            assert!((output - 12.0).abs() < 0.001);
+            assert!(output < 16.0);
+        }
+    }
+    #[test]
+    fn natural_drive_is_shared_and_stopped_drive_generates_nothing() {
+        assert_eq!(dynamo_output(32.0, 256.0, 0.0, 1), 16.0);
+        assert_eq!(dynamo_output(32.0, 256.0, 0.0, 4), 8.0);
+        assert_eq!(dynamo_output(0.0, 256.0, 16.0, 3), 0.0);
+        assert_eq!(dynamo_output(64.0, 0.0, 16.0, 0), 0.0);
+    }
+}

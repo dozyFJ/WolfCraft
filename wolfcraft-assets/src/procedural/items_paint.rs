@@ -136,7 +136,8 @@ pub mod items {
     pub const XENO_CRYSTAL: u16 = 181;
     pub const SPACE_ROCKET: u16 = 182;
     pub const ROCKET_FUEL: u16 = 183;
-    pub const COUNT: u16 = 184;
+    pub const SHIP_HAMMER: u16 = 184;
+    pub const COUNT: u16 = 185;
     /// Liquid colour of each potion: healing, regeneration, speed, strength, resistance,
     /// fire resistance, poison, slowness, harm (same as the engine's effect colours).
     pub const POTION_COLORS: [[f32; 3]; 9] = [
@@ -1360,6 +1361,15 @@ pub(crate) fn build() -> Vec<(String, Image)> {
     l.add(XENO_CRYSTAL, "xeno_crystal", crystal(Rgb(0.78, 0.30, 1.0), Rgb(0.45, 1.0, 0.90)));
     l.add(SPACE_ROCKET, "space_rocket", art(&["......R", ".....RRR", ".....WWW", "....WWbWW", "....WbbbW", "....WWbWW", "....WWWWW", "....WWWWW", "....WGGGW", "...RWWWWWR", "..RRWWWWWRR", "..RR.GGG.RR", "......O", ".....OYO", "......O"]));
     l.add(ROCKET_FUEL, "rocket_fuel", art(&["", "", ".....GGGG", ".....DDDD", "....DOOOOD", "....DOYYOD", "....DOYYOD", "....DOOOOD", "....DOOOOD", "....DROORD", "....DOOOOD", "....DDDDDD"]));
+    l.add(SHIP_HAMMER, "ship_hammer", p(|q| q.template(&STAR_HAMMER_TPL[..], &|ch| match ch {
+        'K' => Some(Rgb(0.08, 0.15, 0.18)),
+        'G' => Some(Rgb(0.28, 0.43, 0.48)),
+        'g' => Some(Rgb(0.74, 0.86, 0.88)),
+        'C' => Some(Rgb(0.18, 0.95, 0.77)),
+        'B' => Some(Rgb(0.65, 0.43, 0.18)),
+        _ => None,
+    })));
+
     for (_, img) in l.0.iter_mut() {
         outline(img);
         shade_edges(img);
