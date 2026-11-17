@@ -187,6 +187,7 @@ pub struct GameSession {
     /// «Механика»: every known shaft, cog, wheel, crank and machine, and when to re-solve.
     pub kin: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, KinNode>,
     kin_t: f32,
+    kin_accum: f64,
     /// WolfTech item pipes placed in this world, and the timer of their next push.
     pub pipes: std::collections::HashSet<wolfcraft_engine::cubesphere::Cell>,
     pipe_t: f32,
@@ -263,6 +264,7 @@ pub struct GameSession {
     slowmo: f32,
     /// «Звёздный молот» cooldown.
     hammer_cd: f32,
+    ship_hammer_mode: u8,
     /// A guardian's cut-scene (awakening, rage, defeat) and what was last seen of the
     /// guardian (health, phase) to notice hits and phase changes.
     boss_film: Option<BossFilm>,
@@ -388,6 +390,7 @@ impl GameSession {
             tech_nets: Vec::new(),
             kin: std::collections::HashMap::new(),
             kin_t: 0.0,
+            kin_accum: 0.0,
             pipes: Default::default(),
             pipe_t: 0.0,
             tech_t: 0.0,
@@ -417,6 +420,7 @@ impl GameSession {
             shake: 0.0,
             slowmo: 0.0,
             hammer_cd: 0.0,
+            ship_hammer_mode: 0,
             boss_film: None,
             boss_seen: None,
             title: None,
@@ -1412,6 +1416,9 @@ impl GameSession {
                     if self.explosives.light(&mut self.chunks, pos, DYNAMITE_FUSE) {
                         keep.push(e);
                     }
+                }
+                InteractionEvent::Fire { weapon: id } if id == wolfcraft_engine::items::ids::SHIP_HAMMER => {
+                    self.use_ship_hammer(eye, look);
                 }
                 InteractionEvent::Fire { weapon: id } if id == wolfcraft_engine::items::ids::STAR_HAMMER => {
                     self.hammer_slam(eye, look);
@@ -2720,16 +2727,9 @@ impl GameSession {
                     st.working = st.flow > 0.0;
                 }
                 Kind::Motor => {
-                    let need = sp.rate * dt;
-                    st.flow = sp.rate;
-                    if st.energy >= need {
-                        st.energy -= need;
-                        st.working = true;
-                        st.burn = 0.5;
-                    } else {
-                        st.burn = (st.burn - dt).max(0.0);
-                        st.working = st.burn > 0.0;
-                    }
+                    // The 20 Hz kinetic simulation pays for rotation, including catch-up steps.
+                    // Never mark a motor powered merely because it coasted without energy.
+                    st.flow = if st.working { sp.rate } else { 0.0 };
                 }
                 Kind::Reactor => {
                     // Once a second: the rods pulse, the hull heats or cools (heat = progress).
@@ -2921,11 +2921,10 @@ impl GameSession {
         self.achieved.is_empty() && self.clock < 30.0
     }
 
-    /// «Механика»: solves the turning networks four times a second (sources → shafts and cogs
+    /// «Механика»: solves the turning networks twenty times a second (sources → shafts and cogs
     /// → machines, overload stops everything), runs the machines and the cranks.
     fn tick_kinetic(&mut self, events: &[InteractionEvent], dt: f32) {
-        use wolfcraft_engine::items::ItemStack;
-        use wolfcraft_engine::kinetic::{self as kn, Part};
+        use wolfcraft_engine::kinetic as kn;
         for e in events {
             match e {
                 InteractionEvent::Placed { pos, block } if kn::part(*block).is_some() => {
@@ -2944,15 +2943,35 @@ impl GameSession {
                 _ => {}
             }
         }
+        if !dt.is_finite() || dt <= 0.0 { return; }
+        self.kin_accum += dt as f64;
+        // Keep time debt rather than discarding simulation time on a slow frame.
+        let steps = (((self.kin_accum + 0.000001) / 0.05).floor() as usize).min(100);
+        for _ in 0..steps {
+            self.kin_accum -= 0.05;
+            self.step_kinetic(0.05);
+        }
+    }
+
+    fn step_kinetic(&mut self, dt: f32) {
+        use wolfcraft_engine::items::ItemStack;
+        use wolfcraft_engine::kinetic::{self as kn, Part};
         if self.kin.is_empty() {
             return;
+        }
+        let motors: Vec<_> = self.kin.keys().copied().filter(|c| self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::ElectricMotor)).collect();
+        for c in motors {
+            let t = self.tech.entry(c).or_default();
+            let need = wolfcraft_engine::wolftech::spec(wolfcraft_engine::wolftech::Kind::Motor).rate * dt;
+            t.working = t.energy + 0.00001 >= need;
+            if t.working { t.energy = (t.energy - need).max(0.0); }
         }
         for n in self.kin.values_mut() {
             n.crank = (n.crank - dt).max(0.0);
         }
         self.kin_t -= dt;
         if self.kin_t <= 0.0 {
-            self.kin_t = 0.25;
+            self.kin_t = 0.05;
             let g = self.chunks.grid();
             let cells: Vec<_> = self.kin.keys().copied().collect();
             for c in &cells {
@@ -2961,7 +2980,8 @@ impl GameSession {
                 }
             }
             let mut seen: std::collections::HashMap<wolfcraft_engine::cubesphere::Cell, i8> = std::collections::HashMap::new();
-            let start: Vec<_> = self.kin.keys().copied().collect();
+            let mut start: Vec<_> = self.kin.keys().copied().collect();
+            start.sort_by_key(|c| (c.f, c.i, c.j, c.k));
             for c0 in start {
                 if seen.contains_key(&c0) {
                     continue;
@@ -2971,7 +2991,8 @@ impl GameSession {
                 let mut net = vec![(c0, 1i8)];
                 seen.insert(c0, 1);
                 let mut i = 0;
-                while i < net.len() && net.len() < 2048 {
+                let mut jammed = false;
+                while i < net.len() {
                     let (c, sg) = net[i];
                     i += 1;
                     let Some(pc) = self.chunks.get_block(c).and_then(kn::part) else { continue };
@@ -2983,19 +3004,22 @@ impl GameSession {
                             _ => (0, 0, d),
                         };
                         let Some(n) = g.offset(c, a, b, k) else { continue };
-                        if seen.contains_key(&n) {
-                            continue;
-                        }
                         let Some(pn) = self.chunks.get_block(n).and_then(kn::part) else { continue };
                         if let Some(flip) = kn::link(pc, pn, (ax, s)) {
                             let ns = if flip { -sg } else { sg };
-                            seen.insert(n, ns);
-                            net.push((n, ns));
+                            if let Some(previous) = seen.get(&n) {
+                                if *previous != ns { jammed = true; }
+                            } else {
+                                seen.insert(n, ns);
+                                net.push((n, ns));
+                            }
                         }
                     }
                 }
                 // Sources and load of this network.
                 let (mut speed, mut cap, mut load) = (0.0f32, 0.0f32, 0.0f32);
+                let mut motor_input = 0.0f32;
+                let mut motor_cap = 0.0f32;
                 for (c, _) in &net {
                     let Some(p) = self.chunks.get_block(*c).and_then(kn::part) else { continue };
                     match p {
@@ -3024,6 +3048,8 @@ impl GameSession {
                             if self.tech.get(c).is_some_and(|t| t.working) {
                                 speed = speed.max(64.0);
                                 cap += 512.0;
+                                motor_cap += 512.0;
+                                motor_input += wolfcraft_engine::wolftech::spec(wolfcraft_engine::wolftech::Kind::Motor).rate;
                             }
                         }
                         Part::Gearbox => {}
@@ -3031,11 +3057,13 @@ impl GameSession {
                     }
                 }
                 let over = load > cap && speed > 0.0;
-                let run = if over { 0.0 } else { speed };
-                // Dynamos turn the rotation into WolfTech energy: RPM / 2 ЭЕ a second.
+                let run = if over || jammed { 0.0 } else { speed };
+                let dynamos = net.iter().filter(|(c, _)| self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::KineticDynamo)).count();
+                let output = wolfcraft_engine::kinetic::dynamo_output(run, cap - motor_cap, motor_input, dynamos);
+                // Dynamos share the energy budget of the drive, with conversion losses.
                 for (c, _) in &net {
                     if self.chunks.get_block(*c) == Some(wolfcraft_engine::block::Block::KineticDynamo) {
-                        self.tech.entry(*c).or_default().env = run / 2.0;
+                        self.tech.entry(*c).or_default().env = output;
                     }
                 }
                 for (c, sg) in &net {
@@ -3052,27 +3080,23 @@ impl GameSession {
         for c in machines {
             let Some(b) = self.chunks.get_block(c) else { continue };
             let Some(p) = kn::part(b).filter(|p| kn::is_machine(*p)) else { continue };
-            let v = self.container_slots(c, b).clone();
-            let out = v.first().copied().flatten().and_then(|i| kn::recipe(p, i.id));
-            let room = out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
-                None => true,
-                Some(s) => s.id == o && s.count as u32 + n as u32 <= 64,
-            });
-            let node = self.kin.get_mut(&c).unwrap();
-            if !room {
-                node.progress = 0.0;
-                continue;
-            }
-            node.progress += dt * node.speed / 16.0;
-            if node.progress >= 2.0 {
-                node.progress = 0.0;
+            let speed = self.kin[&c].speed;
+            self.kin.get_mut(&c).unwrap().progress += dt * speed / 16.0;
+            loop {
+                let v = self.container_slots(c, b).clone();
+                let out = v.first().copied().flatten().and_then(|i| kn::recipe(p, i.id));
+                let room = out.is_some_and(|(o, n)| match v.get(2).copied().flatten() {
+                    None => n <= wolfcraft_engine::items::info(o).max_stack,
+                    Some(s) => s.id == o && s.count as u32 + n as u32 <= s.info().max_stack as u32,
+                });
+                if !room { self.kin.get_mut(&c).unwrap().progress = 0.0; break; }
+                if self.kin[&c].progress + 0.00001 < 2.0 { break; }
+                self.kin.get_mut(&c).unwrap().progress = (self.kin[&c].progress - 2.0).max(0.0);
                 let (o, n) = out.unwrap();
                 let v = self.container_slots(c, b);
                 if let Some(i) = v[0].as_mut() {
                     i.count -= 1;
-                    if i.count == 0 {
-                        v[0] = None;
-                    }
+                    if i.count == 0 { v[0] = None; }
                 }
                 match v[2].as_mut() {
                     Some(s) => s.count += n,
@@ -4659,6 +4683,79 @@ impl GameSession {
     }
 
     /// «Звёздный молот»: a slam into the ground — a shock ring throws creatures up into the
+    pub fn ship_hammer_label(&self) -> &'static str {
+        ["Монтаж", "Демонтаж", "Диагностика"][self.ship_hammer_mode as usize % 3]
+    }
+
+    pub fn next_ship_hammer_mode(&mut self) {
+        self.ship_hammer_mode = (self.ship_hammer_mode + 1) % 3;
+        self.item_name = Some((format!("Корабельный молот: {}", self.ship_hammer_label()), 2.0));
+    }
+
+    // Never destroy storage, machines, scripts or unbreakable world layers with a shockwave.
+    fn hammer_breakable(&self, c: wolfcraft_engine::cubesphere::Cell, b: wolfcraft_engine::block::Block) -> bool {
+        use wolfcraft_engine::block::Block as B;
+        b.is_solid() && b.info().hardness >= 0.0
+            && !matches!(b.base_kind(), B::Bedrock | B::InnerCore | B::Chest | B::ElectricFurnace | B::MachineCasing | B::EnchantTable | B::Battery | B::CommandBlock | B::Terminal | B::Sign | B::SignB)
+            && !wolfcraft_engine::construction::is_container(b)
+            && wolfcraft_engine::wolftech::kind(b).is_none()
+            && wolfcraft_engine::kinetic::part(b).is_none()
+            && !self.containers.contains_key(&c) && !self.tech.contains_key(&c)
+            && !self.block_commands.contains_key(&c)
+    }
+
+    fn use_ship_hammer(&mut self, eye: DVec3, look: DVec3) {
+        use wolfcraft_engine::{block::Block as B, kinetic as kn, wolftech as wt};
+        if self.player.sneaking { self.next_ship_hammer_mode(); return; }
+        if self.hammer_cd > 0.0 { return; }
+        let Some(h) = raycast(&self.chunks, eye, look, 7.0) else { return; };
+        let (c, b) = (h.cell, h.block);
+        if kn::part(b).is_none() && wt::kind(b).is_none() {
+            self.item_name = Some(("Нужен механизм WolfTech или Механики".into(), 2.0));
+            return;
+        }
+        let message = match self.ship_hammer_mode {
+            0 => {
+                let axis = kn::part(b).and_then(kn::axis).unwrap_or(0);
+                let next = kn::with_axis(b, (axis + 1) % 3);
+                if next == b { "Этот механизм не имеет поворотной оси".into() }
+                else if self.chunks.set_block(c, next) {
+                    self.net_out.push((c, next)); self.kin_t = 0.0;
+                    if !self.player.is_creative() { self.player.inventory.wear_selected(); }
+                    "Ось механизма повёрнута".into()
+                } else { "Не удалось повернуть механизм".into() }
+            }
+            1 => {
+                let occupied = self.containers.get(&c).is_some_and(|v| v.iter().any(Option::is_some))
+                    || self.tech.get(&c).is_some_and(|t| t.energy > 0.0 || t.burn > 0.0 || t.progress > 0.0 || t.working)
+                    || self.kin.get(&c).is_some_and(|n| n.progress > 0.0 || n.crank > 0.0)
+                    || self.furnace_fuel.get(&c).is_some_and(|v| *v > 0.0)
+                    || self.block_commands.contains_key(&c);
+                if occupied { "Сначала опустошите и остановите механизм (включая энергию)".into() }
+                else if self.chunks.set_block(c, B::Air) {
+                    self.net_out.push((c, B::Air));
+                    self.containers.remove(&c); self.tech.remove(&c); self.kin.remove(&c);
+                    self.furnace_fuel.remove(&c); self.kin_t = 0.0;
+                    self.drops.pop_from_block(wolfcraft_engine::items::ItemStack::of_block(b, 1), self.chunks.grid().cell_center(c));
+                    if !self.player.is_creative() { self.player.inventory.wear_selected(); }
+                    "Механизм демонтирован без потери блока".into()
+                } else { "Не удалось демонтировать механизм".into() }
+            }
+            _ => {
+                let mut text = b.info().name.to_string();
+                if let Some(n) = self.kin.get(&c) {
+                    text.push_str(&format!(" · {:.0} RPM · {:.0}/{:.0} SU{}", n.speed, n.load, n.cap, if n.load > n.cap { " · Перегрузка" } else { "" }));
+                }
+                if let Some(t) = self.tech.get(&c) {
+                    text.push_str(&format!(" · {:.0} ЭЕ · {:.1} ЭЕ/с", t.energy, t.flow));
+                }
+                text
+            }
+        };
+        self.hammer_cd = 0.35;
+        self.item_name = Some((message, 3.0));
+    }
+
     /// air, a crater opens in front, dust races out.
     fn hammer_slam(&mut self, eye: DVec3, look: DVec3) {
         use wolfcraft_engine::block::Block as B;
@@ -4666,16 +4763,19 @@ impl GameSession {
         if self.hammer_cd > 0.0 {
             return;
         }
+        let Some(hit) = raycast(&self.chunks, eye, look, 7.0) else {
+            self.item_name = Some(("Наведите молот на блок в пределах 7 м".into(), 1.5));
+            return;
+        };
         self.hammer_cd = 1.4;
-        let up = self.player.up();
-        let feet = self.player.body.pos;
-        let fwd = (look - up * look.dot(up)).normalize_or_zero();
-        let at = feet + fwd * 3.0;
+        let at = self.chunks.grid().cell_center(hit.cell);
+        let up = wolfcraft_engine::physics::up_at(at);
+        let feet = at;
         // Creatures around are flung up and away.
         for i in 0..self.mobs.mobs.len() {
             let m = &self.mobs.mobs[i];
             let d = m.body.pos - feet;
-            let flat = (d - up * d.dot(up)).length();
+            let flat = d.length();
             if m.hp > 0.0 && flat < 9.0 {
                 self.mobs.hurt(i, 18.0 * (1.0 - flat as f32 / 12.0), feet);
                 let m = &mut self.mobs.mobs[i];
@@ -4692,7 +4792,9 @@ impl GameSession {
                 for dk in -2..=1i32 {
                     if di * di + dj * dj + dk * dk <= 5 {
                         if let Some(c) = g.offset(c0, di, dj, dk) {
-                            cells.push((c, B::Air));
+                            if self.chunks.get_block(c).is_some_and(|b| self.hammer_breakable(c, b)) {
+                                cells.push((c, B::Air));
+                            }
                         }
                     }
                 }
@@ -4713,7 +4815,6 @@ impl GameSession {
         self.shake = 0.8;
         self.flash = Some(([0.8, 0.9, 1.0], 0.25));
         self.booms.push((at, 5.0, 0.01));
-        let _ = eye;
     }
 
     /// The big moment of a strike: flash, shake, slow motion, a dome of light racing out,
@@ -6364,6 +6465,61 @@ mod tests {
             assert!(t.elapsed().as_secs() < 90, "chunks never finished: {done}/{total}, inflight {}, chunk {:?}", s.chunks.stats.gen_inflight, s.player_chunk());
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    #[test]
+    fn hammer_mechanics_regression() {
+        let mut s = load("hammer_mechanics", 1837, true);
+        settle(&mut s);
+        let g = s.chunks.grid();
+        let c = g.world_to_cell(s.player.body.pos);
+        // A saw processes identically under smooth and irregular frame schedules.
+        assert!(s.chunks.set_block(c, Block::MechSaw));
+        for schedule in [vec![0.016; 250], vec![0.13, 0.17, 0.7, 1.1, 0.9, 1.0]] {
+            s.kin.clear(); s.kin_accum = 0.0; s.kin_t = 100.0;
+            s.kin.insert(c, KinNode { speed: 24.0, ..Default::default() });
+            s.containers.insert(c, vec![Some(ItemStack::of_block(Block::OakLog, 10)), None, None]);
+            for dt in schedule { s.tick_kinetic(&[], dt); }
+            let v = &s.containers[&c];
+            assert_eq!(v[0].unwrap().count, 7);
+            assert_eq!(v[2].unwrap().count, 18);
+            assert!(s.kin[&c].progress < 0.01);
+        }
+        assert!(s.chunks.set_block(c, Block::ElectricMotor));
+        s.kin.clear(); s.kin_accum = 0.0; s.kin_t = 100.0;
+        s.kin.insert(c, KinNode::default());
+        s.tech.insert(c, TechState { energy: 16.0, ..Default::default() });
+        s.tick_kinetic(&[], 1.0);
+        assert!(s.tech[&c].energy < 0.001);
+        s.tick_kinetic(&[], 0.05);
+        assert!(!s.tech[&c].working, "an unpaid motor must not power dynamos through coasting");
+        s.tech.clear();
+        assert!(!s.hammer_breakable(c, Block::MechSaw));
+        assert!(!s.hammer_breakable(c, Block::Bedrock));
+        s.containers.remove(&c); s.kin.clear();
+        assert!(s.hammer_breakable(c, Block::Stone));
+        // The utility hammer rotates a shaft, refuses occupied machines, then returns a block.
+        let eye = g.cell_center(c) + wolfcraft_engine::physics::up_at(g.cell_center(c)) * 3.0;
+        let look = (g.cell_center(c) - eye).normalize();
+        assert!(s.chunks.set_block(c, Block::Shaft));
+        s.use_ship_hammer(eye, look);
+        assert_eq!(s.chunks.get_block(c), Some(Block::ShaftJ));
+        s.hammer_cd = 0.0; s.ship_hammer_mode = 1;
+        s.containers.insert(c, vec![Some(ItemStack::new(wolfcraft_engine::items::ids::IRON_INGOT, 3))]);
+        s.use_ship_hammer(eye, look);
+        assert_eq!(s.chunks.get_block(c), Some(Block::ShaftJ));
+        s.containers.remove(&c); s.hammer_cd = 0.0;
+        let drops = s.drops.list.len();
+        s.use_ship_hammer(eye, look);
+        assert_eq!(s.chunks.get_block(c), Some(Block::Air));
+        assert_eq!(s.drops.list.len(), drops + 1);
+        assert!(s.chunks.set_block(c, Block::Stone));
+        let chest = g.offset(c, 1, 0, 0).unwrap();
+        assert!(s.chunks.set_block(chest, Block::Chest));
+        s.hammer_cd = 0.0;
+        s.hammer_slam(eye, look);
+        assert_eq!(s.chunks.get_block(c), Some(Block::Air), "shockwave follows the aimed block");
+        assert_eq!(s.chunks.get_block(chest), Some(Block::Chest), "shockwave preserves nearby storage");
     }
 
     /// A bot plays for a few game minutes in three worlds (survival, creative, studio

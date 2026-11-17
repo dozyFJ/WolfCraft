@@ -1286,14 +1286,18 @@ impl App {
             }
             (Screen::Paused, KeyCode::Escape) => self.screen = Screen::Playing,
             (Screen::Playing, KeyCode::KeyE) => {
+                self.container = None;
+                self.near_table = false;
                 self.inv_ui = InventoryUiState::default();
                 self.screen = Screen::Inventory;
             }
-            (Screen::Inventory, KeyCode::KeyE) => {
+            (Screen::Inventory, KeyCode::KeyE | KeyCode::Escape) => {
                 if let Some(s) = &mut self.session {
                     inventory_ui::close(&mut self.inv_ui, &mut s.player.inventory);
                 }
                 self.container = None;
+                self.near_table = false;
+                self.inv_ui.builder = false;
                 self.screen = Screen::Playing;
             }
             (Screen::Playing, KeyCode::KeyB) => self.voice_menu = !self.voice_menu,
@@ -1850,12 +1854,14 @@ impl App {
                             InteractionEvent::FrameUse{..}|InteractionEvent::ActivateBoss{..}=>{},
                             InteractionEvent::Slept { .. } | InteractionEvent::Sat { .. } => {}
                             InteractionEvent::OpenBuilder => {
+                                self.container = None;
                                 self.inv_ui = InventoryUiState::default();
                                 self.inv_ui.builder = true;
                                 self.screen = Screen::Inventory;
                                 self.near_table = false;
                             }
                             InteractionEvent::OpenCrafting => {
+                                self.container = None;
                                 self.inv_ui = InventoryUiState::default();
                                 self.screen = Screen::Inventory;
                                 self.near_table = true;
@@ -1867,6 +1873,7 @@ impl App {
                             }
                             InteractionEvent::OpenContainer { pos, block } => {
                                 self.container = Some((pos, block));
+                                self.near_table = false;
                                 self.inv_ui = InventoryUiState::default();
                                 self.screen = Screen::Inventory;
                             }
@@ -2366,6 +2373,13 @@ impl App {
                                 }
                             }
                             // WolfTech drill: a glass pill with the digging square; tap to change.
+                            if screen == Screen::Playing && !studio_edit && s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::SHIP_HAMMER) {
+                                egui::Area::new(egui::Id::new("ship-hammer-mode")).anchor(egui::Align2::RIGHT_CENTER, [-14.0, -110.0]).show(ctx, |ui| {
+                                    let r = ui.add_sized([176.0, 44.0], egui::Button::new(format!("⚒ {} ↻", s.ship_hammer_label())));
+                                    ui_cover.push(r.rect);
+                                    if r.clicked() { s.next_ship_hammer_mode(); }
+                                });
+                            }
                             if screen == Screen::Playing && !studio_edit && s.player.inventory.held().is_some_and(|h| wolfcraft_engine::tools::has_area_modes(h.id)) && drill_overlay(ctx, s.player.drill_area, &mut ui_cover) {
                                 s.player.drill_area = wolfcraft_engine::tools::next_drill_mode(s.player.drill_area);
                                 let n = wolfcraft_engine::tools::drill_side(s.player.drill_area);
@@ -3277,7 +3291,7 @@ impl App {
                                 // Box-built 3D models too, not flat icons.
                                 ids::STAR_BLASTER => 6,
                                 ids::STAR_REMOTE => 7,
-                                ids::STAR_HAMMER => 8,
+                                ids::STAR_HAMMER | ids::SHIP_HAMMER => 8,
                                 ids::PLASMA_RIFLE => 9,
                                 ids::RAILGUN => 10,
                                 ids::DRILL => 11,
@@ -4301,7 +4315,7 @@ fn held_visual(inv: &wolfcraft_engine::inventory::Inventory, tile_colors: &[[[f3
             ids::SNIPER => Some(5),
             ids::STAR_BLASTER => Some(6),
             ids::STAR_REMOTE => Some(7),
-            ids::STAR_HAMMER => Some(8),
+            ids::STAR_HAMMER | ids::SHIP_HAMMER => Some(8),
             ids::PLASMA_RIFLE => Some(9),
             ids::RAILGUN => Some(10),
             ids::DRILL => Some(11),
@@ -5270,4 +5284,32 @@ fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, 
         }
     });
     pick
+}
+
+#[cfg(test)]
+mod inventory_context_tests {
+    use super::*;
+    #[test]
+    fn opening_player_inventory_discards_previous_chest_and_workbench() {
+        let dir = std::env::temp_dir().join(format!("wolf_inventory_context_{}", std::process::id()));
+        let mut app = App::new(LaunchArgs { data_dir: Some(dir.clone()), ..Default::default() });
+        app.screen = Screen::Playing;
+        app.container = Some((wolfcraft_engine::cubesphere::Cell::new(4, 20, 20, 50), wolfcraft_engine::block::Block::Chest));
+        app.near_table = true;
+        app.handle_key(KeyCode::KeyE, true, false);
+        assert_eq!(app.screen, Screen::Inventory);
+        assert!(app.container.is_none());
+        assert!(!app.near_table);
+        app.near_table = true;
+        app.handle_key(KeyCode::KeyE, true, false);
+        assert_eq!(app.screen, Screen::Playing);
+        assert!(!app.near_table);
+        app.handle_key(KeyCode::KeyE, true, false);
+        assert_eq!(app.screen, Screen::Inventory);
+        assert!(app.container.is_none());
+        app.handle_key(KeyCode::Escape, true, false);
+        assert_eq!(app.screen, Screen::Playing);
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
