@@ -41,6 +41,18 @@ pub fn set_globe_terrain(n: u32, colors: Vec<[f32; 3]>, heights: Vec<f32>) {
     }
 }
 
+// The sky pass deliberately does not write world depth. Sort only the globe, leaving
+// stars and atmosphere behind it, so hidden terrain cannot paint over its near side.
+fn sort_globe_surface(vertices: &mut [ModelVertex]) {
+    let distance = |t: &[ModelVertex;3]| {
+        let c = (Vec3::from(t[0].pos)+Vec3::from(t[1].pos)+Vec3::from(t[2].pos))/3.0;
+        c.length_squared()
+    };
+    let mut triangles: Vec<[ModelVertex;3]> = vertices.chunks_exact(3).map(|t|[t[0],t[1],t[2]]).collect();
+    triangles.sort_by(|a,b|distance(b).total_cmp(&distance(a)));
+    for (dst,tri) in vertices.chunks_exact_mut(3).zip(triangles) { dst.copy_from_slice(&tri); }
+}
+
 fn hash(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(0x7feb352d);
@@ -362,6 +374,7 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
         };
         halo(1.07, mix(p.sky, [0.10, 0.20, 0.45], space.max(0.6)), &mut o);
         halo(1.035, mix(p.sky, [0.30, 0.55, 0.95], space.max(0.6)), &mut o);
+        let globe_start = o.v.len();
         // Globe: latitude/longitude patches coloured by a cheap continent noise.
         let (lat_n, lon_n) = if p.cube { (28u32, 56u32) } else { (14u32, 28u32) };
         let sun_n = p.sun_dir.normalize_or_zero();
@@ -446,6 +459,7 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
                 o.tri(centre + a * rad, centre + c * rad, centre + d * rad, col);
             }
         }
+        sort_globe_surface(&mut o.v[globe_start..]);
     }
     o.v
 }
@@ -471,6 +485,16 @@ mod tests {
         if let Ok(mut g) = GLOBE.lock() { *g = None; }
     }
 
+    #[test]
+    fn far_globe_faces_are_painted_before_near_faces() {
+        let mut o=Out{v:vec![]};
+        for z in [2.0,10.0,4.0] {
+            o.tri(Vec3::new(0.0,0.0,z),Vec3::new(1.0,0.0,z),Vec3::new(0.0,1.0,z),[1.0,1.0,1.0]);
+        }
+        sort_globe_surface(&mut o.v);
+        let depths:Vec<_>=o.v.chunks_exact(3).map(|t|t[0].pos[2]).collect();
+        assert_eq!(depths,vec![10.0,10.0,4.0,4.0,2.0,2.0]);
+    }
     #[test]
     fn night_has_stars_and_day_ground_has_none() {
         let night = build_sky(&params(DVec3::new(0.0, 1002.0, 0.0), 0.0));

@@ -346,7 +346,30 @@ impl Planet {
         let mmask = smoothstep(0.1, 0.55, Self::n3(&self.n_mmask, d * 2.4));
         let misc = Self::n3(&self.n_misc, d * 6.0) + Self::n3(&self.n_misc, wp * 0.03) * 0.12;
         let sea = Self::n3(&self.n_edge, d * 3.0);
-        let (e, biome, temp) = match self.kind.terrain_kind() {
+        let (e, biome, temp) = match self.kind {
+            PlanetKind::Mars => {
+                // Broad mesas cut by continuous canyons, dry even at their deepest point.
+                let plateau = smoothstep(-0.25, 0.35, Self::n3(&self.n_edge, wp*0.003));
+                let canyon = 1.0-smoothstep(0.025,0.12,Self::n3(&self.n_river,wp*0.0025).abs());
+                ((8.0+plateau*42.0*amp+hills*0.45-canyon*24.0).max(2.0),Biome::MoonHighlands,0.15)
+            }
+            PlanetKind::Venus => {
+                ((8.0+hills*0.55+mmask*ridge*48.0*amp).max(3.0),Biome::AshWastes,1.0)
+            }
+            PlanetKind::Mercury => {
+                let bowl = smoothstep(0.12,0.50,Self::n3(&self.n_lake,wp*0.014));
+                ((7.0+hills*0.4+ridge*12.0-bowl*18.0).max(1.0),Biome::MoonMare,0.6)
+            }
+            PlanetKind::Titan => {
+                let dunes=Self::n3(&self.n_hill,wp*0.035).abs()*5.0;
+                ((5.0+hills*0.3+dunes+mmask*ridge*14.0).max(1.0),Biome::MoonMare,0.02)
+            }
+            PlanetKind::Europa | PlanetKind::Titania | PlanetKind::Triton => {
+                let crack=1.0-smoothstep(0.015,0.075,Self::n3(&self.n_river,wp*0.008).abs());
+                let relief=match self.kind {PlanetKind::Europa=>8.0,PlanetKind::Titania=>28.0,_=>14.0};
+                ((4.0+hills*0.25+ridge*relief-crack*4.0).max(1.0),Biome::FrozenPlains,0.01)
+            }
+            _ => match self.kind.terrain_kind() {
             PlanetKind::Moon => {
                 // Craters: round bowls with raised rims, everywhere, of every size.
                 let mut e = 8.0 + hills * 0.8 + mmask * ridge * 60.0 * amp;
@@ -379,6 +402,7 @@ impl Planet {
                 let wet = Self::n3(&self.n_humid, d * 2.3);
                 (e, if wet > 0.25 && e < 14.0 { Biome::GlowSwamp } else { Biome::AlienJungle }, 0.7)
             }
+            },
         };
         Column { elev: e as f32, biome, temp, humid: 0.5, land: if e > 0.0 { 0.5 } else { -0.5 }, river: false, volcanic: 0.0, lava_lake: false }
     }
@@ -768,6 +792,9 @@ impl Planet {
             return Block::Air;
         }
         let depth = s - r;
+        if self.kind == PlanetKind::Titan && s-r < 4.0 {
+            return if s-r < 1.0 { Block::Sand } else { Block::Ice };
+        }
         if self.kind == PlanetKind::Mars && s - r < 5.0 {
             return if s-r < 1.0 { Block::RedSand } else { Block::Terracotta };
         }
@@ -939,7 +966,7 @@ impl Planet {
                 continue;
             }
             // Stay away from face seams so the start area is one simple grid.
-            let cell = self.grid.world_to_cell(d * self.radius);
+            let cell = self.grid.world_to_cell(self.grid.along(d, self.radius));
             let margin = self.grid.n / 4; // central half of a face: cells are almost square there
             if cell.i < margin || cell.j < margin || cell.i >= self.grid.n - margin || cell.j >= self.grid.n - margin {
                 continue;
@@ -962,7 +989,7 @@ impl Planet {
     /// Scans down the column below direction `d` for solid ground with two free blocks above.
     /// Returns the feet position just above the surface.
     pub fn stand_position(&self, d: DVec3) -> Option<DVec3> {
-        let base = self.grid.world_to_cell(d * self.radius);
+        let base = self.grid.world_to_cell(self.grid.along(d, self.radius));
         let dir = self.grid.cell_dir(base.f, base.i, base.j);
         let col = self.column(dir);
         let top = self.top_k(&col);
@@ -976,7 +1003,9 @@ impl Planet {
         for k in ((top - 12)..=(top + 24)).rev() {
             let b = self.block_at(Cell::new(base.f, base.i, base.j, k));
             if b.is_solid() && !is_leaf_or_log(b) {
-                return if free(k + 1) && free(k + 2) { Some(self.grid.along(dir, k as f64 + 1.3)) } else { None };
+                if free(k + 1) && free(k + 2) {
+                    return Some(self.grid.along(dir, k as f64 + 1.3));
+                }
             }
         }
         None
@@ -1015,6 +1044,54 @@ mod tests {
         let mars=Planet::new_world(&cfg,PlanetKind::Mars);
         let spawn=mars.find_spawn();
         assert_eq!(mars.block_at_world(spawn+spawn.normalize()*4.0),Block::Air);
+    }
+    #[test]
+    fn landing_has_ground_and_headroom_for_every_destination_and_shape() {
+        for shape in [PlanetShape::Sphere,PlanetShape::Cube] {
+            for seed in [1,34] {
+                let mut cfg=WorldConfig::new("landings",seed);
+                cfg.shape=shape; cfg.size=PlanetSize::Small;
+                for kind in PlanetKind::ALL {
+                    let p=Planet::new_world(&cfg,kind);
+                    let pos=p.find_spawn();
+                    let up=p.grid.up(pos);
+                    assert!(p.block_at_world(pos-up*0.5).is_solid(),"{shape:?} {kind:?} {seed}: floating spawn");
+                    for h in [0.0,0.6,1.6] {
+                        let b=p.block_at_world(pos+up*h);
+                        assert!(!b.is_solid()&&!b.is_fluid(),"{shape:?} {kind:?} {seed}: blocked body {b:?}");
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn rocky_and_icy_solar_destinations_are_dry_and_have_bounded_relief() {
+        let cfg=WorldConfig::new("solar-land",77);
+        for kind in [PlanetKind::Mercury,PlanetKind::Venus,PlanetKind::Mars,PlanetKind::Europa,PlanetKind::Titan,PlanetKind::Titania,PlanetKind::Triton] {
+            let p=Planet::new_world(&cfg,kind);
+            for i in 0..120 {
+                let col=p.column(Rng(i).unit_vec());
+                assert!(col.elev>=1.0 && col.elev<100.0,"{kind:?}: {}",col.elev);
+                assert!(!col.biome.is_ocean());
+            }
+        }
+    }
+    #[test]
+    fn cube_landing_stays_in_the_requested_column() {
+        let mut cfg=WorldConfig::new("cube-landing",34);
+        cfg.shape=PlanetShape::Cube;
+        let p=Planet::new(&cfg);
+        let mut checked=0;
+        for i in 0..100 {
+            let d=Rng(i).unit_vec();
+            if let Some(pos)=p.stand_position(d) {
+                let want=p.grid.world_to_cell(p.grid.along(d,p.radius));
+                let got=p.grid.world_to_cell(pos);
+                assert_eq!((got.f,got.i,got.j),(want.f,want.i,want.j));
+                checked+=1;
+            }
+        }
+        assert!(checked>10);
     }
     #[test]
     fn deterministic_by_seed() {
