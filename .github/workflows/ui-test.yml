@@ -30,7 +30,10 @@ jobs:
       - name: Luau block events
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q libasound2-dev pkg-config
-          cargo test -p wolfcraft-game --lib -- luau_scripts voice arena_summons weather achievements audio studio_selection_tests inventory_context_tests hammer_mechanics_regression --nocapture
+          cargo test -p wolfcraft-game --lib -- luau_scripts voice arena_summons weather achievements audio studio_selection_tests inventory_context_tests hammer_mechanics_regression rocket_camera_tests --nocapture
+
+      - name: Rocket flight and planetary transfer (isolated gravity state)
+        run: cargo test -p wolfcraft-game --lib rocket_flight_regression -- --nocapture
 
       - name: Server profiles, plugins and access roles
         run: cargo test -p wolfserver -p wolfcraft-net -- --nocapture
