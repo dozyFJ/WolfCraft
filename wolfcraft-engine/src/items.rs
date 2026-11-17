@@ -174,7 +174,8 @@ pub mod ids {
     pub const XENO_CRYSTAL: ItemId = 437;
     pub const SPACE_ROCKET: ItemId = 438;
     pub const ROCKET_FUEL: ItemId = 439;
-    pub const LAST: ItemId = 439;
+    pub const SHIP_HAMMER: ItemId = 440;
+    pub const LAST: ItemId = 440;
 
     pub const fn tool(material: u16, kind: u16) -> ItemId {
         TOOLS_BASE + material * 4 + kind
@@ -382,6 +383,7 @@ pub fn info(id: ItemId) -> ItemInfo {
         ids::DRAGON_SOUL => ItemInfo { max_stack: 16, ..plain("Душа дракона", sp::DRAGON_SOUL) },
         ids::RAW_FISH => ItemInfo { food: Some((2.0, 1.0)), ..plain("Сырая рыба", sp::RAW_FISH) },
         ids::STAR_REMOTE => ItemInfo { max_stack: 1, ..plain("Звёздный пульт", sp::STAR_REMOTE) },
+        ids::SHIP_HAMMER => ItemInfo { max_stack: 1, durability: 1200, attack: 5.0, ..plain("Корабельный молот", sp::SHIP_HAMMER) },
         ids::STAR_HAMMER => ItemInfo { max_stack: 1, attack: 9.0, ..plain("Звёздный молот", sp::STAR_HAMMER) },
         ids::STAR_BLASTER => ItemInfo { max_stack: 1, attack: 3.0, ..plain("Звёздный бластер", sp::STAR_BLASTER) },
         ids::COOKED_FISH => ItemInfo { food: Some((6.0, 9.0)), ..plain("Жареная рыба", sp::COOKED_FISH) },
