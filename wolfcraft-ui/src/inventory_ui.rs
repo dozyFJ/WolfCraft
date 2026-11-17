@@ -29,6 +29,7 @@ const BACKPACK_TAB: usize = CREATIVE_TABS.len() - 1;
 pub struct InventoryUiState {
     pub tab: usize,
     pub search: String,
+    catalog_sort: usize,
     pub build_form: usize,
     pub build_material: usize,
     pub build_open: bool,
@@ -128,19 +129,49 @@ fn slot_widget(ui: &mut Ui, icons: &GuiIcons, p: &Palette, rect: Rect, stack: Op
 }
 
 /// Order of items in the creative grid.
-fn sort_key(id: ItemId) -> (usize, u8, String) {
-    let cat = CREATIVE_TABS.iter().position(|c| *c == items::category(id)).unwrap_or(99);
-    let group = if (items::ITEM_BASE..1024).contains(&id) {
-        if items::info(id).tool.is_some() || items::armor_slot(id).is_some() { 5 } else { 4 }
-    } else {
-        let b = wolfcraft_engine::block::Block::from_id(id);
-        match b.info().render {
-            wolfcraft_engine::block::RenderKind::Cross => 3,
-            _ if !b.boxes().is_empty() => 2,
-            _ => 1,
+fn sort_key(id: ItemId) -> (usize,u16,u16,u16,String,ItemId) {
+    use wolfcraft_engine::block::Block;
+    let info=items::info(id);let name=info.name.to_lowercase().replace('ё',"е");
+    let cat=CREATIVE_TABS.iter().position(|c|*c==items::category(id)).unwrap_or(99);
+    if let Some((e,_))=wolfcraft_engine::construction::entry(id) {
+        return (cat,1000+e.form as u16,0,e.material as u16,name,id);
+    }
+    if let Some((kind,tier))=items::tool_shape(id) {return (cat,400+kind as u16,tier as u16,0,name,id);}
+    if let Some(slot)=items::armor_slot(id) {return (cat,500,items::armor_material(id).unwrap_or(99) as u16,slot as u16,name,id);}
+    if let Some(b)=info.place {
+        let natural=match b {
+            Block::Stone=>Some((0,0)),Block::Cobblestone=>Some((0,1)),Block::MossyCobblestone=>Some((0,2)),
+            Block::Granite=>Some((0,3)),Block::Marble=>Some((0,4)),Block::Slate=>Some((0,5)),Block::Limestone=>Some((0,6)),Block::Basalt=>Some((0,7)),Block::Obsidian=>Some((0,8)),
+            Block::Grass=>Some((1,0)),Block::SnowyGrass=>Some((1,1)),Block::DryGrass=>Some((1,2)),Block::SwampGrass=>Some((1,3)),Block::Dirt=>Some((1,4)),Block::Mud=>Some((1,5)),Block::Podzol=>Some((1,6)),Block::Peat=>Some((1,7)),Block::Clay=>Some((1,8)),
+            Block::Sand=>Some((2,0)),Block::RedSand=>Some((2,1)),Block::Gravel=>Some((2,2)),Block::Sandstone=>Some((2,3)),
+            Block::Snow=>Some((3,0)),Block::Ice=>Some((3,1)),Block::PackedIce=>Some((3,2)),
+            Block::Netherrack=>Some((4,0)),Block::Ash=>Some((4,1)),_=>None,
+        };
+        if items::category(id)=="Природа" {if let Some((family,variant))=natural{return(cat,family,variant,0,name,id);}}
+        if items::category(id)=="Дерево" {
+            let species=["дуб","берез","елов","акац","вишн","ксено"].iter().position(|s|name.contains(s)).unwrap_or(99) as u16;
+            let kind=if name.contains("бревн"){0}else if name.contains("доск"){1}else if name.contains("листв")||name.contains("хво"){2}else{3};
+            return(cat,20+species,kind,0,name,id);
         }
-    };
-    (cat, group, items::info(id).name.to_lowercase())
+        if let Some(kind)=wolfcraft_engine::wolftech::kind(b) {
+            let family=if wolfcraft_engine::wolftech::is_source(kind){100}else if wolfcraft_engine::wolftech::is_store(kind){101}else{103};
+            return(cat,family,kind as u16,0,name,id);
+        }
+        if b==Block::Cable||wolfcraft_engine::pipes::is_pipe(b){return(cat,102,0,0,name,id);}
+        let family=["каменн","булыж","гранит","мрамор","кирпич","песчан","стекл","шерст"].iter().position(|f|name.contains(f)).unwrap_or(99) as u16;
+        let shape=if name.contains("плит"){1}else if name.contains("ступен"){2}else if name.contains("стен"){3}else if name.contains("панел"){4}else{0};
+        let color=["бел","светло-сер","сер","черн","коричн","красн","оранж","желт","лайм","зелен","бирюз","голуб","син","фиолет","пурпур","роз"].iter().position(|c|name.contains(c)).unwrap_or(99) as u16;
+        return(cat,200+family,shape,color,name,id);
+    }
+    (cat,900,0,0,name,id)
+}
+
+fn sort_catalog(list:&mut [ItemId],mode:usize) {
+    match mode {
+        1=>list.sort_by_cached_key(|id|(items::info(*id).name.to_lowercase().replace('ё',"е"),*id)),
+        2=>list.sort_unstable(),
+        _=>list.sort_by_cached_key(|id|sort_key(*id)),
+    }
 }
 
 fn matches_search(id: ItemId, search: &str) -> bool {
@@ -958,6 +989,19 @@ fn group_cells(list: &[ItemId], open: Option<usize>, grouped: bool) -> Vec<Cell>
 #[allow(clippy::too_many_arguments)]
 fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, cell: f32, rows: usize, cols: usize, grid_w: f32, palette_all: Vec<ItemId>, slot_rects: &mut Vec<(usize, Rect)>, trash_rect: &mut Option<Rect>, result: &mut InventoryResult) {
     let _ = &result;
+    let player_page=state.tab==BACKPACK_TAB&&!state.search_open;
+    let mut catalog:Vec<ItemId>=palette_all.into_iter().filter(|id|(state.search_open||in_tab(*id,state.tab)||!state.search.trim().is_empty())&&matches_search(*id,&state.search)).collect();
+    let title=if player_page {"Инвентарь игрока"}else if state.search_open {"Результаты поиска"}else{CREATIVE_TABS[state.tab.min(BACKPACK_TAB)]};
+    ui.horizontal(|ui| {
+        ui.set_min_height(28.0);
+        ui.add(egui::Label::new(egui::RichText::new(if player_page {title.to_string()}else{format!("{title} · {}",catalog.len())}).font(bold_font(14.0)).color(p.text)).truncate());
+        if !player_page {ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
+            egui::ComboBox::from_id_salt("inventory-sort").width(116.0).selected_text(["По группам","По названию","По ID"][state.catalog_sort.min(2)]).show_ui(ui,|ui| {
+                for (mode,label) in [(0,"По группам"),(1,"По названию"),(2,"По ID")] {ui.selectable_value(&mut state.catalog_sort,mode,label);}
+            });
+        });}
+    });
+    ui.add_space(4.0);
     // ---- Tab title + search ----
     ui.horizontal(|ui| {
         if state.search_open {
@@ -992,11 +1036,8 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         });
         return;
     } else {
-        let mut list: Vec<ItemId> = palette_all.into_iter().filter(|id| (state.search_open || in_tab(*id, state.tab) || !state.search.trim().is_empty()) && matches_search(*id, &state.search)).collect();
-        // Sorted: by category (in "Все"), then full blocks, shaped blocks (stairs, slabs,
-        // doors…), plants, items and tools, alphabetically inside each group so related
-        // things sit together (all oak, all diamond…).
-        list.sort_by_cached_key(|id| sort_key(*id));
+        sort_catalog(&mut catalog,state.catalog_sort);
+        let list=catalog;
         // Building pieces come in a dozen materials each: like on Bedrock, every form is one
         // cell with a "+" that unfolds its materials in place (a search shows them all).
         let cells = group_cells(&list, state.open_group, state.search.trim().is_empty());
@@ -1010,7 +1051,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         // Swipe scrolls the list (a slot only reacts to a tap, so the finger drag goes to the
         // scroll area); the bar stays visible so it is clear there is more below.
         egui::ScrollArea::vertical()
-            .id_salt(("creative-scroll", state.tab))
+            .id_salt(("creative-scroll", state.tab, state.search.trim().to_lowercase(), state.catalog_sort))
             .auto_shrink([false, false])
             .drag_to_scroll(true)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
@@ -1454,6 +1495,30 @@ mod tests {
         render(&mut st,&mut inv,1.0,vec![egui::Event::PointerMoved(at),egui::Event::PointerButton{pos:at,button:egui::PointerButton::Primary,pressed:true,modifiers:Default::default()}]);
         render(&mut st,&mut inv,1.1,vec![egui::Event::PointerButton{pos:at,button:egui::PointerButton::Primary,pressed:false,modifiers:Default::default()}]);
         assert!(inv.slots[0].is_none());assert_eq!(inv.slots[1].unwrap().count,7);assert!(!st.confirm_clear);
+    }
+
+    #[test]
+    fn catalogue_groups_nature_wood_and_tool_tiers() {
+        let mut natural=vec![Block::Ice,Block::Mud,Block::Sand,Block::Granite,Block::Snow,Block::Dirt,Block::Stone].into_iter().map(|b|b as ItemId).collect::<Vec<_>>();
+        sort_catalog(&mut natural,0);
+        assert_eq!(natural,vec![Block::Stone,Block::Granite,Block::Dirt,Block::Mud,Block::Sand,Block::Snow,Block::Ice].into_iter().map(|b|b as ItemId).collect::<Vec<_>>());
+        let mut wood=vec![Block::BirchLog as ItemId,Block::OakLeaves as ItemId,Block::OakPlanks as ItemId,Block::OakLog as ItemId];sort_catalog(&mut wood,0);
+        assert_eq!(wood,vec![Block::OakLog as ItemId,Block::OakPlanks as ItemId,Block::OakLeaves as ItemId,Block::BirchLog as ItemId]);
+        let mut tools=vec![items::ids::tool(0,1),items::ids::tool(3,0),items::ids::tool(0,0)];sort_catalog(&mut tools,0);
+        assert_eq!(tools,vec![items::ids::tool(0,0),items::ids::tool(3,0),items::ids::tool(0,1)]);
+        sort_catalog(&mut wood,2);assert!(wood.windows(2).all(|p|p[0]<p[1]));
+        sort_catalog(&mut wood,1);assert!(wood.windows(2).all(|p|items::info(p[0]).name.to_lowercase()<=items::info(p[1]).name.to_lowercase()));
+    }
+
+    #[test]
+    fn catalogue_header_names_the_active_category_and_search_results() {
+        let (ctx,icons)=ctx_with_icons();let mut st=InventoryUiState::default();let mut inv=Inventory::default();st.tab=5;
+        let render=|st:&mut InventoryUiState,inv:&mut Inventory|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(1000.0,700.0))),..Default::default()},|ctx|{show(ctx,&icons,st,inv,true,false,0.016);});
+        render(&mut st,&mut inv);let out=render(&mut st,&mut inv);
+        let count=items::creative_palette().iter().filter(|id|in_tab(**id,5)).count();let expected=format!("Природа · {count}");
+        assert!(out.shapes.iter().any(|s|matches!(&s.shape,egui::epaint::Shape::Text(t) if t.galley.job.text==expected)));
+        st.search_open=true;st.search="точно_нет_такого_блока".into();render(&mut st,&mut inv);let out=render(&mut st,&mut inv);
+        assert!(out.shapes.iter().any(|s|matches!(&s.shape,egui::epaint::Shape::Text(t) if t.galley.job.text=="Результаты поиска · 0")));
     }
 
     #[test]
