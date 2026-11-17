@@ -5,7 +5,7 @@
 use crate::gui_renderer::GuiIcons;
 use crate::hud::draw_stack;
 use crate::theme_manager::{ANIM_TIME, Palette, bold_font, palette};
-use crate::ui_components::{section_label, text_input};
+use crate::ui_components::text_input;
 use egui::{Align2, Color32, FontId, Id, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
 use wolfcraft_assets::gui as icon;
 use wolfcraft_engine::inventory::{CraftGrid, HOTBAR, Inventory, SLOTS};
@@ -95,6 +95,7 @@ pub fn close(state: &mut InventoryUiState, inv: &mut Inventory) {
     state.hold_used = false;
     state.touch_source=None;state.touch_origin=None;state.touch_spreading=false;state.spread_cells.clear();
     state.recipes_open = false;
+    state.confirm_clear=false;
     state.drag_slot = None;
     state.drag_item = None;
 }
@@ -226,13 +227,20 @@ fn distribute_stack(inv:&mut Inventory,grid:&mut CraftGrid,source:usize,targets:
 #[derive(Clone,Copy)]
 enum ControlIcon { Gui(u16), Item(ItemId) }
 
+const INVENTORY_BODY_H:f32=432.0;
+fn section_label(ui:&mut Ui,text:&str) {ui.label(egui::RichText::new(text).font(bold_font(12.0)).color(Color32::from_rgb(164,178,192)));}
+fn inventory_surface(painter:&egui::Painter,rect:Rect,recessed:bool) {
+    painter.rect_filled(rect,Rounding::same(4.0),if recessed {Color32::from_rgb(23,28,35)}else{Color32::from_rgb(36,43,52)});
+    painter.rect_stroke(rect,Rounding::same(4.0),Stroke::new(1.0,Color32::from_rgb(68,82,97)));
+}
+
 fn inventory_plate(ui:&mut Ui,icons:&GuiIcons,p:&Palette,rect:Rect,id:Id,icon:ControlIcon,label:&str,on:bool)->egui::Response {
-    let response=ui.interact(rect,id,Sense::click());let gold=crate::ui_components::ACHIEVEMENT_GOLD;
+    let response=ui.interact(rect,id,Sense::click());let edge=if on {p.accent}else{Color32::from_rgb(78,93,110)};
     let hot=response.hovered()||response.is_pointer_button_down_on();
-    ui.painter().rect_filled(rect,Rounding::same(14.0),if on||hot {Color32::from_rgb(104,76,36)}else{Color32::from_rgb(46,35,23)});
-    ui.painter().rect_stroke(rect,Rounding::same(14.0),Stroke::new(if on||hot {2.0}else{1.3},gold));
+    ui.painter().rect_filled(rect,Rounding::same(4.0),if on||hot {Color32::from_rgb(46,60,75)}else{Color32::from_rgb(32,39,49)});
+    ui.painter().rect_stroke(rect,Rounding::same(4.0),Stroke::new(if on {1.5}else{1.0},edge));
     let ir=Rect::from_center_size(if label.is_empty(){rect.center()}else{Pos2::new(rect.left()+18.0,rect.center().y)},Vec2::splat(22.0));
-    match icon {ControlIcon::Gui(ic)=>icons.paint(ui.painter(),ir,ic,gold),ControlIcon::Item(item)=>icons.paint_item(ui.painter(),ir,item)}
+    match icon {ControlIcon::Gui(ic)=>icons.paint(ui.painter(),ir,ic,if on {p.accent}else{p.text}),ControlIcon::Item(item)=>icons.paint_item(ui.painter(),ir,item)}
     if !label.is_empty(){let text=ui.painter().layout(label.to_string(),bold_font(12.0),p.text,(rect.width()-40.0).max(1.0));ui.painter().galley(Pos2::new(rect.left()+33.0,rect.center().y-text.size().y/2.0),text,p.text);}
     response
 }
@@ -244,7 +252,8 @@ fn clear_inventory(state:&mut InventoryUiState,inv:&mut Inventory) {
 
 /// Shows the inventory. `near_table` turns the crafting grid into 3×3.
 pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState, inv: &mut Inventory, creative: bool, near_table: bool, dt: f32) -> InventoryResult {
-    let p = palette(ctx);
+    let mut p = palette(ctx);
+    p.text=Color32::from_rgb(226,232,239);p.text_muted=Color32::from_rgb(155,171,187);p.surface_hi=Color32::from_rgb(36,43,53);p.surface_hover=Color32::from_rgb(47,58,71);p.outline=Color32::from_rgb(65,79,95);
     state.hold_seen=false;
     if state.touch_source.is_none(){ctx.data_mut(|d|d.insert_temp(Id::new("inventory-touch-drag"),false));}
     let mut result = InventoryResult::default();
@@ -270,7 +279,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
         let (rows, cols) = (7usize, 9usize);
         let grid_w = cols as f32 * (cell + GAP) - GAP + 14.0;
         let width = grid_w + 216.0;
-        let esc = crate::ui_components::block_screen_material(ctx, "inventory", width, false, crate::gui_renderer::panel_color(wolfcraft_assets::gui::PANEL_WORKBENCH), |ui| {
+        let esc = crate::ui_components::block_screen_material(ctx, "inventory", width, false, crate::ui_components::INVENTORY_BG, |ui| {
             if confirmation_was_open {ui.set_enabled(false);}
             creative_layout(ui, icons, &p, state, inv, cell, rows, cols, grid_w, &mut slot_rects, &mut trash_rect, &mut result);
         });
@@ -298,24 +307,24 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     } else {
         let content_w=9.0*(CELL+GAP)-GAP+14.0;
         let width=content_w+84.0;
-        let esc=crate::ui_components::block_screen_material(ctx,"inventory",width,false,crate::gui_renderer::panel_color(wolfcraft_assets::gui::PANEL_WORKBENCH),|ui| {
+        let esc=crate::ui_components::block_screen_material(ctx,"inventory",width,false,crate::ui_components::INVENTORY_BG,|ui| {
             let (header,_)=ui.allocate_exact_size(Vec2::new(width,68.0),Sense::hover());
-            icons.paint_panel(ui.painter(),header,wolfcraft_assets::gui::PANEL_WORKBENCH,Color32::WHITE);
+            inventory_surface(ui.painter(),header,false);
             ui.painter().text(Pos2::new(header.left()+14.0,header.center().y),Align2::LEFT_CENTER,if state.builder {"Конструктор"}else{"Инвентарь"},bold_font(18.0),p.text);
             let close=Rect::from_min_size(Pos2::new(header.right()-116.0,header.center().y-18.0),Vec2::new(104.0,36.0));
             if inventory_plate(ui,icons,&p,close,Id::new("survival-close"),ControlIcon::Gui(icon::CLOSE),"Закрыть",false).clicked(){result.close=true;}
             ui.add_space(6.0);
             ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(Vec2::new(content_w,384.0),egui::Layout::top_down(egui::Align::Min),|ui| {
-                    let area=Rect::from_min_size(ui.cursor().min,Vec2::new(content_w,384.0));
-                    icons.paint_panel(ui.painter(),area,wolfcraft_assets::gui::PANEL_WORKBENCH,Color32::WHITE);
-                    egui::ScrollArea::vertical().id_salt("player-inventory-body").drag_to_scroll(state.touch_source.is_none()).max_height(384.0).auto_shrink([false,false]).show(ui,|ui| {
+                ui.allocate_ui_with_layout(Vec2::new(content_w,INVENTORY_BODY_H),egui::Layout::top_down(egui::Align::Min),|ui| {
+                    let area=Rect::from_min_size(ui.cursor().min,Vec2::new(content_w,INVENTORY_BODY_H));
+                    inventory_surface(ui.painter(),area,true);
+                    egui::ScrollArea::vertical().id_salt("player-inventory-body").drag_to_scroll(state.touch_source.is_none()).max_height(INVENTORY_BODY_H).auto_shrink([false,false]).show(ui,|ui| {
                         ui.set_width(content_w-12.0);
                         if state.builder {let free=state.builder_free;result.crafted=construction_panel(ui,icons,state,inv,free);}
                         else {player_contents(ui,icons,&p,state,inv,&mut slot_rects,&mut result);}
                     });
                 });
-                right_hotbar(ui,icons,&p,state,inv,384.0,&mut slot_rects);
+                right_hotbar(ui,icons,&p,state,inv,INVENTORY_BODY_H,&mut slot_rects,&mut trash_rect);
             });
         });
         if esc||result.close {result.close=true;}
@@ -351,7 +360,7 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
     }
     if state.confirm_clear {
         let mut answer=None;
-        let esc=crate::ui_components::block_screen_material(ctx,"inventory-clear-confirm",390.0,false,Color32::from_rgb(62,44,27),|ui| {
+        let esc=crate::ui_components::block_screen_material(ctx,"inventory-clear-confirm",390.0,false,crate::ui_components::INVENTORY_BG,|ui| {
             ui.heading("Очистить инвентарь?");
             ui.add(egui::Label::new("Удалить все предметы из рюкзака, быстрого доступа, экипировки и сетки крафта?").wrap());
             ui.add_space(10.0);
@@ -440,7 +449,8 @@ pub fn show(ctx: &egui::Context, icons: &GuiIcons, state: &mut InventoryUiState,
             let galley = ctx.fonts(|f| f.layout_no_wrap(text.clone(), font, p.text));
             let size = galley.size() + Vec2::new(16.0, 8.0);
             let sr = ctx.screen_rect();
-            let mut pill = Rect::from_center_size(Pos2::new(rect.center().x, rect.top() - 6.0 - size.y * 0.5), size);
+            let anchor=ctx.data(|d|d.get_temp::<(f32,Vec2)>(Id::new("inventory").with("fit"))).map_or(*rect,|(s,t)|Rect::from_min_max((rect.min.to_vec2()*s+t).to_pos2(),(rect.max.to_vec2()*s+t).to_pos2()));
+            let mut pill = Rect::from_center_size(Pos2::new(anchor.center().x, anchor.top() - 6.0 - size.y * 0.5), size);
             pill = pill.translate(Vec2::new((sr.left() + 4.0 - pill.left()).max(0.0) + (sr.right() - 4.0 - pill.right()).min(0.0), (sr.top() + 4.0 - pill.top()).max(0.0)));
             let a = (*t * 4.0).clamp(0.0, 1.0);
             layer.rect_filled(pill, Rounding::same(6.0), p.surface.gamma_multiply(0.96 * a));
@@ -793,7 +803,7 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
     // Mode: 0 Творчество (the item grid), 1 Крафт, 2 Персонаж, 3 Рюкзак.
     let mode = usize::from(state.tab==BACKPACK_TAB);
     let (banner,_) = ui.allocate_exact_size(Vec2::new(full_w,68.0),Sense::hover());
-    icons.paint_panel(ui.painter(),banner,wolfcraft_assets::gui::PANEL_WORKBENCH,Color32::WHITE);
+    inventory_surface(ui.painter(),banner,false);
     let title=["Творчество","Инвентарь игрока"][mode];
     ui.painter().text(Pos2::new(banner.left()+14.0,banner.center().y),Align2::LEFT_CENTER,title,bold_font(18.0),p.text);
     let controls=Rect::from_min_max(Pos2::new(banner.right()-276.0,banner.top()+14.0),Pos2::new(banner.right()-6.0,banner.bottom()-14.0));
@@ -820,10 +830,9 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
         if state.search_open {ui.ctx().data_mut(|d|d.insert_temp(Id::new("inv-search-fresh"),true));}else{state.search.clear();}
     }
     ui.add_space(4.0);
-    let grid_h = rows as f32 * (cell + GAP) - GAP + 12.0;
     // ---- Category menu: pills in one row with arrows (Творчество only) ----
     // ---- The section: the item grid (or the page of Крафт / Персонаж / Рюкзак) ----
-    let section_h = (grid_h + if mode == 0 { 0.0 } else { 40.0 + 6.0 }).max(384.0);
+    let section_h = INVENTORY_BODY_H;
     ui.horizontal_top(|ui| {
         {
             ui.allocate_ui_with_layout(Vec2::new(120.0,section_h),egui::Layout::top_down(egui::Align::Min),|ui| {
@@ -845,24 +854,27 @@ fn creative_layout(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Inven
             ui.set_width(grid_w);ui.set_height(section_h);
             creative_main(ui,icons,p,state,inv,cell,rows,cols,grid_w,palette_all,slot_rects,trash_rect,result);
         });
-        right_hotbar(ui,icons,p,state,inv,section_h,slot_rects);
+        right_hotbar(ui,icons,p,state,inv,section_h,slot_rects,trash_rect);
     });
     // Quick access is one vertical column on the right; no bottom bar.
 
 }
 
-fn right_hotbar(ui:&mut Ui,icons:&GuiIcons,p:&Palette,state:&mut InventoryUiState,inv:&mut Inventory,height:f32,slots:&mut Vec<(usize,Rect)>) {
+fn right_hotbar(ui:&mut Ui,icons:&GuiIcons,p:&Palette,state:&mut InventoryUiState,inv:&mut Inventory,height:f32,slots:&mut Vec<(usize,Rect)>,trash:&mut Option<Rect>) {
     ui.allocate_ui_with_layout(Vec2::new(72.0,height),egui::Layout::top_down(egui::Align::Min),|ui| {
         ui.spacing_mut().item_spacing.y=4.0;
         let panel=Rect::from_min_size(ui.cursor().min,Vec2::new(72.0,height));
-        ui.painter().rect_filled(panel,Rounding::same(14.0),Color32::from_rgb(46,35,23));
-        ui.painter().rect_stroke(panel,Rounding::same(14.0),Stroke::new(1.5,crate::ui_components::ACHIEVEMENT_GOLD));
+        inventory_surface(ui.painter(),panel,true);
         let (label,_)=ui.allocate_exact_size(Vec2::new(72.0,22.0),Sense::hover());ui.painter().text(label.center(),Align2::CENTER_CENTER,"1–9",bold_font(12.0),p.text);
         for slot in 0..HOTBAR {
             let (row,_)=ui.allocate_exact_size(Vec2::new(72.0,36.0),Sense::hover());let r=Rect::from_min_size(row.min+Vec2::new(25.0,0.0),Vec2::splat(36.0));
             ui.painter().text(Pos2::new(row.left()+13.0,row.center().y),Align2::CENTER_CENTER,(slot+1).to_string(),bold_font(11.0),p.text_muted);
             slots.push((slot,r));draw_slot(ui,icons,p,state,inv,slot,r);
         }
+        let (row,_)=ui.allocate_exact_size(Vec2::new(72.0,36.0),Sense::hover());
+        let r=Rect::from_min_size(row.min+Vec2::new(25.0,0.0),Vec2::splat(36.0));
+        bin(ui,icons,p,state,inv,r,36.0,trash);
+        #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(Id::new("inventory-test-trash"),r));
     });
 }
 
@@ -893,30 +905,15 @@ fn hotbar_row(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryU
 fn bin(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut InventoryUiState, inv: &mut Inventory, rect: Rect, s: f32, trash_rect: &mut Option<Rect>) {
     let resp = ui.interact(rect, Id::new("inv-bin"), Sense::click());
     let hot = resp.hovered() || state.drag_slot.is_some();
-    ui.painter().rect_filled(rect, Rounding::same(10.0), p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
-    ui.painter().rect_stroke(rect, Rounding::same(10.0), Stroke::new(2.0_f32, p.danger.gamma_multiply(0.7)));
+    ui.painter().rect_filled(rect, Rounding::same(4.0), p.danger.gamma_multiply(if hot { 0.35 } else { 0.15 }));
+    ui.painter().rect_stroke(rect, Rounding::same(4.0), Stroke::new(1.0_f32, p.danger.gamma_multiply(0.7)));
     icons.paint(ui.painter(), rect.shrink(s * 0.24), icon::TRASH, p.danger);
     // Tap: delete the item in the selected hotbar slot. Or drag any slot here.
-    if resp.double_clicked() {
-        // Double tap: everything goes (hotbar and backpack) — but only on a second double tap
-        // within 3 s, so a slip of the finger doesn't wipe the inventory.
-        let armed_id = Id::new("inv-clear-armed");
-        let now = ui.input(|i| i.time);
-        let armed: Option<f64> = ui.ctx().data(|d| d.get_temp(armed_id));
-        if armed.is_some_and(|t| now - t < 3.0) {
-            for s in inv.slots.iter_mut() {
-                *s = None;
-            }
-            state.toast = Some(("Инвентарь очищен".to_string(), 1.6));
-            ui.ctx().data_mut(|d| d.remove::<f64>(armed_id));
-        } else {
-            state.toast = Some(("Ещё раз двойное нажатие — очистить весь инвентарь".to_string(), 2.5));
-            ui.ctx().data_mut(|d| d.insert_temp(armed_id, now));
-        }
-    } else if resp.clicked() {
-        inv.slots[inv.selected] = None;
+    if resp.clicked() {
+        let slot=state.picked_slot.unwrap_or(inv.selected);
+        set(inv,&mut state.grid,slot,None);state.picked_slot=None;
     }
-    resp.on_hover_text("Удалить: нажмите — предмет в выбранном слоте; двойное нажатие — всё; или перетащите сюда");
+    resp.on_hover_text("Удалить выбранную стопку или перетащить предмет сюда");
     *trash_rect = Some(rect);
 }
 
@@ -985,7 +982,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         // backpack and hotbar (scrolls on small screens).
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         // A recessed metal panel behind the slots, like in the block windows.
-        icons.paint_panel(ui.painter(), area.expand(3.0), wolfcraft_assets::gui::PANEL_WORKBENCH, Color32::WHITE);
+        inventory_surface(ui.painter(),area.expand(3.0),true);
         let area = area.shrink(4.0);
         let content = area;
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(content));
@@ -1006,9 +1003,10 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
         let list = cells;
         let (area, _) = ui.allocate_exact_size(Vec2::new(grid_w, grid_h), Sense::hover());
         // A recessed metal panel behind the slots, like in the block windows.
-        icons.paint_panel(ui.painter(), area.expand(3.0), wolfcraft_assets::gui::PANEL_METAL, Color32::WHITE);
+        inventory_surface(ui.painter(),area.expand(3.0),true);
         let area = area.shrink(4.0);
         let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(area));
+        ui2.spacing_mut().item_spacing.y=GAP;
         // Swipe scrolls the list (a slot only reacts to a tap, so the finger drag goes to the
         // scroll area); the bar stays visible so it is clear there is more below.
         egui::ScrollArea::vertical()
@@ -1016,7 +1014,7 @@ fn creative_main(ui: &mut Ui, icons: &GuiIcons, p: &Palette, state: &mut Invento
             .auto_shrink([false, false])
             .drag_to_scroll(true)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-            .show_rows(&mut ui2, cell + GAP, list.len().div_ceil(cols), |ui, visible| {
+            .show_rows(&mut ui2, cell, list.len().div_ceil(cols), |ui, visible| {
             for chunk in list.chunks(cols).skip(visible.start).take(visible.end-visible.start) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::splat(GAP);
@@ -1425,6 +1423,37 @@ mod tests {
             let hotbar:Vec<_>=slots.iter().filter(|(s,_)|*s<HOTBAR).collect();
             for p in hotbar.windows(2){assert_eq!(p[0].1.center().x,p[1].1.center().x);assert!(p[0].1.top()<p[1].1.top());}
         }
+    }
+
+    #[test]
+    fn inventory_frame_stays_fixed_across_filters_and_player_page() {
+        let (ctx,icons)=ctx_with_icons();let mut st=InventoryUiState::default();let mut inv=Inventory::default();
+        let render=|st:&mut InventoryUiState,inv:&mut Inventory,time| {
+            let _=ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(1100.0,720.0))),time:Some(time),..Default::default()},|ctx|{show(ctx,&icons,st,inv,true,false,0.016);});
+            ctx.memory(|m|m.area_rect(Id::new("inventory").with("body"))).unwrap()
+        };
+        for time in [0.0,0.3,0.6] {render(&mut st,&mut inv,time);}
+        let base=render(&mut st,&mut inv,1.0);
+        for n in 0..4 {
+            st.tab=if n==3 {BACKPACK_TAB}else{n};st.search_open=n==2;st.search=if n==2 {"алмаз".into()}else{String::new()};
+            let rect=render(&mut st,&mut inv,2.0+n as f64);
+            assert!((rect.width()-base.width()).abs()<1.0&&(rect.height()-base.height()).abs()<1.0,"layout changed: {base:?} -> {rect:?}");
+        }
+    }
+
+    #[test]
+    fn right_hotbar_bin_deletes_only_the_selected_stack() {
+        let (ctx,icons)=ctx_with_icons();let mut st=InventoryUiState::default();let mut inv=Inventory::default();
+        inv.slots[0]=Some(ItemStack::of_block(Block::OakPlanks,13));inv.slots[1]=Some(ItemStack::of_block(Block::Stone,7));
+        let render=|st:&mut InventoryUiState,inv:&mut Inventory,time,events|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(1000.0,700.0))),time:Some(time),events,..Default::default()},|ctx|{show(ctx,&icons,st,inv,true,false,0.016);});
+        for time in [0.0,0.3,0.6] {render(&mut st,&mut inv,time,vec![]);}
+        let trash:Rect=ctx.data(|d|d.get_temp(Id::new("inventory-test-trash"))).unwrap();
+        let slots:Vec<(usize,Rect)>=ctx.data(|d|d.get_temp(Id::new("inventory-test-slots"))).unwrap();
+        assert!(trash.top()>slots.iter().find(|(s,_)|*s==8).unwrap().1.bottom());
+        let (scale,t)=ctx.data(|d|d.get_temp::<(f32,Vec2)>(Id::new("inventory").with("fit"))).unwrap();let at=(trash.center().to_vec2()*scale+t).to_pos2();
+        render(&mut st,&mut inv,1.0,vec![egui::Event::PointerMoved(at),egui::Event::PointerButton{pos:at,button:egui::PointerButton::Primary,pressed:true,modifiers:Default::default()}]);
+        render(&mut st,&mut inv,1.1,vec![egui::Event::PointerButton{pos:at,button:egui::PointerButton::Primary,pressed:false,modifiers:Default::default()}]);
+        assert!(inv.slots[0].is_none());assert_eq!(inv.slots[1].unwrap().count,7);assert!(!st.confirm_clear);
     }
 
     #[test]
