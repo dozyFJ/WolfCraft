@@ -18,6 +18,8 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     a.lerp_to_gamma(b, t.clamp(0.0, 1.0))
 }
 
+pub const INVENTORY_BG: Color32 = Color32::from_rgb(29,33,40);
+
 pub const ACHIEVEMENT_GOLD: Color32 = Color32::from_rgb(255,205,70);
 
 pub const BUTTON_HEIGHT: f32 = 38.0;
@@ -501,10 +503,11 @@ pub fn block_screen_material(ctx: &egui::Context, id: &str, width: f32, corner_c
         ui.set_max_height(4000.0);
         Frame::none()
             .fill(fill)
-            .rounding(Rounding::same(18.0))
-            .stroke(Stroke::new(2.0,ACHIEVEMENT_GOLD.gamma_multiply(0.8)))
+            .rounding(Rounding::same(if fill==INVENTORY_BG {6.0}else{18.0}))
+            .stroke(if fill==INVENTORY_BG {Stroke::new(1.0,Color32::from_rgb(76,89,103))}else{Stroke::new(2.0,ACHIEVEMENT_GOLD.gamma_multiply(0.8))})
             .inner_margin(Margin::same(14.0))
             .show(ui, |ui| {
+                if fill==INVENTORY_BG {ui.visuals_mut().override_text_color=Some(Color32::from_rgb(226,232,239));}
                 ui.set_width(width);
                 let max_h = (screen.height() - 2.0 * 14.0 - 20.0) / MIN_FIT;
                 egui::ScrollArea::vertical().id_salt(Id::new(id).with("scroll")).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
