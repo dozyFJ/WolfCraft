@@ -426,7 +426,7 @@ pub fn game_screen(ctx: &egui::Context, id: &str, title: &str, width: f32, add: 
                 // The window is scaled down to fit the screen (see `fit_body`); it scrolls
                 // only when it would still not fit at the smallest scale.
                 let max_h = (screen.height() - SCREEN_BAR - 2.0 * 14.0 - 16.0) / MIN_FIT;
-                egui::ScrollArea::vertical().id_salt(Id::new(id).with("scroll")).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt(Id::new(id).with("scroll")).drag_to_scroll(id!="inventory"||!ctx.data(|d|d.get_temp::<bool>(Id::new("inventory-touch-drag")).unwrap_or(false))).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
                     add(ui);
                 });
             });
