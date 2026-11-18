@@ -310,6 +310,82 @@ impl Editor {
     }
 }
 
+impl Editor {
+    fn import_button(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .add_enabled(!self.importing, egui::Button::new("+ Импорт"))
+            .clicked()
+        {
+            self.pick_import(ui.ctx());
+        }
+    }
+
+    fn export_button(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .add_enabled(
+                !self.clips.is_empty() && !self.exporting,
+                theme::primary("Экспорт MP4"),
+            )
+            .clicked()
+        {
+            self.export(ui.ctx());
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn update_button(&mut self, ui: &mut egui::Ui) {
+        let label = if self.update_available {
+            "Обновить"
+        } else {
+            "Обновления"
+        };
+        if ui
+            .add_enabled(
+                !self.updating && !self.importing && !self.exporting,
+                egui::Button::new(label),
+            )
+            .clicked()
+        {
+            if self.update_available && !self.clips.is_empty() {
+                self.confirm_update = true;
+            } else {
+                self.begin_update();
+            }
+        }
+    }
+
+    fn trim_controls(&mut self, ui: &mut egui::Ui, compact: bool) {
+        let clip = &mut self.clips[self.selected];
+        ui.heading("Обрезка");
+        ui.add(egui::Label::new(RichText::new(clip.name()).weak()).truncate());
+        ui.add_space(4.0);
+        if compact {
+            ui.spacing_mut().slider_width = (ui.available_width() - 132.0).max(72.0);
+        }
+        let start_changed = ui
+            .add(
+                egui::Slider::new(&mut clip.start, 0.0..=(clip.end - 0.04).max(0.0))
+                    .fixed_decimals(3)
+                    .text("Начало, с"),
+            )
+            .changed();
+        let end_changed = ui
+            .add(
+                egui::Slider::new(
+                    &mut clip.end,
+                    (clip.start + 0.04).min(clip.duration)..=clip.duration,
+                )
+                .fixed_decimals(3)
+                .text("Конец, с"),
+            )
+            .changed();
+        if start_changed || end_changed {
+            self.cursor = self.cursor.clamp(clip.start, clip.end);
+            self.invalidate_frame();
+        }
+    }
+}
+
 impl eframe::App for Editor {
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
         theme::backdrop(context);
@@ -326,56 +402,38 @@ impl eframe::App for Editor {
         });
         self.import(dropped, context);
 
+        let compact = context.screen_rect().width() < 520.0;
         egui::TopBottomPanel::top("toolbar")
             .frame(theme::glass(13.0, 7.0))
             .show(context, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.heading(RichText::new("WolfCut").color(ACCENT).strong());
-                    if ui
-                        .add_enabled(!self.importing, egui::Button::new("+ Импорт"))
-                        .clicked()
-                    {
-                        self.pick_import(context);
+                    if !compact {
+                        self.import_button(ui);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_enabled(
-                                !self.clips.is_empty() && !self.exporting,
-                                theme::primary("Экспорт MP4"),
-                            )
-                            .clicked()
-                        {
-                            self.export(context);
+                        if !compact {
+                            self.export_button(ui);
                         }
                         #[cfg(target_os = "android")]
-                        {
-                            let label = if self.update_available {
-                                "Обновить"
-                            } else {
-                                "Обновления"
-                            };
-                            if ui
-                                .add_enabled(
-                                    !self.updating && !self.importing && !self.exporting,
-                                    egui::Button::new(label),
-                                )
-                                .clicked()
-                            {
-                                if self.update_available && !self.clips.is_empty() {
-                                    self.confirm_update = true;
-                                } else {
-                                    self.begin_update();
-                                }
-                            }
-                        }
+                        self.update_button(ui);
                     });
                 });
+                if compact {
+                    ui.horizontal_centered(|ui| {
+                        self.import_button(ui);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.export_button(ui);
+                        });
+                    });
+                }
             });
 
         egui::TopBottomPanel::bottom("status")
             .frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(16.0, 3.0)))
             .show(context, |ui| {
-                ui.label(RichText::new(&self.status).small().weak());
+                ui.add(egui::Label::new(RichText::new(&self.status).small().weak()).truncate())
+                    .on_hover_text(&self.status);
             });
 
         egui::TopBottomPanel::bottom("timeline")
@@ -450,37 +508,17 @@ impl eframe::App for Editor {
                 }
             });
 
-        if let Some(clip) = self.clips.get_mut(self.selected) {
-            let mut trim_changed = false;
-            egui::SidePanel::right("trim")
-                .default_width(190.0)
-                .resizable(false)
-                .frame(theme::glass(10.0, 8.0))
-                .show(context, |ui| {
-                    ui.heading("Обрезка");
-                    ui.add(egui::Label::new(RichText::new(clip.name()).weak()).truncate());
-                    ui.add_space(10.0);
-                    trim_changed |= ui
-                        .add(
-                            egui::Slider::new(&mut clip.start, 0.0..=(clip.end - 0.04).max(0.0))
-                                .fixed_decimals(3)
-                                .text("Начало, с"),
-                        )
-                        .changed();
-                    trim_changed |= ui
-                        .add(
-                            egui::Slider::new(
-                                &mut clip.end,
-                                (clip.start + 0.04).min(clip.duration)..=clip.duration,
-                            )
-                            .fixed_decimals(3)
-                            .text("Конец, с"),
-                        )
-                        .changed();
-                });
-            if trim_changed {
-                self.cursor = self.cursor.clamp(clip.start, clip.end);
-                self.invalidate_frame();
+        if !self.clips.is_empty() {
+            if compact {
+                egui::TopBottomPanel::bottom("trim_mobile")
+                    .frame(theme::glass(12.0, 6.0))
+                    .show(context, |ui| self.trim_controls(ui, true));
+            } else {
+                egui::SidePanel::right("trim")
+                    .default_width(190.0)
+                    .resizable(false)
+                    .frame(theme::glass(10.0, 8.0))
+                    .show(context, |ui| self.trim_controls(ui, false));
             }
         }
 
@@ -489,6 +527,9 @@ impl eframe::App for Editor {
             .show(context, |ui| {
                 if let Some(clip) = self.clips.get(self.selected) {
                     ui.heading("Предпросмотр");
+                    if compact {
+                        ui.spacing_mut().slider_width = (ui.available_width() - 72.0).max(72.0);
+                    }
                     let size = egui::vec2(
                         ui.available_width(),
                         (ui.available_height() - ui.spacing().interact_size.y - 9.0).max(24.0),
@@ -572,7 +613,7 @@ pub fn run_desktop() -> eframe::Result<()> {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1120.0, 720.0])
-            .with_min_inner_size([720.0, 480.0])
+            .with_min_inner_size([320.0, 480.0])
             .with_drag_and_drop(true),
         ..Default::default()
     };
