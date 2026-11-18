@@ -29,7 +29,7 @@ jobs:
         with:
           key: wolfcraft-windows
 
-      - name: Build WolfCraft.exe and WolfStudio.exe
+      - name: Build Windows executables
         run: |
           # Everything linked in (libstdc++, libgcc, winpthread): the exe needs no MinGW DLLs
           # on the player's PC.
@@ -39,10 +39,11 @@ jobs:
           export RUSTFLAGS="-L native=$GCCLIB -C target-feature=+crt-static -C link-arg=-static -C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
           cargo build -p wolfcraft-game --bin WolfCraft --release --target x86_64-pc-windows-gnu
           cargo build -p wolfstudio --bin WolfStudio --release --target x86_64-pc-windows-gnu
-          cp target/x86_64-pc-windows-gnu/release/{WolfCraft,WolfStudio}.exe .
+          cargo build -p wolfserver --release --target x86_64-pc-windows-gnu
+          cp target/x86_64-pc-windows-gnu/release/{WolfCraft,WolfStudio,WolfServer}.exe .
           ls -lh WolfCraft.exe
           echo "DLLs the exe needs:"
-          for exe in WolfCraft.exe WolfStudio.exe; do
+          for exe in WolfCraft.exe WolfStudio.exe WolfServer.exe; do
             x86_64-w64-mingw32-objdump -p "$exe" | grep "DLL Name" | sort -u
             if x86_64-w64-mingw32-objdump -p "$exe" | grep -qiE "libstdc|libgcc|libwinpthread"; then
               echo "$exe still requires a MinGW DLL"
@@ -55,6 +56,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete pc-test -y --cleanup-tag || true
-          gh release create pc-test WolfCraft.exe WolfStudio.exe --prerelease --target "$GITHUB_SHA" \
+          gh release create pc-test WolfCraft.exe WolfStudio.exe WolfServer.exe --prerelease --target "$GITHUB_SHA" \
             --title "WolfCraft для ПК (Windows) #${{ github.run_number }}" \
-            --notes "WolfCraft.exe — игра. WolfStudio.exe — редактор серверов и мини-игр. ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."
+            --notes "WolfCraft.exe — игра. WolfStudio.exe — редактор серверов и мини-игр. WolfServer.exe — выделенный сервер. ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."
