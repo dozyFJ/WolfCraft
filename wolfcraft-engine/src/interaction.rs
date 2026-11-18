@@ -605,7 +605,11 @@ impl Interaction {
                 block.oriented(player.heading.dot(ei), player.heading.dot(ej))
             }
         };
-        let block = if h.normal == (2, -1) { block.inverted_stair() } else { block };
+        let block = match h.normal {
+            (2, -1) => block.inverted_stair().upper_slab(),
+            (0 | 1, _) if h.height > 0.5 => block.upper_slab(),
+            _ => block,
+        };
         if !world.cell_block(target).is_replaceable() {
             return events;
         }
@@ -699,7 +703,7 @@ mod tests {
     const EAST: (usize, i32) = (0, 1);
 
     fn hit(world: &Mock, cell: Cell, normal: (usize, i32)) -> Hit {
-        Hit { cell, normal, dist: 1.0, block: world.block(cell) }
+        Hit { cell, normal, dist: 1.0, height: 0.5, block: world.block(cell) }
     }
 
     fn setup() -> (Mock, Player) {
@@ -729,6 +733,34 @@ mod tests {
             assert_eq!(inverted.base_item(), stair);
             for (above, below) in upright.boxes().iter().zip(inverted.boxes()) {
                 assert_eq!((below[2], below[5]), (1.0 - above[5], 1.0 - above[2]));
+            }
+        }
+    }
+
+    #[test]
+    fn slabs_follow_the_clicked_face_and_height() {
+        use crate::construction::{self, Form};
+        let catalogue_slab = construction::block(Form::LowerSlab, 0, 0).unwrap();
+        for slab in [Block::CobbleSlab, Block::PlankSlab, catalogue_slab] {
+            for (normal, height, upper) in [
+                (UP, 1.0, false),
+                ((2, -1), 0.0, true),
+                ((0, -1), 0.25, false),
+                ((0, -1), 0.75, true),
+            ] {
+                let (mut world, mut player) = setup();
+                player.inventory.selected = 0;
+                player.inventory.slots[0] = Some(ItemStack::of_block(slab, 1));
+                let h = Hit { height, ..hit(&world, c(0, 50, 0), normal) };
+                let target = h.front_cell(&world.grid).unwrap();
+                Interaction::default().use_item(&mut world, &mut player, Some(h));
+                let placed = world.block(target);
+                let shape = placed.shape().unwrap();
+                assert_eq!((shape[2], shape[5]), if upper { (0.5, 1.0) } else { (0.0, 0.5) });
+                assert_eq!(Block::from_id(placed as u16), placed);
+                if slab != catalogue_slab {
+                    assert_eq!(placed.base_item(), slab);
+                }
             }
         }
     }

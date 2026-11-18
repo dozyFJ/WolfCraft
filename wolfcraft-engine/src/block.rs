@@ -2079,6 +2079,14 @@ blocks! {
     2682 Build47R1Inverted => crate::construction::block_info("Медь · Внешний угол ступеней", 7, crate::construction::Form::OuterStairs),
     2683 Build47R2Inverted => crate::construction::block_info("Медь · Внешний угол ступеней", 7, crate::construction::Form::OuterStairs),
     2684 Build47R3Inverted => crate::construction::block_info("Медь · Внешний угол ступеней", 7, crate::construction::Form::OuterStairs),
+    2685 StoneSlabUpper => needs_pick(info("Каменная плита", Shape, 5.0, Pickaxe, all(t::STONE))),
+    2686 PlankSlabUpper => info("Дощатая плита", Shape, 2.0, Axe, all(t::PLANKS)),
+    2687 CobbleSlabUpper => needs_pick(info("Булыжная плита", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    2688 StoneBrickSlabUpper => needs_pick(info("Плита из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    2689 SandstoneSlabUpper => needs_pick(info("Песчаниковая плита", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    2690 BrickSlabUpper => needs_pick(info("Кирпичная плита", Shape, 5.0, Pickaxe, all(t::BRICKS))),
+    2691 BirchSlabUpper => info("Берёзовая плита", Shape, 2.0, Axe, all(t::BIRCH_PLANKS)),
+    2692 SpruceSlabUpper => info("Еловая плита", Shape, 2.0, Axe, all(t::SPRUCE_PLANKS)),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2305,6 +2313,7 @@ impl Block {
         }
         use Block::*;
         const SLAB: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 0.5];
+        const UPPER_SLAB: [f32; 6] = [0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
         const VERT_A: [f32; 6] = [0.0, 0.0, 0.0, 0.5, 1.0, 1.0];
         const VERT_B: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 0.5, 1.0];
         const PANE_A: [f32; 6] = [0.44, 0.0, 0.0, 0.56, 1.0, 1.0];
@@ -2365,6 +2374,7 @@ impl Block {
         const SIGN_B: [[f32; 6]; 2] = [[0.46, 0.46, 0.0, 0.54, 0.54, 0.55], [0.44, 0.05, 0.5, 0.56, 0.95, 0.95]];
         match self {
             StoneSlab | PlankSlab | CobbleSlab | StoneBrickSlab | SandstoneSlab | BrickSlab | BirchSlab | SpruceSlab => std::slice::from_ref(&SLAB),
+            StoneSlabUpper | PlankSlabUpper | CobbleSlabUpper | StoneBrickSlabUpper | SandstoneSlabUpper | BrickSlabUpper | BirchSlabUpper | SpruceSlabUpper => std::slice::from_ref(&UPPER_SLAB),
             StoneSlabVerticalA | PlankSlabVerticalA | BrickSlabVerticalA => std::slice::from_ref(&VERT_A),
             StoneSlabVerticalB | PlankSlabVerticalB | BrickSlabVerticalB => std::slice::from_ref(&VERT_B),
             GlassPaneA | RedPaneA | BluePaneA | GreenPaneA | YellowPaneA => std::slice::from_ref(&PANE_A),
@@ -2508,6 +2518,28 @@ impl Block {
         })
     }
 
+    /// Move a standard or catalogue lower slab to the upper half of the cell.
+    pub fn upper_slab(self) -> Self {
+        use crate::construction::{self, Form};
+        if let Some((entry, rotation)) = construction::entry(self as u16) {
+            if entry.form == Form::LowerSlab {
+                return construction::block(Form::UpperSlab, entry.material, rotation).unwrap_or(self);
+            }
+        }
+        use Block::*;
+        match self {
+            StoneSlab => StoneSlabUpper,
+            PlankSlab => PlankSlabUpper,
+            CobbleSlab => CobbleSlabUpper,
+            StoneBrickSlab => StoneBrickSlabUpper,
+            SandstoneSlab => SandstoneSlabUpper,
+            BrickSlab => BrickSlabUpper,
+            BirchSlab => BirchSlabUpper,
+            SpruceSlab => SpruceSlabUpper,
+            _ => self,
+        }
+    }
+
     /// Reflects a placed stair vertically, preserving its direction and material.
     pub fn inverted_stair(self) -> Self {
         let id = match self as u16 {
@@ -2621,6 +2653,14 @@ impl Block {
             GreenPaneB => GreenPaneA,
             YellowPaneB => YellowPaneA,
             SignB => Sign,
+            StoneSlabUpper => StoneSlab,
+            PlankSlabUpper => PlankSlab,
+            CobbleSlabUpper => CobbleSlab,
+            StoneBrickSlabUpper => StoneBrickSlab,
+            SandstoneSlabUpper => SandstoneSlab,
+            BrickSlabUpper => BrickSlab,
+            BirchSlabUpper => BirchSlab,
+            SpruceSlabUpper => SpruceSlab,
             StoneSlabVerticalB => StoneSlabVerticalA,
             PlankSlabVerticalB => PlankSlabVerticalA,
             BrickSlabVerticalB => BrickSlabVerticalA,

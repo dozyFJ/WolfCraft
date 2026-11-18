@@ -356,6 +356,8 @@ pub struct Hit {
     /// Face normal pointing out of the hit block towards the ray origin: (axis 0=i 1=j 2=k, sign).
     pub normal: (usize, i32),
     pub dist: f64,
+    /// Height of the hit point relative to the bottom of the hit cell.
+    pub height: f64,
     pub block: Block,
 }
 
@@ -414,9 +416,26 @@ pub fn raycast(world: &impl Voxels, origin: DVec3, dir: DVec3, max_dist: f64) ->
             if !b.boxes().is_empty() {
                 let nearest = block_obbs_in(world, c, b).iter().filter_map(|o| ray_obb(origin, dir, o)).filter(|(d,_)| *d <= max_dist)
                     .min_by(|a,b| a.0.total_cmp(&b.0));
-                if let Some((dist, normal)) = nearest { return Some(Hit { cell:c, normal, dist, block:b }); }
+                if let Some((dist, normal)) = nearest {
+                    let height = g.radial(origin + dir * dist) - f64::from(c.k);
+                    return Some(Hit { cell: c, normal, dist, height, block: b });
+                }
             } else {
-                return Some(Hit { cell: c, normal: entry_face(g, prev, c), dist: t, block: b });
+                let normal = entry_face(g, prev, c);
+                // Refine entry within the march step so a shallow side hit
+                // near the midpoint selects the correct half of the block.
+                let mut lo = t - STEP;
+                let mut hi = t;
+                for _ in 0..12 {
+                    let mid = (lo + hi) * 0.5;
+                    if g.world_to_cell(origin + dir * mid) == c {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                let height = g.radial(origin + dir * hi) - f64::from(c.k);
+                return Some(Hit { cell: c, normal, dist: t, height, block: b });
             }
         }
         prev = c;
