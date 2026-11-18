@@ -21,6 +21,7 @@ static BRIDGE: RwLock<Option<Arc<Bridge>>> = RwLock::new(None);
 pub enum ResultEvent {
     Import(Vec<PathBuf>, String),
     Export(String),
+    Update(String, bool),
 }
 
 pub fn initialize(app: &AndroidApp) -> Result<(), Box<dyn std::error::Error>> {
@@ -94,6 +95,14 @@ pub fn pick_export() -> Result<(), String> {
     launch("saveVideo")
 }
 
+pub fn update(install: bool) -> Result<(), String> {
+    launch(if install {
+        "installUpdate"
+    } else {
+        "checkUpdate"
+    })
+}
+
 pub fn poll() -> Result<Option<ResultEvent>, String> {
     let bridge = bridge();
     let mut env = bridge
@@ -128,6 +137,8 @@ pub fn poll() -> Result<Option<ResultEvent>, String> {
             .map(PathBuf::from)
             .collect();
         ResultEvent::Import(paths, status)
+    } else if value["type"] == "update" {
+        ResultEvent::Update(status, value["available"].as_bool().unwrap_or(false))
     } else {
         ResultEvent::Export(status)
     };

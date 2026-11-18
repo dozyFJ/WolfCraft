@@ -27,9 +27,9 @@ native="${CARGO_TARGET_DIR:-$project/target}/aarch64-linux-android/release/libwo
 
 mkdir -p "$staging"/{classes,apk/lib/arm64-v8a,apk/assets}
 java -m jdk.compiler/com.sun.tools.javac.Main -source 8 -target 8 -Xlint:-options -classpath "$platform" \
-    -d "$staging/classes" android/src/com/wolfcraft/wolfcut/WolfCutActivity.java
+    -d "$staging/classes" android/src/com/wolfcraft/wolfcut/*.java
 "$tools/d8" --release --min-api 26 --lib "$platform" --output "$staging/apk" \
-    "$staging/classes/com/wolfcraft/wolfcut/WolfCutActivity.class"
+    "$staging/classes/com/wolfcraft/wolfcut/"*.class
 
 install -m 644 "$native" "$media/libffmpeg.so" "$media/libffprobe.so" "$staging/apk/lib/arm64-v8a"
 install -m 644 android/FFmpeg-LICENSE.txt "$staging/apk/assets/"

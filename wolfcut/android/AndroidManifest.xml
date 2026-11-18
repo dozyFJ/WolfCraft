@@ -1,12 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.wolfcraft.wolfcut"
-    android:versionCode="1"
-    android:versionName="0.1.0">
+    android:versionCode="2"
+    android:versionName="0.2.0">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application android:label="WolfCut"
         android:extractNativeLibs="true"
         android:allowBackup="false"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+        <provider android:name=".UpdateProvider"
+            android:authorities="com.wolfcraft.wolfcut.update"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <activity android:name=".WolfCutActivity"
             android:exported="true"
             android:screenOrientation="landscape"

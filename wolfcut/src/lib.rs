@@ -1,12 +1,13 @@
 #[cfg(target_os = "android")]
 mod android;
 mod media;
+mod theme;
 
 use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
 use media::{Clip, MediaResult};
 use std::{path::PathBuf, sync::mpsc, thread};
 
-const ACCENT: Color32 = Color32::from_rgb(175, 239, 112);
+use theme::ACCENT;
 
 enum Event {
     Imported(Vec<Clip>, Vec<String>),
@@ -26,6 +27,14 @@ struct Editor {
     importing: bool,
     exporting: bool,
     status: String,
+    #[cfg(target_os = "android")]
+    updating: bool,
+    #[cfg(target_os = "android")]
+    update_available: bool,
+    #[cfg(target_os = "android")]
+    update_manual: bool,
+    #[cfg(target_os = "android")]
+    confirm_update: bool,
     sender: mpsc::Sender<Event>,
     receiver: mpsc::Receiver<Event>,
 }
@@ -33,16 +42,9 @@ struct Editor {
 impl Editor {
     fn new(context: &egui::Context) -> Self {
         let (sender, receiver) = mpsc::channel();
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(23, 25, 28);
-        visuals.window_fill = visuals.panel_fill;
-        visuals.extreme_bg_color = Color32::from_rgb(13, 15, 17);
-        visuals.selection.bg_fill = Color32::from_rgb(54, 79, 42);
-        context.set_visuals(visuals);
+        theme::install(context);
         #[cfg(target_os = "android")]
-        context.style_mut(|style| {
-            style.spacing.interact_size.y = 32.0;
-        });
+        let updating = android::update(false).is_ok();
         Self {
             clips: Vec::new(),
             selected: 0,
@@ -54,6 +56,14 @@ impl Editor {
             importing: false,
             exporting: false,
             status: "Добавьте видео, чтобы начать монтаж.".into(),
+            #[cfg(target_os = "android")]
+            updating,
+            #[cfg(target_os = "android")]
+            update_available: false,
+            #[cfg(target_os = "android")]
+            update_manual: false,
+            #[cfg(target_os = "android")]
+            confirm_update: false,
             sender,
             receiver,
         }
@@ -249,8 +259,24 @@ impl Editor {
     }
 
     #[cfg(target_os = "android")]
+    fn begin_update(&mut self) {
+        self.update_manual = true;
+        match android::update(self.update_available) {
+            Ok(()) => {
+                self.updating = true;
+                self.status = if self.update_available {
+                    "Подготовка обновления…".into()
+                } else {
+                    "Проверка обновлений…".into()
+                };
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
+    #[cfg(target_os = "android")]
     fn poll_android(&mut self, context: &egui::Context) {
-        if !self.importing && !self.exporting {
+        if !self.importing && !self.exporting && !self.updating {
             return;
         }
         match android::poll() {
@@ -263,14 +289,22 @@ impl Editor {
                 self.exporting = false;
                 self.status = status;
             }
+            Ok(Some(android::ResultEvent::Update(status, available))) => {
+                self.updating = false;
+                self.update_available = available;
+                if self.update_manual || available {
+                    self.status = status;
+                }
+            }
             Ok(None) => {}
             Err(error) => {
                 self.importing = false;
                 self.exporting = false;
+                self.updating = false;
                 self.status = error;
             }
         }
-        if self.importing || self.exporting {
+        if self.importing || self.exporting || self.updating {
             context.request_repaint_after(std::time::Duration::from_millis(150));
         }
     }
@@ -278,6 +312,7 @@ impl Editor {
 
 impl eframe::App for Editor {
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
+        theme::backdrop(context);
         self.receive(context);
         #[cfg(target_os = "android")]
         self.poll_android(context);
@@ -291,107 +326,139 @@ impl eframe::App for Editor {
         });
         self.import(dropped, context);
 
-        egui::TopBottomPanel::top("toolbar").show(context, |ui| {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.heading(RichText::new("WolfCut").color(ACCENT).strong());
-                ui.separator();
-                if ui
-                    .add_enabled(!self.importing, egui::Button::new("+ Импорт"))
-                    .clicked()
-                {
-                    self.pick_import(context);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let button = egui::Button::new(
-                        RichText::new("Экспорт MP4").color(Color32::BLACK).strong(),
-                    )
-                    .fill(ACCENT);
+        egui::TopBottomPanel::top("toolbar")
+            .frame(theme::glass(13.0, 7.0))
+            .show(context, |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.heading(RichText::new("WolfCut").color(ACCENT).strong());
                     if ui
-                        .add_enabled(!self.clips.is_empty() && !self.exporting, button)
+                        .add_enabled(!self.importing, egui::Button::new("+ Импорт"))
                         .clicked()
                     {
-                        self.export(context);
+                        self.pick_import(context);
                     }
-                });
-            });
-            ui.add_space(8.0);
-        });
-
-        egui::TopBottomPanel::bottom("status").show(context, |ui| {
-            ui.add_space(4.0);
-            ui.label(&self.status);
-            ui.add_space(4.0);
-        });
-
-        egui::TopBottomPanel::bottom("timeline").show(context, |ui| {
-            ui.add_space(9.0);
-            ui.horizontal(|ui| {
-                ui.heading("Монтаж");
-                let duration = self
-                    .clips
-                    .iter()
-                    .fold(0.0, |total, clip| total + clip.length());
-                ui.weak(format!("{duration:.2} с"));
-            });
-            ui.add_space(5.0);
-            if self.clips.is_empty() {
-                ui.weak("Добавьте клипы на монтажную дорожку.");
-            } else {
-                let mut selection = None;
-                egui::ScrollArea::horizontal()
-                    .id_salt("clips")
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for (index, clip) in self.clips.iter().enumerate() {
-                                let title = format!("{}\n{:.2} с", clip.name(), clip.length());
-                                let button =
-                                    egui::Button::new(title).selected(index == self.selected);
-                                if ui.add_sized([124.0, 52.0], button).clicked() {
-                                    selection = Some(index);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                !self.clips.is_empty() && !self.exporting,
+                                theme::primary("Экспорт MP4"),
+                            )
+                            .clicked()
+                        {
+                            self.export(context);
+                        }
+                        #[cfg(target_os = "android")]
+                        {
+                            let label = if self.update_available {
+                                "Обновить"
+                            } else {
+                                "Обновления"
+                            };
+                            if ui
+                                .add_enabled(
+                                    !self.updating && !self.importing && !self.exporting,
+                                    egui::Button::new(label),
+                                )
+                                .clicked()
+                            {
+                                if self.update_available && !self.clips.is_empty() {
+                                    self.confirm_update = true;
+                                } else {
+                                    self.begin_update();
                                 }
                             }
-                        });
+                        }
                     });
-                if let Some(index) = selection {
-                    self.select(index);
-                }
-
-                ui.horizontal(|ui| {
-                    let index = self.selected;
-                    if ui
-                        .add_enabled(index > 0, egui::Button::new("← Раньше"))
-                        .clicked()
-                    {
-                        self.clips.swap(index, index - 1);
-                        self.selected -= 1;
-                    }
-                    if ui
-                        .add_enabled(
-                            self.selected + 1 < self.clips.len(),
-                            egui::Button::new("Позже →"),
-                        )
-                        .clicked()
-                    {
-                        self.clips.swap(self.selected, self.selected + 1);
-                        self.selected += 1;
-                    }
-                    if ui.button("Удалить").clicked() {
-                        self.clips.remove(self.selected);
-                        self.select(self.selected.min(self.clips.len().saturating_sub(1)));
-                    }
                 });
-            }
-            ui.add_space(9.0);
-        });
+            });
+
+        egui::TopBottomPanel::bottom("status")
+            .frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(16.0, 3.0)))
+            .show(context, |ui| {
+                ui.label(RichText::new(&self.status).small().weak());
+            });
+
+        egui::TopBottomPanel::bottom("timeline")
+            .frame(theme::glass(12.0, 6.0))
+            .show(context, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Монтаж");
+                    let duration = self
+                        .clips
+                        .iter()
+                        .fold(0.0, |total, clip| total + clip.length());
+                    ui.weak(format!("{duration:.2} с"));
+                });
+                ui.add_space(5.0);
+                if self.clips.is_empty() {
+                    ui.weak("Добавьте клипы на монтажную дорожку.");
+                } else {
+                    let mut selection = None;
+                    egui::ScrollArea::horizontal()
+                        .id_salt("clips")
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                for (index, clip) in self.clips.iter().enumerate() {
+                                    let name = clip.name();
+                                    let mut characters = name.chars();
+                                    let mut short: String = characters.by_ref().take(14).collect();
+                                    if characters.next().is_some() {
+                                        short.push('…');
+                                    }
+                                    let title = format!("{short}\n{:.2} с", clip.length());
+                                    let button = egui::Button::new(title)
+                                        .selected(index == self.selected)
+                                        .rounding(12.0);
+                                    if ui
+                                        .add_sized([136.0, 42.0], button)
+                                        .on_hover_text(name)
+                                        .clicked()
+                                    {
+                                        selection = Some(index);
+                                    }
+                                }
+                            });
+                        });
+                    if let Some(index) = selection {
+                        self.select(index);
+                    }
+
+                    ui.horizontal(|ui| {
+                        let index = self.selected;
+                        if ui
+                            .add_enabled(index > 0, egui::Button::new("Раньше"))
+                            .clicked()
+                        {
+                            self.clips.swap(index, index - 1);
+                            self.selected -= 1;
+                        }
+                        if ui
+                            .add_enabled(
+                                self.selected + 1 < self.clips.len(),
+                                egui::Button::new("Позже"),
+                            )
+                            .clicked()
+                        {
+                            self.clips.swap(self.selected, self.selected + 1);
+                            self.selected += 1;
+                        }
+                        if ui.button("Удалить").clicked() {
+                            self.clips.remove(self.selected);
+                            self.select(self.selected.min(self.clips.len().saturating_sub(1)));
+                        }
+                    });
+                }
+            });
 
         if let Some(clip) = self.clips.get_mut(self.selected) {
             let mut trim_changed = false;
             egui::SidePanel::right("trim")
-                .default_width(205.0)
+                .default_width(190.0)
+                .resizable(false)
+                .frame(theme::glass(10.0, 8.0))
                 .show(context, |ui| {
                     ui.heading("Обрезка");
-                    ui.weak(clip.name());
+                    ui.add(egui::Label::new(RichText::new(clip.name()).weak()).truncate());
                     ui.add_space(10.0);
                     trim_changed |= ui
                         .add(
@@ -417,50 +484,83 @@ impl eframe::App for Editor {
             }
         }
 
-        egui::CentralPanel::default().show(context, |ui| {
-            if let Some(clip) = self.clips.get(self.selected) {
-                ui.heading("Предпросмотр");
-                let size = egui::vec2(
-                    ui.available_width(),
-                    (ui.available_height() - 38.0).max(32.0),
-                );
-                egui::Frame::none()
-                    .fill(Color32::from_rgb(12, 14, 16))
-                    .show(ui, |ui| {
-                        ui.allocate_ui_with_layout(
-                            size,
-                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                            |ui| {
-                                if let Some(frame) = &self.frame {
-                                    let source = frame.size_vec2();
-                                    let scale = (size.x / source.x).min(size.y / source.y);
-                                    ui.image((frame.id(), source * scale));
-                                } else {
-                                    ui.weak(if self.pending_frame || self.frame_dirty {
-                                        "Загрузка кадра…"
+        egui::CentralPanel::default()
+            .frame(theme::glass(10.0, 7.0))
+            .show(context, |ui| {
+                if let Some(clip) = self.clips.get(self.selected) {
+                    ui.heading("Предпросмотр");
+                    let size = egui::vec2(
+                        ui.available_width(),
+                        (ui.available_height() - ui.spacing().interact_size.y - 9.0).max(24.0),
+                    );
+                    egui::Frame::none()
+                        .fill(Color32::from_rgb(14, 18, 34))
+                        .show(ui, |ui| {
+                            ui.allocate_ui_with_layout(
+                                size,
+                                egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                                |ui| {
+                                    if let Some(frame) = &self.frame {
+                                        let source = frame.size_vec2();
+                                        let scale = (size.x / source.x).min(size.y / source.y);
+                                        ui.image((frame.id(), source * scale));
                                     } else {
-                                        "Кадр недоступен"
-                                    });
-                                }
-                            },
-                        );
+                                        ui.weak(if self.pending_frame || self.frame_dirty {
+                                            "Загрузка кадра…"
+                                        } else {
+                                            "Кадр недоступен"
+                                        });
+                                    }
+                                },
+                            );
+                        });
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut self.cursor, clip.start..=clip.end)
+                                .fixed_decimals(3)
+                                .suffix(" с"),
+                        )
+                        .changed()
+                    {
+                        self.invalidate_frame();
+                    }
+                } else {
+                    let gap = (ui.available_height() * 0.32).max(0.0);
+                    ui.add_space(gap);
+                    ui.vertical_centered(|ui| {
+                        ui.heading("Добавьте первое видео");
+                        if !cfg!(target_os = "android") {
+                            ui.weak("Перетащите файл в окно или выберите его в диалоге.");
+                        }
+                        if ui
+                            .add_enabled(!self.importing, theme::primary("Выбрать видео"))
+                            .clicked()
+                        {
+                            self.pick_import(context);
+                        }
                     });
-                if ui
-                    .add(
-                        egui::Slider::new(&mut self.cursor, clip.start..=clip.end)
-                            .fixed_decimals(3)
-                            .suffix(" с"),
-                    )
-                    .changed()
-                {
-                    self.invalidate_frame();
                 }
-            } else {
-                ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new("Перетащите видео сюда").size(26.0));
+            });
+
+        #[cfg(target_os = "android")]
+        if self.confirm_update {
+            egui::Window::new("Обновление WolfCut")
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .collapsible(false)
+                .resizable(false)
+                .show(context, |ui| {
+                    ui.label("Обновление закроет текущий монтаж.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Отмена").clicked() {
+                            self.confirm_update = false;
+                        }
+                        if ui.add(theme::primary("Продолжить")).clicked() {
+                            self.confirm_update = false;
+                            self.begin_update();
+                        }
+                    });
                 });
-            }
-        });
+        }
 
         self.request_frame(context);
     }

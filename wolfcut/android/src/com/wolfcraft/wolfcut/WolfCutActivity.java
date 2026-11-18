@@ -26,6 +26,7 @@ public final class WolfCutActivity extends NativeActivity {
     private static final int EXPORT = 2;
     private final ConcurrentLinkedQueue<String> results = new ConcurrentLinkedQueue<>();
     private File session;
+    private final Updater updater = new Updater(this, this::reportUpdate);
 
     @Override
     public void onCreate(Bundle state) {
@@ -47,6 +48,26 @@ public final class WolfCutActivity extends NativeActivity {
 
     public String pollResult() {
         return results.poll();
+    }
+
+    public void checkUpdate() {
+        updater.check();
+    }
+
+    public void installUpdate() {
+        updater.install();
+    }
+
+    private void reportUpdate(String status, boolean available) {
+        try {
+            results.add(new JSONObject()
+                    .put("type", "update")
+                    .put("status", status)
+                    .put("available", available)
+                    .toString());
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
     }
 
     public void pickVideos() {
