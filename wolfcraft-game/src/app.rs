@@ -76,6 +76,7 @@ struct InputState {
     left: bool,
     right_press: bool,
     right: bool,
+    place_orbit: Option<f64>,
     swap_press: bool,
     middle_press: bool,
     scroll: f32,
@@ -85,6 +86,7 @@ struct InputState {
 
 struct LoadState {
     shared: Arc<LoadShared>,
+    hosted_script: Option<String>,
     title: String,
     error: Option<String>,
     started: Instant,
@@ -169,7 +171,7 @@ impl App {
 }
 
 /// Draws the script's GUI (ScreenGui-like) over the game; returns the ids of pressed buttons.
-fn draw_lua_gui(ctx: &egui::Context, icons:&wolfcraft_ui::GuiIcons, els: &[crate::lua::GuiElement]) -> Vec<String> {
+fn draw_lua_gui(ctx: &egui::Context, icons: &wolfcraft_ui::GuiIcons, els: &[crate::lua::GuiElement], cover: &mut Vec<egui::Rect>) -> Vec<String> {
     use crate::lua::GuiKind;
     let mut pressed = Vec::new();
     let sr = ctx.screen_rect();
@@ -183,27 +185,35 @@ fn draw_lua_gui(ctx: &egui::Context, icons:&wolfcraft_ui::GuiIcons, els: &[crate
             ctx.fonts(|f| f.layout_no_wrap(e.text.clone(), font.clone(), egui::Color32::WHITE)).size() + egui::vec2(16.0, 8.0)
         };
         let rect = egui::Rect::from_center_size(centre, size);
-        egui::Area::new(egui::Id::new(("lua-gui", i, &e.id))).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
-            let resp = ui.allocate_rect(egui::Rect::from_min_size(rect.min, size), if e.kind == GuiKind::Button { egui::Sense::click() } else { egui::Sense::hover() });
-            let painter = ui.painter();
-            let mut fill = e.color.map(c32);
-            if e.kind == GuiKind::Button && resp.is_pointer_button_down_on() {
-                fill = fill.map(|c| c.gamma_multiply(0.8));
-            }
-            let tint=fill.unwrap_or(egui::Color32::WHITE).gamma_multiply(e.opacity);
-            if e.kind==GuiKind::Image {
-                if let Some(sprite)=e.sprite {icons.paint(painter,rect,sprite,tint);}
-            } else if e.kind!=GuiKind::Label {
-                let sprite=e.sprite.unwrap_or(wolfcraft_assets::gui::PANEL_DARK);
-                icons.paint_panel(painter,rect,sprite,tint);
-            }
-            if !e.text.is_empty() {
-                painter.text(rect.center(), egui::Align2::CENTER_CENTER, &e.text, font, c32(e.text_color).gamma_multiply(e.opacity));
-            }
-            if resp.clicked() {
-                pressed.push(e.id.clone());
-            }
-        });
+        let button = e.kind == GuiKind::Button;
+        if button {
+            cover.push(rect);
+        }
+        egui::Area::new(egui::Id::new(("lua-gui", i, &e.id)))
+            .order(egui::Order::Foreground)
+            .fixed_pos(rect.min)
+            .interactable(button)
+            .show(ctx, |ui| {
+                let resp = ui.allocate_rect(rect, if button { egui::Sense::click() } else { egui::Sense::hover() });
+                let painter = ui.painter();
+                let mut fill = e.color.map(c32);
+                if e.kind == GuiKind::Button && resp.is_pointer_button_down_on() {
+                    fill = fill.map(|c| c.gamma_multiply(0.8));
+                }
+                let tint=fill.unwrap_or(egui::Color32::WHITE).gamma_multiply(e.opacity);
+                if e.kind==GuiKind::Image {
+                    if let Some(sprite)=e.sprite {icons.paint(painter,rect,sprite,tint);}
+                } else if e.kind!=GuiKind::Label {
+                    let sprite=e.sprite.unwrap_or(wolfcraft_assets::gui::PANEL_DARK);
+                    icons.paint_panel(painter,rect,sprite,tint);
+                }
+                if !e.text.is_empty() {
+                    painter.text(rect.center(), egui::Align2::CENTER_CENTER, &e.text, font, c32(e.text_color).gamma_multiply(e.opacity));
+                }
+                if resp.clicked() {
+                    pressed.push(e.id.clone());
+                }
+            });
     }
     pressed
 }
@@ -333,7 +343,7 @@ pub struct App {
     studio_target: Option<wolfcraft_engine::cubesphere::Cell>,
     script_console: Vec<(ChatKind,String)>,
     /// Studio: where the edit camera was when «Играть» started (position, heading, pitch).
-    studio_cam: Option<(glam::DVec3, glam::DVec3, f64)>,
+    studio_cam: Option<(glam::DVec3, glam::DVec3, f64, crate::session::CameraMode)>,
     /// Voice chat on servers, and its menu (the microphone in the top bar).
     voice: crate::voice::Voice,
     voice_menu: bool,
@@ -620,7 +630,7 @@ impl App {
     fn start_load(&mut self, cfg: WorldConfig, is_new: bool) {
         let title = format!("«{}»", cfg.name);
         let shared = loader::start(LoadRequest { cfg, worlds_dir: self.worlds_dir.clone(), is_new });
-        self.load = Some(LoadState { shared, title, error: None, started: Instant::now(), progress: (usize::MAX, 0), progress_at: Instant::now() });
+        self.load = Some(LoadState { shared, hosted_script: None, title, error: None, started: Instant::now(), progress: (usize::MAX, 0), progress_at: Instant::now() });
         self.session = None;
         self.nav.clear();
         self.screen = Screen::Loading;
@@ -664,8 +674,9 @@ impl App {
         let _ = std::fs::remove_file(dir.join("dimension.txt"));
         let title = format!("«{}»", cfg.name);
         let shared = loader::start(LoadRequest { cfg, worlds_dir: online, is_new: false });
-        self.load = Some(LoadState { shared, title, error: None, started: Instant::now(), progress: (usize::MAX, 0), progress_at: Instant::now() });
+        self.load = Some(LoadState { shared, hosted_script: None, title, error: None, started: Instant::now(), progress: (usize::MAX, 0), progress_at: Instant::now() });
         self.session = None;
+        self.lua = None;
         self.nav.clear();
         self.screen = Screen::Loading;
         let now = self.time.elapsed() as f64;
@@ -723,6 +734,11 @@ impl App {
         if self.net.is_none() {
             self.host = None;
             return;
+        }
+        if cfg.studio_project {
+            if let Some(load) = &mut self.load {
+                load.hosted_script = Some(read_world_script(&dir));
+            }
         }
         let now = self.time.elapsed() as f64;
         self.chat.push(ChatKind::System, "Сервер запущен: друзья увидят его в «Игра по сети → Рядом»", now);
@@ -1068,7 +1084,10 @@ impl App {
                     if on {
                         // Like Roblox Studio's Play: the camera waits here, a character appears at
                         // the spawn point and plays by the world's own rules.
-                        self.studio_cam = Some((s.player.body.pos, s.player.heading, s.player.pitch));
+                        self.studio_cam = Some((s.player.body.pos, s.player.heading, s.player.pitch, s.camera_mode));
+                        if s.cfg.studio_project {
+                            s.camera_mode = crate::session::CameraMode::ThirdBack;
+                        }
                         s.player.noclip = false;
                         s.player.body.flying = false;
                         s.studio = false;
@@ -1084,10 +1103,11 @@ impl App {
                         s.studio = true;
                         s.player.mode = wolfcraft_engine::config::GameMode::Creative;
                         s.player.survival = Default::default();
-                        if let Some((pos, heading, pitch)) = self.studio_cam.take() {
+                        if let Some((pos, heading, pitch, camera_mode)) = self.studio_cam.take() {
                             s.teleport(pos);
                             s.player.heading = heading;
                             s.player.pitch = pitch;
+                            s.camera_mode = camera_mode;
                         }
                         s.player.noclip = true;
                         s.player.body.flying = true;
@@ -2110,10 +2130,15 @@ impl App {
         let upload_budget = if self.screen == Screen::Loading { 64 } else { 16 };
         self.pump_meshes(gfx, upload_budget);
 
-        // PC: hold Alt to free the cursor and click the panels over the world (clicker, arena
-        // shop, script GUIs); release it to look around again.
+        // Mini-games keep the pointer available for GUI; ordinary worlds release it with Alt.
+        let place_play = self.place_play();
+        self.touch.place_play = place_play;
+        let can_look = self.screen == Screen::Playing && !self.chat.open && self.web_pages.is_empty();
+        if !place_play || !can_look {
+            self.input.place_orbit = None;
+        }
         let alt = self.input.keys.contains(&KeyCode::AltLeft) || self.input.keys.contains(&KeyCode::AltRight);
-        let want_grab = self.screen == Screen::Playing && !self.chat.open && self.web_pages.is_empty() && !alt;
+        let want_grab = can_look && !place_play && !alt;
         if want_grab != self.grabbed {
             let w = gfx.window.clone();
             self.set_grab(&w, want_grab);
@@ -2432,7 +2457,7 @@ impl App {
                         }
                         // The world script's own GUI (Luau, like Roblox ScreenGui).
                         if screen == Screen::Playing && !studio_edit && !lua_gui.is_empty() {
-                            lua_clicks.extend(draw_lua_gui(ctx, &icons, &lua_gui));
+                            lua_clicks.extend(draw_lua_gui(ctx, &icons, &lua_gui, &mut ui_cover));
                         }
                         // Mod windows in HTML + CSS + JS.
                         if screen == Screen::Playing {
@@ -2775,9 +2800,6 @@ impl App {
         // The studio's edit mode has its ribbon on top instead of the game's top bar; in
         // «Играть» the place runs as players see it, with the game's bar.
         self.touch.studio = self.studio.as_ref().is_some_and(|st| !st.playtest);
-        // A place played like in Roblox: its GUI is its own (scripts). That is «Играть» in
-        // the studio and a place joined over the network.
-        self.touch.place_play = self.place_play();
         if let Some(s) = &self.session {
             self.touch.creative = s.player.is_creative();
             self.touch.flying = s.player.body.flying;
@@ -3414,7 +3436,10 @@ impl App {
                 Some(Ok(loaded)) => {
                     log::info!("world ready after {:.2}s", l.started.elapsed().as_secs_f32());
                     self.pending_meshes.clear();
-                    let session = GameSession::new(loaded);
+                    let mut session = GameSession::new(loaded);
+                    if session.cfg.studio_project && self.net.is_some() && self.studio.is_none() {
+                        session.camera_mode = crate::session::CameraMode::ThirdBack;
+                    }
                     self.settings_world_hint(&session);
                     self.session = Some(session);
                     if let Some(g) = &mut self.gfx {
@@ -3441,6 +3466,7 @@ impl App {
                 log::warn!("loading stalled at {done}/{total} (player {:?}, chunk {:?}); entering anyway", s.player.body.pos, s.player_chunk());
             }
             if (done * 100 >= total * 90 && s.ground_ready()) || stalled {
+                let hosted_script = l.hosted_script.take();
                 self.load = None;
                 self.screen = Screen::Playing;
                 self.near_table = false;
@@ -3453,8 +3479,10 @@ impl App {
                     s.player.noclip = true;
                 }
                 // The world's Luau script (written in the studio) runs every time the world starts.
-                if self.net.is_none() {
-                    let script = read_world_script(&self.worlds_dir.join(&s.cfg.id));
+                let script = hosted_script.or_else(|| {
+                    self.net.is_none().then(|| read_world_script(&self.worlds_dir.join(&s.cfg.id)))
+                });
+                if let Some(script) = script {
                     self.start_lua(&script);
                 }
             }
@@ -3773,7 +3801,6 @@ impl ApplicationHandler for App {
         if matches!(event, WindowEvent::Touch(_) | WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::KeyboardInput { .. }) {
             self.last_input = Instant::now();
         }
-        let over_ui = gfx.gui.wants_pointer() && self.screen != Screen::Playing;
         match event {
             WindowEvent::CloseRequested => {
                 if let Some(s) = &mut self.session {
@@ -3788,6 +3815,8 @@ impl ApplicationHandler for App {
             WindowEvent::Focused(false) => {
                 self.input.keys.clear();
                 self.input.left = false;
+                self.input.right = false;
+                self.input.place_orbit = None;
                 if self.screen == Screen::Playing {
                     self.screen = Screen::Paused;
                 }
@@ -3805,25 +3834,30 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                // A free cursor (Alt held) over a panel: the click is the panel's.
-                let on_panel = !self.grabbed && gfx.gui.wants_pointer();
-                if self.screen == Screen::Playing && !on_panel {
-                    let down = state == ElementState::Pressed;
-                    match button {
-                        MouseButton::Left => self.input.left = down,
-                        MouseButton::Right => {
-                            if down {
-                                self.input.right_press = true;
-                            }
-                            self.input.right = down;
+                let on_panel = !self.grabbed && (resp.consumed || gfx.gui.wants_pointer());
+                let down = state == ElementState::Pressed;
+                let playing = self.screen == Screen::Playing && !self.chat.open;
+                match button {
+                    MouseButton::Left => self.input.left = down && playing && !on_panel,
+                    MouseButton::Right if !down => {
+                        self.input.right = false;
+                        if self.input.place_orbit.take().is_some_and(|distance| distance < 3.0)
+                            && playing && !on_panel && self.place_play()
+                        {
+                            self.input.right_press = true;
                         }
-                        MouseButton::Middle if down => self.input.middle_press = true,
-                        _ => {}
                     }
-                } else if state == ElementState::Released {
-                    self.input.left = false;
+                    MouseButton::Right if playing && !on_panel => {
+                        if self.place_play() {
+                            self.input.place_orbit = Some(0.0);
+                        } else {
+                            self.input.right_press = true;
+                            self.input.right = true;
+                        }
+                    }
+                    MouseButton::Middle if down && playing && !on_panel => self.input.middle_press = true,
+                    _ => {}
                 }
-                let _ = over_ui;
             }
             WindowEvent::Touch(t) => {
                 self.touch.seen = true;
@@ -3901,7 +3935,10 @@ impl ApplicationHandler for App {
 
     fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            if self.grabbed {
+            if let Some(distance) = &mut self.input.place_orbit {
+                *distance += delta.0.hypot(delta.1);
+            }
+            if self.grabbed || self.input.place_orbit.is_some_and(|distance| distance >= 3.0) {
                 self.input.mouse_dx += delta.0;
                 self.input.mouse_dy += delta.1;
             }
@@ -4439,13 +4476,12 @@ fn studio_touch_size(size: (u32, u32), studio: Option<&wolfcraft_ui::studio_ui::
 /// «Питомник» on screen: the coin counter with the pets in the team, and the egg hatch
 /// animation (the capsule wobbles, cracks, bursts in the pet's rarity colour).
 impl App {
-    /// A studio place is being played (studio «Играть», or a place joined over the network):
-    /// none of WolfCraft's own HUD, only the stick, jump and the top bar.
+    /// Mini-game controls and HUD apply only to projects marked as mini-games.
     fn place_play(&self) -> bool {
         let Some(s) = &self.session else { return false };
-        match &self.studio {
+        s.cfg.studio_project && match &self.studio {
             Some(st) => st.playtest,
-            None => self.net.is_some() && s.cfg.studio_project,
+            None => self.net.is_some(),
         }
     }
 }
