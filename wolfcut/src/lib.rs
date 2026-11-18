@@ -311,6 +311,36 @@ impl Editor {
 }
 
 impl Editor {
+    fn toolbar(&mut self, context: &egui::Context, compact: bool) -> egui::Rect {
+        egui::TopBottomPanel::top("toolbar")
+            .frame(theme::glass(13.0, 7.0))
+            .show(context, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(RichText::new("WolfCut").color(ACCENT).strong());
+                    if !compact {
+                        self.import_button(ui);
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if !compact {
+                            self.export_button(ui);
+                        }
+                        #[cfg(target_os = "android")]
+                        self.update_button(ui);
+                    });
+                });
+                if compact {
+                    ui.horizontal(|ui| {
+                        self.import_button(ui);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.export_button(ui);
+                        });
+                    });
+                }
+            })
+            .response
+            .rect
+    }
+
     fn import_button(&mut self, ui: &mut egui::Ui) {
         if ui
             .add_enabled(!self.importing, egui::Button::new("+ Импорт"))
@@ -403,31 +433,7 @@ impl eframe::App for Editor {
         self.import(dropped, context);
 
         let compact = context.screen_rect().width() < 520.0;
-        egui::TopBottomPanel::top("toolbar")
-            .frame(theme::glass(13.0, 7.0))
-            .show(context, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.heading(RichText::new("WolfCut").color(ACCENT).strong());
-                    if !compact {
-                        self.import_button(ui);
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if !compact {
-                            self.export_button(ui);
-                        }
-                        #[cfg(target_os = "android")]
-                        self.update_button(ui);
-                    });
-                });
-                if compact {
-                    ui.horizontal_centered(|ui| {
-                        self.import_button(ui);
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            self.export_button(ui);
-                        });
-                    });
-                }
-            });
+        self.toolbar(context, compact);
 
         egui::TopBottomPanel::bottom("status")
             .frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(16.0, 3.0)))
@@ -653,4 +659,27 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         log::error!("WolfCut startup: {error}");
     }
     android::clear();
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+#[test]
+fn portrait_toolbar_leaves_room_for_the_editor() {
+    let context = egui::Context::default();
+    let mut editor = Editor::new(&context);
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 720.0));
+    for _ in 0..2 {
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |context| {
+                let toolbar = editor.toolbar(context, true);
+                assert!(
+                    toolbar.height() >= 60.0 && toolbar.height() < 100.0,
+                    "{toolbar:?}"
+                );
+            },
+        );
+    }
 }
