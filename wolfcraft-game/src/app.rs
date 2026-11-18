@@ -5377,14 +5377,17 @@ mod inventory_context_tests {
         let data = std::env::temp_dir().join(format!("wolf_saves_migration_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
         let legacy = data.join("worlds");
-        let cfg = WorldConfig::new("Старый мир", 42);
+        let mut cfg = WorldConfig::new("Старый мир", 42);
+        cfg.id = wolfcraft_engine::config::unique_world_id(&legacy, &cfg.name);
         let world = legacy.join(&cfg.id);
         cfg.save(&world).unwrap();
         std::fs::write(world.join("player.dat"), b"player").unwrap();
 
         let saves = game_saves_dir(&data);
         assert_eq!(saves, data.join("saves"));
-        assert_eq!(list_worlds(&saves)[0].id, cfg.id);
+        let worlds = list_worlds(&saves);
+        assert_eq!(worlds.len(), 1);
+        assert_eq!(worlds[0].id, cfg.id);
         assert_eq!(std::fs::read(saves.join(&cfg.id).join("player.dat")).unwrap(), b"player");
         assert_eq!(game_saves_dir(&data), saves);
         std::fs::remove_dir_all(data).unwrap();
