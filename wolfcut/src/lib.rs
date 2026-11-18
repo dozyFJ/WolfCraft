@@ -372,7 +372,7 @@ impl Editor {
         if ui
             .add_enabled(
                 !self.updating && !self.importing && !self.exporting,
-                egui::Button::new(label),
+                egui::Button::new(label).selected(self.update_available),
             )
             .clicked()
         {

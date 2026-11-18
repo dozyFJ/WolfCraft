@@ -1,7 +1,8 @@
 use eframe::egui::{self, Color32, Frame, Margin, RichText, Stroke, TextStyle, Vec2};
 
-pub(crate) const ACCENT: Color32 = Color32::from_rgb(195, 212, 255);
-pub(crate) const ON_ACCENT: Color32 = Color32::from_rgb(23, 40, 85);
+pub(crate) const ACCENT: Color32 = Color32::from_rgb(146, 188, 255);
+pub(crate) const ON_ACCENT: Color32 = Color32::from_rgb(15, 33, 70);
+const PURPLE: Color32 = Color32::from_rgb(225, 173, 255);
 const TEXT: Color32 = Color32::from_rgb(235, 238, 255);
 
 pub(crate) fn install(context: &egui::Context) {
@@ -10,8 +11,8 @@ pub(crate) fn install(context: &egui::Context) {
     visuals.panel_fill = Color32::TRANSPARENT;
     visuals.window_fill = Color32::from_rgb(35, 41, 73);
     visuals.extreme_bg_color = Color32::from_rgb(19, 24, 49);
-    visuals.selection.bg_fill = Color32::from_rgb(62, 81, 140);
-    visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
+    visuals.selection.bg_fill = Color32::from_rgb(91, 56, 120);
+    visuals.selection.stroke = Stroke::new(1.0_f32, PURPLE);
     let widgets = &mut visuals.widgets;
     for (widget, fill, foreground) in [
         (
@@ -20,9 +21,9 @@ pub(crate) fn install(context: &egui::Context) {
             TEXT,
         ),
         (&mut widgets.inactive, Color32::from_rgb(49, 58, 97), TEXT),
-        (&mut widgets.hovered, Color32::from_rgb(66, 79, 129), TEXT),
-        (&mut widgets.active, Color32::from_rgb(82, 102, 165), TEXT),
-        (&mut widgets.open, Color32::from_rgb(62, 81, 140), TEXT),
+        (&mut widgets.hovered, Color32::from_rgb(60, 78, 132), TEXT),
+        (&mut widgets.active, Color32::from_rgb(103, 66, 137), TEXT),
+        (&mut widgets.open, Color32::from_rgb(87, 56, 116), TEXT),
     ] {
         widget.bg_fill = fill;
         widget.weak_bg_fill = fill;
@@ -77,7 +78,7 @@ pub(crate) fn backdrop(context: &egui::Context) {
     mesh.add_triangle(0, 2, 3);
     painter.add(egui::Shape::mesh(mesh));
 
-    for (offset, color) in [(0.23, [124, 111, 244]), (0.82, [81, 185, 229])] {
+    for (offset, color) in [(0.23, [181, 91, 234]), (0.82, [74, 128, 255])] {
         let center = screen.left_top() + Vec2::new(screen.width() * offset, screen.height() * 0.23);
         let mut glow = egui::Mesh::default();
         glow.colored_vertex(
