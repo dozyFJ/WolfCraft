@@ -13,3 +13,18 @@ cargo run --release
 Добавьте видео через диалог или перетащите файлы в окно. Выберите клип на монтажной дорожке, задайте начало и конец и перемещайте курсор для просмотра кадров. Кнопки «Раньше» и «Позже» меняют порядок клипов. «Экспорт MP4» объединяет их в один файл H.264/AAC, 1280 × 720, 30 кадров в секунду.
 
 Текущая версия поддерживает покадровый предпросмотр по ползунку и одну последовательность клипов. Монтажная сессия хранится в памяти до закрытия приложения.
+
+## Android
+
+Android-версия использует тот же редактор и системные диалоги выбора и сохранения файлов. Поддерживаются устройства ARM64 с Android 8.0 и выше. Экспорт сохраняет MP4 720p с видео MPEG-4 и звуком AAC.
+
+Для сборки на Linux нужны Rust с целью `aarch64-linux-android`, JDK, Android SDK 35, Build Tools 35.0.0, NDK r27d, исходники [FFmpeg 7.1.5](https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz), `make` и `zip`.
+
+```sh
+rustup target add aarch64-linux-android
+./android/build-ffmpeg.sh /path/to/ffmpeg-7.1.5 /path/to/ndk /path/to/ffmpeg-output
+./android/build-apk.sh /path/to/android.jar /path/to/build-tools /path/to/ndk \
+  /path/to/ffmpeg-output /path/to/keystore /path/to/WolfCut.apk
+```
+
+Перед сборкой задайте `WOLFCUT_KS_PASS` и, если имя ключа отличается от `androiddebugkey`, `WOLFCUT_KS_ALIAS`.

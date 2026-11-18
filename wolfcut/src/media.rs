@@ -39,8 +39,21 @@ fn run(command: &mut Command) -> MediaResult<Output> {
     }
 }
 
+fn program(name: &str) -> Command {
+    #[cfg(target_os = "android")]
+    return Command::new(crate::android::executable(name));
+
+    #[cfg(not(target_os = "android"))]
+    Command::new(name)
+}
+
+#[cfg(target_os = "android")]
+const VIDEO_ENCODER: [&str; 4] = ["-c:v", "mpeg4", "-q:v", "4"];
+#[cfg(not(target_os = "android"))]
+const VIDEO_ENCODER: [&str; 4] = ["-c:v", "libx264", "-preset", "fast"];
+
 pub fn probe(path: PathBuf) -> MediaResult<Clip> {
-    let output = run(Command::new("ffprobe")
+    let output = run(program("ffprobe")
         .args([
             "-v",
             "error",
@@ -78,7 +91,7 @@ pub fn probe(path: PathBuf) -> MediaResult<Clip> {
 }
 
 pub fn frame(path: &Path, time: f64) -> MediaResult<image::RgbaImage> {
-    let output = run(Command::new("ffmpeg")
+    let output = run(program("ffmpeg")
         .args(["-v", "error", "-ss", &format!("{time:.4}"), "-i"])
         .arg(path)
         .args([
@@ -112,7 +125,7 @@ pub fn export(clips: &[Clip], destination: &Path, progress: impl Fn(usize)) -> M
     for (index, clip) in clips.iter().enumerate() {
         progress(index + 1);
         let name = format!("part-{index}.mp4");
-        let mut command = Command::new("ffmpeg");
+        let mut command = program("ffmpeg");
         command
             .args([
                 "-nostdin",
@@ -131,8 +144,9 @@ pub fn export(clips: &[Clip], destination: &Path, progress: impl Fn(usize)) -> M
         let audio = if clip.audio { "0:a:0" } else { "1:a:0" };
         run(command.args(["-map", "0:V:0", "-map", audio, "-t", &format!("{:.4}", clip.length()),
             "-vf", "scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30",
-            "-af", "apad", "-c:v", "libx264", "-threads", "2", "-pix_fmt", "yuv420p", "-preset", "fast",
+            "-af", "apad", "-threads", "2", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-ar", "48000", "-ac", "2"])
+            .args(VIDEO_ENCODER)
             .arg(temporary.path().join(&name)))?;
         manifest.push_str(&format!("file {name}\n"));
     }
@@ -140,7 +154,7 @@ pub fn export(clips: &[Clip], destination: &Path, progress: impl Fn(usize)) -> M
     std::fs::write(temporary.path().join("clips.ffconcat"), manifest)
         .map_err(|error| error.to_string())?;
     let result = temporary.path().join("export.mp4");
-    run(Command::new("ffmpeg").current_dir(temporary.path()).args([
+    run(program("ffmpeg").current_dir(temporary.path()).args([
         "-nostdin",
         "-v",
         "error",
@@ -157,7 +171,7 @@ pub fn export(clips: &[Clip], destination: &Path, progress: impl Fn(usize)) -> M
     std::fs::rename(result, destination).map_err(|error| error.to_string())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
 
@@ -168,7 +182,7 @@ mod tests {
         let silent = folder.path().join("silent clip.mp4");
         let sound = folder.path().join("sound clip.mp4");
 
-        run(Command::new("ffmpeg")
+        run(program("ffmpeg")
             .args([
                 "-v",
                 "error",
@@ -183,7 +197,7 @@ mod tests {
             ])
             .arg(&silent))
         .unwrap();
-        run(Command::new("ffmpeg")
+        run(program("ffmpeg")
             .args([
                 "-v",
                 "error",

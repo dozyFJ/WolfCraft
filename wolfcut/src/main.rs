@@ -1,4 +1,10 @@
-mod media;
+#[cfg(not(target_os = "android"))]
+fn main() -> eframe::Result<()> {
+    wolfcut::run_desktop()
+}
+
+#[cfg(target_os = "android")]
+fn main() {}
 
 use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
 use media::{Clip, MediaResult};
