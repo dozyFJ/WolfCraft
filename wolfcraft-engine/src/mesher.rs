@@ -412,6 +412,14 @@ fn mesh_shapes(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32
                         boxes = &mirrored;
                     }
                 }
+                let pane_boxes;
+                if b.is_pane() {
+                    pane_boxes = b.pane_boxes([
+                        inp.get(x, y, z + 1), inp.get(x, y, z - 1),
+                        inp.get(x + 1, y, z), inp.get(x - 1, y, z),
+                    ]);
+                    boxes = &pane_boxes;
+                }
                 // Fences and walls: rails towards the neighbours they join.
                 let joined;
                 if b.post_family().is_some() {
@@ -590,7 +598,9 @@ fn mesh_direction(inp: &MeshInput, f: usize, out: &mut MeshData, bl: &dyn Fn([i3
                 let leaves = (info.render == RenderKind::Cutout && b.blocks_light()) as u64;
                 let turf = (a == 1 && sign > 0 && matches!(b, Block::Grass | Block::DryGrass | Block::SwampGrass)) as u64;
                 let solid_leaves = (leaves == 1 && FAST_LEAVES.load(std::sync::atomic::Ordering::Relaxed)) as u64;
-                let key = (1u64 << 63) | (tile as u64) | (ao[0] << 16) | (ao[1] << 18) | (ao[2] << 20) | (ao[3] << 22) | (sky << 24) | (emit << 28) | (trans << 29) | (lit << 30) | (leaves << 34) | (turf << 35) | (solid_leaves << 36);
+                // Bark follows the horizontal trunk; end grain keeps the default UV.
+                let rotate_bark = matches!((b.horizontal_log_axis(), a), (Some(0), 0 | 1) | (Some(1), 2)) as u64;
+                let key = (1u64 << 63) | (rotate_bark << 37) | (tile as u64) | (ao[0] << 16) | (ao[1] << 18) | (ao[2] << 20) | (ao[3] << 22) | (sky << 24) | (emit << 28) | (trans << 29) | (lit << 30) | (leaves << 34) | (turf << 35) | (solid_leaves << 36);
                 mask[(i + j * 16) as usize] = key;
                 any = true;
             }
@@ -651,8 +661,9 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
         } else {
             (*cu as f32, -(*cv as f32))
         };
+        let uv = if (key >> 37) & 1 != 0 { [tv, -tu] } else { [tu, tv] };
         let aof = [0.45, 0.65, 0.82, 1.0][ao[ci] as usize];
-        verts.push(Vertex { pos, uv: [tu, tv], flags: tile | (emit << 16) | ((f as u32) << 17) | (lit << 20) | (solid << 27), light: [aof, sky] });
+        verts.push(Vertex { pos, uv, flags: tile | (emit << 16) | ((f as u32) << 17) | (lit << 20) | (solid << 27), light: [aof, sky] });
     }
     let flip = ao[0] + ao[2] < ao[1] + ao[3];
     let tri: [u32; 6] = match (sign > 0, flip) {

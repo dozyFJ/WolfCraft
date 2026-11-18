@@ -558,8 +558,15 @@ impl Interaction {
             let p0 = g.point(target.f, target.i as f64, target.j as f64, target.k as f64);
             let ei = (g.point(target.f, target.i as f64 + 1.0, target.j as f64, target.k as f64) - p0).normalize_or_zero();
             let ej = (g.point(target.f, target.i as f64, target.j as f64 + 1.0, target.k as f64) - p0).normalize_or_zero();
-            // Pistons face the player (also up and down), everything else turns with the view.
-            if let Some(crate::block::Part::Piston { sticky, .. }) = block.part() {
+            // A log's end faces the clicked block. Across a planet face boundary, the
+            // destination cell can have a different local axis from the hit cell.
+            if block.log_on_axis(2).is_some() {
+                let axis = (0..3).find(|&axis| {
+                    [-1, 1].into_iter().any(|sign| g.neighbor(target, axis, sign) == Some(h.cell))
+                }).unwrap_or(h.normal.0);
+                block.log_on_axis(axis).unwrap_or(block)
+            } else if let Some(crate::block::Part::Piston { sticky, .. }) = block.part() {
+                // Pistons face the player, including up and down.
                 let ek = (g.point(target.f, target.i as f64, target.j as f64, target.k as f64 + 1.0) - p0).normalize_or_zero();
                 let l = player.look_dir();
                 let (li, lj, lk) = (l.dot(ei), l.dot(ej), l.dot(ek));
@@ -700,6 +707,24 @@ mod tests {
         w.blocks.insert(c(1, 50, 0), Block::Dirt);
         let p = Player::new(wp(0.5, 80.0, 0.5), GameMode::Survival);
         (w, p)
+    }
+
+    #[test]
+    fn logs_follow_the_clicked_face_and_drop_the_original_item() {
+        for log in [Block::OakLog, Block::SpruceLog, Block::BirchLog, Block::AcaciaLog, Block::AlienLog] {
+            for (axis, sign) in [(0, -1), (1, 1), UP] {
+                let (mut world, mut player) = setup();
+                player.inventory.selected = 0;
+                player.inventory.slots[0] = Some(ItemStack::of_block(log, 1));
+                let h = hit(&world, c(0, 50, 0), (axis, sign));
+                let target = h.front_cell(&world.grid).unwrap();
+                Interaction::default().use_item(&mut world, &mut player, Some(h));
+                let placed = world.block(target);
+                assert_eq!(placed.horizontal_log_axis(), (axis != 2).then_some(axis));
+                assert_eq!(placed.base_item(), log);
+                assert_eq!(Block::from_id(placed as u16), placed);
+            }
+        }
     }
 
     #[test]
@@ -1047,5 +1072,5 @@ fn is_wall_decor(b: Block) -> bool {
 
 /// Tree trunks (the lumber axe fells what is joined).
 fn is_log(b: Block) -> bool {
-    matches!(b, Block::OakLog | Block::BirchLog | Block::SpruceLog | Block::AcaciaLog | Block::AlienLog)
+    b.log_on_axis(2).is_some()
 }
