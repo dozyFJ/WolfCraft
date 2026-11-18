@@ -1957,6 +1957,16 @@ blocks! {
     2560 GlowShroom => emissive(info("Светогриб", Cross, 0.0, Hand, all(t::GLOW_SHROOM))),
     2561 XenoOre => emissive(ore("Ксенорудa", t::XENO_ORE, 2)),
     2562 AlienPlant => info("Ксенопобег", Cross, 0.0, Hand, all(t::ALIEN_PLANT)),
+    2563 OakLogI => info("Дубовое бревно", Opaque, 3.0, Axe, [t::LOG_SIDE, t::LOG_SIDE, t::LOG_SIDE, t::LOG_SIDE, t::LOG_TOP, t::LOG_TOP]),
+    2564 OakLogJ => info("Дубовое бревно", Opaque, 3.0, Axe, [t::LOG_TOP, t::LOG_TOP, t::LOG_SIDE, t::LOG_SIDE, t::LOG_SIDE, t::LOG_SIDE]),
+    2565 SpruceLogI => info("Еловое бревно", Opaque, 3.0, Axe, [t::SPRUCE_LOG_SIDE, t::SPRUCE_LOG_SIDE, t::SPRUCE_LOG_SIDE, t::SPRUCE_LOG_SIDE, t::LOG_TOP, t::LOG_TOP]),
+    2566 SpruceLogJ => info("Еловое бревно", Opaque, 3.0, Axe, [t::LOG_TOP, t::LOG_TOP, t::SPRUCE_LOG_SIDE, t::SPRUCE_LOG_SIDE, t::SPRUCE_LOG_SIDE, t::SPRUCE_LOG_SIDE]),
+    2567 BirchLogI => info("Берёзовое бревно", Opaque, 3.0, Axe, [t::BIRCH_LOG_SIDE, t::BIRCH_LOG_SIDE, t::BIRCH_LOG_SIDE, t::BIRCH_LOG_SIDE, t::LOG_TOP, t::LOG_TOP]),
+    2568 BirchLogJ => info("Берёзовое бревно", Opaque, 3.0, Axe, [t::LOG_TOP, t::LOG_TOP, t::BIRCH_LOG_SIDE, t::BIRCH_LOG_SIDE, t::BIRCH_LOG_SIDE, t::BIRCH_LOG_SIDE]),
+    2569 AcaciaLogI => info("Акациевое бревно", Opaque, 3.0, Axe, [t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE, t::LOG_TOP, t::LOG_TOP]),
+    2570 AcaciaLogJ => info("Акациевое бревно", Opaque, 3.0, Axe, [t::LOG_TOP, t::LOG_TOP, t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE]),
+    2571 AlienLogI => info("Ксенобревно", Opaque, 3.0, Axe, [t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_TOP, t::ALIEN_LOG_TOP]),
+    2572 AlienLogJ => info("Ксенобревно", Opaque, 3.0, Axe, [t::ALIEN_LOG_TOP, t::ALIEN_LOG_TOP, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE]),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2376,8 +2386,64 @@ impl Block {
         })
     }
 
+    /// The trunk's axis along the ground, if it was placed horizontally (0 i, 1 j).
+    pub fn horizontal_log_axis(self) -> Option<usize> {
+        let id = self as u16;
+        (2563..=2572).contains(&id).then(|| ((id - 2563) % 2) as usize)
+    }
+
+    /// Orients a trunk along a cell axis (0 i, 1 j, 2 up).
+    pub fn log_on_axis(self, axis: usize) -> Option<Block> {
+        use Block::*;
+        let variants = match self {
+            OakLog | OakLogI | OakLogJ => [OakLogI, OakLogJ, OakLog],
+            SpruceLog | SpruceLogI | SpruceLogJ => [SpruceLogI, SpruceLogJ, SpruceLog],
+            BirchLog | BirchLogI | BirchLogJ => [BirchLogI, BirchLogJ, BirchLog],
+            AcaciaLog | AcaciaLogI | AcaciaLogJ => [AcaciaLogI, AcaciaLogJ, AcaciaLog],
+            AlienLog | AlienLogI | AlienLogJ => [AlienLogI, AlienLogJ, AlienLog],
+            _ => return None,
+        };
+        variants.get(axis).copied()
+    }
+
+    pub fn is_pane(self) -> bool {
+        use Block::*;
+        matches!(self, GlassPaneA | GlassPaneB | RedPaneA | RedPaneB | BluePaneA | BluePaneB
+            | GreenPaneA | GreenPaneB | YellowPaneA | YellowPaneB)
+    }
+
+    /// Panes connect across colours, to full glass and to opaque cubes.
+    pub fn pane_joins(neighbor: Block) -> bool {
+        use Block::*;
+        neighbor.is_pane() || neighbor.is_opaque()
+            || matches!(neighbor, Glass | RedGlass | BlueGlass | GreenGlass | YellowGlass)
+    }
+
+    /// Shared geometry for rendering, collision and raycasts. Neighbours are +i, -i, +j, -j.
+    /// The placed orientation is used for a pane that stands on its own.
+    pub fn pane_boxes(self, neighbors: [Block; 4]) -> Vec<[f32; 6]> {
+        let joined = neighbors.map(Self::pane_joins);
+        if !joined.contains(&true) {
+            return self.boxes().to_vec();
+        }
+        const LO: f32 = 0.44;
+        const HI: f32 = 0.56;
+        let mut boxes = vec![[LO, LO, 0.0, HI, HI, 1.0]];
+        let arms = [
+            [HI, LO, 0.0, 1.0, HI, 1.0],
+            [0.0, LO, 0.0, LO, HI, 1.0],
+            [LO, HI, 0.0, HI, 1.0, 1.0],
+            [LO, 0.0, 0.0, HI, LO, 1.0],
+        ];
+        boxes.extend(arms.into_iter().zip(joined).filter_map(|(arm, on)| on.then_some(arm)));
+        boxes
+    }
+
     /// The item a placed variant comes from (open doors, turned stairs and panes, ...).
     pub fn base_item(self) -> Block {
+        if self.horizontal_log_axis().is_some() {
+            return self.log_on_axis(2).unwrap_or(self);
+        }
         if let Some((e, _)) = crate::construction::entry(self as u16) { return Block::from_id(e.base); }
         if let Some((b, _)) = self.wall_mount() {
             return match b {

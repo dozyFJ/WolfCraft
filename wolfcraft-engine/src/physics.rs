@@ -226,6 +226,13 @@ pub fn block_obbs_in(world: &impl Voxels, cell: Cell, block: Block) -> Vec<Obb> 
             return vec![sub_obb(&g.cell_obb(cell), &mb)];
         }
     }
+    if block.is_pane() {
+        let neighbors = [(0, 1), (0, -1), (1, 1), (1, -1)].map(|(axis, sign)| {
+            g.neighbor(cell, axis, sign).map_or(Block::Air, |n| world.cell_block(n))
+        });
+        let o = g.cell_obb(cell);
+        return block.pane_boxes(neighbors).iter().map(|s| sub_obb(&o, s)).collect();
+    }
     if block.post_family().is_some() {
         // Fences and walls block the gap to the neighbours they join.
         let o = g.cell_obb(cell);
@@ -600,6 +607,29 @@ pub(crate) mod tests {
                 assert!(!inside(&b), "run {run} (speed {speed}, angle {a:.2}) frame {f}: body inside a block");
             }
         }
+    }
+
+    #[test]
+    fn corner_pane_has_collision_arms_only_toward_its_neighbors() {
+        let mut world = Ball::new(64.0);
+        let cell = Cell::new(4, 16, 16, 70);
+        let east = world.grid.neighbor(cell, 0, 1).unwrap();
+        let north = world.grid.neighbor(cell, 1, -1).unwrap();
+        let pane = Block::GlassPaneA;
+        world.edits.insert(cell, pane);
+        world.edits.insert(east, Block::RedPaneB);
+        world.edits.insert(north, Block::BluePaneA);
+        let neighbors = [Block::RedPaneB, Block::Air, Block::Air, Block::BluePaneA];
+        assert_eq!(pane.pane_boxes(neighbors), [
+            [0.44, 0.44, 0.0, 0.56, 0.56, 1.0],
+            [0.56, 0.44, 0.0, 1.0, 0.56, 1.0],
+            [0.44, 0.0, 0.0, 0.56, 0.44, 1.0],
+        ]);
+        assert_eq!(block_obbs_in(&world, cell, pane).len(), 3);
+        world.edits.remove(&east);
+        world.edits.remove(&north);
+        assert_eq!(pane.pane_boxes([Block::Air; 4]), pane.boxes());
+        assert_eq!(block_obbs_in(&world, cell, pane).len(), 1);
     }
 
     #[test]
