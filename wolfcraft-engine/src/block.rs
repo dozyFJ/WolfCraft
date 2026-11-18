@@ -1967,6 +1967,118 @@ blocks! {
     2570 AcaciaLogJ => info("Акациевое бревно", Opaque, 3.0, Axe, [t::LOG_TOP, t::LOG_TOP, t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE, t::ACACIA_LOG_SIDE]),
     2571 AlienLogI => info("Ксенобревно", Opaque, 3.0, Axe, [t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_TOP, t::ALIEN_LOG_TOP]),
     2572 AlienLogJ => info("Ксенобревно", Opaque, 3.0, Axe, [t::ALIEN_LOG_TOP, t::ALIEN_LOG_TOP, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE, t::ALIEN_LOG_SIDE]),
+    2573 CobbleStairsInverted => needs_pick(info("Булыжные ступени", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    2574 CobbleStairs1Inverted => needs_pick(info("Булыжные ступени", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    2575 CobbleStairs2Inverted => needs_pick(info("Булыжные ступени", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    2576 CobbleStairs3Inverted => needs_pick(info("Булыжные ступени", Shape, 5.0, Pickaxe, all(t::COBBLESTONE))),
+    2577 PlankStairsInverted => info("Деревянные ступени", Shape, 2.0, Axe, all(t::PLANKS)),
+    2578 PlankStairs1Inverted => info("Деревянные ступени", Shape, 2.0, Axe, all(t::PLANKS)),
+    2579 PlankStairs2Inverted => info("Деревянные ступени", Shape, 2.0, Axe, all(t::PLANKS)),
+    2580 PlankStairs3Inverted => info("Деревянные ступени", Shape, 2.0, Axe, all(t::PLANKS)),
+    2581 StoneBrickStairsInverted => needs_pick(info("Ступени из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    2582 StoneBrickStairs1Inverted => needs_pick(info("Ступени из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    2583 StoneBrickStairs2Inverted => needs_pick(info("Ступени из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    2584 StoneBrickStairs3Inverted => needs_pick(info("Ступени из каменных кирпичей", Shape, 5.0, Pickaxe, all(t::STONE_BRICKS))),
+    2585 SandstoneStairsInverted => needs_pick(info("Песчаниковые ступени", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    2586 SandstoneStairs1Inverted => needs_pick(info("Песчаниковые ступени", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    2587 SandstoneStairs2Inverted => needs_pick(info("Песчаниковые ступени", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    2588 SandstoneStairs3Inverted => needs_pick(info("Песчаниковые ступени", Shape, 3.0, Pickaxe, all(t::SANDSTONE))),
+    2589 Build24R0Inverted => crate::construction::block_info("Дуб · Ступени", 0, crate::construction::Form::Stairs),
+    2590 Build24R1Inverted => crate::construction::block_info("Дуб · Ступени", 0, crate::construction::Form::Stairs),
+    2591 Build24R2Inverted => crate::construction::block_info("Дуб · Ступени", 0, crate::construction::Form::Stairs),
+    2592 Build24R3Inverted => crate::construction::block_info("Дуб · Ступени", 0, crate::construction::Form::Stairs),
+    2593 Build25R0Inverted => crate::construction::block_info("Берёза · Ступени", 1, crate::construction::Form::Stairs),
+    2594 Build25R1Inverted => crate::construction::block_info("Берёза · Ступени", 1, crate::construction::Form::Stairs),
+    2595 Build25R2Inverted => crate::construction::block_info("Берёза · Ступени", 1, crate::construction::Form::Stairs),
+    2596 Build25R3Inverted => crate::construction::block_info("Берёза · Ступени", 1, crate::construction::Form::Stairs),
+    2597 Build26R0Inverted => crate::construction::block_info("Ель · Ступени", 2, crate::construction::Form::Stairs),
+    2598 Build26R1Inverted => crate::construction::block_info("Ель · Ступени", 2, crate::construction::Form::Stairs),
+    2599 Build26R2Inverted => crate::construction::block_info("Ель · Ступени", 2, crate::construction::Form::Stairs),
+    2600 Build26R3Inverted => crate::construction::block_info("Ель · Ступени", 2, crate::construction::Form::Stairs),
+    2601 Build27R0Inverted => crate::construction::block_info("Камень · Ступени", 3, crate::construction::Form::Stairs),
+    2602 Build27R1Inverted => crate::construction::block_info("Камень · Ступени", 3, crate::construction::Form::Stairs),
+    2603 Build27R2Inverted => crate::construction::block_info("Камень · Ступени", 3, crate::construction::Form::Stairs),
+    2604 Build27R3Inverted => crate::construction::block_info("Камень · Ступени", 3, crate::construction::Form::Stairs),
+    2605 Build28R0Inverted => crate::construction::block_info("Кирпич · Ступени", 4, crate::construction::Form::Stairs),
+    2606 Build28R1Inverted => crate::construction::block_info("Кирпич · Ступени", 4, crate::construction::Form::Stairs),
+    2607 Build28R2Inverted => crate::construction::block_info("Кирпич · Ступени", 4, crate::construction::Form::Stairs),
+    2608 Build28R3Inverted => crate::construction::block_info("Кирпич · Ступени", 4, crate::construction::Form::Stairs),
+    2609 Build29R0Inverted => crate::construction::block_info("Мрамор · Ступени", 5, crate::construction::Form::Stairs),
+    2610 Build29R1Inverted => crate::construction::block_info("Мрамор · Ступени", 5, crate::construction::Form::Stairs),
+    2611 Build29R2Inverted => crate::construction::block_info("Мрамор · Ступени", 5, crate::construction::Form::Stairs),
+    2612 Build29R3Inverted => crate::construction::block_info("Мрамор · Ступени", 5, crate::construction::Form::Stairs),
+    2613 Build30R0Inverted => crate::construction::block_info("Железо · Ступени", 6, crate::construction::Form::Stairs),
+    2614 Build30R1Inverted => crate::construction::block_info("Железо · Ступени", 6, crate::construction::Form::Stairs),
+    2615 Build30R2Inverted => crate::construction::block_info("Железо · Ступени", 6, crate::construction::Form::Stairs),
+    2616 Build30R3Inverted => crate::construction::block_info("Железо · Ступени", 6, crate::construction::Form::Stairs),
+    2617 Build31R0Inverted => crate::construction::block_info("Медь · Ступени", 7, crate::construction::Form::Stairs),
+    2618 Build31R1Inverted => crate::construction::block_info("Медь · Ступени", 7, crate::construction::Form::Stairs),
+    2619 Build31R2Inverted => crate::construction::block_info("Медь · Ступени", 7, crate::construction::Form::Stairs),
+    2620 Build31R3Inverted => crate::construction::block_info("Медь · Ступени", 7, crate::construction::Form::Stairs),
+    2621 Build32R0Inverted => crate::construction::block_info("Дуб · Внутренний угол ступеней", 0, crate::construction::Form::InnerStairs),
+    2622 Build32R1Inverted => crate::construction::block_info("Дуб · Внутренний угол ступеней", 0, crate::construction::Form::InnerStairs),
+    2623 Build32R2Inverted => crate::construction::block_info("Дуб · Внутренний угол ступеней", 0, crate::construction::Form::InnerStairs),
+    2624 Build32R3Inverted => crate::construction::block_info("Дуб · Внутренний угол ступеней", 0, crate::construction::Form::InnerStairs),
+    2625 Build33R0Inverted => crate::construction::block_info("Берёза · Внутренний угол ступеней", 1, crate::construction::Form::InnerStairs),
+    2626 Build33R1Inverted => crate::construction::block_info("Берёза · Внутренний угол ступеней", 1, crate::construction::Form::InnerStairs),
+    2627 Build33R2Inverted => crate::construction::block_info("Берёза · Внутренний угол ступеней", 1, crate::construction::Form::InnerStairs),
+    2628 Build33R3Inverted => crate::construction::block_info("Берёза · Внутренний угол ступеней", 1, crate::construction::Form::InnerStairs),
+    2629 Build34R0Inverted => crate::construction::block_info("Ель · Внутренний угол ступеней", 2, crate::construction::Form::InnerStairs),
+    2630 Build34R1Inverted => crate::construction::block_info("Ель · Внутренний угол ступеней", 2, crate::construction::Form::InnerStairs),
+    2631 Build34R2Inverted => crate::construction::block_info("Ель · Внутренний угол ступеней", 2, crate::construction::Form::InnerStairs),
+    2632 Build34R3Inverted => crate::construction::block_info("Ель · Внутренний угол ступеней", 2, crate::construction::Form::InnerStairs),
+    2633 Build35R0Inverted => crate::construction::block_info("Камень · Внутренний угол ступеней", 3, crate::construction::Form::InnerStairs),
+    2634 Build35R1Inverted => crate::construction::block_info("Камень · Внутренний угол ступеней", 3, crate::construction::Form::InnerStairs),
+    2635 Build35R2Inverted => crate::construction::block_info("Камень · Внутренний угол ступеней", 3, crate::construction::Form::InnerStairs),
+    2636 Build35R3Inverted => crate::construction::block_info("Камень · Внутренний угол ступеней", 3, crate::construction::Form::InnerStairs),
+    2637 Build36R0Inverted => crate::construction::block_info("Кирпич · Внутренний угол ступеней", 4, crate::construction::Form::InnerStairs),
+    2638 Build36R1Inverted => crate::construction::block_info("Кирпич · Внутренний угол ступеней", 4, crate::construction::Form::InnerStairs),
+    2639 Build36R2Inverted => crate::construction::block_info("Кирпич · Внутренний угол ступеней", 4, crate::construction::Form::InnerStairs),
+    2640 Build36R3Inverted => crate::construction::block_info("Кирпич · Внутренний угол ступеней", 4, crate::construction::Form::InnerStairs),
+    2641 Build37R0Inverted => crate::construction::block_info("Мрамор · Внутренний угол ступеней", 5, crate::construction::Form::InnerStairs),
+    2642 Build37R1Inverted => crate::construction::block_info("Мрамор · Внутренний угол ступеней", 5, crate::construction::Form::InnerStairs),
+    2643 Build37R2Inverted => crate::construction::block_info("Мрамор · Внутренний угол ступеней", 5, crate::construction::Form::InnerStairs),
+    2644 Build37R3Inverted => crate::construction::block_info("Мрамор · Внутренний угол ступеней", 5, crate::construction::Form::InnerStairs),
+    2645 Build38R0Inverted => crate::construction::block_info("Железо · Внутренний угол ступеней", 6, crate::construction::Form::InnerStairs),
+    2646 Build38R1Inverted => crate::construction::block_info("Железо · Внутренний угол ступеней", 6, crate::construction::Form::InnerStairs),
+    2647 Build38R2Inverted => crate::construction::block_info("Железо · Внутренний угол ступеней", 6, crate::construction::Form::InnerStairs),
+    2648 Build38R3Inverted => crate::construction::block_info("Железо · Внутренний угол ступеней", 6, crate::construction::Form::InnerStairs),
+    2649 Build39R0Inverted => crate::construction::block_info("Медь · Внутренний угол ступеней", 7, crate::construction::Form::InnerStairs),
+    2650 Build39R1Inverted => crate::construction::block_info("Медь · Внутренний угол ступеней", 7, crate::construction::Form::InnerStairs),
+    2651 Build39R2Inverted => crate::construction::block_info("Медь · Внутренний угол ступеней", 7, crate::construction::Form::InnerStairs),
+    2652 Build39R3Inverted => crate::construction::block_info("Медь · Внутренний угол ступеней", 7, crate::construction::Form::InnerStairs),
+    2653 Build40R0Inverted => crate::construction::block_info("Дуб · Внешний угол ступеней", 0, crate::construction::Form::OuterStairs),
+    2654 Build40R1Inverted => crate::construction::block_info("Дуб · Внешний угол ступеней", 0, crate::construction::Form::OuterStairs),
+    2655 Build40R2Inverted => crate::construction::block_info("Дуб · Внешний угол ступеней", 0, crate::construction::Form::OuterStairs),
+    2656 Build40R3Inverted => crate::construction::block_info("Дуб · Внешний угол ступеней", 0, crate::construction::Form::OuterStairs),
+    2657 Build41R0Inverted => crate::construction::block_info("Берёза · Внешний угол ступеней", 1, crate::construction::Form::OuterStairs),
+    2658 Build41R1Inverted => crate::construction::block_info("Берёза · Внешний угол ступеней", 1, crate::construction::Form::OuterStairs),
+    2659 Build41R2Inverted => crate::construction::block_info("Берёза · Внешний угол ступеней", 1, crate::construction::Form::OuterStairs),
+    2660 Build41R3Inverted => crate::construction::block_info("Берёза · Внешний угол ступеней", 1, crate::construction::Form::OuterStairs),
+    2661 Build42R0Inverted => crate::construction::block_info("Ель · Внешний угол ступеней", 2, crate::construction::Form::OuterStairs),
+    2662 Build42R1Inverted => crate::construction::block_info("Ель · Внешний угол ступеней", 2, crate::construction::Form::OuterStairs),
+    2663 Build42R2Inverted => crate::construction::block_info("Ель · Внешний угол ступеней", 2, crate::construction::Form::OuterStairs),
+    2664 Build42R3Inverted => crate::construction::block_info("Ель · Внешний угол ступеней", 2, crate::construction::Form::OuterStairs),
+    2665 Build43R0Inverted => crate::construction::block_info("Камень · Внешний угол ступеней", 3, crate::construction::Form::OuterStairs),
+    2666 Build43R1Inverted => crate::construction::block_info("Камень · Внешний угол ступеней", 3, crate::construction::Form::OuterStairs),
+    2667 Build43R2Inverted => crate::construction::block_info("Камень · Внешний угол ступеней", 3, crate::construction::Form::OuterStairs),
+    2668 Build43R3Inverted => crate::construction::block_info("Камень · Внешний угол ступеней", 3, crate::construction::Form::OuterStairs),
+    2669 Build44R0Inverted => crate::construction::block_info("Кирпич · Внешний угол ступеней", 4, crate::construction::Form::OuterStairs),
+    2670 Build44R1Inverted => crate::construction::block_info("Кирпич · Внешний угол ступеней", 4, crate::construction::Form::OuterStairs),
+    2671 Build44R2Inverted => crate::construction::block_info("Кирпич · Внешний угол ступеней", 4, crate::construction::Form::OuterStairs),
+    2672 Build44R3Inverted => crate::construction::block_info("Кирпич · Внешний угол ступеней", 4, crate::construction::Form::OuterStairs),
+    2673 Build45R0Inverted => crate::construction::block_info("Мрамор · Внешний угол ступеней", 5, crate::construction::Form::OuterStairs),
+    2674 Build45R1Inverted => crate::construction::block_info("Мрамор · Внешний угол ступеней", 5, crate::construction::Form::OuterStairs),
+    2675 Build45R2Inverted => crate::construction::block_info("Мрамор · Внешний угол ступеней", 5, crate::construction::Form::OuterStairs),
+    2676 Build45R3Inverted => crate::construction::block_info("Мрамор · Внешний угол ступеней", 5, crate::construction::Form::OuterStairs),
+    2677 Build46R0Inverted => crate::construction::block_info("Железо · Внешний угол ступеней", 6, crate::construction::Form::OuterStairs),
+    2678 Build46R1Inverted => crate::construction::block_info("Железо · Внешний угол ступеней", 6, crate::construction::Form::OuterStairs),
+    2679 Build46R2Inverted => crate::construction::block_info("Железо · Внешний угол ступеней", 6, crate::construction::Form::OuterStairs),
+    2680 Build46R3Inverted => crate::construction::block_info("Железо · Внешний угол ступеней", 6, crate::construction::Form::OuterStairs),
+    2681 Build47R0Inverted => crate::construction::block_info("Медь · Внешний угол ступеней", 7, crate::construction::Form::OuterStairs),
+    2682 Build47R1Inverted => crate::construction::block_info("Медь · Внешний угол ступеней", 7, crate::construction::Form::OuterStairs),
+    2683 Build47R2Inverted => crate::construction::block_info("Медь · Внешний угол ступеней", 7, crate::construction::Form::OuterStairs),
+    2684 Build47R3Inverted => crate::construction::block_info("Медь · Внешний угол ступеней", 7, crate::construction::Form::OuterStairs),
 }
 
 /// An iskrit mechanism: a piston (base, possibly sticky and extended), a piston head, a
@@ -2177,6 +2289,16 @@ impl Block {
 
     /// All boxes of a `Shape` block (empty for full cubes).
     pub fn boxes(self) -> &'static [[f32; 6]] {
+        if self.upright_stair().is_some() {
+            static BOXES: std::sync::OnceLock<[Vec<[f32; 6]>; 112]> = std::sync::OnceLock::new();
+            let boxes = BOXES.get_or_init(|| std::array::from_fn(|offset| {
+                let id = if offset < 16 { 129 + offset } else { 1120 + offset - 16 };
+                Self::from_id(id as u16).boxes().iter().map(|&[i0, j0, k0, i1, j1, k1]| {
+                    [i0, j0, 1.0 - k1, i1, j1, 1.0 - k0]
+                }).collect()
+            }));
+            return &boxes[(self as u16 - 2573) as usize];
+        }
         if let Some((e, r)) = crate::construction::entry(self as u16) { return &crate::construction::geometry::model(e.form, r, 0).boxes; }
         if let Some((base, d)) = self.wall_mount() {
             return wall_boxes(base, d);
@@ -2386,6 +2508,25 @@ impl Block {
         })
     }
 
+    /// Reflects a placed stair vertically, preserving its direction and material.
+    pub fn inverted_stair(self) -> Self {
+        let id = match self as u16 {
+            id @ 129..=144 => 2573 + id - 129,
+            id @ 1120..=1215 => 2573 + 16 + id - 1120,
+            _ => return self,
+        };
+        Self::from_id(id)
+    }
+
+    fn upright_stair(self) -> Option<Self> {
+        let id = match self as u16 {
+            id @ 2573..=2588 => 129 + id - 2573,
+            id @ 2589..=2684 => 1120 + id - 2589,
+            _ => return None,
+        };
+        Some(Self::from_id(id))
+    }
+
     /// The trunk's axis along the ground, if it was placed horizontally (0 i, 1 j).
     pub fn horizontal_log_axis(self) -> Option<usize> {
         let id = self as u16;
@@ -2441,6 +2582,9 @@ impl Block {
 
     /// The item a placed variant comes from (open doors, turned stairs and panes, ...).
     pub fn base_item(self) -> Block {
+        if let Some(stair) = self.upright_stair() {
+            return stair.base_item();
+        }
         if self.horizontal_log_axis().is_some() {
             return self.log_on_axis(2).unwrap_or(self);
         }

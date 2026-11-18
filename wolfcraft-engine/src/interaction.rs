@@ -605,6 +605,7 @@ impl Interaction {
                 block.oriented(player.heading.dot(ei), player.heading.dot(ej))
             }
         };
+        let block = if h.normal == (2, -1) { block.inverted_stair() } else { block };
         if !world.cell_block(target).is_replaceable() {
             return events;
         }
@@ -707,6 +708,29 @@ mod tests {
         w.blocks.insert(c(1, 50, 0), Block::Dirt);
         let p = Player::new(wp(0.5, 80.0, 0.5), GameMode::Survival);
         (w, p)
+    }
+
+    #[test]
+    fn placing_stairs_underneath_reflects_the_shape() {
+        use crate::construction::{self, Form};
+        for stair in [Block::CobbleStairs, Block::PlankStairs, construction::block(Form::InnerStairs, 0, 0).unwrap()] {
+            let (mut world, mut player) = setup();
+            player.inventory.selected = 0;
+            player.inventory.slots[0] = Some(ItemStack::of_block(stair, 2));
+            let support = c(0, 50, 0);
+            for normal in [UP, (2, -1)] {
+                let h = hit(&world, support, normal);
+                Interaction::default().use_item(&mut world, &mut player, Some(h));
+            }
+            let upright = world.block(c(0, 51, 0));
+            let inverted = world.block(c(0, 49, 0));
+            assert_ne!(upright, inverted);
+            assert_eq!(inverted, upright.inverted_stair());
+            assert_eq!(inverted.base_item(), stair);
+            for (above, below) in upright.boxes().iter().zip(inverted.boxes()) {
+                assert_eq!((below[2], below[5]), (1.0 - above[5], 1.0 - above[2]));
+            }
+        }
     }
 
     #[test]
