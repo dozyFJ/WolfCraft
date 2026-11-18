@@ -831,6 +831,14 @@ impl App {
     fn studio_view(&self) -> Option<wolfcraft_ui::studio_ui::StudioView> {
         let s = self.session.as_ref()?;
         use wolfcraft_engine::player as pl;
+        use wolfcraft_ui::studio_ui::StudioConnection;
+        let connection = if self.host.is_some() {
+            StudioConnection::Hosting
+        } else if self.net.is_some() {
+            StudioConnection::Connected
+        } else {
+            StudioConnection::Local
+        };
         let (m, day) = pl::month(s.player.world_time);
         let held_block = s.player.inventory.held().filter(|h| h.info().place.is_some()).map(|h| (h.id, h.info().name.to_string()));
         let mut players = vec![(s.nickname.clone(), s.player.body.pos.to_array(), s.player.survival.health)];
@@ -846,6 +854,7 @@ impl App {
             date: format!("{day} {}", pl::MONTH_GENITIVE[m]),
             hour: (pl::day_fraction(s.player.world_time) * 24.0) as f32,
             spawning: s.mobs.spawning,
+            connection,
             players,
             mobs: s.mobs.mobs.iter().map(|mb| (mb.kind.name().to_string(), mb.hp, mb.kind.max_hp(), mb.body.pos.to_array())).collect(),
             drops: s.drops.list.len(),

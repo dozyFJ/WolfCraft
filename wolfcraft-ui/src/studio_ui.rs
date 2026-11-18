@@ -45,6 +45,8 @@ pub enum Center {
 pub enum Node {
     #[default]
     Workspace,
+    Population,
+    Network,
     Players,
     Player(usize),
     Mobs,
@@ -168,6 +170,14 @@ impl Default for StudioState {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub enum StudioConnection {
+    #[default]
+    Local,
+    Hosting,
+    Connected,
+}
+
 /// What the studio shows about the running place (filled by the game each frame).
 #[derive(Default, Clone)]
 pub struct StudioView {
@@ -179,6 +189,7 @@ pub struct StudioView {
     /// Hour of the day 0..24.
     pub hour: f32,
     pub spawning: bool,
+    pub connection: StudioConnection,
     /// (name, position, health)
     pub players: Vec<(String, [f64; 3], f32)>,
     /// (name, hp, max hp, position)
@@ -509,7 +520,7 @@ fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, v
     let assets = Rect::from_min_max(Pos2::new(left.left(), split+2.0), left.max);
     if st.show_explorer||st.show_toolbox {covered.push(left);}
     if st.show_props {covered.push(right);}
-    if st.show_explorer {window(ctx,"workspace-tree",tree,p,icons,icon::TREE,"Сцена",|ui| explorer(ui,p,st,view));}
+    if st.show_explorer {window(ctx,"workspace-tree",tree,p,icons,icon::TREE,"Проводник",|ui| explorer(ui,p,st,view));}
     if st.show_toolbox {window(ctx,"workspace-assets",assets,p,icons,icon::CUBE,"Ресурсы",|ui| toolbox(ui,icons,p,st,inv,&mut actions));}
     if st.show_props {window(ctx,"workspace-inspector",right,p,icons,icon::PROPS,"Инспектор",|ui| properties(ui,icons,p,st,view,&mut actions));}
     if st.center == Center::Script {
@@ -535,7 +546,7 @@ fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, v
             egui::ScrollArea::horizontal().id_salt("workspace-footer-scroll").show(ui,|ui| {ui.horizontal(|ui| {
                 if ui.selectable_label(st.show_output,"Вывод").clicked() { st.show_output = !st.show_output; }
                 if ui.selectable_label(st.center == Center::Script,"Код").clicked() { st.center = if st.center == Center::Script { Center::World } else { Center::Script }; }
-                if ui.selectable_label(st.show_explorer,"Сцена").clicked(){st.show_explorer=!st.show_explorer;}
+                if ui.selectable_label(st.show_explorer,"Проводник").clicked(){st.show_explorer=!st.show_explorer;}
                 if ui.selectable_label(st.show_toolbox,"Ресурсы").clicked(){st.show_toolbox=!st.show_toolbox;}
                 if ui.selectable_label(st.show_props,"Инспектор").clicked(){st.show_props=!st.show_props;}
                 if ui.button("Свернуть панели").clicked(){st.show_explorer=false;st.show_toolbox=false;st.show_props=false;st.show_output=false;}
@@ -1060,6 +1071,7 @@ fn explorer(ui: &mut Ui, p: &Palette, st: &mut StudioState, view: &StudioView) {
                 // On a phone the dock shows one window: the tap goes on to its Свойства
                 // (the script opens straight in the code window).
                 st.selected = node;
+                st.show_props = true;
                 if node == Node::Script {
                     if ui.ctx().screen_rect().width() > ui.ctx().screen_rect().height() { st.center = Center::Script; }
                     st.dock_tab = 4;
@@ -1069,24 +1081,37 @@ fn explorer(ui: &mut Ui, p: &Palette, st: &mut StudioState, view: &StudioView) {
             }
         };
         row(ui, 0, Node::Workspace, format!("Мир «{}»", view.project), Color32::from_rgb(90, 170, 255));
-        row(ui, 1, Node::Players, format!("Игроки ({})", view.players.len()), Color32::from_rgb(120, 220, 140));
-        for (i, (n, ..)) in view.players.iter().enumerate() {
-            row(ui, 2, Node::Player(i), n.clone(), Color32::from_rgb(120, 220, 140));
-        }
-        row(ui, 1, Node::Mobs, format!("Мобы ({})", view.mobs.len()), Color32::from_rgb(240, 150, 90));
-        for (i, (n, hp, max, _)) in view.mobs.iter().enumerate().take(60) {
-            row(ui, 2, Node::Mob(i), format!("{n} {:.0}/{:.0}", hp, max), Color32::from_rgb(240, 150, 90));
-        }
-        row(ui, 1, Node::Drops, format!("Предметы на земле ({})", view.drops), Color32::from_rgb(230, 210, 110));
-        let target = view.target.as_ref().map(|t| format!("Выбранный блок: {}", t.1)).unwrap_or_else(|| "Выбранный блок: —".into());
-        row(ui, 1, Node::Target, target, Color32::from_rgb(150, 200, 255));
-        row(ui, 1, Node::Models, format!("Модели ({})", view.models.len()), Color32::from_rgb(255, 170, 210));
-        for (i, (n, count)) in view.models.iter().enumerate().take(200) {
-            row(ui, 2, Node::Model(i), format!("{n} · {count} бл."), Color32::from_rgb(255, 170, 210));
-        }
-        row(ui, 0, Node::Lighting, "Освещение".into(), Color32::from_rgb(255, 220, 90));
-        row(ui, 0, Node::Scripts, "Скрипты".into(), Color32::from_rgb(190, 140, 255));
-        row(ui, 1, Node::Script, "script.lua".into(), Color32::from_rgb(190, 140, 255));
+        ui.separator();
+        ui.label(egui::RichText::new("Сервисы").color(p.text_muted));
+
+        egui::CollapsingHeader::new("Геометрия").default_open(true).show(ui, |ui| {
+            let target = view.target.as_ref().map(|t| format!("Блок: {}", t.1)).unwrap_or_else(|| "Блок не выбран".into());
+            row(ui, 0, Node::Target, target, Color32::from_rgb(150, 200, 255));
+            row(ui, 0, Node::Models, format!("Модели ({})", view.models.len()), Color32::from_rgb(255, 170, 210));
+            for (i, (name, count)) in view.models.iter().enumerate().take(200) {
+                row(ui, 1, Node::Model(i), format!("{name} · {count} бл."), Color32::from_rgb(255, 170, 210));
+            }
+            row(ui, 0, Node::Drops, format!("Предметы на земле ({})", view.drops), Color32::from_rgb(230, 210, 110));
+        });
+        egui::CollapsingHeader::new("Население").show(ui, |ui| {
+            row(ui, 0, Node::Population, "Правила появления".into(), Color32::from_rgb(240, 150, 90));
+            row(ui, 0, Node::Players, format!("Игроки ({})", view.players.len()), Color32::from_rgb(120, 220, 140));
+            for (i, (name, ..)) in view.players.iter().enumerate() {
+                row(ui, 1, Node::Player(i), name.clone(), Color32::from_rgb(120, 220, 140));
+            }
+            row(ui, 0, Node::Mobs, format!("Мобы ({})", view.mobs.len()), Color32::from_rgb(240, 150, 90));
+            for (i, (name, hp, max, _)) in view.mobs.iter().enumerate().take(60) {
+                row(ui, 1, Node::Mob(i), format!("{name} {hp:.0}/{max:.0}"), Color32::from_rgb(240, 150, 90));
+            }
+        });
+        egui::CollapsingHeader::new("Цикл мира").show(ui, |ui| {
+            row(ui, 0, Node::Lighting, "Время и календарь".into(), Color32::from_rgb(255, 220, 90));
+        });
+        egui::CollapsingHeader::new("Логика мира").show(ui, |ui| {
+            row(ui, 0, Node::Scripts, "Среда Luau".into(), Color32::from_rgb(190, 140, 255));
+            row(ui, 1, Node::Script, "script.lua".into(), Color32::from_rgb(190, 140, 255));
+        });
+        row(ui, 0, Node::Network, "Сетевая сессия".into(), Color32::from_rgb(90, 170, 255));
     });
 }
 
@@ -1119,11 +1144,30 @@ fn properties(ui: &mut Ui, icons: &GuiIcons, p: &Palette, st: &mut StudioState, 
                 }
             });
         }
-        Node::Players | Node::Mobs | Node::Drops | Node::Scripts => {
-            ui.label(egui::RichText::new("Выберите элемент в Проводнике").size(12.5).color(p.text_muted));
-            if pill_button(ui, icons, Some(icon::TREE), "Проводник", ButtonKind::Secondary, w, true).clicked() {
-                st.dock_tab = 1;
+        Node::Population => {
+            let mut spawning = view.spawning;
+            if ui.checkbox(&mut spawning, "Мобы появляются").changed() {
+                actions.push(StudioAction::SetSpawning(spawning));
             }
+        }
+        Node::Players => prop(ui, "Игроков", view.players.len().to_string()),
+        Node::Mobs => prop(ui, "Мобов", view.mobs.len().to_string()),
+        Node::Drops => prop(ui, "Предметов", view.drops.to_string()),
+        Node::Scripts => {
+            prop(ui, "Состояние", if view.script_running { "Запущен" } else { "Остановлен" }.into());
+            if pill_button(ui, icons, Some(icon::CODE), "Открыть код", ButtonKind::Primary, w, true).clicked() {
+                st.center = Center::Script;
+                st.dock_tab = 4;
+            }
+        }
+        Node::Network => {
+            let mode = match view.connection {
+                StudioConnection::Local => "Локальный мир",
+                StudioConnection::Hosting => "Свой сервер",
+                StudioConnection::Connected => "Подключён",
+            };
+            prop(ui, "Режим", mode.into());
+            prop(ui, "Игроков в сессии", view.players.len().to_string());
         }
         Node::Player(i) => {
             if let Some((n, at, hp)) = view.players.get(i) {
@@ -1406,7 +1450,7 @@ mod tests {
         let mut inv = Inventory::default();
         let view = StudioView { project: "Тест".into(), mobs: vec![("Овца".into(), 8.0, 8.0, [1.0, 2.0, 3.0])], players: vec![("Я".into(), [0.0; 3], 20.0)], compact: true, ..Default::default() };
         for tab in [Tab::Home, Tab::Model, Tab::Brush, Tab::Test, Tab::View] {
-            for node in [Node::Workspace, Node::Lighting, Node::Mob(0), Node::Player(0), Node::Script] {
+            for node in [Node::Workspace, Node::Population, Node::Lighting, Node::Mob(0), Node::Player(0), Node::Scripts, Node::Script, Node::Network] {
                 st.tab = tab;
                 st.selected = node;
                 st.show_output = true;
@@ -1456,7 +1500,7 @@ mod tests {
         let render=|st:&mut StudioState,inv:&mut Inventory,events|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(900.0,420.0))),events,..Default::default()},|ctx|{draw(ctx,&icons,st,&view,inv);});
         render(&mut st,&mut inv,vec![]);let out=render(&mut st,&mut inv,vec![]);
         assert!(st.view_right.unwrap()-st.view_left.unwrap()>880.0);
-        let at=out.shapes.iter().find_map(|s|match &s.shape {egui::epaint::Shape::Text(t) if t.galley.job.text=="Сцена"=>Some(t.pos+t.galley.size()*0.5),_=>None}).unwrap();
+        let at=out.shapes.iter().find_map(|s|match &s.shape {egui::epaint::Shape::Text(t) if t.galley.job.text=="Проводник"=>Some(t.pos+t.galley.size()*0.5),_=>None}).unwrap();
         render(&mut st,&mut inv,vec![egui::Event::PointerMoved(at),egui::Event::PointerButton{pos:at,button:egui::PointerButton::Primary,pressed:true,modifiers:Default::default()}]);
         render(&mut st,&mut inv,vec![egui::Event::PointerButton{pos:at,button:egui::PointerButton::Primary,pressed:false,modifiers:Default::default()}]);
         assert!(st.show_explorer);
