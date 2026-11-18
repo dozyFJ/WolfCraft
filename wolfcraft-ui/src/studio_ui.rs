@@ -277,6 +277,26 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &
         return (actions, covered);
     }
 
+    if !view.compact {
+        use egui::{Key, Modifiers};
+
+        if st.playtest {
+            if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F8)) {
+                actions.push(StudioAction::Playtest(false));
+            }
+        } else {
+            if ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::S)) {
+                actions.push(StudioAction::Save);
+            }
+            if !ctx.wants_keyboard_input()
+                && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F6))
+            {
+                st.center = Center::World;
+                actions.push(StudioAction::Playtest(true));
+            }
+        }
+    }
+
     if st.playtest {
         // Play-testing: only a small bar with the stop button.
         let r = Rect::from_center_size(Pos2::new(screen.center().x, screen.top() + 24.0), Vec2::new(230.0, 38.0));
@@ -300,7 +320,9 @@ pub fn draw(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, view: &
     // One layout for phones in both orientations: ribbon, window pills, and a dock (under
     // the world when upright, at the right side in landscape).
     if screen.width() > screen.height() {
-        return draw_workspace(ctx, icons, st, view, inv, &p);
+        let (workspace_actions, covered) = draw_workspace(ctx, icons, st, view, inv, &p);
+        actions.extend(workspace_actions);
+        return (actions, covered);
     }
     if DOCK_LAYOUT || screen.height() > screen.width() {
         return draw_portrait(ctx, icons, st, view, inv, &p, actions, covered);
@@ -481,9 +503,14 @@ fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, v
                     if ui.selectable_label(st.center == Center::World, "3D · Сцена").clicked() { st.center = Center::World; }
                     if ui.selectable_label(st.center == Center::Script, "Скрипт").clicked() { st.center = Center::Script; }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("▶ Тест").clicked() { actions.push(StudioAction::Playtest(true)); }
+                        if ui.button("▶ Тест").on_hover_text(if view.compact { "Запустить тест" } else { "Запустить тест · F6" }).clicked() {
+                            st.center = Center::World;
+                            actions.push(StudioAction::Playtest(true));
+                        }
                         if ui.button("Сервер").on_hover_text("Сохранить мир и запустить сервер").clicked() { actions.push(StudioAction::Publish); }
-                        if ui.button("Сохранить").clicked() { actions.push(StudioAction::Save); }
+                        if ui.button("Сохранить").on_hover_text(if view.compact { "Сохранить проект" } else { "Сохранить проект · Ctrl+S" }).clicked() {
+                            actions.push(StudioAction::Save);
+                        }
                     });
                 });
             });
@@ -515,7 +542,16 @@ fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, v
     st.view_right = Some(mid_r);
     st.view_bottom = Some(scene_bottom);
     // Scene tree and asset browser stay together; selecting a node updates the inspector.
-    let split = if st.show_explorer&&st.show_toolbox {body_top + (bottom-body_top)*0.48}else if st.show_explorer {bottom}else{body_top};
+    let both_left_panels = st.show_explorer && st.show_toolbox;
+    let left_height = bottom - body_top;
+    let split = if both_left_panels {
+        let fraction = if view.compact { 0.48 } else { st.split.clamp(0.2, 0.8) };
+        body_top + left_height * fraction
+    } else if st.show_explorer {
+        bottom
+    } else {
+        body_top
+    };
     let tree = Rect::from_min_max(left.min, Pos2::new(left.right(), split-2.0));
     let assets = Rect::from_min_max(Pos2::new(left.left(), split+2.0), left.max);
     if st.show_explorer||st.show_toolbox {covered.push(left);}
@@ -523,6 +559,15 @@ fn draw_workspace(ctx: &egui::Context, icons: &GuiIcons, st: &mut StudioState, v
     if st.show_explorer {window(ctx,"workspace-tree",tree,p,icons,icon::TREE,"Проводник",|ui| explorer(ui,p,st,view));}
     if st.show_toolbox {window(ctx,"workspace-assets",assets,p,icons,icon::CUBE,"Ресурсы",|ui| toolbox(ui,icons,p,st,inv,&mut actions));}
     if st.show_props {window(ctx,"workspace-inspector",right,p,icons,icon::PROPS,"Инспектор",|ui| properties(ui,icons,p,st,view,&mut actions));}
+    if both_left_panels && !view.compact && left_height > 0.0 {
+        let handle = Rect::from_min_max(
+            Pos2::new(left.left(), split - 3.0),
+            Pos2::new(left.right(), split + 3.0),
+        );
+        if let Some(dy) = splitter(ctx, "workspace-left-split", handle, false, p) {
+            st.split = (st.split + dy / left_height).clamp(0.2, 0.8);
+        }
+    }
     if st.center == Center::Script {
         let r = Rect::from_min_max(Pos2::new(mid_l,body_top),Pos2::new(mid_r,scene_bottom));
         covered.push(r);
