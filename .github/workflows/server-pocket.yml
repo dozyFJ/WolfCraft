@@ -1,9 +1,7 @@
-name: WolfStudio app (studio + server) + WolfServer PC
+name: WolfStudio app (studio + server)
 
 on:
-  push:
-    branches: [mobile-explosives, codex/ota-launchers]
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
@@ -22,7 +20,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add aarch64-linux-android x86_64-pc-windows-gnu
+          rustup target add aarch64-linux-android
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -100,28 +98,10 @@ jobs:
             --title "WolfStudio native OTA ${GITHUB_SHA::7}" \
             --notes "Подписанные ядра редактора и сервера arm64 для APK-загрузчика."
 
-      - name: WolfServer for Windows (PC)
-        continue-on-error: true
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq mingw-w64
-          cargo build -p wolfserver --release --target x86_64-pc-windows-gnu
-          cp target/x86_64-pc-windows-gnu/release/WolfServer.exe WolfServer.exe
-          ls -lh WolfServer.exe
-
       - uses: actions/upload-artifact@v4
         with:
-          name: WolfServer
+          name: WolfStudio-apk
           path: |
             WolfStudio.apk
-            WolfServer.exe
             studio-ota/*
-          if-no-files-found: ignore
-
-      - name: Attach Windows server
-        if: ${{ hashFiles('WolfServer.exe') != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag=server-test
-          if [ "$GITHUB_REF_NAME" = "codex/ota-launchers" ]; then tag=studio-ota-bootstrap; fi
-          gh release upload "$tag" WolfServer.exe --clobber
+          if-no-files-found: error

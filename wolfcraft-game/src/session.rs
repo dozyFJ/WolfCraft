@@ -3145,9 +3145,9 @@ impl GameSession {
         out
     }
 
-    fn save_pipes(&self) {
+    fn save_pipes(&self) -> Result<(), String> {
         let list: Vec<String> = self.pipes.iter().map(|c| format!("{} {} {} {}", c.f, c.i, c.j, c.k)).collect();
-        let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("pipes.txt"), list.join("\n").as_bytes());
+        wolfcraft_engine::storage::write_safe(&self.dir.join("pipes.txt"), list.join("\n").as_bytes())
     }
 
     /// WolfTech item pipes, twice a second: each network takes what its machines made (and
@@ -3245,9 +3245,9 @@ impl GameSession {
         }
     }
 
-    fn save_kinetic(&self) {
+    fn save_kinetic(&self) -> Result<(), String> {
         let list: Vec<String> = self.kin.keys().map(|c| format!("{} {} {} {}", c.f, c.i, c.j, c.k)).collect();
-        let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("kinetic.txt"), list.join("\n").as_bytes());
+        wolfcraft_engine::storage::write_safe(&self.dir.join("kinetic.txt"), list.join("\n").as_bytes())
     }
 
     /// Grants an achievement once per world: a golden toast pops on the left.
@@ -3701,7 +3701,9 @@ impl GameSession {
     /// Swaps planet + chunk streaming: home, its hell, or another planet of the world.
     fn enter_place(&mut self, hell: bool, kind: wolfcraft_engine::planet::PlanetKind) {
         use wolfcraft_engine::planet::PlanetKind;
-        self.save_containers();
+        if let Err(err) = self.save_containers() {
+            log::error!("saving containers: {err}");
+        }
         self.save_tech();
         self.containers.clear();
         self.kin.clear();
@@ -3944,16 +3946,14 @@ impl GameSession {
         }
     }
 
-    fn save_block_commands(&self) {
+    fn save_block_commands(&self) -> Result<(), String> {
         let mut out = String::new();
         for (c, cmd) in &self.block_commands {
             if !cmd.is_empty() {
                 out += &format!("{} {} {} {} {}\n", c.f, c.i, c.j, c.k, cmd.replace('\n', " "));
             }
         }
-        if let Err(e) = std::fs::write(self.block_commands_path(), out) {
-            log::error!("saving commands.txt: {e}");
-        }
+        wolfcraft_engine::storage::write_safe(&self.block_commands_path(), out.as_bytes())
     }
 
     fn containers_path(&self) -> PathBuf {
@@ -3976,7 +3976,7 @@ impl GameSession {
         }
     }
 
-    fn save_containers(&self) {
+    fn save_containers(&self) -> Result<(), String> {
         let mut out = String::new();
         for (c, v) in &self.containers {
             for (i, s) in v.iter().enumerate() {
@@ -3985,46 +3985,51 @@ impl GameSession {
                 }
             }
         }
-        if let Err(e) = wolfcraft_engine::storage::write_safe(&self.containers_path(), out.as_bytes()) {
-            log::error!("saving containers.txt: {e}");
-        }
+        wolfcraft_engine::storage::write_safe(&self.containers_path(), out.as_bytes())
     }
 
     /// Writes player.dat, edited chunks and world.toml.
-    pub fn save(&mut self) {
+    pub fn save(&mut self) -> bool {
+        use wolfcraft_engine::storage::write_safe;
+
+        let mut saved = true;
+        let mut record = |file: &str, result: Result<(), String>| {
+            if let Err(err) = result {
+                log::error!("saving {file}: {err}");
+                saved = false;
+            }
+        };
         if !self.hell {
-            self.save_kinetic();
-            self.save_pipes();
+            record("kinetic.txt", self.save_kinetic());
+            record("pipes.txt", self.save_pipes());
         }
-        if let Err(e)=self.storage_bank.save(&self.dir.join("storage_bank.bin")){log::error!("storage bank: {e}");}
-        if let Err(e)=self.boss_book.save(&self.dir.join("bosses.txt")){log::error!("bosses: {e}");}
-        self.save_containers();
-        self.save_block_commands();
+        record("storage_bank.bin", self.storage_bank.save(&self.dir.join("storage_bank.bin")));
+        record("bosses.txt", self.boss_book.save(&self.dir.join("bosses.txt")));
+        record("containers", self.save_containers());
+        record("block commands", self.save_block_commands());
         match &self.arena {
             Some(a) => {
-                let _ = wolfcraft_engine::storage::write_safe(&self.dir.join("arena.txt"), a.to_text().as_bytes());
+                record("arena.txt", write_safe(&self.dir.join("arena.txt"), a.to_text().as_bytes()));
             }
             None => {
-                let _ = std::fs::remove_file(self.dir.join("arena.txt"));
+                let result = std::fs::remove_file(self.dir.join("arena.txt")).or_else(|err| {
+                    if err.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(err) }
+                });
+                record("arena.txt", result.map_err(|err| err.to_string()));
             }
         }
         if self.clicker.active {
-            if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("clicker.txt"), self.clicker.to_text().as_bytes()) {
-                log::error!("clicker: {e}");
-            }
+            record("clicker.txt", write_safe(&self.dir.join("clicker.txt"), self.clicker.to_text().as_bytes()));
         }
         if self.buttonsim.active {
-            if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("buttonsim.txt"), self.buttonsim.to_text().as_bytes()) {
-                log::error!("buttonsim: {e}");
-            }
+            record("buttonsim.txt", write_safe(&self.dir.join("buttonsim.txt"), self.buttonsim.to_text().as_bytes()));
         }
         if !self.petsim.owned.is_empty() || self.petsim.coins > 0 {
-            if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("petsim.txt"), self.petsim.to_text().as_bytes()) {
-                log::error!("petsim: {e}");
-            }
+            record("petsim.txt", write_safe(&self.dir.join("petsim.txt"), self.petsim.to_text().as_bytes()));
         }
         if let Some(h) = self.petsim_home {
-            let _ = std::fs::write(self.dir.join("petsim_home.txt"), format!("{} {} {}", h.x, h.y, h.z));
+            let home = format!("{} {} {}", h.x, h.y, h.z);
+            record("petsim_home.txt", write_safe(&self.dir.join("petsim_home.txt"), home.as_bytes()));
         }
         let dim = if self.hell {
             let p = self.overworld_pos.unwrap_or(DVec3::ZERO);
@@ -4035,19 +4040,13 @@ impl GameSession {
         } else {
             "overworld".to_string()
         };
-        let _ = std::fs::write(self.dimension_path(), dim);
-        if let Err(e) = wolfcraft_engine::storage::write_safe(&self.dir.join("player.dat"), &self.player.to_bytes()) {
-            log::error!("saving player.dat: {e}");
-        }
-        match self.chunks.save_all() {
-            Ok(n) => log::info!("saved {n} region file(s)"),
-            Err(e) => log::error!("saving regions: {e}"),
-        }
+        record("dimension", write_safe(&self.dimension_path(), dim.as_bytes()));
+        record("player.dat", write_safe(&self.dir.join("player.dat"), &self.player.to_bytes()));
+        record("regions", self.chunks.save_all().map(|n| log::info!("saved {n} region file(s)")));
         self.cfg.last_played = platform::unix_now();
-        if let Err(e) = self.cfg.save(&self.dir) {
-            log::error!("saving world.toml: {e}");
-        }
-        self.saved_notice = 2.0;
+        record("world.toml", self.cfg.save(&self.dir));
+        self.saved_notice = if saved { 2.0 } else { 0.0 };
+        saved
     }
 
     /// Camera for rendering. First person sits at the eye level; third person orbits behind or
@@ -6419,7 +6418,9 @@ impl GameSession {
                 self.block_commands.insert(c, text.to_string());
             }
         }
-        self.save_block_commands();
+        if let Err(err) = self.save_block_commands() {
+            log::error!("saving block commands: {err}");
+        }
         // Work out every network once.
         for c in placed {
             if matches!(self.chunks.get_block(c).map(|b| b.unwall()), Some(B::IskritWire | B::IskritTorch | B::IskritBlock | B::IskritLamp | B::SwitchOn)) || self.chunks.get_block(c).is_some_and(|b| b.part().is_some()) {
@@ -6498,6 +6499,21 @@ mod tests {
             assert!(t.elapsed().as_secs() < 90, "chunks never finished: {done}/{total}, inflight {}, chunk {:?}", s.chunks.stats.gen_inflight, s.player_chunk());
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    #[test]
+    fn failed_world_save_clears_success_notice() {
+        let mut s = load("failed_world_save", 1837, true);
+        assert!(s.save());
+        let player_path = s.dir.join("player.dat");
+        std::fs::remove_file(&player_path).unwrap();
+        std::fs::create_dir(&player_path).unwrap();
+
+        assert!(!s.save());
+        assert_eq!(s.saved_notice, 0.0);
+
+        std::fs::remove_dir(&player_path).unwrap();
+        assert!(s.save());
     }
 
     #[test]

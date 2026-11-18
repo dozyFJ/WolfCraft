@@ -100,7 +100,6 @@ const STUDIO_SCRIPT: &str = "studio.txt";
 /// World script in Luau, written in the studio, run when the world starts.
 const SCRIPT_FILE: &str = "script.lua";
 
-/// The world's Luau script (an old command list is translated on the way).
 /// Worlds of the bundled WolfServer (`--data <files>/wolfserver`): the WolfStudio places.
 fn servers_dir(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("wolfserver").join("worlds")
@@ -122,6 +121,42 @@ fn move_studio_projects(old: &std::path::Path, servers: &std::path::Path) {
     }
 }
 
+fn game_saves_dir(data_dir: &std::path::Path) -> PathBuf {
+    let saves = data_dir.join("saves");
+    let legacy = data_dir.join("worlds");
+    if legacy.is_dir() && !saves.exists() {
+        match std::fs::rename(&legacy, &saves) {
+            Ok(()) => return saves,
+            Err(_) if saves.is_dir() && !legacy.exists() => return saves,
+            Err(err) => {
+                log::warn!("move {} -> {}: {err}", legacy.display(), saves.display());
+                return legacy;
+            }
+        }
+    }
+    if let Err(err) = std::fs::create_dir_all(&saves) {
+        log::warn!("create {}: {err}", saves.display());
+        return legacy;
+    }
+    // Both folders can exist if saves were restored from a backup.
+    if let Ok(entries) = std::fs::read_dir(&legacy) {
+        for entry in entries.flatten() {
+            let from = entry.path();
+            if !from.join("world.toml").is_file() {
+                continue;
+            }
+            let to = saves.join(entry.file_name());
+            if std::fs::symlink_metadata(&to).is_ok() {
+                log::warn!("save already exists at {}; keeping {}", to.display(), from.display());
+            } else if let Err(err) = std::fs::rename(&from, &to) {
+                log::warn!("move {} -> {}: {err}", from.display(), to.display());
+            }
+        }
+    }
+    saves
+}
+
+/// The world's Luau script (an old command list is translated on the way).
 fn read_world_script(dir: &std::path::Path) -> String {
     if let Ok(s) = std::fs::read_to_string(dir.join(SCRIPT_FILE)) {
         return s;
@@ -397,11 +432,15 @@ impl App {
         // WolfStudio app: servers are places with their own worlds, apart from game worlds —
         // the same folder the bundled WolfServer runs them from, so every server made on the
         // «Сервер» tab is in the studio list and every place can be started as a server.
-        let worlds_dir = if wolfcraft_ui::launcher::is_studio_app() { servers_dir(&data_dir) } else { data_dir.join("worlds") };
-        let _ = std::fs::create_dir_all(&worlds_dir);
-        if wolfcraft_ui::launcher::is_studio_app() {
-            move_studio_projects(&data_dir.join("worlds"), &worlds_dir);
-        }
+        let worlds_dir = if wolfcraft_ui::launcher::is_studio_app() {
+            let dir = servers_dir(&data_dir);
+            let _ = std::fs::create_dir_all(&dir);
+            move_studio_projects(&data_dir.join("worlds"), &dir);
+            move_studio_projects(&data_dir.join("saves"), &dir);
+            dir
+        } else {
+            game_saves_dir(&data_dir)
+        };
         let mut settings = Settings::load(&data_dir);
         let saved_servers = settings.servers.clone();
         if cfg!(target_os = "android") {
@@ -929,10 +968,8 @@ impl App {
             }
             StudioAction::Save => {
                 self.save_studio_script();
-                if let Some(s) = &mut self.session {
-                    s.save();
-                }
-                status(self, "Сохранено");
+                let saved = self.session.as_mut().map_or(true, |s| s.save());
+                status(self, if saved { "Сохранено" } else { "Не удалось полностью сохранить мир" });
             }
             StudioAction::Publish => {
                 self.save_studio_script();
@@ -3685,10 +3722,9 @@ impl App {
             }
             MenuAction::SaveGame => {
                 if let Some(s) = &mut self.session {
-                    s.save();
+                    let message = if s.save() { "Игра сохранена" } else { "Не удалось полностью сохранить мир" };
+                    self.chat.push(ChatKind::System, message, self.time.elapsed() as f64);
                 }
-                let now = self.time.elapsed() as f64;
-                self.chat.push(ChatKind::System, "Игра сохранена", now);
             }
             MenuAction::SaveAndQuit => {
                 self.chat = ChatState::default();
@@ -5336,6 +5372,24 @@ fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, 
 #[cfg(test)]
 mod inventory_context_tests {
     use super::*;
+    #[test]
+    fn legacy_world_is_listed_from_saves_after_migration() {
+        let data = std::env::temp_dir().join(format!("wolf_saves_migration_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let legacy = data.join("worlds");
+        let cfg = WorldConfig::new("Старый мир", 42);
+        let world = legacy.join(&cfg.id);
+        cfg.save(&world).unwrap();
+        std::fs::write(world.join("player.dat"), b"player").unwrap();
+
+        let saves = game_saves_dir(&data);
+        assert_eq!(saves, data.join("saves"));
+        assert_eq!(list_worlds(&saves)[0].id, cfg.id);
+        assert_eq!(std::fs::read(saves.join(&cfg.id).join("player.dat")).unwrap(), b"player");
+        assert_eq!(game_saves_dir(&data), saves);
+        std::fs::remove_dir_all(data).unwrap();
+    }
+
     #[test]
     fn opening_player_inventory_discards_previous_chest_and_workbench() {
         let dir = std::env::temp_dir().join(format!("wolf_inventory_context_{}", std::process::id()));
