@@ -384,8 +384,11 @@ pub fn run(s: &mut GameSession, line: &str) -> Reply {
             vec![sys(format!("Биом: {} · температура {:.0}% · влажность {:.0}%", col.biome.label(), col.temp * 100.0, col.humid * 100.0))]
         }
         "save" => {
-            s.save();
-            vec![sys("Мир сохранён")]
+            if s.save() {
+                vec![sys("Мир сохранён")]
+            } else {
+                vec![err("Не удалось полностью сохранить мир")]
+            }
         }
         other => vec![err(format!("Неизвестная команда: /{other}. Введите /help"))],
     }
