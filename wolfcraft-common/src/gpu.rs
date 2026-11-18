@@ -124,6 +124,7 @@ impl GpuContext {
             unsafe extern "C" {
                 fn dlopen(name: *const std::ffi::c_char, flags: i32) -> *mut std::ffi::c_void;
                 fn dlsym(handle: *mut std::ffi::c_void, name: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+                fn dlclose(handle: *mut std::ffi::c_void) -> i32;
             }
             let lib = unsafe { dlopen(c"libandroid.so".as_ptr(), 2) };
             if lib.is_null() {
@@ -131,6 +132,7 @@ impl GpuContext {
             }
             let sym = unsafe { dlsym(lib, c"ANativeWindow_setFrameRate".as_ptr()) };
             if sym.is_null() {
+                unsafe { dlclose(lib) };
                 log::info!("refresh rate: not supported on this Android version");
                 return;
             }
@@ -142,6 +144,7 @@ impl GpuContext {
                     log::info!("refresh rate {hz} Hz requested (result {r})");
                 }
             }
+            unsafe { dlclose(lib) };
         }
         #[cfg(not(target_os = "android"))]
         let _ = hz;
@@ -170,10 +173,10 @@ impl GpuContext {
     }
 
     pub fn set_vsync(&mut self, vsync: bool) {
+        let vsync = vsync || cfg!(target_os = "android");
         if vsync == self.vsync {
             return;
         }
-        let vsync = vsync || cfg!(target_os = "android");
         self.vsync = vsync;
         let Some(surface) = &self.surface else { return };
         let caps = surface.get_capabilities(&self.adapter);

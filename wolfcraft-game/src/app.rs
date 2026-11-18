@@ -441,12 +441,8 @@ impl App {
         } else {
             game_saves_dir(&data_dir)
         };
-        let mut settings = Settings::load(&data_dir);
+        let settings = Settings::load(&data_dir);
         let saved_servers = settings.servers.clone();
-        if cfg!(target_os = "android") {
-            // Phones: a shorter view keeps the frame rate up.
-            settings.render_distance = settings.render_distance.min(5);
-        }
         let (preview_tx, preview_rx) = channel();
         let (create_tx, create_rx) = channel();
         let random_seed = splitmix(platform::unix_now() ^ (std::process::id() as u64) << 20) % 1_000_000_000;
@@ -589,7 +585,14 @@ impl App {
         }
         let gpu = GpuContext::new(window.clone(), self.settings.vsync, false)?;
         self.packs = wolfcraft_assets::packs::list(&self.pack_dirs());
-        let atlases = self.load_atlases().or_else(|_| AtlasManager::new(None))?;
+        let atlases = match self.load_atlases() {
+            Ok(atlases) => atlases,
+            Err(err) => {
+                self.pack_status = format!("Не удалось загрузить пак: {err}");
+                self.settings.texture_pack = wolfcraft_assets::packs::DEFAULT_PACK.into();
+                self.load_atlases().or_else(|_| AtlasManager::new(None))?
+            }
+        };
         // Export the generated atlases once so artists can see and override them.
         let export_dir = self.data_dir.join("atlases");
         if !export_dir.join("blocks_atlas.png").exists() {
@@ -1259,7 +1262,7 @@ impl App {
             }
             Err(e) => {
                 self.pack_status = format!("Не удалось загрузить пак: {e}");
-                self.loaded_pack = self.settings.texture_pack.clone();
+                self.settings.texture_pack = self.loaded_pack.clone();
             }
         }
     }
@@ -3991,8 +3994,6 @@ impl ApplicationHandler for App {
             30
         } else if !self.screen.in_world() && !cfg!(target_os = "android") {
             60
-        } else if gfx.gpu.vsync() {
-            0
         } else {
             self.settings.max_fps
         };

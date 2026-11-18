@@ -458,7 +458,7 @@ fn yes() -> bool {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            render_distance: 8,
+            render_distance: if cfg!(target_os = "android") { 5 } else { 8 },
             fov: 75.0,
             vsync: true,
             max_fps: 0,
@@ -548,6 +548,18 @@ impl Settings {
             _ => &self.texture_pack,
         }.to_string();
         self.style_version = STYLE_VERSION;
+
+        // Older menus could leave a named preset selected after individual effects changed.
+        if self.shaders != 3 {
+            let mut preset = Self::default();
+            preset.apply_shader_preset(self.shaders);
+            if !matches!(self.shaders, 0 | 1 | 2 | 4 | 5)
+                || (self.relief_mode, self.relief_strength, self.fx_flags())
+                    != (preset.relief_mode, preset.relief_strength, preset.fx_flags())
+            {
+                self.shaders = 3;
+            }
+        }
     }
     pub fn save(&self, data_dir: &Path) {
         let _ = std::fs::create_dir_all(data_dir);
@@ -585,6 +597,21 @@ mod tests {
             s.migrate();
             assert_eq!(s.texture_pack, new);
         }
+    }
+
+    #[test]
+    fn settings_keep_manual_effects_and_distance() {
+        let mut settings = Settings::default();
+        settings.apply_shader_preset(4);
+        settings.fx_bloom = true;
+        settings.fx_wet = false;
+        settings.render_distance = 11;
+        let mut saved: Settings = toml::from_str(&toml::to_string(&settings).unwrap()).unwrap();
+        saved.migrate();
+        assert_eq!(saved.shaders, 3);
+        assert!(saved.fx_bloom);
+        assert!(!saved.fx_wet);
+        assert_eq!(saved.render_distance, 11);
     }
 
     #[test]
