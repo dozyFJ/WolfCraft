@@ -1,6 +1,7 @@
 //! The player: orientation on a sphere, movement, survival stats, persistence (`player.dat`).
 
 use crate::config::{Difficulty, GameMode};
+use crate::cubesphere::Cell;
 use crate::inventory::Inventory;
 use crate::physics::{self, Body, EYE_HEIGHT, MoveInput, Voxels, up_at};
 use glam::DVec3;
@@ -114,6 +115,8 @@ pub struct Player {
     pub survival: Survival,
     pub spawn: DVec3,
     pub sneaking: bool,
+    /// Support face for a step that sneaking prevented at a ledge.
+    pub bridge_hit: Option<physics::Hit>,
     pub sprinting: bool,
     pub world_time: f64,
     /// Walk-cycle phase (radians) and swing amount 0..1 for the character model.
@@ -159,6 +162,7 @@ impl Player {
             survival: Survival::default(),
             spawn,
             sneaking: false,
+            bridge_hit: None,
             sprinting: false,
             world_time: 0.25 * DAY_LENGTH,
             anim_phase: 0.0,
@@ -303,6 +307,7 @@ impl Player {
 
     /// One frame of movement and survival simulation.
     pub fn update(&mut self, world: &impl Voxels, c: &Controls, difficulty: Difficulty, dt: f64) {
+        self.bridge_hit = None;
         self.revive_guard=(self.revive_guard-dt as f32).max(0.0);
         self.try_revive();
         if self.survival.dead {
@@ -426,7 +431,20 @@ impl Player {
         // place blocks under the edge to build a bridge).
         if self.sneaking && !c.jump && !self.body.in_water && !self.body.flying && has_support(world, before) && !has_support(world, self.body.pos) {
             let up = physics::up_at(before);
-            // Keep the vertical part (a ceiling, a slab), drop the step sideways.
+            if wish.length_squared() > 0.0 {
+                let grid = world.grid();
+                let target = grid.world_to_cell(self.body.pos - up * 0.15);
+                self.bridge_hit = support_cells(world, before).find_map(|cell| {
+                    let block = world.cell_block(cell);
+                    if !block.is_solid() || !block.boxes().is_empty() {
+                        return None;
+                    }
+                    let normal = [(0, -1), (0, 1), (1, -1), (1, 1)].into_iter()
+                        .find(|&(axis, sign)| grid.neighbor(cell, axis, sign) == Some(target))?;
+                    Some(physics::Hit { cell, normal, dist: 0.0, height: 0.5, block })
+                });
+            }
+            // Restore the previous position and drop the sideways movement.
             self.body.pos = before;
             self.body.vel = up * self.body.vel.dot(up).max(0.0);
             self.body.on_ground = true;
@@ -715,13 +733,18 @@ pub fn sun_direction(world_time: f64) -> DVec3 {
 /// growing with altitude up to 60× far out in space.
 /// Is there something solid under the body's footprint at `feet` (four corners of a square
 /// as wide as the body, a little below the feet)?
-fn has_support(world: &impl Voxels, feet: DVec3) -> bool {
+fn support_cells(world: &impl Voxels, feet: DVec3) -> impl Iterator<Item = Cell> + '_ {
     let up = physics::up_at(feet);
     let helper = if up.y.abs() < 0.9 { DVec3::Y } else { DVec3::X };
     let t1 = (helper - up * helper.dot(up)).normalize();
     let t2 = up.cross(t1);
     let r = physics::BODY_RADIUS * 0.95;
-    [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0), (0.0, 0.0)].iter().any(|(a, b)| world.block_at_world(feet + t1 * (r * a) + t2 * (r * b) - up * 0.15).is_solid())
+    [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0), (0.0, 0.0)].into_iter()
+        .map(move |(a, b)| world.grid().world_to_cell(feet + t1 * (r * a) + t2 * (r * b) - up * 0.15))
+}
+
+fn has_support(world: &impl Voxels, feet: DVec3) -> bool {
+    support_cells(world, feet).any(|cell| world.cell_block(cell).is_solid())
 }
 
 pub fn space_boost(grid: &crate::cubesphere::Grid, r: f64) -> f64 {
@@ -911,6 +934,59 @@ mod tests {
                 assert!(dropped > 1.5, "walking should fall off ({dropped})");
             }
         }
+    }
+
+    impl crate::interaction::WorldEdit for BallWorld {
+        fn set_block(&mut self, cell: Cell, block: Block) -> bool {
+            self.edits.insert(cell, block);
+            true
+        }
+    }
+
+    #[test]
+    fn holding_place_at_a_sneak_edge_extends_the_bridge_until_blocks_run_out() {
+        use crate::interaction::{Interaction, InteractionEvent};
+        use crate::items::ItemStack;
+
+        let mut world = BallWorld::new(60.0);
+        let support = world.grid.world_to_cell(DVec3::new(0.0, 64.0, 0.0));
+        world.edits.insert(support, Block::Stone);
+        let centre = world.grid.cell_center(support);
+        let start = centre + world.grid.up(centre) * 0.51;
+        let mut player = Player::new(start, GameMode::Survival);
+        player.inventory.slots[0] = Some(ItemStack::of_block(Block::Cobblestone, 3));
+        let controls = Controls { forward: 1.0, sneak: true, ..Default::default() };
+        let mut events = Vec::new();
+
+        for _ in 0..60 {
+            player.update(&world, &Controls::default(), Difficulty::Normal, 1.0 / 60.0);
+        }
+        for _ in 0..120 {
+            player.update(&world, &controls, Difficulty::Normal, 1.0 / 60.0);
+        }
+        assert_eq!(world.edits.len(), 1);
+        assert!(player.bridge_hit.is_some());
+
+        for _ in 0..300 {
+            player.update(&world, &controls, Difficulty::Normal, 1.0 / 60.0);
+            Interaction::extend_bridge(&mut world, &mut player, &mut events);
+        }
+
+        assert_eq!(events.len(), 3);
+        let mut previous = support;
+        for event in events {
+            let InteractionEvent::Placed { pos, block: Block::Cobblestone } = event else {
+                panic!("expected a bridge placement, got {event:?}");
+            };
+            assert_eq!(pos.k, support.k);
+            assert!([(0, -1), (0, 1), (1, -1), (1, 1)].into_iter()
+                .any(|(axis, sign)| world.grid.neighbor(previous, axis, sign) == Some(pos)));
+            previous = pos;
+        }
+        assert!(player.inventory.held().is_none());
+        assert!(player.bridge_hit.is_some(), "player should stop at the new edge");
+        assert!(world.grid.radial(player.body.pos) > f64::from(support.k) + 0.5);
+        assert!((player.body.pos - start).length() > 2.0);
     }
 
     #[test]

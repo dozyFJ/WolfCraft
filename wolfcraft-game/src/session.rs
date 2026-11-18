@@ -714,6 +714,10 @@ impl GameSession {
         self.tick_ride(input, dt);
         // Resting: asleep (the night passes in a few seconds) or sitting until you move.
         let resting = self.tick_rest(input, dt);
+        let bridging = input.sneak && input.use_held && !input.jump
+            && !self.player.body.flying && !self.player.body.in_water
+            && (input.forward != 0.0 || input.strafe != 0.0)
+            && Interaction::bridge_block(&self.player).is_some();
         // Physics, split into steps of at most 1/30 s.
         if self.rocket.is_some() {
             self.tick_rocket(dt);
@@ -723,6 +727,10 @@ impl GameSession {
             while left > 1e-6 {
                 let step = left.min(1.0 / 30.0);
                 self.player.update(&self.chunks, &controls, self.cfg.difficulty, step);
+                if bridging && !self.player.survival.dead && self.player.bridge_hit.is_some() {
+                    used_stack = self.player.inventory.held();
+                    Interaction::extend_bridge(&mut self.chunks, &mut self.player, &mut events);
+                }
                 left -= step;
             }
         }
@@ -841,9 +849,9 @@ impl GameSession {
                 }
             }
             // A tap on a dragon: put a saddle on it, climb on or get off.
-            let mounted = input.use_pressed && self.try_mount();
+            let mounted = input.use_pressed && !bridging && self.try_mount();
             // A tap on a creature in the crosshair hits it (touch screens: a short tap is "use").
-            if input.use_pressed && !mounted && !self.try_attack(0.25) {
+            if input.use_pressed && !bridging && !mounted && !self.try_attack(0.25) {
                 used_stack=self.player.inventory.held();
                 events.extend(self.interaction.use_item(&mut self.chunks, &mut self.player, hit));
             }

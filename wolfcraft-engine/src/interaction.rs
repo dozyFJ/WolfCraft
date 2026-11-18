@@ -550,8 +550,26 @@ impl Interaction {
             }
             return events;
         }
-        let (Some(block), Some(h)) = (info.place, hit) else { return events };
-        let Some(target) = h.front_cell(world.grid()) else { return events };
+        if let (Some(block), Some(hit)) = (info.place, hit) {
+            Self::place_block(world, player, block, hit, false, &mut events);
+        }
+        events
+    }
+
+    pub fn bridge_block(player: &Player) -> Option<Block> {
+        player.inventory.held()?.info().place.filter(|block| {
+            block.is_solid() && block.boxes().is_empty()
+        })
+    }
+
+    pub fn extend_bridge(world: &mut impl WorldEdit, player: &mut Player, events: &mut Vec<InteractionEvent>) {
+        if let (Some(block), Some(hit)) = (Self::bridge_block(player), player.bridge_hit.take()) {
+            Self::place_block(world, player, block, hit, true, events);
+        }
+    }
+
+    fn place_block(world: &mut impl WorldEdit, player: &mut Player, block: Block, h: Hit, bridge: bool, events: &mut Vec<InteractionEvent>) {
+        let Some(target) = h.front_cell(world.grid()) else { return };
         // Turn stairs, panes, doors and signs to the player's view.
         let block = {
             let g = world.grid();
@@ -611,16 +629,22 @@ impl Interaction {
             _ => block,
         };
         if !world.cell_block(target).is_replaceable() {
-            return events;
+            return;
         }
-        if block.is_solid() && body_overlaps_cell(world.grid(), player.body.pos, target) {
-            return events;
+        // At a ledge the player's feet can dip slightly below the new floor.
+        // Allow shallow contact there while still rejecting body intersection.
+        let mut feet = player.body.pos;
+        if bridge {
+            feet += world.grid().up(feet) * 0.25;
+        }
+        if block.is_solid() && body_overlaps_cell(world.grid(), feet, target) {
+            return;
         }
         // A door needs a free block above for its upper half.
         let door_above = block.door_top().map(|top| (world.grid().neighbor(target, 2, 1), top));
         if let Some((above, _)) = door_above {
             if !above.is_some_and(|a| world.cell_block(a).is_replaceable()) {
-                return events;
+                return;
             }
         }
         if world.set_block(target, block) {
@@ -634,7 +658,6 @@ impl Interaction {
             }
             events.push(InteractionEvent::Placed { pos: target, block });
         }
-        events
     }
 
     /// Middle click in creative: copy the targeted block into the selected hotbar slot.

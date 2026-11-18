@@ -1508,13 +1508,18 @@ impl App {
         // With a bow in hand a long press on the screen draws it instead of breaking blocks.
         let bow = self.session.as_ref().is_some_and(|s| s.player.inventory.held().is_some_and(|h| h.id == wolfcraft_engine::items::ids::BOW));
         let k = &self.input.keys;
+        let shift = k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight);
+        let shift_bridge = shift && self.input.right && self.session.as_ref().is_some_and(|s| {
+            !s.player.body.flying && (s.player.inventory.held().is_none()
+                || wolfcraft_engine::interaction::Interaction::bridge_block(&s.player).is_some())
+        });
         let f = InputFrame {
             forward: (axis(KeyCode::KeyW, KeyCode::KeyS) + self.touch.move_vec.1).clamp(-1.0, 1.0),
             strafe: (axis(KeyCode::KeyD, KeyCode::KeyA) + self.touch.move_vec.0).clamp(-1.0, 1.0),
             jump: k.contains(&KeyCode::Space) || self.touch.jump_held,
             jump_pressed: std::mem::take(&mut self.input.jump_press),
-            sprint: k.contains(&KeyCode::ShiftLeft) || k.contains(&KeyCode::ShiftRight) || self.touch.sprint,
-            sneak: k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || if self.touch.flying { self.touch.down_held } else { self.touch.sneak },
+            sprint: (shift && !shift_bridge) || self.touch.sprint,
+            sneak: shift_bridge || k.contains(&KeyCode::ControlLeft) || k.contains(&KeyCode::KeyC) || if self.touch.flying { self.touch.down_held } else { self.touch.sneak },
             look: self.smooth_look((self.input.mouse_dx * mouse_sens + tl.0 as f64 * 1.4 * sens, if self.settings.invert_y { 1.0 } else { -1.0 } * (self.input.mouse_dy * mouse_sens + tl.1 as f64 * 1.4 * sens))),
             break_held: self.input.left || (self.touch.breaking && !bow) || self.tap_hit > 0.0,
             use_pressed: std::mem::take(&mut self.input.right_press),
