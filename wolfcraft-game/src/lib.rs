@@ -39,6 +39,17 @@ pub fn run(args: LaunchArgs, event_loop: EventLoop<()>) {
 
 /// Desktop entry point.
 pub fn run_desktop() {
+    run_desktop_app(false);
+}
+
+/// Desktop entry point for the standalone WolfStudio editor.
+#[cfg(not(target_os = "android"))]
+pub fn run_studio_desktop() {
+    run_desktop_app(true);
+}
+
+fn run_desktop_app(studio: bool) {
+    wolfcraft_ui::launcher::set_studio_app(studio);
     let args = LaunchArgs::parse(std::env::args().skip(1));
     match EventLoop::new() {
         Ok(e) => run(args, e),

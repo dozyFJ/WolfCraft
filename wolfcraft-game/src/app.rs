@@ -531,7 +531,7 @@ impl App {
 
     fn create_gfx(&mut self, event_loop: &ActiveEventLoop) -> Result<Gfx, String> {
         let attrs = Window::default_attributes()
-            .with_title("WolfCraft")
+            .with_title(if wolfcraft_ui::launcher::is_studio_app() { "WolfStudio" } else { "WolfCraft" })
             .with_inner_size(LogicalSize::new(1280.0, 720.0))
             .with_min_inner_size(LogicalSize::new(900.0, 560.0));
         let window = Arc::new(event_loop.create_window(attrs).map_err(|e| format!("Не удалось создать окно: {e}"))?);
@@ -893,7 +893,7 @@ impl App {
         match a {
             StudioAction::Exit => {
                 self.save_studio_script();
-                if wolfcraft_ui::launcher::is_studio_app() {
+                if cfg!(target_os = "android") && wolfcraft_ui::launcher::is_studio_app() {
                     // WolfStudio: back to «Мои серверы» in the app (like closing a place in
                     // Roblox Studio), with everything saved.
                     if let Some(s) = &mut self.session {
@@ -1151,8 +1151,12 @@ impl App {
             g.world.clear();
         }
         self.nav.clear();
-        self.nav.push(Screen::Main);
-        self.screen = Screen::GameMenu;
+        if wolfcraft_ui::launcher::is_studio_app() {
+            self.screen = Screen::Main;
+        } else {
+            self.nav.push(Screen::Main);
+            self.screen = Screen::GameMenu;
+        }
         // Show the planet of the world we just left.
         self.menu_planet_requested = false;
     }
@@ -3528,7 +3532,8 @@ impl App {
                 self.host = None;
                 self.join_server(&addr);
             }
-            MenuAction::HostServer(Some(id)) if wolfcraft_ui::launcher::is_studio_app() => {
+            MenuAction::HostServer(Some(id))
+                if cfg!(target_os = "android") && wolfcraft_ui::launcher::is_studio_app() => {
                 // WolfStudio: «Запустить» starts this place on the bundled WolfServer (the
                 // «Сервер» tab), with its own world from the servers folder.
                 if let Some(s) = &mut self.session {

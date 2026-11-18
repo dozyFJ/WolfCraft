@@ -29,7 +29,7 @@ jobs:
         with:
           key: wolfcraft-windows
 
-      - name: Build WolfCraft.exe
+      - name: Build WolfCraft.exe and WolfStudio.exe
         run: |
           # Everything linked in (libstdc++, libgcc, winpthread): the exe needs no MinGW DLLs
           # on the player's PC.
@@ -38,17 +38,23 @@ jobs:
           export CXXSTDLIB=static=stdc++
           export RUSTFLAGS="-L native=$GCCLIB -C target-feature=+crt-static -C link-arg=-static -C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
           cargo build -p wolfcraft-game --bin WolfCraft --release --target x86_64-pc-windows-gnu
-          cp target/x86_64-pc-windows-gnu/release/WolfCraft.exe WolfCraft.exe
+          cargo build -p wolfstudio --bin WolfStudio --release --target x86_64-pc-windows-gnu
+          cp target/x86_64-pc-windows-gnu/release/{WolfCraft,WolfStudio}.exe .
           ls -lh WolfCraft.exe
           echo "DLLs the exe needs:"
-          x86_64-w64-mingw32-objdump -p WolfCraft.exe | grep "DLL Name" | sort -u
-          if x86_64-w64-mingw32-objdump -p WolfCraft.exe | grep -qiE "libstdc|libgcc|libwinpthread"; then echo "MinGW DLL still needed"; exit 1; fi
+          for exe in WolfCraft.exe WolfStudio.exe; do
+            x86_64-w64-mingw32-objdump -p "$exe" | grep "DLL Name" | sort -u
+            if x86_64-w64-mingw32-objdump -p "$exe" | grep -qiE "libstdc|libgcc|libwinpthread"; then
+              echo "$exe still requires a MinGW DLL"
+              exit 1
+            fi
+          done
 
       - name: Publish (release pc-test)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete pc-test -y --cleanup-tag || true
-          gh release create pc-test WolfCraft.exe --prerelease --target "$GITHUB_SHA" \
+          gh release create pc-test WolfCraft.exe WolfStudio.exe --prerelease --target "$GITHUB_SHA" \
             --title "WolfCraft для ПК (Windows) #${{ github.run_number }}" \
-            --notes "Та же игра, что на телефоне. Скачай WolfCraft.exe и запусти. ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."
+            --notes "WolfCraft.exe — игра. WolfStudio.exe — редактор серверов и мини-игр. ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}."

@@ -4,12 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# WolfStudio: the WolfCraft studio as its own Android app (the game no longer has a studio
-# tab). Same engine and UI as the game, started in studio mode.
+# The Android activity and the desktop editor share the WolfCraft engine.
 [lib]
 name = "wolfstudio"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
+
+[[bin]]
+name = "WolfStudio"
+path = "src/main.rs"
 
 [dependencies]
 wolfcraft-game = { path = "../wolfcraft-game", default-features = false }
