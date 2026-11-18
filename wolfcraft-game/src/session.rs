@@ -6505,14 +6505,13 @@ mod tests {
     fn failed_world_save_clears_success_notice() {
         let mut s = load("failed_world_save", 1837, true);
         assert!(s.save());
-        let player_path = s.dir.join("player.dat");
-        std::fs::remove_file(&player_path).unwrap();
-        std::fs::create_dir(&player_path).unwrap();
+        let temp_path = s.dir.join("player.tmp");
+        std::fs::create_dir(&temp_path).unwrap();
 
         assert!(!s.save());
         assert_eq!(s.saved_notice, 0.0);
 
-        std::fs::remove_dir(&player_path).unwrap();
+        std::fs::remove_dir(&temp_path).unwrap();
         assert!(s.save());
     }
 
