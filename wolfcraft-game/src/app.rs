@@ -411,6 +411,7 @@ pub struct App {
     /// Minimap texture and when it was last rebuilt.
     minimap: Option<egui::TextureHandle>,
     minimap_age: f32,
+    minimap_origin: Option<MinimapOrigin>,
     /// Seconds since the sky (stars, planets, clouds) was last rebuilt: 20 times a second is
     /// plenty, it hardly moves.
     sky_age: f32,
@@ -563,6 +564,7 @@ impl App {
             last_health: 20.0,
             minimap: None,
             minimap_age: 10.0,
+            minimap_origin: None,
             sky_age: 10.0,
             eat_anim: 0.0,
             equip_anim: 0.0,
@@ -1258,6 +1260,7 @@ impl App {
                 gfx.world.reload_atlases(&gfx.gpu.device, &gfx.gpu.queue, &gfx.atlases);
                 gfx.gui.icons = Arc::new(wolfcraft_ui::gui_renderer::GuiIcons::new(&gfx.gui.ctx, &gfx.atlases));
                 self.block_colors.clear();
+                self.minimap_row = 0;
                 self.pack_status = String::new();
             }
             Err(e) => {
@@ -2265,8 +2268,18 @@ impl App {
                 self.block_colors = block_top_colors(&gfx.atlases);
             }
             if let Some(s) = &self.session {
-                // 8 rows per step keeps each frame cheap; the texture updates when all 64 are done.
-                build_minimap_rows(s, &self.block_colors, self.minimap_row..self.minimap_row + 8, &mut self.minimap_px);
+                let place = (s.hell, s.planet_kind);
+                if self.minimap_origin.is_none_or(|origin| origin.place != place) {
+                    self.minimap = None;
+                    self.minimap_row = 0;
+                }
+                // All 64 rows in an upload sample the same position and north vector.
+                if self.minimap_row == 0 {
+                    self.minimap_origin = Some(MinimapOrigin::new(s));
+                }
+                if let Some(origin) = self.minimap_origin {
+                    build_minimap_rows(s, origin, &self.block_colors, self.minimap_row..self.minimap_row + 8, &mut self.minimap_px);
+                }
                 self.minimap_row += 8;
                 if self.minimap_row >= 64 {
                     self.minimap_row = 0;
@@ -3481,6 +3494,9 @@ impl App {
                         session.camera_mode = crate::session::CameraMode::ThirdBack;
                     }
                     self.settings_world_hint(&session);
+                    self.minimap = None;
+                    self.minimap_origin = None;
+                    self.minimap_row = 0;
                     self.session = Some(session);
                     if let Some(g) = &mut self.gfx {
                         g.world.clear();
@@ -4038,63 +4054,76 @@ fn block_top_colors(atlases: &AtlasManager) -> Vec<[u8; 3]> {
     use wolfcraft_engine::block::Block;
     let atlas = atlases.get(wolfcraft_assets::AtlasKind::Blocks);
     let img = atlas.image();
-    (0..=wolfcraft_engine::construction::LAST_ID)
-        .map(|id| {
-            let b = Block::from_id(id);
-            let tile = b.info().tiles[2] as usize;
-            if tile >= atlas.len() {
-                return [0, 0, 0];
-            }
-            let r = atlas.rect(tile);
-            let (mut sum, mut n) = ([0u32; 3], 0u32);
-            for y in r.y..r.y + r.h {
-                for x in r.x..r.x + r.w {
-                    let o = ((y * img.width + x) * 4) as usize;
-                    if img.pixels[o + 3] > 127 {
-                        for c in 0..3 {
-                            sum[c] += img.pixels[o + c] as u32;
+    let mut colors = vec![[0, 0, 0]; Block::ALL.last().map_or(0, |b| *b as usize + 1)];
+    let mut tiles = HashMap::new();
+    for &block in Block::ALL {
+        let tile = block.info().tiles[2] as usize;
+        if tile < atlas.len() {
+            colors[block as usize] = *tiles.entry(tile).or_insert_with(|| {
+                let r = atlas.rect(tile);
+                let (mut sum, mut n) = ([0u32; 3], 0u32);
+                for y in r.y..r.y + r.h {
+                    for x in r.x..r.x + r.w {
+                        let o = ((y * img.width + x) * 4) as usize;
+                        if img.pixels[o + 3] > 127 {
+                            for c in 0..3 {
+                                sum[c] += img.pixels[o + c] as u32;
+                            }
+                            n += 1;
                         }
-                        n += 1;
                     }
                 }
-            }
-            if n == 0 { [0, 0, 0] } else { [(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8] }
-        })
-        .collect()
+                if n == 0 { [0, 0, 0] } else { [(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8] }
+            });
+        }
+    }
+    colors
 }
 
-/// 64x64 heading-up map around the player: top block colour, shaded by height.
-fn build_minimap_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range<usize>, px: &mut [egui::Color32]) {
+#[derive(Clone, Copy)]
+struct MinimapOrigin {
+    place: (bool, wolfcraft_engine::planet::PlanetKind),
+    feet: DVec3,
+    north: DVec3,
+    east: DVec3,
+}
+
+impl MinimapOrigin {
+    fn new(s: &GameSession) -> Self {
+        let up = s.player.up();
+        let axis = if up.y.abs() > 0.995 { DVec3::Z } else { DVec3::Y };
+        let north = (axis - up * axis.dot(up)).normalize_or_zero();
+        Self { place: (s.hell, s.planet_kind), feet: s.player.body.pos, north, east: north.cross(up) }
+    }
+}
+
+fn minimap_surface(
+    height: i32,
+    mut sample: impl FnMut(i32) -> Option<wolfcraft_engine::block::Block>,
+) -> Option<(wolfcraft_engine::block::Block, i32)> {
     use wolfcraft_engine::block::{Block, RenderKind};
+    (height - 18..=height + 8).rev().find_map(|k| {
+        let block = sample(k)?;
+        (block != Block::Air && block.info().render != RenderKind::Invisible).then_some((block, k))
+    })
+}
+
+/// 64×64 north-up map: top loaded block colour, shaded by height.
+fn build_minimap_rows(s: &GameSession, origin: MinimapOrigin, colors: &[[u8; 3]], rows: std::ops::Range<usize>, px: &mut [egui::Color32]) {
     const N: usize = 64;
-    // North-up (like a navigator): the map stays still while the view turns; only the
-    // player's arrow on it rotates. A turning map was rebuilt a few rows at a time and tore.
-    let p = &s.player;
-    let up = p.up();
-    let axis = if up.y.abs() > 0.995 { DVec3::Z } else { DVec3::Y };
-    let fwd = (axis - up * axis.dot(up)).normalize_or_zero();
-    let right = fwd.cross(up);
-    let feet = p.body.pos;
     let g = s.chunks.grid();
-    let pk = g.radial(feet).floor() as i32;
+    let pk = g.radial(origin.feet).floor() as i32;
     for zy in rows {
         for xx in 0..N {
-            let off = right * (xx as f64 - N as f64 / 2.0 + 0.5) + fwd * (N as f64 / 2.0 - zy as f64 - 0.5);
-            let dir = g.col_dir(feet + off);
-            let mut found = None;
+            let off = origin.east * (xx as f64 - N as f64 / 2.0 + 0.5)
+                + origin.north * (N as f64 / 2.0 - zy as f64 - 0.5);
+            let dir = g.col_dir(origin.feet + off);
             px[zy * N + xx] = egui::Color32::from_rgb(12, 14, 18);
-            for k in (pk - 18..=pk + 8).rev() {
-                let c = g.world_to_cell(g.along(dir, k as f64 + 0.5));
-                match s.chunks.get_block(c) {
-                    None => break,
-                    Some(Block::Air) => continue,
-                    Some(b) if b.info().render == RenderKind::Invisible => continue,
-                    Some(b) => {
-                        found = Some((b, k));
-                        break;
-                    }
-                }
-            }
+            let mut cell = g.world_to_cell(g.along(dir, pk as f64 + 0.5));
+            let found = minimap_surface(pk, |k| {
+                cell.k = k;
+                s.chunks.get_block(cell)
+            });
             if let Some((b, k)) = found {
                 let base = if b.is_water() { [52, 96, 200] } else { colors.get(b as usize).copied().unwrap_or([128, 128, 128]) };
                 let shade = (1.0 + (k - pk) as f32 * 0.035).clamp(0.55, 1.35);
@@ -4103,7 +4132,6 @@ fn build_minimap_rows(s: &GameSession, colors: &[[u8; 3]], rows: std::ops::Range
             }
         }
     }
-    let _ = up;
 }
 
 /// Phones are small: shrink the interface a little.
@@ -5373,6 +5401,18 @@ fn rocket_menu(ctx: &egui::Context, here: wolfcraft_engine::planet::PlanetKind, 
 #[cfg(test)]
 mod inventory_context_tests {
     use super::*;
+    #[test]
+    fn minimap_reads_terrain_below_unloaded_air() {
+        use wolfcraft_engine::block::Block;
+        assert_eq!(minimap_surface(16, |k| match k {
+            0..=13 => Some(Block::Stone),
+            14 => Some(Block::Grass),
+            15..=16 => Some(Block::Air),
+            _ => None,
+        }), Some((Block::Grass, 14)));
+        assert_eq!(minimap_surface(16, |_| None), None);
+    }
+
     #[test]
     fn legacy_world_is_listed_from_saves_after_migration() {
         let data = std::env::temp_dir().join(format!("wolf_saves_migration_{}", std::process::id()));

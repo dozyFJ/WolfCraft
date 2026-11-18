@@ -653,7 +653,7 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         let c = r.center();
         let (sn, cs) = s.compass.unwrap_or(0.0).to_radians().sin_cos();
         let rot = |v: Vec2| c + Vec2::new(v.x * cs - v.y * sn, v.x * sn + v.y * cs);
-        let pts = vec![rot(Vec2::new(0.0, -8.0)), rot(Vec2::new(6.0, 7.0)), rot(Vec2::new(0.0, 3.5)), rot(Vec2::new(-6.0, 7.0))];
+        let pts = vec![rot(Vec2::new(0.0, -8.0)), rot(Vec2::new(6.0, 7.0)), rot(Vec2::new(-6.0, 7.0))];
         painter.add(egui::Shape::convex_polygon(pts, p.accent, Stroke::new(1.5_f32, Color32::from_black_alpha(200))));
     }
 
