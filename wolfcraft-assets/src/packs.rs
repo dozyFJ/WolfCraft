@@ -13,10 +13,10 @@ use std::path::{Path, PathBuf};
 
 /// Built-in packs: (id, name, upscale factor).
 pub const BUILTIN: [(&str, &str, u32); 4] = [
-    ("builtin:toon16", "Мультяшный Лайт 16× (основной)", 1),
-    ("builtin:toon32", "Мультяшный 32×", 2),
-    (TOON_PACK, "Мультяшный HD 64×", 4),
-    ("builtin:toon128", "Мультяшный 4K 128×", 8),
+    ("builtin:toon16", "Мультяшный 16×16", 1),
+    ("builtin:toon32", "Мультяшный 32×32", 2),
+    (TOON_PACK, "Мультяшный 64×64", 4),
+    ("builtin:toon128", "Мультяшный 128×128", 8),
 ];
 
 /// The game's main look: the light 16× cartoon pack (fast on every phone).
@@ -44,7 +44,7 @@ pub struct PackInfo {
 pub fn list(dirs: &[PathBuf]) -> Vec<PackInfo> {
     let mut v: Vec<PackInfo> = BUILTIN
         .iter()
-        .map(|(id, name, _f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == DEFAULT_PACK { "Основной стиль игры: мультяшные блоки 16×16, лёгкие шейдеры, быстро на любом телефоне".into() } else if *id == TOON_PACK { "Мультяшный в HD: мягче края и детали".into() } else if *id == "builtin:toon32" { "Мультяшный чуть чётче основного".into() } else if *id == "builtin:toon128" { "Мультяшный в высоком разрешении (128×128 на блок): чёткие края, для сильных устройств".into() } else { "Мультяшные текстуры".into() }, path: None })
+        .map(|(id, name, _f)| PackInfo { id: id.to_string(), name: name.to_string(), description: if *id == DEFAULT_PACK { "По умолчанию".into() } else if *id == TOON_PACK { "Повышенная детализация".into() } else if *id == "builtin:toon32" { "Умеренная детализация".into() } else if *id == "builtin:toon128" { "Максимальная детализация".into() } else { "Мультяшные текстуры".into() }, path: None })
         .collect();
     let mut users = Vec::new();
     for dir in dirs {

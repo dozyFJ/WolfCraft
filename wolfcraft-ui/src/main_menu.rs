@@ -1330,71 +1330,54 @@ const FPS_LIMITS: [u32; 7] = [0, 30, 60, 90, 120, 144, 240];
 
 const SETTINGS_TABS: [(u16, &str); 7] = [(icon::HEART, "Профиль"), (icon::SUN, "Графика"), (icon::CUBE, "Текстуры"), (icon::HAMMER, "Рука"), (icon::EDIT, "Интерфейс"), (icon::CROSSHAIR, "Управление"), (icon::REFRESH, "Обновления")];
 
+fn compact_toggle(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
+    ui.horizontal(|ui| {
+        let changed = toggle_switch(ui, value).changed();
+        ui.label(label);
+        changed
+    }).inner
+}
+
 /// Resource packs: built-in ones and the player's own, plus import from a link.
 fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs: &PacksView, res: &mut SettingsResult) {
-    // Shaders: a preset, then every effect on its own (changing one switches to "Свои").
-    setting_row(ui, "Шейдеры", Some("Лёгкие: рельеф, ветер, вода. Ультра: ещё глубина швов (параллакс). Мульт: мягкий яркий свет и сочные цвета, как в топовых симуляторах. RTX: всё сразу и настоящие тени от солнца (для мощных устройств)"), |ui| {
+    setting_row(ui, "Профиль освещения", None, |ui| {
         let mut preset = s.shaders;
-        if segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкие"), (2, "Ультра"), (5, "RTX"), (4, "Мульт"), (3, "Свои")], &mut preset) {
-            if preset != 3 {
-                s.apply_shader_preset(preset);
-            } else {
-                s.shaders = 3;
-            }
+        if segmented(ui, "shaders", &[(0u8, "Выкл"), (1, "Лёгкий"), (2, "Ультра"), (5, "Тени+"), (4, "Мульт"), (3, "Свой")], &mut preset) {
+            s.apply_shader_preset(preset);
             res.changed = true;
         }
     });
     ui.add_space(8.0);
-    let before = (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading, s.fx_toon);
-    setting_row(ui, "Рельеф текстур", Some("Объём: свет и тень на каждом камне. Глубина: швы и щели уходят внутрь блока. В HD-паках подробнее"), |ui| {
-        res.changed |= segmented(ui, "relief", &[(0u8, "Нет"), (1, "Объём"), (2, "Глубина")], &mut s.relief_mode);
-    });
-    if s.relief_mode > 0 {
-        ui.add_space(6.0);
-        setting_row(ui, "Сила рельефа", None, |ui| {
-            res.changed |= ui.add(egui::Slider::new(&mut s.relief_strength, 0.3..=2.0).fixed_decimals(1)).changed();
+    egui::CollapsingHeader::new("Эффекты и рельеф").show(ui, |ui| {
+        let before = (s.relief_mode, s.relief_strength, s.fx_flags());
+        setting_row(ui, "Рельеф текстур", None, |ui| {
+            res.changed |= segmented(ui, "relief", &[(0u8, "Нет"), (1, "Объём"), (2, "Глубина")], &mut s.relief_mode);
         });
-    }
-    ui.add_space(6.0);
-    setting_row(ui, "Ветер", Some("Качаются листва и трава"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fx_wind).changed();
+        if s.relief_mode > 0 {
+            setting_row(ui, "Сила рельефа", None, |ui| {
+                res.changed |= ui.add(egui::Slider::new(&mut s.relief_strength, 0.3..=2.0).fixed_decimals(1)).changed();
+            });
+        }
+        for (label, value) in [
+            ("Ветер", &mut s.fx_wind),
+            ("Волны и блики воды", &mut s.fx_water),
+            ("Цветокоррекция", &mut s.fx_grading),
+            ("Мультяшный свет", &mut s.fx_toon),
+            ("Свечение", &mut s.fx_bloom),
+            ("Лучи солнца", &mut s.fx_rays),
+            ("Мокрые блоки в дождь", &mut s.fx_wet),
+            ("Тени от солнца", &mut s.fx_shadows),
+        ] {
+            res.changed |= compact_toggle(ui, label, value);
+        }
+        if (s.relief_mode, s.relief_strength, s.fx_flags()) != before {
+            s.shaders = 3;
+        }
+        res.changed |= compact_toggle(ui, "Быстрая листва", &mut s.fast_leaves);
     });
-    ui.add_space(6.0);
-    setting_row(ui, "Вода", Some("Волны, блики солнца и отражение неба"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fx_water).changed();
-    });
-    ui.add_space(6.0);
-    setting_row(ui, "Цветокоррекция", Some("Контраст и сочные цвета"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fx_grading).changed();
-    });
-    ui.add_space(6.0);
-    setting_row(ui, "Мультяшный свет", Some("Мягкие светлые тени, яркие краски, контур-подсветка мобов"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fx_toon).changed();
-    });
-    ui.add_space(6.0);
-    setting_row(ui, "Быстрая листва", Some("Кроны без просветов — сильно быстрее на слабых телефонах"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fast_leaves).changed();
-    });
-    ui.add_space(6.0);
-    setting_row(ui, "Свечение", Some("Как в шейдерах на ПК: лава, факелы и солнце светятся ореолом (чуть медленнее)"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fx_bloom).changed();
-    });
-    ui.add_space(6.0);
-    setting_row(ui, "Лучи солнца", Some("Солнечные лучи пробиваются сквозь листву и края гор (чуть медленнее)"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fx_rays).changed();
-    });
-    ui.add_space(6.0);
-    setting_row(ui, "Мокрые блоки", Some("В дождь блоки под небом темнеют и блестят"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fx_wet).changed();
-    });
-    ui.add_space(6.0);
-    setting_row(ui, "Тени от солнца", Some("Как RTX: каждый блок, дерево и дом отбрасывают настоящую тень (заметно медленнее)"), |ui| {
-        res.changed |= toggle_switch(ui, &mut s.fx_shadows).changed();
-    });
-    if (s.relief_mode, s.relief_strength, s.fx_wind, s.fx_water, s.fx_grading, s.fx_toon) != before {
-        s.shaders = 3;
-    }
     ui.add_space(10.0);
+    section_label(ui, "Наборы текстур");
+    ui.add_space(4.0);
     for pack in packs.list {
         let sel = s.texture_pack == pack.id;
         let resp = row_card(ui, sel, |ui| {
@@ -1412,10 +1395,6 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
         });
         if resp.clicked() && !sel {
             s.texture_pack = pack.id.clone();
-            // The cartoon pack looks its best with the cartoon light.
-            if wolfcraft_assets::packs::is_toon(&pack.id) && s.shaders != 4 {
-                s.apply_shader_preset(4);
-            }
             res.changed = true;
         }
         ui.add_space(6.0);
@@ -1423,13 +1402,16 @@ fn packs_tab(ui: &mut Ui, icons: &GuiIcons, p: &Palette, s: &mut Settings, packs
     ui.add_space(8.0);
     section_label(ui, "Свой пак");
     ui.add_space(4.0);
-    ui.label(egui::RichText::new("Пак — папка или .zip с картинками blocks/, items/, entities/, gui/, particles/ (имя_спрайта.png, любой размер) и pack.json {\"name\": \"...\"}. Положите его в папку:").size(12.5).color(p.text_muted));
-    ui.label(egui::RichText::new(packs.folder).size(12.5).color(p.text));
+    egui::CollapsingHeader::new("Папка для паков").show(ui, |ui| {
+        ui.label("Положите папку или ZIP с файлом pack.json сюда:");
+        ui.label(egui::RichText::new(packs.folder).size(12.5).color(p.text_muted));
+    });
     ui.add_space(6.0);
     let url_id = egui::Id::new("pack-url");
     let mut url: String = ui.ctx().data(|d| d.get_temp(url_id)).unwrap_or_default();
-    ui.horizontal(|ui| {
-        text_input(ui, icons, &mut url, "Ссылка на .zip", 300.0, Some(icon::GLOBE));
+    let width = ui.available_width();
+    text_input(ui, icons, &mut url, "Ссылка на ZIP-пак", width, Some(icon::GLOBE));
+    ui.horizontal_wrapped(|ui| {
         if pill_button(ui, icons, Some(icon::DOWNLOAD), "Загрузить", ButtonKind::Primary, 0.0, !url.trim().is_empty()).clicked() {
             res.download = Some(url.trim().to_string());
         }
@@ -1523,11 +1505,11 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                     });
                 }
                 1 => {
-                    setting_row(ui, "Дальность прорисовки", Some("В чанках по 16 блоков. Больше — красивее, но тяжелее"), |ui| {
+                    setting_row(ui, "Дальность прорисовки", Some("В чанках по 16 блоков"), |ui| {
                         res.changed |= ui.add(egui::Slider::new(&mut s.render_distance, 3..=16).suffix(" чанк.")).changed();
                     });
                     ui.add_space(8.0);
-                    setting_row(ui, "Разрешение", Some("Чем меньше, тем быстрее. 75% на телефоне почти не отличить, а FPS выше"), |ui| {
+                    setting_row(ui, "Разрешение", Some("Разрешение 3D-сцены"), |ui| {
                         let mut pct = (s.render_scale * 100.0).round() as u8;
                         if segmented(ui, "render-scale", &[(50u8, "50%"), (67, "67%"), (75, "75%"), (100, "100%")], &mut pct) {
                             s.render_scale = pct as f32 / 100.0;
@@ -1543,11 +1525,11 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                         res.changed |= ui.add(egui::Slider::new(&mut s.particles, 0.0..=2.0)).changed();
                     });
                     ui.add_space(8.0);
-                    setting_row(ui, "Вертикальная синхронизация", Some("Убирает разрывы изображения"), |ui| {
-                        res.changed |= toggle_switch(ui, &mut s.vsync).changed();
-                    });
-                    ui.add_space(8.0);
-                    setting_row(ui, "Ограничение FPS", Some("Работает без VSync"), |ui| {
+                    if !cfg!(target_os = "android") {
+                        res.changed |= compact_toggle(ui, "Вертикальная синхронизация", &mut s.vsync);
+                        ui.add_space(8.0);
+                    }
+                    setting_row(ui, "Лимит FPS", None, |ui| {
                         let labels: Vec<String> = FPS_LIMITS.iter().map(|f| if *f == 0 { "Без ограничения".to_string() } else { format!("{f} FPS") }).collect();
                         let mut idx = FPS_LIMITS.iter().position(|f| *f == s.max_fps).unwrap_or(0);
                         if dropdown(ui, icons, "fps-limit", &labels, &mut idx, 200.0) {
@@ -1562,17 +1544,14 @@ pub fn settings_screen(ctx: &egui::Context, icons: &GuiIcons, s: &mut Settings, 
                         });
                         ui.add_space(8.0);
                     }
-                    setting_row(ui, "Частота экрана", Some("Плавнее на экранах 90/120 Гц, но тратит больше батареи"), |ui| {
-                        res.changed |= segmented(ui, "refresh", &[(60u32, "60 Гц"), (90, "90 Гц"), (120, "120 Гц")], &mut s.refresh_rate);
-                    });
-                    ui.add_space(8.0);
-                    setting_row(ui, "Показывать FPS", None, |ui| {
-                        res.changed |= toggle_switch(ui, &mut s.show_fps).changed();
-                    });
-                    ui.add_space(8.0);
-                    setting_row(ui, "«Что это?»", Some("Как мод WAILA: плашка сверху по центру — что за блок или существо перед вами, чем добыть, энергия машин, здоровье"), |ui| {
-                        res.changed |= toggle_switch(ui, &mut s.show_look).changed();
-                    });
+                    if cfg!(target_os = "android") {
+                        setting_row(ui, "Частота экрана", Some("Зависит от возможностей телефона"), |ui| {
+                            res.changed |= segmented(ui, "refresh", &[(60u32, "60 Гц"), (90, "90 Гц"), (120, "120 Гц")], &mut s.refresh_rate);
+                        });
+                        ui.add_space(8.0);
+                    }
+                    res.changed |= compact_toggle(ui, "Показывать FPS", &mut s.show_fps);
+                    res.changed |= compact_toggle(ui, "Подсказка о блоке или существе", &mut s.show_look);
                 }
                 2 => {
                     packs_tab(ui, icons, &p, s, packs, &mut res);
