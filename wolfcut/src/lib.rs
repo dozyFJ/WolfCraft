@@ -2,15 +2,19 @@
 mod android;
 mod media;
 mod theme;
+mod timeline;
+mod timeline_ui;
 
-use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
-use media::{Clip, MediaResult};
+use eframe::egui::{self, ColorImage, RichText, TextureHandle, TextureOptions};
+use media::{Clip, ImportedMedia, MediaResult};
 use std::{path::PathBuf, sync::mpsc, thread};
+use timeline::{Audio, Title};
+use timeline_ui::Item;
 
 use theme::ACCENT;
 
 enum Event {
-    Imported(Vec<Clip>, Vec<String>),
+    Imported(Vec<ImportedMedia>, Vec<String>),
     Frame(u64, MediaResult<image::RgbaImage>),
     Progress(usize, usize),
     Exported(PathBuf, MediaResult<()>),
@@ -18,6 +22,13 @@ enum Event {
 
 struct Editor {
     clips: Vec<Clip>,
+    titles: Vec<Title>,
+    audio: Vec<Audio>,
+    timeline_item: Option<Item>,
+    inspector: bool,
+    caption_textures: Vec<(String, TextureHandle)>,
+    #[cfg(target_os = "android")]
+    import_position: f64,
     selected: usize,
     cursor: f64,
     frame: Option<TextureHandle>,
@@ -47,6 +58,13 @@ impl Editor {
         let updating = android::update(false).is_ok();
         Self {
             clips: Vec::new(),
+            titles: Vec::new(),
+            audio: Vec::new(),
+            timeline_item: None,
+            inspector: false,
+            caption_textures: Vec::new(),
+            #[cfg(target_os = "android")]
+            import_position: 0.0,
             selected: 0,
             cursor: 0.0,
             frame: None,
@@ -69,19 +87,19 @@ impl Editor {
         }
     }
 
-    fn import(&mut self, paths: Vec<PathBuf>, context: &egui::Context) {
+    fn import(&mut self, paths: Vec<PathBuf>, start: f64, context: &egui::Context) {
         if paths.is_empty() || self.importing {
             return;
         }
         self.importing = true;
-        self.status = "Чтение видео…".into();
+        self.status = "Чтение файлов…".into();
         let sender = self.sender.clone();
         let context = context.clone();
         thread::spawn(move || {
             let mut clips = Vec::new();
             let mut errors = Vec::new();
             for path in paths {
-                match media::probe(path.clone()) {
+                match media::import(path.clone(), start) {
                     Ok(clip) => clips.push(clip),
                     Err(error) => errors.push(format!("{} — {error}", path.display())),
                 }
@@ -144,6 +162,10 @@ impl Editor {
                 .clips
                 .iter()
                 .any(|clip| clip.path.canonicalize().is_ok_and(|path| path == target))
+                || self
+                    .audio
+                    .iter()
+                    .any(|track| track.path.canonicalize().is_ok_and(|path| path == target))
             {
                 self.status =
                     "Выберите другой файл для экспорта, чтобы сохранить исходное видео.".into();
@@ -162,10 +184,12 @@ impl Editor {
         self.exporting = true;
         self.status = "Подготовка экспорта…".into();
         let clips = self.clips.clone();
+        let titles = self.titles.clone();
+        let audio = self.audio.clone();
         let sender = self.sender.clone();
         let context = context.clone();
         thread::spawn(move || {
-            let result = media::export(&clips, &destination, |part| {
+            let result = media::export(&clips, &titles, &audio, &destination, |part| {
                 let _ = sender.send(Event::Progress(part, clips.len()));
                 context.request_repaint();
             });
@@ -181,14 +205,20 @@ impl Editor {
                     self.importing = false;
                     let count = clips.len();
                     let first = self.clips.is_empty();
-                    self.clips.extend(clips);
-                    if first && count > 0 {
+                    for item in clips {
+                        match item {
+                            ImportedMedia::Video(clip) => self.clips.push(clip),
+                            ImportedMedia::Audio(track) => self.audio.push(track),
+                        }
+                    }
+                    if first && !self.clips.is_empty() {
                         self.select(0);
+                        self.timeline_item = Some(Item::Video(0));
                     }
                     self.status = if errors.is_empty() {
-                        format!("Добавлено клипов: {count}")
+                        format!("Добавлено файлов: {count}")
                     } else {
-                        format!("Добавлено клипов: {count}. {}", errors.join(" · "))
+                        format!("Добавлено файлов: {count}. {}", errors.join(" · "))
                     };
                 }
                 Event::Frame(revision, result) => {
@@ -238,20 +268,32 @@ impl Editor {
 
 impl Editor {
     #[cfg(not(target_os = "android"))]
-    fn pick_import(&mut self, context: &egui::Context) {
-        let paths = rfd::FileDialog::new()
-            .add_filter("Видео", &["mp4", "mov", "mkv", "avi", "webm", "m4v"])
-            .pick_files()
-            .unwrap_or_default();
-        self.import(paths, context);
+    fn pick_import(&mut self, audio: bool, context: &egui::Context) {
+        let dialog = if audio {
+            rfd::FileDialog::new().add_filter("Аудио", &["wav", "mp3", "m4a", "aac", "ogg", "flac"])
+        } else {
+            rfd::FileDialog::new().add_filter("Видео", &["mp4", "mov", "mkv", "avi", "webm", "m4v"])
+        };
+        let paths = dialog.pick_files().unwrap_or_default();
+        self.import(
+            paths,
+            self.playhead().min((self.duration() - 0.04).max(0.0)),
+            context,
+        );
     }
 
     #[cfg(target_os = "android")]
-    fn pick_import(&mut self, context: &egui::Context) {
-        match android::pick_import() {
+    fn pick_import(&mut self, audio: bool, context: &egui::Context) {
+        match android::pick_import(audio) {
             Ok(()) => {
+                self.import_position = self.playhead().min((self.duration() - 0.04).max(0.0));
                 self.importing = true;
-                self.status = "Выберите видео.".into();
+                self.status = if audio {
+                    "Выберите аудио."
+                } else {
+                    "Выберите видео."
+                }
+                .into();
                 context.request_repaint();
             }
             Err(error) => self.status = error,
@@ -283,7 +325,7 @@ impl Editor {
             Ok(Some(android::ResultEvent::Import(paths, status))) => {
                 self.importing = false;
                 self.status = status;
-                self.import(paths, context);
+                self.import(paths, self.import_position, context);
             }
             Ok(Some(android::ResultEvent::Export(status))) => {
                 self.exporting = false;
@@ -346,7 +388,7 @@ impl Editor {
             .add_enabled(!self.importing, egui::Button::new("+ Импорт"))
             .clicked()
         {
-            self.pick_import(ui.ctx());
+            self.pick_import(false, ui.ctx());
         }
     }
 
@@ -422,7 +464,7 @@ impl eframe::App for Editor {
         self.receive(context);
         #[cfg(target_os = "android")]
         self.poll_android(context);
-        let dropped = context.input(|input| {
+        let dropped: Vec<_> = context.input(|input| {
             input
                 .raw
                 .dropped_files
@@ -430,7 +472,9 @@ impl eframe::App for Editor {
                 .filter_map(|file| file.path.clone())
                 .collect()
         });
-        self.import(dropped, context);
+        if !dropped.is_empty() {
+            self.import(dropped, self.drop_position(context), context);
+        }
 
         let compact = context.screen_rect().width() < 520.0;
         self.toolbar(context, compact);
@@ -443,95 +487,13 @@ impl eframe::App for Editor {
             });
 
         egui::TopBottomPanel::bottom("timeline")
-            .frame(theme::glass(12.0, 6.0))
-            .show(context, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Монтаж");
-                    let duration = self
-                        .clips
-                        .iter()
-                        .fold(0.0, |total, clip| total + clip.length());
-                    ui.weak(format!("{duration:.2} с"));
-                });
-                ui.add_space(5.0);
-                if self.clips.is_empty() {
-                    ui.weak("Добавьте клипы на монтажную дорожку.");
-                } else {
-                    let mut selection = None;
-                    egui::ScrollArea::horizontal()
-                        .id_salt("clips")
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                for (index, clip) in self.clips.iter().enumerate() {
-                                    let name = clip.name();
-                                    let mut characters = name.chars();
-                                    let mut short: String = characters.by_ref().take(14).collect();
-                                    if characters.next().is_some() {
-                                        short.push('…');
-                                    }
-                                    let title = format!("{short}\n{:.2} с", clip.length());
-                                    let button = egui::Button::new(title)
-                                        .selected(index == self.selected)
-                                        .rounding(12.0);
-                                    if ui
-                                        .add_sized([136.0, 42.0], button)
-                                        .on_hover_text(name)
-                                        .clicked()
-                                    {
-                                        selection = Some(index);
-                                    }
-                                }
-                            });
-                        });
-                    if let Some(index) = selection {
-                        self.select(index);
-                    }
-
-                    ui.horizontal(|ui| {
-                        let index = self.selected;
-                        if ui
-                            .add_enabled(index > 0, egui::Button::new("Раньше"))
-                            .clicked()
-                        {
-                            self.clips.swap(index, index - 1);
-                            self.selected -= 1;
-                        }
-                        if ui
-                            .add_enabled(
-                                self.selected + 1 < self.clips.len(),
-                                egui::Button::new("Позже"),
-                            )
-                            .clicked()
-                        {
-                            self.clips.swap(self.selected, self.selected + 1);
-                            self.selected += 1;
-                        }
-                        if ui.button("Удалить").clicked() {
-                            self.clips.remove(self.selected);
-                            self.select(self.selected.min(self.clips.len().saturating_sub(1)));
-                        }
-                    });
-                }
-            });
-
-        if !self.clips.is_empty() {
-            if compact {
-                egui::TopBottomPanel::bottom("trim_mobile")
-                    .frame(theme::glass(12.0, 6.0))
-                    .show(context, |ui| self.trim_controls(ui, true));
-            } else {
-                egui::SidePanel::right("trim")
-                    .default_width(190.0)
-                    .resizable(false)
-                    .frame(theme::glass(10.0, 8.0))
-                    .show(context, |ui| self.trim_controls(ui, false));
-            }
-        }
+            .frame(theme::glass(10.0, 6.0))
+            .show(context, |ui| self.timeline(ui));
 
         egui::CentralPanel::default()
             .frame(theme::glass(10.0, 7.0))
             .show(context, |ui| {
-                if let Some(clip) = self.clips.get(self.selected) {
+                if !self.clips.is_empty() {
                     ui.heading("Предпросмотр");
                     if compact {
                         ui.spacing_mut().slider_width = (ui.available_width() - 72.0).max(72.0);
@@ -540,36 +502,17 @@ impl eframe::App for Editor {
                         ui.available_width(),
                         (ui.available_height() - ui.spacing().interact_size.y - 9.0).max(24.0),
                     );
-                    egui::Frame::none()
-                        .fill(Color32::from_rgb(14, 18, 34))
-                        .show(ui, |ui| {
-                            ui.allocate_ui_with_layout(
-                                size,
-                                egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                                |ui| {
-                                    if let Some(frame) = &self.frame {
-                                        let source = frame.size_vec2();
-                                        let scale = (size.x / source.x).min(size.y / source.y);
-                                        ui.image((frame.id(), source * scale));
-                                    } else {
-                                        ui.weak(if self.pending_frame || self.frame_dirty {
-                                            "Загрузка кадра…"
-                                        } else {
-                                            "Кадр недоступен"
-                                        });
-                                    }
-                                },
-                            );
-                        });
+                    self.preview(ui, size);
+                    let mut time = self.playhead();
                     if ui
                         .add(
-                            egui::Slider::new(&mut self.cursor, clip.start..=clip.end)
-                                .fixed_decimals(3)
+                            egui::Slider::new(&mut time, 0.0..=self.duration())
+                                .fixed_decimals(2)
                                 .suffix(" с"),
                         )
                         .changed()
                     {
-                        self.invalidate_frame();
+                        self.seek(time);
                     }
                 } else {
                     let gap = (ui.available_height() * 0.32).max(0.0);
@@ -583,7 +526,7 @@ impl eframe::App for Editor {
                             .add_enabled(!self.importing, theme::primary("Выбрать видео"))
                             .clicked()
                         {
-                            self.pick_import(context);
+                            self.pick_import(false, context);
                         }
                     });
                 }
@@ -609,6 +552,7 @@ impl eframe::App for Editor {
                 });
         }
 
+        self.show_inspector(context);
         self.request_frame(context);
     }
 }
@@ -663,9 +607,26 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
 
 #[cfg(all(test, not(target_os = "android")))]
 #[test]
-fn portrait_toolbar_leaves_room_for_the_editor() {
+fn portrait_toolbar_and_timeline_leave_room_for_preview() {
     let context = egui::Context::default();
     let mut editor = Editor::new(&context);
+    editor.clips.push(Clip {
+        path: "clip.mp4".into(),
+        duration: 10.0,
+        start: 0.0,
+        end: 10.0,
+        audio: false,
+    });
+    editor.titles.push(Title {
+        text: "Текст".into(),
+        start: 1.0,
+        duration: 3.0,
+    });
+    editor.audio.push(Audio {
+        path: "audio.wav".into(),
+        start: 2.0,
+        duration: 3.0,
+    });
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 720.0));
     for _ in 0..2 {
         let _ = context.run(
@@ -679,6 +640,16 @@ fn portrait_toolbar_leaves_room_for_the_editor() {
                     toolbar.height() >= 60.0 && toolbar.height() < 100.0,
                     "{toolbar:?}"
                 );
+                let tracks = egui::TopBottomPanel::bottom("test_tracks")
+                    .frame(theme::glass(10.0, 6.0))
+                    .show(context, |ui| editor.timeline(ui))
+                    .response
+                    .rect;
+                assert!(
+                    tracks.height() >= 140.0 && tracks.height() < 220.0,
+                    "{tracks:?}"
+                );
+                assert!(context.available_rect().height() > 380.0);
             },
         );
     }

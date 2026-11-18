@@ -32,7 +32,7 @@ java -m jdk.compiler/com.sun.tools.javac.Main -source 8 -target 8 -Xlint:-option
     "$staging/classes/com/wolfcraft/wolfcut/"*.class
 
 install -m 644 "$native" "$media/libffmpeg.so" "$media/libffprobe.so" "$staging/apk/lib/arm64-v8a"
-install -m 644 android/FFmpeg-LICENSE.txt "$staging/apk/assets/"
+install -m 644 android/FFmpeg-LICENSE.txt android/Ubuntu-Font-LICENSE.txt "$staging/apk/assets/"
 "$tools/aapt2" link -I "$platform" --manifest android/AndroidManifest.xml -o "$staging/base.apk"
 (cd "$staging/apk" && zip -q -r "$staging/base.apk" classes.dex lib assets)
 "$tools/zipalign" -P 16 -f 4 "$staging/base.apk" "$staging/aligned.apk"

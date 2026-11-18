@@ -71,9 +71,17 @@ public final class WolfCutActivity extends NativeActivity {
     }
 
     public void pickVideos() {
+        pickMedia("video/*");
+    }
+
+    public void pickAudio() {
+        pickMedia("audio/*");
+    }
+
+    private void pickMedia(String mimeType) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("video/*");
+        intent.setType(mimeType);
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         open(intent, IMPORT);
     }
@@ -146,7 +154,7 @@ public final class WolfCutActivity extends NativeActivity {
                 }
             }
         }
-        report(IMPORT, paths.length() == 0 ? "Не удалось прочитать видео." : "", paths);
+        report(IMPORT, paths.length() == 0 ? "Не удалось прочитать выбранные файлы." : "", paths);
     }
 
     private String displayName(Uri uri) {

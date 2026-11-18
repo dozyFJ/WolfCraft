@@ -87,8 +87,8 @@ fn launch(method: &str) -> Result<(), String> {
         })
 }
 
-pub fn pick_import() -> Result<(), String> {
-    launch("pickVideos")
+pub fn pick_import(audio: bool) -> Result<(), String> {
+    launch(if audio { "pickAudio" } else { "pickVideos" })
 }
 
 pub fn pick_export() -> Result<(), String> {
