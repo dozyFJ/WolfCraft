@@ -19,6 +19,7 @@ pub struct Controls {
     pub jump: bool,
     pub sprint: bool,
     pub sneak: bool,
+    pub bridge: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -429,25 +430,32 @@ impl Player {
         // Sneaking keeps you on the edge, as on Bedrock: a step that would leave you with
         // nothing under your feet is undone (you can lean out about a third of a block and
         // place blocks under the edge to build a bridge).
-        if self.sneaking && !c.jump && !self.body.in_water && !self.body.flying && has_support(world, before) && !has_support(world, self.body.pos) {
-            let up = physics::up_at(before);
-            if wish.length_squared() > 0.0 {
+        if self.sneaking && !c.jump && !self.body.in_water && !self.body.flying {
+            if c.bridge && wish.length_squared() > 0.0 {
                 let grid = world.grid();
+                let up = physics::up_at(before);
                 let target = grid.world_to_cell(self.body.pos - up * 0.15);
-                self.bridge_hit = support_cells(world, before).find_map(|cell| {
-                    let block = world.cell_block(cell);
-                    if !block.is_solid() || !block.boxes().is_empty() {
-                        return None;
-                    }
-                    let normal = [(0, -1), (0, 1), (1, -1), (1, 1)].into_iter()
-                        .find(|&(axis, sign)| grid.neighbor(cell, axis, sign) == Some(target))?;
-                    Some(physics::Hit { cell, normal, dist: 0.0, height: 0.5, block })
-                });
+                if world.cell_block(target).is_replaceable() {
+                    self.bridge_hit = support_cells(world, before).find_map(|cell| {
+                        let block = world.cell_block(cell);
+                        if !block.is_solid() || !block.boxes().is_empty()
+                            || (grid.cell_center(target) - grid.cell_center(cell)).dot(wish) <= 0.0
+                        {
+                            return None;
+                        }
+                        let normal = [(0, -1), (0, 1), (1, -1), (1, 1)].into_iter()
+                            .find(|&(axis, sign)| grid.neighbor(cell, axis, sign) == Some(target))?;
+                        Some(physics::Hit { cell, normal, dist: 0.0, height: 0.5, block })
+                    });
+                }
             }
-            // Restore the previous position and drop the sideways movement.
-            self.body.pos = before;
-            self.body.vel = up * self.body.vel.dot(up).max(0.0);
-            self.body.on_ground = true;
+            if self.bridge_hit.is_some() || (has_support(world, before) && !has_support(world, self.body.pos)) {
+                let up = physics::up_at(before);
+                // Restore the previous position and drop the sideways movement.
+                self.body.pos = before;
+                self.body.vel = up * self.body.vel.dot(up).max(0.0);
+                self.body.on_ground = true;
+            }
         }
 
         if self.body.flying {
@@ -739,7 +747,7 @@ fn support_cells(world: &impl Voxels, feet: DVec3) -> impl Iterator<Item = Cell>
     let t1 = (helper - up * helper.dot(up)).normalize();
     let t2 = up.cross(t1);
     let r = physics::BODY_RADIUS * 0.95;
-    [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0), (0.0, 0.0)].into_iter()
+    [(0.0, 0.0), (1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)].into_iter()
         .map(move |(a, b)| world.grid().world_to_cell(feet + t1 * (r * a) + t2 * (r * b) - up * 0.15))
 }
 
@@ -961,14 +969,15 @@ mod tests {
         for _ in 0..60 {
             player.update(&world, &Controls::default(), Difficulty::Normal, 1.0 / 60.0);
         }
-        for _ in 0..120 {
-            player.update(&world, &controls, Difficulty::Normal, 1.0 / 60.0);
+        let bridge_controls = Controls { bridge: true, ..controls };
+        for _ in 0..60 {
+            player.update(&world, &bridge_controls, Difficulty::Normal, 1.0 / 60.0);
         }
         assert_eq!(world.edits.len(), 1);
         assert!(player.bridge_hit.is_some());
 
         for _ in 0..300 {
-            player.update(&world, &controls, Difficulty::Normal, 1.0 / 60.0);
+            player.update(&world, &bridge_controls, Difficulty::Normal, 1.0 / 60.0);
             Interaction::extend_bridge(&mut world, &mut player, &mut events);
         }
 
@@ -984,6 +993,7 @@ mod tests {
             previous = pos;
         }
         assert!(player.inventory.held().is_none());
+        player.update(&world, &bridge_controls, Difficulty::Normal, 1.0 / 60.0);
         assert!(player.bridge_hit.is_some(), "player should stop at the new edge");
         assert!(world.grid.radial(player.body.pos) > f64::from(support.k) + 0.5);
         assert!((player.body.pos - start).length() > 2.0);
