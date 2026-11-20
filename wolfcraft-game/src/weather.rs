@@ -1,4 +1,4 @@
-//! Weather like in Minecraft: clear spells, rain, thunderstorms; snow where it is cold, nothing
+//! Weather: clear spells, rain, thunderstorms; snow where it is cold, nothing
 //! in deserts. Drops and flakes fall around the player, the sky darkens, lightning flashes.
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

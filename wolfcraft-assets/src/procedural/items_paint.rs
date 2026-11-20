@@ -114,7 +114,7 @@ pub mod items {
     pub const MINING_LASER: u16 = 161;
     pub const BATTERY: u16 = 162;
     pub const ENERGY_CRYSTAL: u16 = 163;
-    // Mod packs: Draconic Evolution, Immersive Engineering, Tinkers' Construct.
+    // Mod packs: драконья ветка, заводская ветка, кузнечная ветка.
     pub const DRACONIUM_DUST: u16 = 164;
     pub const DRACONIUM_INGOT: u16 = 165;
     pub const AWAKENED_DRACONIUM: u16 = 166;
@@ -173,13 +173,13 @@ const SWORD: [&str; 16] = [
     ".....xXx........", "......xXx....w..", ".......xXx..w...", "........xx.w....", "..........w.....", ".........w.hh...",
     "........w..hh...", ".......w.....hw.", ".............ww.", "................",
 ];
-// Tinkers' hammer: a heavy two-sided block head (digs 3×3).
+// кузнечная ветка hammer: a heavy two-sided block head (digs 3×3).
 const HAMMER_TPL: [&str; 16] = [
     "................", ".xxxxxxx........", ".xXXXXXXx.......", ".xXXXXXXx.......", ".xXXXXXXx.......", ".xxxxhhxx.......",
     "......hh........", ".......hh.......", "........hh......", ".........hh.....", "..........hh....", "...........hh...",
     "............hh..", ".............hh.", "..............h.", "................",
 ];
-// Tinkers' excavator: a broad spade (digs 3×3).
+// кузнечная ветка excavator: a broad spade (digs 3×3).
 const EXCAVATOR_TPL: [&str; 16] = [
     "xxxx............", "xXXXx...........", "xXXXXx..........", "xXXXXx..........", ".xXXXx..........", "..xxxhh.........",
     "......hh........", ".......hh.......", "........hh......", ".........hh.....", "..........hh....", "...........hh...",

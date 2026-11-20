@@ -112,11 +112,12 @@ struct News {
     icon: u16,
 }
 
-const NEWS: [News; 4] = [
-    News { title: "Инструменты как в Майне", date: "11 ноября", text: "Кирка, топор, лопата и меч держатся в руке по-новому, у каждого свой удар.", color: Color32::from_rgb(230, 150, 50), icon: icon::HAMMER },
-    News { title: "Ровный мир на кубе", date: "11 ноября", text: "Блоки на гранях кубической планеты теперь стоят строго вертикально.", color: Color32::from_rgb(40, 180, 200), icon: icon::CUBE },
-    News { title: "Новый чат", date: "11 ноября", text: "Полупрозрачная панель, ники цветом и кнопка отправки.", color: Color32::from_rgb(140, 100, 230), icon: icon::EDIT },
-    News { title: "Доспехи", date: "10 ноября", text: "Четыре слота доспехов в инвентаре: шлем, нагрудник, поножи и ботинки.", color: Color32::from_rgb(90, 190, 100), icon: icon::STAR },
+const NEWS: [News; 5] = [
+    News { title: "Полёт в космос", date: "20 ноября", text: "Космическая ракета и топливо: взлёт с открытого неба, орбита, выбор планеты и мягкая посадка.", color: Color32::from_rgb(60, 120, 230), icon: icon::STAR },
+    News { title: "Четыре новые планеты", date: "20 ноября", text: "Луна, огненный Игнис, ледяная Глация и джунгли Ксеноса — своё небо, гравитация, руды и звери.", color: Color32::from_rgb(150, 80, 200), icon: icon::GLOBE },
+    News { title: "Новые биомы", date: "19 ноября", text: "Вишнёвая роща, тёмный лес и цветочный луг. Деревья и постройки стоят на земле, границы биомов плавные.", color: Color32::from_rgb(90, 190, 100), icon: icon::TREE },
+    News { title: "WolfTech: три ветки", date: "16 ноября", text: "Драконья, заводская и кузнечная ветки: энергоядро, печи, плавильня, молот 3×3 и лесорубный топор.", color: Color32::from_rgb(230, 130, 40), icon: icon::GEAR },
+    News { title: "Бур с режимами", date: "16 ноября", text: "Электробур копает 1×1, 3×3 … 13×13 — режим меняется кнопкой справа или клавишей R.", color: Color32::from_rgb(40, 180, 200), icon: icon::HAMMER },
 ];
 
 /// The launcher. `skin` is the selected skin preset.
@@ -769,11 +770,14 @@ fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
             icons.paint(ui.painter(), r.shrink(13.0), n.icon, Color32::WHITE);
             ui.add_space(8.0);
             ui.vertical(|ui| {
+                // The text column takes the rest of the card and wraps (in a row egui would
+                // let long lines run off the card).
+                ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 4.0;
                 // Title, then the date on its own line: nothing squeezes on a narrow screen.
-                ui.label(egui::RichText::new(n.title).font(bold_font(15.0)).color(p.text));
+                ui.add(egui::Label::new(egui::RichText::new(n.title).font(bold_font(15.0)).color(p.text)).wrap());
                 ui.label(egui::RichText::new(n.date).size(11.5).color(if p.dark { Color32::from_rgb(140, 195, 255) } else { mix(p.accent, Color32::BLACK, 0.2) }));
-                ui.label(egui::RichText::new(n.text).size(13.0).color(p.text_muted));
+                ui.add(egui::Label::new(egui::RichText::new(n.text).size(13.0).color(p.text_muted)).wrap());
             });
         });
     });
@@ -785,7 +789,7 @@ fn news_card(ui: &mut Ui, icons: &GuiIcons, p: &Palette, n: &News) {
 // ---------------------------------------------------------------------------------------------
 // Студия
 
-/// Studio home, like Roblox Studio: servers are places. Create one here (name and template),
+/// Studio home: servers are places. Create one here (name and template),
 /// it appears in the list; tap it to open the editor scene; «Запустить» publishes it as a
 /// running server. Worlds of WolfServer in the network can be edited live too.
 /// Сервер: host one of your worlds (or a place) for friends, or join / edit someone's server.
@@ -1026,7 +1030,7 @@ fn studio(ui: &mut Ui, icons: &GuiIcons, p: &Palette, version: &str, worlds: &[c
             ui.set_width(ui.available_width());
             ui.label(egui::RichText::new("НОВАЯ МИНИ-ИГРА").size(11.5).color(p.text_muted));
             ui.add(egui::TextEdit::singleline(name).char_limit(32).hint_text("Название").desired_width(ui.available_width()));
-            ui.label(egui::RichText::new("Пустая плоская основа с сеткой, без построек — как Baseplate в Roblox Studio").size(12.5).color(p.text_muted));
+            ui.label(egui::RichText::new("Пустая плоская основа с сеткой, без построек").size(12.5).color(p.text_muted));
             *template = 0;
             ui.horizontal(|ui| {
                 if pill_button(ui, icons, None, "Отмена", ButtonKind::Secondary, 120.0, true).clicked() {

@@ -130,7 +130,7 @@ impl Interaction {
         // «Сноровка»: +35 % mining speed per level.
         let eff = player.inventory.held().map(|s| s.ench_level(crate::magic::Ench::Efficiency)).unwrap_or(0);
         let mut time = time / (1.0 + 0.35 * eff as f32);
-        // A tool digging a wide square (drill, draconic pickaxe, Tinkers' hammer) works a
+        // A tool digging a wide square (drill, draconic pickaxe, кузнечная ветка hammer) works a
         // little longer.
         let side = crate::tools::area_side(player.inventory.held().map(|s| s.id), player.drill_area);
         if side > 1 && time > 0.0 {

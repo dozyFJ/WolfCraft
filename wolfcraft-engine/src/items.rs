@@ -148,7 +148,7 @@ pub mod ids {
     /// energy crystal is the heart of the big storage.
     pub const BATTERY: ItemId = 418;
     pub const ENERGY_CRYSTAL: ItemId = 419;
-    /// Mod packs in WolfTech. Draconic Evolution: draconium, the draconic core, the draconic
+    /// WolfTech, the draconic branch: draconium, the draconic core, the draconic
     /// pickaxe (digs wide squares, like the drill) and sword.
     pub const DRACONIUM_DUST: ItemId = 420;
     pub const DRACONIUM_INGOT: ItemId = 421;
@@ -156,10 +156,10 @@ pub mod ids {
     pub const DRACONIC_CORE: ItemId = 423;
     pub const DRACONIC_PICKAXE: ItemId = 424;
     pub const DRACONIC_SWORD: ItemId = 425;
-    /// Immersive Engineering: coal coke and steel.
+    /// заводская ветка: coal coke and steel.
     pub const COKE: ItemId = 426;
     pub const STEEL_INGOT: ItemId = 427;
-    /// Tinkers' Construct: cobalt, manyullyn and the big tools (hammer and excavator dig
+    /// кузнечная ветка: cobalt, manyullyn and the big tools (hammer and excavator dig
     /// 3×3, the lumber axe fells a whole tree, the cleaver hits hard).
     pub const COBALT_INGOT: ItemId = 428;
     pub const MANYULLYN_INGOT: ItemId = 429;

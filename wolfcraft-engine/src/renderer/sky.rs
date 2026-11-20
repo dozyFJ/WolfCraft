@@ -336,7 +336,7 @@ pub fn build_sky(p: &SkyParams) -> Vec<ModelVertex> {
         }
     }
 
-    // ---- clouds: puffy cartoon blocks drifting over the land (like Hytale / Minecraft) ----
+    // ---- clouds: puffy cartoon blocks drifting over the land ----
     clouds(&mut o, p, up, altitude as f64);
 
     // ---- our planet seen from above, with an atmosphere halo ----

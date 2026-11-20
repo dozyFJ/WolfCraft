@@ -82,7 +82,7 @@ impl Time {
         let now = Instant::now();
         // Clamp huge deltas (window drag, breakpoints) so simulation does not explode.
         let raw = (now - self.last_frame).as_secs_f32().min(0.25);
-        // The game moves by a smoothed frame time (like Minecraft's frame pacing): timer noise
+        // The game moves by a smoothed frame time: timer noise
         // and vsync jitter no longer shake the camera, and no real time is ever lost.
         self.delta = self.pacer.step(raw);
         self.last_frame = now;

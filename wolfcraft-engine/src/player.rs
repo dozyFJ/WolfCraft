@@ -513,7 +513,7 @@ impl Player {
         let target = if moving { (speed / 4.3).clamp(0.0, 1.0) } else { 0.0 };
         self.anim_amount += (target - self.anim_amount) * (1.0 - (-12.0 * dt).exp());
         if moving {
-            // About 3.7 steps per second at walking speed (π of phase per step), like Minecraft.
+            // About 3.7 steps per second at walking speed (π of phase per step).
             self.anim_phase = (self.anim_phase + speed * dt * 2.8).rem_euclid(std::f32::consts::TAU);
         }
     }

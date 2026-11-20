@@ -562,7 +562,7 @@ pub fn build_player_model(pose: &PlayerPose, camera: DVec3) -> Vec<ModelVertex> 
         // Crawl stroke: the arms circle all the way round, one half a turn behind the other.
         let ang = if swim { pose.phase * 0.8 + if side < 0.0 { 0.0 } else { std::f32::consts::PI } + 2.6 } else { ang };
         // Attack: the right arm's motion depends on the tool. Holding something keeps the arm a
-        // little forward, as in Minecraft.
+        // little forward.
         let a = pose.attack.clamp(0.0, 1.0);
         // A weapon: both arms come up to aim it (one-handed ones only the right).
         if let (Held::Gun(k), false) = (pose.held, swim) {
@@ -1455,7 +1455,7 @@ const fn key(t: f32, x: f32, y: f32, z: f32, tilt: f32, yaw: f32, roll: f32) -> 
 
 const REST: f32 = 0.0;
 
-/// Empty hand: the Minecraft punch, a quick arc in towards the crosshair and back.
+/// Empty hand: the punch, a quick arc in towards the crosshair and back.
 const FIST_ANIM: &[AnimKey] = &[
     key(0.00, REST, REST, REST, REST, REST, REST),
     key(0.12, -0.04, 0.05, 0.06, -0.20, 0.25, 0.10),
@@ -1555,7 +1555,7 @@ fn arm_place(pose: &HandsPose, side: f32) -> ArmPlace {
     let swing = pose.punch_cycle;
     let swinging = swing > 0.0 && swing < 1.0;
     if side > 0.0 {
-        // Resting place of the right hand: low on the right, like in Minecraft.
+        // Resting place of the right hand: low on the right,.
         let mut p = Vec3::new(0.30, -0.30, 0.42) + off;
         let mut a = ArmPlace { pos: p, tilt: 0.2 + btilt, yaw: byaw, roll: broll };
         if swinging {
@@ -1593,7 +1593,7 @@ fn arm_place(pose: &HandsPose, side: f32) -> ArmPlace {
             p += Vec3::new(-0.03 * e, -0.08 * e + recoil, 0.17 * e - recoil) * k.max(0.4);
             a.tilt -= 0.5 * e * k.max(0.4);
         }
-        // Eating, like Minecraft: the food comes in front of the mouth and bobs with every
+        // Eating: the food comes in front of the mouth and bobs with every
         // bite, then the hand goes back.
         if pose.eat > 0.0 {
             let e = pose.eat.clamp(0.0, 1.0);
@@ -1701,7 +1701,7 @@ pub fn build_held_block(pose: &HandsPose, tiles: [u16; 6], emissive: bool, cross
     let centre = fist + Vec3::new(0.05, 0.06, 0.06);
     let h = 0.15f32;
     let (ys, yc) = 0.72f32.sin_cos(); // turned so two sides show, like a held block
-    let (ps, pc) = (-0.32f32).sin_cos(); // top tipped towards the camera, as in Minecraft
+    let (ps, pc) = (-0.32f32).sin_cos(); // top tipped towards the camera
     let rot = |v: Vec3| {
         let r = Vec3::new(v.x * yc + v.z * ys, v.y, -v.x * ys + v.z * yc);
         Vec3::new(r.x, r.y * pc - r.z * ps, r.y * ps + r.z * pc)
@@ -1775,12 +1775,12 @@ pub fn build_first_person_hands(pose: &HandsPose) -> Vec<ModelVertex> {
         let (pivot, angle) = (a.pos, a.tilt);
         let (x, y, z) = (pivot.x, pivot.y, pivot.z);
         // Both arms are always built (the left one rests below the screen unless it carries a
-        // shield); the right one grips the held item, like in Minecraft.
+        // shield); the right one grips the held item,.
         {
             // Square arm like the third-person body: sleeve with a slightly wider hand.
             // Sleeve, a darker cuff and the hand: clean flat colours (no skin patches).
             let cuff = [sleeve_c[0] * 0.72, sleeve_c[1] * 0.72, sleeve_c[2] * 0.72];
-            // Like Minecraft: an item in the right hand is shown on its own, without the arm
+            // An item in the right hand is shown on its own, without the arm
             // (bows keep the arm: it draws the string).
             let hide_arm = (side > 0.0 && pose.holding && pose.bow.is_none()) || (side < 0.0 && pose.shield);
             if !hide_arm {
@@ -2419,7 +2419,7 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         // 3D item: every opaque icon pixel is a little box. The icon's handle (bottom-left)
         // sits in the fist; its right edge points left and a bit away, so the tip leans
         // towards the crosshair.
-        // Minecraft grip. Our tool icons run from the handle (bottom-right pixel) to the head
+        // The grip. Our tool icons run from the handle (bottom-right pixel) to the head
         // (top-left). `d` is that diagonal in the view: up, forward and a bit right; the flat
         // side looks back towards the camera at about 45°.
         let d = Vec3::new(0.10, 1.0, -0.02).normalize();
@@ -2436,7 +2436,7 @@ fn add_tool(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle
         let w = (d * sy - e * sx).normalize();
         let n = u.cross(w).normalize();
         // Same proportions as the hotbar icon, not a giant: the tool fills about a quarter of
-        // the view's height, like in Minecraft.
+        // the view's height,.
         let s = 0.46;
         // The grip pixel (12.5, 12.5 from the top-left) sits in the fist.
         let o = f + Vec3::new(-0.01, 0.03, 0.02) - u * (s * 0.78) - w * (s * 0.22);
@@ -2555,7 +2555,7 @@ fn add_bow(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle:
     }
 }
 
-/// Wooden shield with an iron rim and boss, facing away from the camera. Minecraft size: a
+/// Wooden shield with an iron rim and boss, facing away from the camera. Size: a
 /// tall board that covers a good part of the left of the screen when raised.
 fn add_shield(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, angle: f32) {
     let b = |v: &mut Vec<ModelVertex>, lo: Vec3, hi: Vec3, c: [f32; 3]| add_box(v, frame, f + lo, f + hi, pivot, angle, c);
@@ -2576,7 +2576,7 @@ fn add_shield(v: &mut Vec<ModelVertex>, frame: &Frame, f: Vec3, pivot: Vec3, ang
 /// along `n`; `o` is the icon's bottom-left corner. Inner side faces are skipped.
 #[allow(clippy::too_many_arguments)]
 /// Thickness in pixels of a held or dropped icon: WolfTech items are chunky (3 px), the rest
-/// one pixel like in Minecraft.
+/// one pixel.
 pub fn icon_depth(sprite: usize) -> f32 {
     if (wolfcraft_assets::items::IRON_DUST as usize..wolfcraft_assets::items::COUNT as usize).contains(&sprite) { 2.0 } else { 1.0 }
 }
@@ -2769,7 +2769,7 @@ mod tests {
         let rest = build_first_person_hands(&p);
         p.punch_cycle = strike_moment(true);
         let struck = build_first_person_hands(&p);
-        // In Minecraft style the arm holding an item is hidden: only the sword and the shield.
+        // The arm holding an item is hidden: only the sword and the shield.
         assert!(rest.len() > 2 * 3 * 36, "sword and shield add boxes");
         assert_eq!(rest.len(), struck.len());
         assert!(rest.iter().zip(&struck).any(|(a, b)| a.pos != b.pos), "the sword arm swings");

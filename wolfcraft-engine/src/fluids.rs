@@ -1,4 +1,4 @@
-//! Flowing water and lava, like Minecraft: a source block spreads sideways (water 7 blocks,
+//! Flowing water and lava: a source block spreads sideways (water 7 blocks,
 //! lava 3), liquid falls straight down, flows thin out step by step and dry up when their
 //! source is gone. Water meeting lava turns it into obsidian (source) or cobblestone (flow).
 //!

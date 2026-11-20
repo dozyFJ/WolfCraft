@@ -64,17 +64,17 @@ pub enum Kind {
     ChargePad,
     /// Gravel → flint, netherrack → gunpowder, bones → bone meal, scrap → iron dust…
     Centrifuge,
-    /// Draconic Evolution: a huge energy store (50 million) that also charges gear.
+    /// драконья ветка: a huge energy store (50 million) that also charges gear.
     DracoCore,
-    /// Draconic Evolution: fusion crafting — draconium → awakened, crystals → cores (hungry).
+    /// драконья ветка: fusion crafting — draconium → awakened, crystals → cores (hungry).
     Fusion,
-    /// Immersive Engineering: coal → coke, logs → coal, with no energy (slow).
+    /// заводская ветка: coal → coke, logs → coal, with no energy (slow).
     CokeOven,
-    /// Immersive Engineering: iron → steel, with no energy (slow).
+    /// заводская ветка: iron → steel, with no energy (slow).
     BlastFurnace,
-    /// Immersive Engineering: ore → 2 ingots straight away, on energy.
+    /// заводская ветка: ore → 2 ingots straight away, on energy.
     ArcFurnace,
-    /// Tinkers' Construct: melts ore into 2 ingots on the heat of lava beside it (no energy);
+    /// кузнечная ветка: melts ore into 2 ingots on the heat of lava beside it (no energy);
     /// cobalt → manyullyn with gold.
     Smeltery,
 }
@@ -165,12 +165,12 @@ pub fn spec(k: Kind) -> Spec {
         Kind::Centrifuge => Spec { name: "Центрифуга", capacity: 600.0, rate: 10.0, time: 4.0, hint: "Гравий → кремень, адский камень → порох, кости → костная мука, лом → железная пыль" },
         Kind::Dynamo => Spec { name: "Кинетическое динамо", capacity: 1_000.0, rate: 0.0, time: 0.0, hint: "Подведите вал «Механики»: вращение → энергия (быстрее крутится — больше ЭЕ)" },
         Kind::Motor => Spec { name: "Электромотор", capacity: 400.0, rate: 16.0, time: 0.0, hint: "Подключите кабель: на энергии крутит валы «Механики» (64 об/мин)" },
-        Kind::DracoCore => Spec { name: "Драконье энергоядро", capacity: 50_000_000.0, rate: 0.0, time: 0.0, hint: "Draconic Evolution: хранит 50 миллионов ЭЕ и заряжает снаряжение (положите его слева)" },
-        Kind::Fusion => Spec { name: "Термоядерный крафтер", capacity: 40_000.0, rate: 400.0, time: 10.0, hint: "Draconic Evolution: драконий → пробуждённый, энергокристалл → драконье ядро, алмаз → дракониевая пыль. Очень голоден" },
-        Kind::CokeOven => Spec { name: "Коксовая печь", capacity: 0.0, rate: 0.0, time: 12.0, hint: "Immersive Engineering: уголь → кокс, бревно → уголь. Без энергии, медленно" },
-        Kind::BlastFurnace => Spec { name: "Доменная печь", capacity: 0.0, rate: 0.0, time: 16.0, hint: "Immersive Engineering: железный слиток → стальной. Без энергии" },
-        Kind::ArcFurnace => Spec { name: "Дуговая печь", capacity: 4_000.0, rate: 40.0, time: 2.0, hint: "Immersive Engineering: руда → 2 слитка сразу, лом → сталь" },
-        Kind::Smeltery => Spec { name: "Плавильня", capacity: 0.0, rate: 0.0, time: 3.0, hint: "Tinkers' Construct: лава рядом — руда → 2 слитка, кобальт → манюллин. Без энергии" },
+        Kind::DracoCore => Spec { name: "Драконье энергоядро", capacity: 50_000_000.0, rate: 0.0, time: 0.0, hint: "Драконья ветка: хранит 50 миллионов ЭЕ и заряжает снаряжение (положите его слева)" },
+        Kind::Fusion => Spec { name: "Термоядерный крафтер", capacity: 40_000.0, rate: 400.0, time: 10.0, hint: "Драконья ветка: драконий → пробуждённый, энергокристалл → драконье ядро, алмаз → дракониевая пыль. Очень голоден" },
+        Kind::CokeOven => Spec { name: "Коксовая печь", capacity: 0.0, rate: 0.0, time: 12.0, hint: "Заводская ветка: уголь → кокс, бревно → уголь. Без энергии, медленно" },
+        Kind::BlastFurnace => Spec { name: "Доменная печь", capacity: 0.0, rate: 0.0, time: 16.0, hint: "Заводская ветка: железный слиток → стальной. Без энергии" },
+        Kind::ArcFurnace => Spec { name: "Дуговая печь", capacity: 4_000.0, rate: 40.0, time: 2.0, hint: "Заводская ветка: руда → 2 слитка сразу, лом → сталь" },
+        Kind::Smeltery => Spec { name: "Плавильня", capacity: 0.0, rate: 0.0, time: 3.0, hint: "Кузнечная ветка: лава рядом — руда → 2 слитка, кобальт → манюллин. Без энергии" },
         Kind::Enricher => Spec { name: "Обогатитель", capacity: 320.0, rate: 16.0, time: 6.0, hint: "Руда → 3 пыли" },
     }
 }
@@ -604,7 +604,7 @@ mod tests {
         assert_eq!(recipe(Kind::MatterFab, ids::SCRAP), Some((ids::UU_MATTER, 1)));
         assert!(recipe(Kind::Recycler, ids::SCRAP).is_none());
         assert_eq!(recipe(Kind::Centrifuge, Block::Gravel as ItemId), Some((ids::FLINT, 2)));
-        // Mod packs: Tinkers' smeltery doubles ore, IE's arc furnace too, coke and steel, fusion.
+        // Mod packs: кузнечная ветка smeltery doubles ore, IE's arc furnace too, coke and steel, fusion.
         assert_eq!(recipe(Kind::Smeltery, Block::CobaltOre as ItemId), Some((ids::COBALT_INGOT, 2)));
         assert_eq!(recipe(Kind::ArcFurnace, ids::RAW_IRON), Some((ids::IRON_INGOT, 2)));
         assert_eq!(recipe(Kind::CokeOven, ids::COAL), Some((ids::COKE, 1)));

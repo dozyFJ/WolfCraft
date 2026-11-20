@@ -756,7 +756,7 @@ impl GameSession {
             self.cam_lag -= dr;
         }
         self.cam_lag = (self.cam_lag * (-16.0 * dt as f64).exp()).clamp(-1.6, 0.6);
-        // A hard landing: the view sinks a little and springs back (like Minecraft/Halo).
+        // A hard landing: the view sinks a little and springs back.
         {
             let up = self.player.up();
             let vy = self.player.body.vel.dot(up);
@@ -767,7 +767,7 @@ impl GameSession {
             self.land_dip *= (-7.0 * dt as f64).exp();
         }
         // Buried in blocks (a broken save, a block placed on top, a big edit around)? Climb out,
-        // like the game "pushing out of blocks" in Minecraft. Only once the area is loaded.
+        // like the game "pushing out of blocks". Only once the area is loaded.
         self.stuck_check -= dt;
         if self.stuck_check <= 0.0 && self.riding.is_none() {
             self.stuck_check = 0.5;
@@ -4091,13 +4091,13 @@ impl GameSession {
         let right0 = look.cross(up).normalize_or_zero();
         let first = self.camera_mode == CameraMode::First;
         // The view rocks from side to side with the steps (more when running), leans into a
-        // sideways run, and rolls when hurt (Minecraft's damage tilt).
+        // sideways run, and rolls when hurt.
         let a = self.bob_amp;
         let ph = self.bob_phase;
         let roll = self.player.survival.hurt_flash as f64 * 0.35 + if first { ph.sin() * 0.011 * a + self.lean } else { 0.0 };
         let up = if roll.abs() > 1e-5 && right0.length_squared() > 0.5 { (up * roll.cos() + right0 * roll.sin()).normalize() } else { up };
         match self.camera_mode {
-            // Gentle view bobbing (Minecraft-like): a small dip on every step and a sway
+            // Gentle view bobbing: a small dip on every step and a sway
             // from side to side, scaled by the smoothed walking strength.
             CameraMode::First => {
                 // Steps: a smooth dip on each footfall (no kink), a sway to the side, and a
@@ -4225,7 +4225,7 @@ impl GameSession {
         }
     }
 
-    /// Fire, like Minecraft's: it burns the block under it away, spreads to air next to wood,
+    /// Fire's: it burns the block under it away, spreads to air next to wood,
     /// leaves and plants, dies out on stone, goes out in the rain; it hurts what stands in it.
     fn fire_tick(&mut self, dt: f32) {
         use wolfcraft_engine::block::Block;

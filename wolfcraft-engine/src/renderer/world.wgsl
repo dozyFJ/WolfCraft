@@ -224,7 +224,7 @@ fn shade(in: VsOut, color0: vec4<f32>, n: vec3<f32>) -> vec3<f32> {
     let twilight = 1.0 - abs(day * 2.0 - 1.0);
     let sky_rgb = vec3<f32>(max(sky_light, 0.04)) * mix(night_tint, vec3<f32>(1.0), day) * mix(vec3<f32>(1.0), warm, twilight * 0.5);
     // Block light (torches, lava, lamps): level 0..15 from the mesher, warm and with a
-    // Minecraft-like falloff (bright near the source, a soft glow at the edge).
+    // Smooth falloff (bright near the source, a soft glow at the edge).
     let blk = f32((in.flags >> 20u) & 15u) / 15.0;
     let torch = blk * blk * (0.35 + 0.75 * blk);
     let torch_rgb = vec3<f32>(1.0, 0.80, 0.55) * torch;

@@ -49,7 +49,7 @@ pub struct DebugInfo {
     pub ui_ms: f32,
 }
 
-/// «Что это?» (like WAILA in Java Minecraft): what the crosshair is on, in a plate under the
+/// «Что это?»: what the crosshair is on, in a plate under the
 /// minimap — icon, name, which part of the game it comes from, a few facts and a bar.
 #[derive(Clone, Debug)]
 pub struct LookInfo {
@@ -551,7 +551,7 @@ pub fn draw(ctx: &Context, icons: &GuiIcons, s: &HudState) {
         }
         const ROW: f32 = 20.0;
         let x0 = hotbar.left() + 6.0;
-        // Row 1: health. Minecraft-style pixel hearts: low health makes them shake, damage
+        // Row 1: health. Pixel hearts: low health makes them shake, damage
         // flashes the outline.
         let mut row_y = xp.top() - 4.0 - 18.0;
         let t = ctx.input(|i| i.time);
@@ -691,7 +691,7 @@ fn draw_compass(painter: &Painter, p: &Palette, r: Rect, bearing: f32) {
 }
 
 fn draw_debug(painter: &Painter, p: &Palette, d: &DebugInfo) {
-    // Minecraft-style F3: world info on the left, performance on the right; the game stays visible.
+    // Debug screen (F3): world info on the left, performance on the right; the game stays visible.
     let left = [
         format!("WolfCraft · {} · seed {}", d.world_name, d.seed),
         format!("{:.0} FPS ({:.2} ms avg, {:.2} ms max) VSync {}", d.fps, d.frame_ms_avg, d.frame_ms_max, if d.vsync { "вкл" } else { "выкл" }),

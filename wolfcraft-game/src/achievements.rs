@@ -1,4 +1,4 @@
-//! Achievements in the spirit of Minecraft's, along WolfCraft's own path: from the first log
+//! Achievements, along WolfCraft's own path: from the first log
 //! to WolfTech, the reactor, dragons, Hell and the guardians. Each is granted once per world
 //! and pops a golden toast on the left of the screen.
 

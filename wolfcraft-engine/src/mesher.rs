@@ -65,7 +65,7 @@ pub fn sides_connected(vis: u64, a: usize, b: usize) -> bool {
 }
 
 /// Visibility set of a chunk: flood-fills its non-opaque cells and connects every pair of
-/// sides that one open region touches (as in Minecraft's cave culling).
+/// sides that one open region touches.
 pub fn visibility(inp: &MeshInput) -> u64 {
     const N: i32 = CHUNK_SIZE;
     let idx = |x: i32, y: i32, z: i32| (x + y * N * N + z * N) as usize;
@@ -240,7 +240,7 @@ fn sky_at(inp: &MeshInput, q: [i32; 3]) -> u8 {
 }
 
 /// Block light (0..15) of every padded cell: flood fill from the light sources through
-/// non-opaque blocks, one level less per step, like Minecraft. Sources outside the padded box
+/// non-opaque blocks, one level less per step. Sources outside the padded box
 /// shine in through its border as if the way there were open.
 pub fn block_light(inp: &MeshInput) -> Vec<u8> {
     let mut light = vec![0u8; PADDED_VOL];
@@ -640,7 +640,7 @@ fn emit_quad(inp: &MeshInput, out: &mut MeshData, key: u64, f: usize, a: usize, 
     let emit = ((key >> 28) & 1) as u32;
     let trans = (key >> 29) & 1 == 1;
     let lit = ((key >> 30) & 15) as u32 | (((key >> 34) & 1) as u32) << 4 | (((key >> 35) & 1) as u32) << 6;
-    // Fast leaves: drawn solid (no see-through holes), like Minecraft's "Fast" graphics.
+    // Fast leaves: drawn solid (no see-through holes) ("Fast" graphics).
     let solid = ((key >> 36) & 1) as u32;
 
     let plane = (s + if sign > 0 { 1 } else { 0 }) as f32;
@@ -716,7 +716,7 @@ fn mesh_cross(inp: &MeshInput, out: &mut MeshData, bl: &dyn Fn([i32; 3]) -> u32)
                     continue;
                 }
                 let sky = sky_at(inp, [x, y, z]) as f32 / 15.0;
-                // Torches are real 3D sticks (like Minecraft's): a 2-pixel post cut from the
+                // Torches are real 3D sticks: a 2-pixel post cut from the
                 // middle of the picture, standing on the block below, not two flat planes.
                 if let Some(parts) = b.torch_boxes() {
                     let tile = b.info().tiles[0] as u32 | (bl([x, y, z]) << 20) | (1 << 16);

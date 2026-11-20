@@ -50,7 +50,7 @@ pub fn role(id: Option<ItemId>) -> Role {
     if id == ids::OMNI_TOOL || id == ids::DRACONIC_PICKAXE {
         return Role::Omni;
     }
-    // Tinkers' big tools dig and chop like the diamond ones.
+    // кузнечная ветка big tools dig and chop like the diamond ones.
     match id {
         ids::TINKER_HAMMER => return Role::Pickaxe(3),
         ids::TINKER_EXCAVATOR => return Role::Shovel(3),
@@ -234,7 +234,7 @@ pub fn has_area_modes(id: ItemId) -> bool {
 }
 
 /// The square a held tool digs at once: the drill and the draconic pickaxe by their mode,
-/// the Tinkers' hammer and excavator 3×3, everything else one block.
+/// the кузнечная ветка hammer and excavator 3×3, everything else one block.
 pub fn area_side(id: Option<ItemId>, mode: u8) -> i32 {
     match id {
         Some(i) if has_area_modes(i) => drill_side(mode),

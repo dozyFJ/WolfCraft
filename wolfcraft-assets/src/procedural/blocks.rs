@@ -241,7 +241,7 @@ pub mod tiles {
     pub const TESLA_TOP: u16 = 243;
     pub const PAD_TOP: u16 = 244;
     pub const CENTRIFUGE_FRONT: u16 = 245;
-    // Mod packs in WolfTech: Draconic Evolution, Immersive Engineering, Tinkers' Construct.
+    // Mod packs in WolfTech: драконья ветка, заводская ветка, кузнечная ветка.
     pub const DRACONIUM_ORE: u16 = 246;
     pub const DRACONIUM_BLOCK: u16 = 247;
     pub const DRACO_CORE: u16 = 248;
@@ -2785,7 +2785,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
     }));
     l.add(CENTRIFUGE_FRONT, "centrifuge", p(|q| front(q, 350, Rgb(0.95, 0.60, 0.20), 20)));
-    // ---- Draconic Evolution ----
+    // ---- драконья ветка ----
     l.add(DRACONIUM_ORE, "draconium_ore", ore(Rgb(0.62, 0.25, 0.95), 351));
     l.add(DRACONIUM_BLOCK, "draconium_block", p(|q| {
         q.noisy(Rgb(0.42, 0.16, 0.66), 0.06, 352);
@@ -2821,7 +2821,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
         }
     }));
     l.add(FUSION_FRONT, "fusion_crafter", p(|q| front(q, 354, Rgb(1.0, 0.55, 0.15), 16)));
-    // ---- Immersive Engineering: brick ovens, the arc furnace ----
+    // ---- заводская ветка: brick ovens, the arc furnace ----
     let brick_oven = |q: &mut Painter, seed: u32, glow: Rgb, wide: bool| {
         q.noisy(Rgb(0.55, 0.28, 0.20), 0.06, seed);
         for y in 0..S {
@@ -2865,7 +2865,7 @@ pub(crate) fn build() -> Vec<(String, Image)> {
             q.put(x, 11, Rgb(1.0, 0.55, 0.15), 1.0);
         }
     }));
-    // ---- Tinkers' Construct ----
+    // ---- кузнечная ветка ----
     l.add(SMELTERY_FRONT, "smeltery", p(|q| {
         q.noisy(Rgb(0.36, 0.34, 0.33), 0.08, 359);
         for y in 0..S {

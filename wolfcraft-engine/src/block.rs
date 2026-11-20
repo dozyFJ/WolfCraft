@@ -1932,7 +1932,7 @@ blocks! {
     2537 WallSwitchOn1 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
     2538 WallSwitchOn2 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
     2539 WallSwitchOn3 => not_solid(info("Рычаг (вкл.)", Shape, 0.5, Hand, column(t::SWITCH_OFF, t::SWITCH_ON, t::COBBLESTONE))),
-    // Mod packs in WolfTech: Draconic Evolution, Immersive Engineering, Tinkers' Construct.
+    // Mod packs in WolfTech: драконья ветка, заводская ветка, кузнечная ветка.
     2540 DraconiumOre => emissive(ore("Дракониевая руда", t::DRACONIUM_ORE, 3)),
     2541 DraconiumBlock => needs_pick(info("Блок дракония", Opaque, 20.0, Pickaxe, all(t::DRACONIUM_BLOCK))),
     2542 DraconicCore => emissive(needs_pick(info("Драконье энергоядро", Opaque, 12.0, Pickaxe, all(t::DRACO_CORE)))),
@@ -2768,7 +2768,7 @@ impl Block {
 
     /// Door leaf moved to the far side of its cell, and the axis (0 i, 1 j) along which the
     /// neighbour that decides it lies (at -axis). Double doors: the second leaf of a pair
-    /// hangs on the other jamb, so both swing out of the doorway like in Minecraft.
+    /// hangs on the other jamb, so both swing out of the doorway.
     pub fn door_mirror(self) -> Option<(usize, [f32; 6])> {
         if self as u16 >= 1024 { return None; }
         self.door_toggle()?;
@@ -2822,7 +2822,7 @@ impl Block {
     pub fn is_solid(self) -> bool {
         self.info().solid
     }
-    /// Block light it gives off (0..15), like Minecraft: a torch lights 13 blocks around it.
+    /// Block light it gives off (0..15): a torch lights 13 blocks around it.
     #[inline]
     pub fn light_emission(self) -> u8 {
         if let Some((b, _)) = self.wall_mount() {

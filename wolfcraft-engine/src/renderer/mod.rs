@@ -258,7 +258,7 @@ const CHUNK_FADE: f32 = 0.45;
 /// Beyond this distance (blocks) chunks are drawn without small details (grass, flowers).
 pub const DETAIL_DIST: f32 = 56.0;
 
-/// Chunks that can be seen from `start` (cave culling, as in Minecraft): a breadth-first walk
+/// Chunks that can be seen from `start` (cave culling): a breadth-first walk
 /// over the chunk grid that only passes from one side of a chunk to another when open blocks
 /// connect them (`vis`), and never turns back towards the camera. Chunks behind solid rock or
 /// walls are not reached. Unknown chunks count as open, so nothing visible is ever lost;

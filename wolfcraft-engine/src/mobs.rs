@@ -659,7 +659,7 @@ impl MobManager {
             }
             m.slow = (m.slow - dt as f32).max(0.0);
             m.attack_cd = (m.attack_cd - dt as f32).max(0.0);
-            // Daylight, like Minecraft: ghouls under the open sky catch fire; crawlers that are
+            // Daylight: ghouls under the open sky catch fire; crawlers that are
             // far from the player and out of sight slip away.
             if day && self_sun_burns && !m.kind.aquatic() {
                 let open_sky = || Self::line_clear(world, m.body.pos + up * 1.9, m.body.pos + up * 40.0);

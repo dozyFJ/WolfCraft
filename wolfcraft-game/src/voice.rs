@@ -1,4 +1,4 @@
-//! Voice chat on servers, in the spirit of Minecraft's Simple Voice Chat mod.
+//! Voice chat on servers,.
 //!
 //! The microphone is read through cpal (the library rodio plays sound with), mixed down to
 //! mono 16 kHz and cut into 40 ms frames. A frame is sent while the player talks: in
